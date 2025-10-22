@@ -20,7 +20,7 @@ use itertools::Itertools;
 use parking_lot::RawRwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeMask, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::fragment::DistributionType;
@@ -383,6 +383,17 @@ impl InflightStreamingJobInfo {
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+
+    pub fn snapshot_backfill_actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.fragment_infos
+            .values()
+            .filter(|fragment| {
+                fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
+            })
+            .flat_map(|fragment| fragment.actors.keys().copied())
     }
 }
 

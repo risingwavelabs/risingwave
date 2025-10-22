@@ -20,6 +20,7 @@ use std::time::Duration;
 use anyhow::{Context, anyhow};
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
@@ -150,7 +151,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     #[expect(clippy::type_complexity)]
     fn resolve_hummock_version_epochs(
-        background_jobs: &HashMap<TableId, (String, StreamJobFragments)>,
+        background_jobs: impl Iterator<Item = &InflightStreamingJobInfo>,
         version: &HummockVersion,
     ) -> MetaResult<(
         HashMap<TableId, u64>,
@@ -168,18 +169,33 @@ impl GlobalBarrierWorkerContextImpl {
                 .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?)
         };
         let mut min_downstream_committed_epochs = HashMap::new();
-        for (_, job) in background_jobs.values() {
-            let Ok(job_committed_epoch) = get_table_committed_epoch(job.stream_job_id) else {
-                // Question: should we get the committed epoch from any state tables in the job?
-                warn!(
-                    "background job {} has no committed epoch, skip resolving epochs",
-                    job.stream_job_id
-                );
-                continue;
+        for job in background_jobs {
+            let job_committed_epoch = {
+                let mut table_id_iter = job.existing_table_ids();
+                let Some(first_table_id) = table_id_iter.next() else {
+                    bail!("job {} has no state table", job.job_id);
+                };
+                let job_committed_epoch = get_table_committed_epoch(first_table_id)?;
+                for table_id in table_id_iter {
+                    let table_committed_epoch = get_table_committed_epoch(table_id)?;
+                    if job_committed_epoch != table_committed_epoch {
+                        bail!(
+                            "table {} has committed epoch {} different to other table {} with committed epoch {} in job {}",
+                            first_table_id,
+                            job_committed_epoch,
+                            table_id,
+                            table_committed_epoch,
+                            job.job_id
+                        );
+                    }
+                }
+
+                job_committed_epoch
             };
             if let (Some(snapshot_backfill_info), _) =
                 StreamFragmentGraph::collect_snapshot_backfill_info_impl(
-                    job.fragments()
+                    job.fragment_infos
+                        .values()
                         .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
                 )?
             {
@@ -210,13 +226,12 @@ impl GlobalBarrierWorkerContextImpl {
             let upstream_committed_epoch = get_table_committed_epoch(upstream_table_id)?;
             match upstream_committed_epoch.cmp(&downstream_committed_epoch) {
                 Ordering::Less => {
-                    return Err(anyhow!(
+                    bail!(
                         "downstream epoch {} later than upstream epoch {} of table {}",
                         downstream_committed_epoch,
                         upstream_committed_epoch,
                         upstream_table_id
-                    )
-                    .into());
+                    );
                 }
                 Ordering::Equal => {
                     continue;
@@ -238,18 +253,22 @@ impl GlobalBarrierWorkerContextImpl {
                             && *first_checkpoint_epoch == downstream_committed_epoch
                         {
                         } else {
-                            return Err(anyhow!(
+                            bail!(
                                 "resolved first log epoch {:?} on table {} not matched with downstream committed epoch {}",
-                                epochs, upstream_table_id, downstream_committed_epoch).into()
+                                epochs,
+                                upstream_table_id,
+                                downstream_committed_epoch
                             );
                         }
                         log_epochs
                             .try_insert(upstream_table_id, epochs)
                             .expect("non-duplicated");
                     } else {
-                        return Err(anyhow!(
+                        bail!(
                             "upstream table {} on epoch {} has lagged downstream on epoch {} but no table change log",
-                            upstream_table_id, upstream_committed_epoch, downstream_committed_epoch).into()
+                            upstream_table_id,
+                            upstream_committed_epoch,
+                            downstream_committed_epoch
                         );
                     }
                 }
@@ -471,7 +490,14 @@ impl GlobalBarrierWorkerContextImpl {
                     let (state_table_committed_epochs, state_table_log_epochs) = self
                         .hummock_manager
                         .on_current_version(|version| {
-                            Self::resolve_hummock_version_epochs(&background_jobs, version)
+                            Self::resolve_hummock_version_epochs(
+                                info.values().flat_map(|jobs| {
+                                    jobs.iter().filter_map(|(job_id, job)| {
+                                        background_jobs.contains_key(job_id).then_some(job)
+                                    })
+                                }),
+                                version,
+                            )
                         })
                         .await?;
 
@@ -515,10 +541,7 @@ impl GlobalBarrierWorkerContextImpl {
                         let mut background_jobs = HashMap::new();
                         for (definition, stream_job_fragments) in jobs {
                             background_jobs
-                                .try_insert(
-                                    stream_job_fragments.stream_job_id(),
-                                    (definition, stream_job_fragments),
-                                )
+                                .try_insert(stream_job_fragments.stream_job_id(), definition)
                                 .expect("non-duplicate");
                         }
                         background_jobs
@@ -650,10 +673,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .await?;
                 } else {
                     background_jobs
-                        .try_insert(
-                            stream_job_fragments.stream_job_id(),
-                            (definition, stream_job_fragments),
-                        )
+                        .try_insert(stream_job_fragments.stream_job_id(), definition)
                         .expect("non-duplicate");
                 }
             }
@@ -663,7 +683,10 @@ impl GlobalBarrierWorkerContextImpl {
         let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
             .on_current_version(|version| {
-                Self::resolve_hummock_version_epochs(&background_jobs, version)
+                Self::resolve_hummock_version_epochs(
+                    background_jobs.keys().map(|job_id| &info[job_id]),
+                    version,
+                )
             })
             .await?;
 
