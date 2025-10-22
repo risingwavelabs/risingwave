@@ -377,7 +377,10 @@ where
         return Ok(HashMap::new());
     }
 
-    debug_sanity_check(ensembles, fragment_map, job_map);
+    #[cfg(debug_assertions)]
+    {
+        debug_sanity_check(ensembles, fragment_map, job_map);
+    }
 
     let (fragment_source_ids, fragment_splits) =
         resolve_source_fragments(txn, fragment_map).await?;
@@ -629,71 +632,69 @@ where
     Ok(all_fragments)
 }
 
+#[cfg(debug_assertions)]
 fn debug_sanity_check(
     ensembles: &[NoShuffleEnsemble],
     fragment_map: &HashMap<FragmentId, fragment::Model>,
     jobs: &HashMap<ObjectId, streaming_job::Model>,
 ) {
-    #[cfg(debug_assertions)]
-    {
-        // Debug-only assertions to catch inconsistent ensemble metadata early.
-        debug_assert!(
-            ensembles
-                .iter()
-                .all(|ensemble| ensemble.entries.is_subset(&ensemble.components)),
-            "entries must be subset of components"
-        );
-
-        let mut missing_fragments = BTreeSet::new();
-        let mut missing_jobs = BTreeSet::new();
-
-        for fragment_id in ensembles
+    // Debug-only assertions to catch inconsistent ensemble metadata early.
+    debug_assert!(
+        ensembles
             .iter()
-            .flat_map(|ensemble| ensemble.components.iter())
-        {
-            match fragment_map.get(fragment_id) {
-                Some(fragment) => {
-                    if !jobs.contains_key(&fragment.job_id) {
-                        missing_jobs.insert(fragment.job_id);
-                    }
-                }
-                None => {
-                    missing_fragments.insert(*fragment_id);
+            .all(|ensemble| ensemble.entries.is_subset(&ensemble.components)),
+        "entries must be subset of components"
+    );
+
+    let mut missing_fragments = BTreeSet::new();
+    let mut missing_jobs = BTreeSet::new();
+
+    for fragment_id in ensembles
+        .iter()
+        .flat_map(|ensemble| ensemble.components.iter())
+    {
+        match fragment_map.get(fragment_id) {
+            Some(fragment) => {
+                if !jobs.contains_key(&fragment.job_id) {
+                    missing_jobs.insert(fragment.job_id);
                 }
             }
+            None => {
+                missing_fragments.insert(*fragment_id);
+            }
         }
+    }
+
+    debug_assert!(
+        missing_fragments.is_empty(),
+        "missing fragments in fragment_map: {:?}",
+        missing_fragments
+    );
+
+    debug_assert!(
+        missing_jobs.is_empty(),
+        "missing jobs for fragments' job_id: {:?}",
+        missing_jobs
+    );
+
+    for ensemble in ensembles {
+        let unique_vnode_counts: Vec<_> = ensemble
+            .components
+            .iter()
+            .flat_map(|fragment_id| {
+                fragment_map
+                    .get(fragment_id)
+                    .map(|fragment| fragment.vnode_count)
+            })
+            .unique()
+            .collect();
 
         debug_assert!(
-            missing_fragments.is_empty(),
-            "missing fragments in fragment_map: {:?}",
-            missing_fragments
+            unique_vnode_counts.len() <= 1,
+            "components in ensemble must share same vnode_count: ensemble={:?}, vnode_counts={:?}",
+            ensemble.components,
+            unique_vnode_counts
         );
-
-        debug_assert!(
-            missing_jobs.is_empty(),
-            "missing jobs for fragments' job_id: {:?}",
-            missing_jobs
-        );
-
-        for ensemble in ensembles {
-            let unique_vnode_counts: Vec<_> = ensemble
-                .components
-                .iter()
-                .flat_map(|fragment_id| {
-                    fragment_map
-                        .get(fragment_id)
-                        .map(|fragment| fragment.vnode_count)
-                })
-                .unique()
-                .collect();
-
-            debug_assert!(
-                unique_vnode_counts.len() <= 1,
-                "components in ensemble must share same vnode_count: ensemble={:?}, vnode_counts={:?}",
-                ensemble.components,
-                unique_vnode_counts
-            );
-        }
     }
 }
 
