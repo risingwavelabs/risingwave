@@ -342,7 +342,7 @@ impl IcebergConfig {
 }
 
 pub struct IcebergSink {
-    config: IcebergConfig,
+    pub config: IcebergConfig,
     param: SinkParam,
     // In upsert mode, it never be None and empty.
     unique_column_ids: Option<Vec<usize>>,
@@ -377,7 +377,7 @@ impl Debug for IcebergSink {
 }
 
 impl IcebergSink {
-    async fn create_and_validate_table(&self) -> Result<Table> {
+    pub async fn create_and_validate_table(&self) -> Result<Table> {
         if self.config.create_table_if_not_exists {
             self.create_table_if_not_exists().await?;
         }
@@ -398,7 +398,7 @@ impl IcebergSink {
         Ok(table)
     }
 
-    async fn create_table_if_not_exists(&self) -> Result<()> {
+    pub async fn create_table_if_not_exists(&self) -> Result<()> {
         let catalog = self.config.create_catalog().await?;
         let namespace = if let Some(database_name) = &self.config.common.database_name {
             let namespace = NamespaceIdent::new(database_name.clone());
