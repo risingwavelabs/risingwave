@@ -101,7 +101,7 @@ use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::utils::{
     OverwriteOptions, resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
-    resolve_secret_ref_in_with_options,
+    resolve_secret_ref_in_with_options, resolve_source_refresh_mode_in_with_option,
 };
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
@@ -932,6 +932,7 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
     // resolve privatelink connection for Kafka
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
+    let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
 
     // check the system parameter `enforce_secret`
     if session
@@ -1044,6 +1045,7 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: source_rate_limit,
+        refresh_mode: Some(refresh_mode),
     };
     Ok(source)
 }

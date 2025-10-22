@@ -276,6 +276,7 @@ message StreamSource {
   map<string, secret.SecretRef> secret_refs = 10;
   // Downstream columns are used by list node to know which columns are needed.
   optional Columns downstream_columns = 11;
+  plan_common.SourceRefreshMode refresh_mode = 12;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future

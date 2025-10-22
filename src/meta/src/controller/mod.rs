@@ -328,6 +328,10 @@ impl From<ObjectModel<source::Model>> for PbSource {
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
             rate_limit: value.0.rate_limit.map(|v| v as _),
+            refresh_mode: value
+                .0
+                .refresh_mode
+                .map(|refresh_mode| refresh_mode.to_protobuf()),
         }
     }
 }
