@@ -65,16 +65,16 @@ pub struct IcebergFetchExecutor<S: StateStore> {
 ///
 /// Currently 1 `FileScanTask` -> 1 `ChunksWithState`.
 /// Later after we support reading part of a file, we will support 1 `FileScanTask` -> n `ChunksWithState`.
-struct ChunksWithState {
+pub(crate) struct ChunksWithState {
     /// The actual data chunks read from the file
-    chunks: Vec<StreamChunk>,
+    pub chunks: Vec<StreamChunk>,
 
     /// Path to the data file, used for checkpointing and error reporting.
-    data_file_path: String,
+    pub data_file_path: String,
 
     /// The last read position in the file, used for checkpointing.
     #[expect(dead_code)]
-    last_read_pos: Datum,
+    pub last_read_pos: Datum,
 }
 
 pub(super) use state::PersistedFileScanTask;
