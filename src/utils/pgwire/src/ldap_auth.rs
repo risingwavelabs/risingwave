@@ -141,6 +141,30 @@ impl LdapAuthenticator {
 
         if config.server.starts_with("ldaps://") || config.start_tls {
             //FIXME: add configuration for CA certificate.
+            // RisingWave does not have parameters like `ldap_ca_file`, `ldap_cert_file`, or `ldap_key_file`.
+            // PostgreSQL itself does not provide these options. Instead, it uses the libldap (OpenLDAP client library) for LDAP connections and authentication.
+            //     TLS certificate parameters such as `TLS_CACERT`, `TLS_CERT`, and `TLS_KEY` are configured in the libldap configuration file, not in PostgreSQL's configuration.
+            //     When PostgreSQL starts and performs LDAP authentication, its process follows this lookup order for certificate configuration:
+            //
+            // 1. Environment Variables (highest priority): PostgreSQL inherits the environment variables from its startup environment.
+            //     - `LDAPTLS_CACERT` → replaces `TLS_CACERT`
+            //     - `LDAPTLS_CERT` → replaces `TLS_CERT`
+            //     - `LDAPTLS_KEY` → replaces `TLS_KEY`
+            //     - `LDAPTLS_REQCERT` → replaces `TLS_REQCERT`
+            //    - Example:
+            //      ```
+            //      export LDAPTLS_CACERT=/etc/openldap/certs/ca.pem
+            //      export LDAPTLS_CERT=/etc/openldap/certs/postgres.crt
+            //      export LDAPTLS_KEY=/etc/openldap/certs/postgres.key
+            //      export LDAPTLS_REQCERT=demand
+            //      ```
+            //
+            // 2. Configuration File: `/etc/openldap/ldap.conf`
+            //
+            // 3. System Default Directories:
+            // - `/etc/ssl/certs/`
+            // - macOS system trust chain
+
             const CA_CERT_PATH: &str = "/Users/august/Documents/codes/ldap-server/ldap/certs/ca.crt";
             let ca_cert_pem = fs::read(CA_CERT_PATH).map_err(|e| {
                 LdapError::InvalidScopeString(format!("Failed to read CA certificate: {}", e))
