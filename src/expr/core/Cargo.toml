@@ -17,7 +17,7 @@ chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
-const-currying = "0.0.4"
+const-currying = "0.0.5"
 downcast-rs = "2.0"
 easy-ext = "1"
 educe = "0.6"
