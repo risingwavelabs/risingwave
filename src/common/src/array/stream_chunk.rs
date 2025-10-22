@@ -15,7 +15,7 @@
 use std::fmt::Display;
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::{fmt, mem};
 
 use either::Either;
@@ -520,7 +520,28 @@ pub struct OpRowMutRef<'a> {
     i: usize,
 }
 
-impl OpRowMutRef<'_> {
+// Act as a placeholder value when using in `ChangeBuffer`.
+impl Default for OpRowMutRef<'_> {
+    fn default() -> Self {
+        static mut DUMMY_CHUNK_MUT: LazyLock<StreamChunkMut> =
+            LazyLock::new(|| StreamChunk::default().into());
+
+        #[allow(clippy::deref_addrof)] // false positive
+        OpRowMutRef {
+            c: unsafe { &mut *(&raw mut DUMMY_CHUNK_MUT) },
+            i: 0,
+        }
+    }
+}
+
+impl PartialEq for OpRowMutRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.row_ref() == other.row_ref()
+    }
+}
+impl Eq for OpRowMutRef<'_> {}
+
+impl<'a> OpRowMutRef<'a> {
     pub fn index(&self) -> usize {
         self.i
     }
@@ -582,6 +603,8 @@ impl StreamChunkMut {
 
     /// get the mut reference of the stream chunk.
     pub fn to_rows_mut(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
+        // SAFETY: `OpRowMutRef` can only mutate the visibility and ops, which is safe even
+        // when the columns are borrowed by `RowRef` at the same time.
         unsafe {
             (0..self.vis.len())
                 .filter(|i| self.vis.is_set(*i))
