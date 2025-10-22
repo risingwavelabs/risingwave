@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_sqlparser::ast::ObjectName;
+use tokio::time::{Duration, sleep};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -22,6 +23,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use tokio::select;
 
 pub async fn handle_drop_mv(
     handler_args: HandlerArgs,
@@ -72,9 +74,24 @@ pub async fn handle_drop_mv(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .drop_materialized_view(table_id, cascade)
-        .await?;
+
+    let notify_recover_secs = 30;
+    let notify_recover_fut = sleep(Duration::from_secs(notify_recover_secs));
+
+    let mut drop_materialized_view_fut = catalog_writer
+        .drop_materialized_view(table_id, cascade);
+
+    select! {
+        _ = notify_recover_fut => {
+            session.notice_to_user(format!("DROP MATERIALIZED VIEW has taken more than {notify_recover_secs} secs, likely due to high barrier latency.
+            You may trigger cluster recovery to let DROP MATERIALIZED VIEW take effect immediately.
+            Run RECOVER in a separate session to trigger recovery."));
+            drop_materialized_view_fut.await?;
+        }
+        drop_result = &mut drop_materialized_view_fut => {
+            drop_result?;
+        }
+    }
 
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,
