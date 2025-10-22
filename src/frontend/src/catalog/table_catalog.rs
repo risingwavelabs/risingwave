@@ -529,10 +529,13 @@ impl TableCatalog {
     }
 
     /// Get the total vnode count of the table.
-    ///
-    /// Panics if it's called on an incomplete (and not yet persisted) table catalog.
     pub fn vnode_count(&self) -> usize {
-        self.vnode_count.value()
+        if self.id().is_placeholder() {
+            0
+        } else {
+            // Panics if it's called on an incomplete (and not yet persisted) table catalog.
+            self.vnode_count.value()
+        }
     }
 
     pub fn to_prost(&self) -> PbTable {
@@ -604,7 +607,7 @@ impl TableCatalog {
         }
     }
 
-    /// Get columns excluding hidden columns and generated golumns.
+    /// Get columns excluding hidden columns and generated columns.
     pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
         self.columns
             .iter()

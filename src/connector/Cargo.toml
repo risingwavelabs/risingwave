@@ -47,7 +47,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f
     "time",
     "rustls-tls",
 ] }
-csv = "1.3"
+csv = "1.4"
 deltalake = { workspace = true, optional = true }
 duration-str = "0.17.0"
 easy-ext = "1"
@@ -70,7 +70,7 @@ google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-indexmap = { version = "2.12.0", features = ["serde"] }
+indexmap = { workspace = true }
 itertools = { workspace = true }
 jni = { workspace = true }
 maplit = "1.0.2"
@@ -185,7 +185,7 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
-typed-builder = "^0.22"
+typed-builder = "^0.23"
 url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
