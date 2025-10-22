@@ -21,7 +21,6 @@ use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_expr::bail;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
-use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 use risingwave_pb::plan_common::{
     AdditionalColumn, AdditionalColumnKey, AdditionalColumnTimestamp,
     AdditionalColumnType as LegacyAdditionalColumnType, ColumnDescVersion, FormatType,
@@ -35,6 +34,7 @@ use crate::executor::source::{
     BatchIcebergListExecutor, BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor,
     IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
+use crate::from_proto::source::is_manual_trigger_refresh;
 
 pub struct SourceExecutorBuilder;
 
@@ -143,16 +143,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let is_manual_trigger_refresh = source
-                .refresh_mode
-                .as_ref()
-                .map(|refresh_mode| {
-                    matches!(
-                        refresh_mode.refresh_mode,
-                        Some(RefreshMode::ManualTrigger(_))
-                    )
-                })
-                .unwrap_or(false);
+            let is_manual_trigger_refresh = is_manual_trigger_refresh(&source.refresh_mode);
             let exec = {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();

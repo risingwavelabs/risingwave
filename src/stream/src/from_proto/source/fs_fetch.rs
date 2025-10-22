@@ -31,6 +31,7 @@ use crate::executor::source::{
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
+use crate::from_proto::source::is_manual_trigger_refresh;
 use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
@@ -46,6 +47,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
+        let is_manual_trigger_refresh = is_manual_trigger_refresh(&source.refresh_mode);
 
         let source_id = TableId::new(source.source_id);
         let source_name = source.source_name.clone();
@@ -108,14 +110,18 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                 .boxed()
             }
             risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
-                IcebergFetchExecutor::new(
-                    params.actor_context.clone(),
-                    stream_source_core,
-                    upstream,
-                    source.rate_limit,
-                    params.env.config().clone(),
-                )
-                .boxed()
+                if is_manual_trigger_refresh {
+                    todo!()
+                } else {
+                    IcebergFetchExecutor::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        source.rate_limit,
+                        params.env.config().clone(),
+                    )
+                    .boxed()
+                }
             }
             risingwave_connector::source::ConnectorProperties::Azblob(_) => {
                 FsFetchExecutor::<_, OpendalAzblob>::new(

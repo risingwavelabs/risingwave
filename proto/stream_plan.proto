@@ -293,6 +293,7 @@ message StreamFsFetch {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  plan_common.SourceRefreshMode refresh_mode = 11;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves

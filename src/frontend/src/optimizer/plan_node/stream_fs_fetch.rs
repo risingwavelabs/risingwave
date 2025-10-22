@@ -121,6 +121,7 @@ impl StreamNode for StreamFsFetch {
                 with_properties,
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
+                refresh_mode: source_catalog.refresh_mode,
             }
         });
         NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
