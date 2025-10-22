@@ -313,7 +313,7 @@ def _(outer_panels: Panels):
                         "remote storage error {{type}}: {{%s}} @ {{%s}}"
                         % (COMPONENT_LABEL, NODE_LABEL),
                     ),
-                    # We add a small constant 0.05 to make sure that the counter jumps from null to not-null, 
+                    # We add a small constant 0.05 to make sure that the counter jumps from null to not-null,
                     # the line will be flat at y=0.05 instead of disappearing.
                      panels.target(
                         f"sum(irate({metric('user_compute_error_cnt')}[$__rate_interval])) by (error_type, executor_name, fragment_id) or "
