@@ -7249,6 +7249,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonbb"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89939e734c06c50796347be54016229909c690eee14b1c44b44770cfea35f596"
+dependencies = [
+ "bytes",
+ "serde",
+ "serde_json",
+ "smallvec",
+]
+
+[[package]]
 name = "jsonschema-transpiler"
 version = "1.10.0"
 source = "git+https://github.com/mozilla/jsonschema-transpiler?rev=c1a89d720d118843d8bcca51084deb0ed223e4b4#c1a89d720d118843d8bcca51084deb0ed223e4b4"
@@ -11326,7 +11338,7 @@ dependencies = [
  "itoa",
  "jiff",
  "jni",
- "jsonbb",
+ "jsonbb 0.2.1",
  "libc",
  "linkme",
  "lru",
@@ -11405,7 +11417,7 @@ dependencies = [
  "educe",
  "ethnum",
  "fixedbitset 0.5.7",
- "jsonbb",
+ "jsonbb 0.2.1",
  "risingwave_common_proc_macro",
  "rust_decimal",
  "serde_json",
@@ -11563,7 +11575,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "clap",
- "jsonbb",
+ "jsonbb 0.2.1",
  "madsim-tokio",
  "madsim-tonic",
  "prost 0.13.4",
@@ -11777,7 +11789,7 @@ dependencies = [
  "fs-err",
  "hex",
  "itertools 0.14.0",
- "jsonbb",
+ "jsonbb 0.2.1",
  "jsonschema-transpiler",
  "madsim-tokio",
  "num-bigint",
@@ -11953,7 +11965,7 @@ dependencies = [
  "hmac",
  "iceberg",
  "itertools 0.14.0",
- "jsonbb",
+ "jsonbb 0.2.1",
  "linkme",
  "madsim-tokio",
  "md-5",
@@ -12024,7 +12036,7 @@ dependencies = [
  "iana-time-zone",
  "iceberg",
  "itertools 0.14.0",
- "jsonbb",
+ "jsonbb 0.2.1",
  "linkme",
  "madsim-tokio",
  "madsim-tonic",
@@ -12221,7 +12233,7 @@ dependencies = [
  "auto_enums",
  "expect-test",
  "humansize",
- "jsonbb",
+ "jsonbb 0.2.1",
  "jsonwebtoken",
  "risingwave_pb",
  "risingwave_telemetry_event",
@@ -12273,7 +12285,7 @@ dependencies = [
  "iceberg",
  "indexmap 2.12.0",
  "itertools 0.14.0",
- "jsonbb",
+ "jsonbb 0.2.1",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -12811,7 +12823,7 @@ dependencies = [
  "hytra",
  "iceberg",
  "itertools 0.14.0",
- "jsonbb",
+ "jsonbb 0.2.1",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -12859,7 +12871,7 @@ dependencies = [
 name = "risingwave_telemetry_event"
 version = "2.7.0-alpha"
 dependencies = [
- "jsonbb",
+ "jsonbb 0.2.1",
  "madsim-tokio",
  "prost 0.13.4",
  "reqwest 0.12.15",
@@ -14375,7 +14387,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06d900e5c1db024a5bd4535916f1779f104562a7357ff4280e8136eb50b04f35"
 dependencies = [
- "jsonbb",
+ "jsonbb 0.1.4",
  "nom",
  "regex",
  "serde_json",
