@@ -389,7 +389,7 @@ services:
       retries: 5
 
   mongodb:
-    image: mongo:5
+    image: mongo:6
     ports:
       - "27017"
     command: --replSet rs0 --oplogSize 128
@@ -401,7 +401,7 @@ services:
       retries: 3
 
   mongodb-setup:
-    image: mongo:5
+    image: mongo:6
     depends_on:
       - mongodb
     entrypoint:
