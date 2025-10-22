@@ -250,6 +250,17 @@ impl Strong {
             | ExprType::ConvertTo
             | ExprType::Decrypt
             | ExprType::Encrypt
+            | ExprType::PgpSymEncrypt
+            | ExprType::PgpSymEncryptBytea
+            | ExprType::PgpSymDecrypt
+            | ExprType::PgpSymDecryptBytea
+            | ExprType::Armor
+            | ExprType::Dearmor
+            | ExprType::PgpArmorHeaders
+            | ExprType::PgpPubEncrypt
+            | ExprType::PgpPubEncryptBytea
+            | ExprType::PgpPubDecrypt
+            | ExprType::PgpPubDecryptBytea
             | ExprType::Neg
             | ExprType::Field
             | ExprType::Array

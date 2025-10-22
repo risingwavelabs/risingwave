@@ -247,6 +247,17 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::SecureCompare
             | Type::Decrypt
             | Type::Encrypt
+            | Type::PgpSymEncrypt
+            | Type::PgpSymEncryptBytea
+            | Type::PgpSymDecrypt
+            | Type::PgpSymDecryptBytea
+            | Type::Armor
+            | Type::Dearmor
+            | Type::PgpArmorHeaders
+            | Type::PgpPubEncrypt
+            | Type::PgpPubEncryptBytea
+            | Type::PgpPubDecrypt
+            | Type::PgpPubDecryptBytea
             | Type::Tand
             | Type::ArrayPositions
             | Type::StringToArray

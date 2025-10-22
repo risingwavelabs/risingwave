@@ -93,6 +93,7 @@ mod encrypt;
 mod external;
 mod inet;
 mod license;
+mod pgp;
 mod to_timestamp;
 mod translate;
 mod trigonometric;

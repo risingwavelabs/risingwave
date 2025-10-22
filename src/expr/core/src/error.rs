@@ -14,6 +14,7 @@
 
 use std::fmt::{Debug, Display};
 
+use openssl::error::ErrorStack;
 use risingwave_common::array::{ArrayError, ArrayRef};
 use risingwave_common::types::{DataType, DatumRef, ToText};
 use risingwave_pb::PbFieldNotFound;
@@ -134,6 +135,9 @@ pub enum ExprError {
         // We don't use `anyhow::Error` because we don't want to always capture the backtrace.
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+
+    #[error("PGP error: {0}")]
+    Pgp(#[from] PgpError),
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
@@ -240,4 +244,21 @@ impl IntoIterator for MultiExprError {
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_vec().into_iter()
     }
+}
+
+/// Errors specific to PGP operations
+#[derive(Debug, thiserror::Error)]
+pub enum PgpError {
+    #[error("Encryption failed: {0}")]
+    Encryption(#[from] ErrorStack),
+    #[error("Invalid PGP data: {0}")]
+    InvalidData(String),
+    #[error("Unsupported algorithm: {0}")]
+    UnsupportedAlgorithm(String),
+    #[error("Invalid options: {0}")]
+    InvalidOptions(String),
+    #[error("Armor parsing failed: {0}")]
+    ArmorParsing(String),
+    #[error("Packet parsing failed: {0}")]
+    PacketParsing(String),
 }

@@ -12,26 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(iterator_try_collect)]
-#![feature(coroutines)]
-#![feature(never_type)]
-#![feature(error_generic_member_access)]
-#![feature(used_with_arg)]
-#![feature(ascii_char)]
+mod options;
+mod packets;
+mod pgp_impl;
 
-extern crate self as risingwave_expr;
-
-pub mod aggregate;
-#[doc(hidden)]
-pub mod codegen;
-mod error;
-pub mod expr;
-pub mod expr_context;
-pub mod scalar;
-pub mod sig;
-pub mod table_function;
-pub mod window_function;
-
-pub use error::{ContextUnavailable, ExprError, PgpError, Result};
-pub use risingwave_common::{bail, ensure};
-pub use risingwave_expr_macro::*;
+pub use options::*;
+pub use packets::*;
+pub use pgp_impl::*;

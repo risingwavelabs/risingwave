@@ -185,6 +185,7 @@ madsim = "0.2.34"
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = ["native-tls-tls", "rust_decimal"] }
 opendal = "0.53"
+openssl = "0.10.72"
 opentelemetry = "0.29"
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = "0.16"

@@ -21,6 +21,7 @@ arrow-udf-runtime = { workspace = true, optional = true }
 async-openai = { workspace = true }
 async-trait = "0.1"
 auto_enums = { workspace = true }
+base64 = "0.22"
 bytes = "1"
 # The feature setting is also used in src/expr/impl/src/udf/wasm.rs
 chrono = { workspace = true, features = [
@@ -44,7 +45,7 @@ linkme = { workspace = true }
 md5 = { package = "md-5", version = "0.10.6" }
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
-openssl = "0.10.72"
+openssl = { workspace = true }
 rand = { workspace = true }
 regex = { workspace = true }
 risingwave_common = { workspace = true }
