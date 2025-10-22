@@ -11452,7 +11452,6 @@ dependencies = [
  "pin-project-lite",
  "procfs 0.18.0",
  "prometheus",
- "rw_iter_util",
  "rw_resource_util",
  "serde",
  "thiserror-ext",
