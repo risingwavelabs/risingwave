@@ -7238,21 +7238,9 @@ dependencies = [
 
 [[package]]
 name = "jsonbb"
-version = "0.1.4"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91cdcbd02ee94c68803dd808bf8406e91491eaf875f09da650f5893dc56be18c"
-dependencies = [
- "bytes",
- "serde",
- "serde_json",
- "smallvec",
-]
-
-[[package]]
-name = "jsonbb"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89939e734c06c50796347be54016229909c690eee14b1c44b44770cfea35f596"
+checksum = "08074a5ad6e383dfd928869e5bc201318554c72be460d0367203f1f6c9c9c8fd"
 dependencies = [
  "bytes",
  "serde",
@@ -11338,7 +11326,7 @@ dependencies = [
  "itoa",
  "jiff",
  "jni",
- "jsonbb 0.2.1",
+ "jsonbb",
  "libc",
  "linkme",
  "lru",
@@ -11417,7 +11405,7 @@ dependencies = [
  "educe",
  "ethnum",
  "fixedbitset 0.5.7",
- "jsonbb 0.2.1",
+ "jsonbb",
  "risingwave_common_proc_macro",
  "rust_decimal",
  "serde_json",
@@ -11575,7 +11563,7 @@ dependencies = [
  "async-trait",
  "await-tree",
  "clap",
- "jsonbb 0.2.1",
+ "jsonbb",
  "madsim-tokio",
  "madsim-tonic",
  "prost 0.13.4",
@@ -11789,7 +11777,7 @@ dependencies = [
  "fs-err",
  "hex",
  "itertools 0.14.0",
- "jsonbb 0.2.1",
+ "jsonbb",
  "jsonschema-transpiler",
  "madsim-tokio",
  "num-bigint",
@@ -11965,7 +11953,7 @@ dependencies = [
  "hmac",
  "iceberg",
  "itertools 0.14.0",
- "jsonbb 0.2.1",
+ "jsonbb",
  "linkme",
  "madsim-tokio",
  "md-5",
@@ -12036,7 +12024,7 @@ dependencies = [
  "iana-time-zone",
  "iceberg",
  "itertools 0.14.0",
- "jsonbb 0.2.1",
+ "jsonbb",
  "linkme",
  "madsim-tokio",
  "madsim-tonic",
@@ -12233,7 +12221,7 @@ dependencies = [
  "auto_enums",
  "expect-test",
  "humansize",
- "jsonbb 0.2.1",
+ "jsonbb",
  "jsonwebtoken",
  "risingwave_pb",
  "risingwave_telemetry_event",
@@ -12285,7 +12273,7 @@ dependencies = [
  "iceberg",
  "indexmap 2.12.0",
  "itertools 0.14.0",
- "jsonbb 0.2.1",
+ "jsonbb",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -12823,7 +12811,7 @@ dependencies = [
  "hytra",
  "iceberg",
  "itertools 0.14.0",
- "jsonbb 0.2.1",
+ "jsonbb",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -12871,7 +12859,7 @@ dependencies = [
 name = "risingwave_telemetry_event"
 version = "2.7.0-alpha"
 dependencies = [
- "jsonbb 0.2.1",
+ "jsonbb",
  "madsim-tokio",
  "prost 0.13.4",
  "reqwest 0.12.15",
@@ -14383,15 +14371,15 @@ checksum = "3b9b39299b249ad65f3b7e96443bad61c02ca5cd3589f46cb6d610a0fd6c0d6a"
 
 [[package]]
 name = "sql-json-path"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06d900e5c1db024a5bd4535916f1779f104562a7357ff4280e8136eb50b04f35"
+checksum = "aa30c054bdeed860dd36c1e5a467ec4251d925246f7f57b55bfb77decc2e0ed4"
 dependencies = [
- "jsonbb 0.1.4",
+ "jsonbb",
  "nom",
  "regex",
  "serde_json",
- "thiserror 1.0.63",
+ "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
