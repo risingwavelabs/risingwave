@@ -409,12 +409,7 @@ impl CreateMviewProgressTracker {
         for (creating_table_id, (definition, job_info, backfill_order_state)) in jobs {
             let mut states = HashMap::new();
             let mut backfill_upstream_types = HashMap::new();
-            let actors = StreamJobFragments::tracking_progress_actor_ids_impl(
-                job_info
-                    .fragment_infos
-                    .values()
-                    .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
-            );
+            let actors = job_info.tracking_progress_actor_ids();
             for (actor, backfill_upstream_type) in actors {
                 actor_map.insert(actor, creating_table_id);
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));

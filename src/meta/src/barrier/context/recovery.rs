@@ -18,7 +18,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
-use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
@@ -39,7 +38,7 @@ use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActor, StreamJobFragments, TableParallelism};
+use crate::model::{ActorId, StreamActor, TableParallelism};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{
@@ -84,26 +83,20 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn list_background_job_progress(&self) -> MetaResult<Vec<(String, StreamJobFragments)>> {
+    async fn list_background_job_progress(&self) -> MetaResult<HashMap<TableId, String>> {
         let mgr = &self.metadata_manager;
         let job_info = mgr
             .catalog_controller
             .list_background_creating_jobs(false)
             .await?;
 
-        try_join_all(
-            job_info
-                .into_iter()
-                .map(|(id, definition, _init_at)| async move {
-                    let table_id = TableId::new(id as _);
-                    let stream_job_fragments =
-                        mgr.catalog_controller.get_job_fragments_by_id(id).await?;
-                    assert_eq!(stream_job_fragments.stream_job_id(), table_id);
-                    Ok((definition, stream_job_fragments))
-                }),
-        )
-        .await
-        // If failed, enter recovery mode.
+        Ok(job_info
+            .into_iter()
+            .map(|(id, definition, _init_at)| {
+                let table_id = TableId::new(id as _);
+                (table_id, definition)
+            })
+            .collect())
     }
 
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
@@ -356,35 +349,10 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // Background job progress needs to be recovered.
                     tracing::info!("recovering background job progress");
-                    let background_jobs = {
-                        let jobs = self
-                            .list_background_job_progress()
-                            .await
-                            .context("recover background job progress should not fail")?;
-                        let mut background_jobs = HashMap::new();
-                        for (definition, stream_job_fragments) in jobs {
-                            if stream_job_fragments
-                                .tracking_progress_actor_ids()
-                                .is_empty()
-                            {
-                                // If there's no tracking actor in the job, we can finish the job directly.
-                                self.metadata_manager
-                                    .catalog_controller
-                                    .finish_streaming_job(
-                                        stream_job_fragments.stream_job_id().table_id as _,
-                                    )
-                                    .await?;
-                            } else {
-                                background_jobs
-                                    .try_insert(
-                                        stream_job_fragments.stream_job_id(),
-                                        (definition, stream_job_fragments),
-                                    )
-                                    .expect("non-duplicate");
-                            }
-                        }
-                        background_jobs
-                    };
+                    let background_jobs = self
+                        .list_background_job_progress()
+                        .await
+                        .context("recover background job progress should not fail")?;
 
                     tracing::info!("recovered background job progress");
 
@@ -534,17 +502,28 @@ impl GlobalBarrierWorkerContextImpl {
                         .await?;
 
                     let background_jobs = {
-                        let jobs = self
+                        let unfinished_jobs = HashMap::new();
+                        let mut background_jobs = self
                             .list_background_job_progress()
                             .await
                             .context("recover background job progress should not fail")?;
-                        let mut background_jobs = HashMap::new();
-                        for (definition, stream_job_fragments) in jobs {
-                            background_jobs
-                                .try_insert(stream_job_fragments.stream_job_id(), definition)
-                                .expect("non-duplicate");
+                        for (job_id, job_info) in info.values().flatten() {
+                            let Some(definition) = background_jobs.remove(job_id) else {
+                                continue;
+                            };
+                            if job_info.tracking_progress_actor_ids().is_empty() {
+                                // If there's no tracking actor in the job, we can finish the job directly.
+                                self.metadata_manager
+                                    .catalog_controller
+                                    .finish_streaming_job(job_id.table_id as _)
+                                    .await?;
+                            } else {
+                                background_jobs
+                                    .try_insert(*job_id, definition)
+                                    .expect("non-duplicate");
+                            }
                         }
-                        background_jobs
+                        unfinished_jobs
                     };
 
                     let database_infos = self
@@ -658,22 +637,19 @@ impl GlobalBarrierWorkerContextImpl {
         let background_jobs = {
             let jobs = background_jobs;
             let mut background_jobs = HashMap::new();
-            for (definition, stream_job_fragments) in jobs {
-                if !info.contains_key(&stream_job_fragments.stream_job_id()) {
+            for (job_id, definition) in jobs {
+                let Some(info) = info.get(&job_id) else {
                     continue;
-                }
-                if stream_job_fragments
-                    .tracking_progress_actor_ids()
-                    .is_empty()
-                {
+                };
+                if info.tracking_progress_actor_ids().is_empty() {
                     // If there's no tracking actor in the job, we can finish the job directly.
                     self.metadata_manager
                         .catalog_controller
-                        .finish_streaming_job(stream_job_fragments.stream_job_id().table_id as _)
+                        .finish_streaming_job(job_id.table_id as _)
                         .await?;
                 } else {
                     background_jobs
-                        .try_insert(stream_job_fragments.stream_job_id(), definition)
+                        .try_insert(job_id, definition)
                         .expect("non-duplicate");
                 }
             }
