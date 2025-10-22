@@ -134,7 +134,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
         database_id: DatabaseId,
         database_jobs: &HashMap<TableId, InflightStreamingJobInfo>,
         active_streaming_nodes: &ActiveStreamingWorkerNodes,
-        _stream_actors: &HashMap<ActorId, StreamActor>,
+        stream_actors: &HashMap<ActorId, StreamActor>,
         state_table_committed_epochs: &HashMap<TableId, u64>,
     ) -> MetaResult<()> {
         {
@@ -151,9 +151,9 @@ impl BarrierWorkerRuntimeInfoSnapshot {
                         )
                         .into());
                     }
-                    // if !stream_actors.contains_key(actor_id) {
-                    //     return Err(anyhow!("cannot find StreamActor of actor {}", actor_id).into());
-                    // }
+                    if !stream_actors.contains_key(actor_id) {
+                        return Err(anyhow!("cannot find StreamActor of actor {}", actor_id).into());
+                    }
                 }
                 for state_table_id in &fragment.state_table_ids {
                     if !state_table_committed_epochs.contains_key(state_table_id) {
