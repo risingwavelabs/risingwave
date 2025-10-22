@@ -21,6 +21,7 @@ use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_expr::bail;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 use risingwave_pb::plan_common::{
     AdditionalColumn, AdditionalColumnKey, AdditionalColumnTimestamp,
     AdditionalColumnType as LegacyAdditionalColumnType, ColumnDescVersion, FormatType,
@@ -31,8 +32,8 @@ use risingwave_pb::stream_plan::SourceNode;
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
-    SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    BatchIcebergListExecutor, BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor,
+    IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
 
 pub struct SourceExecutorBuilder;
@@ -142,6 +143,16 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
+            let is_manual_trigger_refresh = source
+                .refresh_mode
+                .as_ref()
+                .map(|refresh_mode| {
+                    matches!(
+                        refresh_mode.refresh_mode,
+                        Some(RefreshMode::ManualTrigger(_))
+                    )
+                })
+                .unwrap_or(false);
             let exec = {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();
@@ -211,20 +222,35 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    IcebergListExecutor::new(
-                        params.actor_context.clone(),
-                        stream_source_core,
-                        source
-                            .downstream_columns
-                            .as_ref()
-                            .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
-                        params.executor_stats.clone(),
-                        barrier_receiver,
-                        system_params,
-                        source.rate_limit,
-                        params.env.config().clone(),
-                    )
-                    .boxed()
+                    if is_manual_trigger_refresh {
+                        BatchIcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            params.local_barrier_manager.clone(),
+                        )
+                        .boxed()
+                    } else {
+                        IcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            system_params,
+                            source.rate_limit,
+                            params.env.config().clone(),
+                        )
+                        .boxed()
+                    }
                 } else if source.with_properties.is_batch_connector() {
                     if source
                         .with_properties

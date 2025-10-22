@@ -40,6 +40,8 @@ pub struct BatchIcebergListExecutor<S: StateStore> {
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
     /// Local barrier manager for reporting list finished
     barrier_manager: LocalBarrierManager,
+    /// Metrics for monitor.
+    _metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> BatchIcebergListExecutor<S> {
@@ -47,6 +49,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
         downstream_columns: Option<Vec<ColumnCatalog>>,
+        metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         barrier_manager: LocalBarrierManager,
     ) -> Self {
@@ -56,6 +59,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
             downstream_columns,
             barrier_receiver: Some(barrier_receiver),
             barrier_manager,
+            _metrics: metrics,
         }
     }
 
