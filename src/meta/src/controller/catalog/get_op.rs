@@ -82,6 +82,19 @@ impl CatalogController {
         Ok(table_obj.map(|(table, obj)| ObjectModel(table, obj.unwrap()).into()))
     }
 
+    pub async fn get_connection_sources(
+        &self,
+        connection_id: ConnectionId,
+    ) -> MetaResult<Vec<source::Model>> {
+        let inner = self.inner.read().await;
+        let sources = Source::find()
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .all(&inner.db)
+            .await?;
+
+        Ok(sources)
+    }
+
     pub async fn get_table_by_name(
         &self,
         database_name: &str,

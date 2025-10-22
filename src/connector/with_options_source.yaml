@@ -288,6 +288,12 @@ KafkaProperties:
     alias:
     - kafka.time.offset
     - scan.startup.timestamp_millis
+  - name: enable.mux.reader
+    field_type: bool
+    required: false
+    default: None
+    alias:
+    - kafka.enable.mux.reader
   - name: group.id.prefix
     field_type: String
     comments: |-

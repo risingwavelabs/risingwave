@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
-use rdkafka::message::{BorrowedMessage, Headers, OwnedHeaders};
+use rdkafka::message::{Headers, OwnedHeaders, OwnedMessage};
 use rdkafka::{Message, Timestamp};
 use risingwave_common::types::{
     Datum, DatumCow, DatumRef, ListValue, ScalarImpl, ScalarRefImpl, StructValue,
@@ -90,7 +90,7 @@ impl KafkaMeta {
 }
 
 impl SourceMessage {
-    pub fn from_kafka_message(message: &BorrowedMessage<'_>, require_header: bool) -> Self {
+    pub fn from_kafka_message(message: &OwnedMessage, require_header: bool) -> Self {
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
             key: message.key().map(|p| p.to_vec()),
@@ -100,7 +100,7 @@ impl SourceMessage {
             meta: SourceMeta::Kafka(KafkaMeta {
                 timestamp: message.timestamp(),
                 headers: if require_header {
-                    message.headers().map(|headers| headers.detach())
+                    message.headers().cloned()
                 } else {
                     None
                 },

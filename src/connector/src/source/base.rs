@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -159,6 +160,7 @@ pub struct CreateSplitReaderOpt {
 pub struct CreateSplitReaderResult {
     pub latest_splits: Option<Vec<SplitImpl>>,
     pub backfill_info: HashMap<SplitId, BackfillInfo>,
+    pub release_handles: Vec<ReleaseHandle>,
 }
 
 pub async fn create_split_readers<P: SourceProperties>(
@@ -173,6 +175,7 @@ pub async fn create_split_readers<P: SourceProperties>(
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
         latest_splits: None,
+        release_handles: Default::default(),
     };
     if opt.support_multiple_splits {
         let mut reader = P::SplitReader::new(
@@ -187,6 +190,7 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(reader.seek_to_latest().await?);
         }
         res.backfill_info = reader.backfill_info();
+        res.release_handles = vec![reader.release_handle()];
         Ok((reader.into_stream().boxed(), res))
     } else {
         let mut readers = try_join_all(splits.into_iter().map(|split| {
@@ -209,6 +213,8 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(latest_splits);
         }
         res.backfill_info = readers.iter().flat_map(|r| r.backfill_info()).collect();
+        res.release_handles = readers.iter().map(|r| r.release_handle()).collect();
+
         Ok((
             select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
             res,
@@ -338,6 +344,7 @@ pub struct SourceContext {
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
     // callback function to report CDC auto schema change fail events
     pub on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
+    pub source_info: Option<PbStreamSourceInfo>,
 }
 
 impl SourceContext {
@@ -352,6 +359,7 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+        source_info: Option<PbStreamSourceInfo>,
     ) -> Self {
         Self::new_with_auto_schema_change_callback(
             actor_id,
@@ -363,6 +371,7 @@ impl SourceContext {
             connector_props,
             schema_change_channel,
             None,
+            source_info,
         )
     }
 
@@ -378,6 +387,7 @@ impl SourceContext {
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
         on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
+        source_info: Option<PbStreamSourceInfo>,
     ) -> Self {
         Self {
             actor_id,
@@ -389,6 +399,7 @@ impl SourceContext {
             connector_props,
             schema_change_tx: schema_change_channel,
             on_cdc_auto_schema_change_failure,
+            source_info,
         }
     }
 
@@ -406,6 +417,7 @@ impl SourceContext {
                 split_txn: false,
             },
             ConnectorProperties::default(),
+            None,
             None,
         )
     }
@@ -571,6 +583,39 @@ impl<T> SourceChunkStream for T where
 
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
+type CleanupFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+#[derive(Default)]
+/// A generic handle that can perform async cleanup once.
+pub struct ReleaseHandle {
+    task: Option<CleanupFuture>,
+}
+
+impl ReleaseHandle {
+    pub fn noop() -> Self {
+        Self { task: None }
+    }
+
+    pub fn new<Fut>(fut: Fut) -> Self
+    where
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        Self {
+            task: Some(Box::pin(fut)),
+        }
+    }
+
+    pub(crate) fn into_future(mut self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
+        self.task.take()
+    }
+
+    pub async fn release(self) {
+        if let Some(task) = self.into_future() {
+            task.await;
+        }
+    }
+}
+
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
 /// stream of parsed [`StreamChunk`]
@@ -595,6 +640,10 @@ pub trait SplitReader: Sized + Send {
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
         Err(anyhow!("seek_to_latest is not supported for this connector").into())
+    }
+
+    fn release_handle(&self) -> ReleaseHandle {
+        ReleaseHandle::noop()
     }
 }
 
@@ -701,6 +750,22 @@ impl ConnectorProperties {
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
             || matches!(self, ConnectorProperties::Azblob(_))
+    }
+
+    pub fn enable_mux_reader(&self) -> bool {
+        if let ConnectorProperties::Kafka(k) = self {
+            return k.enable_mux_reader.unwrap_or(false);
+        }
+
+        false
+    }
+
+    pub fn unique_key_under_connection(&self) -> Option<String> {
+        if let ConnectorProperties::Kafka(k) = self {
+            Some(k.common.topic.clone())
+        } else {
+            None
+        }
     }
 
     pub async fn create_split_enumerator(

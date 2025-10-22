@@ -833,7 +833,7 @@ pub async fn bind_create_source_or_table_with_connector(
     wildcard_idx: Option<usize>,
     source_watermarks: Vec<SourceWatermark>,
     columns_from_resolve_source: Option<Vec<ColumnCatalog>>,
-    source_info: StreamSourceInfo,
+    mut source_info: StreamSourceInfo,
     include_column_options: IncludeOption,
     col_id_gen: &mut ColumnIdGenerator,
     create_source_type: CreateSourceType,
@@ -963,6 +963,10 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
             Some(TelemetryDatabaseObject::Source),
         )?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
+
+    if let Some(connection_id) = connector_conn_ref {
+        source_info.connection_id = Some(connection_id);
+    }
 
     // if not using connection, we don't need to check connector match connection type
     if !matches!(connection_type, PbConnectionType::Unspecified) {
@@ -1103,6 +1107,7 @@ pub async fn handle_create_source(
         create_source_type,
     )
     .await?;
+
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
     if stmt.columns.iter().any(|col| {
@@ -1176,6 +1181,7 @@ pub(super) fn generate_stream_graph_for_source(
     )?;
 
     let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
+
     let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
