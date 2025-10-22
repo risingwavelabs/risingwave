@@ -402,13 +402,13 @@ impl CatalogController {
                 worker_id,
                 splits,
                 vnode_bitmap,
-                expr_context: expr_context_2,
+                expr_context,
                 ..
             } = actor;
 
             let vnode_bitmap =
                 vnode_bitmap.map(|vnode_bitmap| Bitmap::from(vnode_bitmap.to_protobuf()));
-            let pb_expr_context = Some(expr_context_2.to_protobuf());
+            let pb_expr_context = Some(expr_context.to_protobuf());
 
             pb_actor_status.insert(
                 actor_id as _,
@@ -1996,7 +1996,7 @@ mod tests {
                 splits,
                 worker_id: _,
                 vnode_bitmap,
-                expr_context: expr_context_2,
+                expr_context,
                 ..
             },
             StreamActor {
@@ -2040,7 +2040,7 @@ mod tests {
                     .unwrap_or_default()
             );
 
-            assert_eq!(Some(expr_context_2.to_protobuf()), pb_expr_context);
+            assert_eq!(Some(expr_context.to_protobuf()), pb_expr_context);
         }
     }
 
