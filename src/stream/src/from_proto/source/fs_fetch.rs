@@ -26,7 +26,8 @@ use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
 use crate::executor::source::{
-    FsFetchExecutor, IcebergFetchExecutor, SourceStateTableHandler, StreamSourceCore,
+    BatchPosixFsFetchExecutor, FsFetchExecutor, IcebergFetchExecutor, SourceStateTableHandler,
+    StreamSourceCore,
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
@@ -131,6 +132,16 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     stream_source_core,
                     upstream,
                     source.rate_limit,
+                )
+                .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::BatchPosixFs(_) => {
+                BatchPosixFsFetchExecutor::new(
+                    params.actor_context.clone(),
+                    stream_source_core,
+                    upstream,
+                    source.rate_limit,
+                    params.local_barrier_manager.clone(),
                 )
                 .boxed()
             }

@@ -49,14 +49,13 @@ hashbrown = { workspace = true }
 hashbrown0_14 = { workspace = true }
 hex = "0.4.3"
 http = "1"
-humantime = "2.2"
+humantime = "2.3"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
 jni = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
-lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -102,7 +101,7 @@ stacker = "0.1"
 static_assertions = "1"
 strum = "0.27"
 strum_macros = "0.27"
-sysinfo = { version = "0.35", default-features = false, features = ["system"] }
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
@@ -144,6 +143,7 @@ mach2 = "0.4"
 coarsetime = "0.1"
 criterion = { workspace = true }
 expect-test = "1"
+lru = { workspace = true }
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = { workspace = true }

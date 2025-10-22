@@ -607,7 +607,7 @@ impl TableCatalog {
         }
     }
 
-    /// Get columns excluding hidden columns and generated golumns.
+    /// Get columns excluding hidden columns and generated columns.
     pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
         self.columns
             .iter()

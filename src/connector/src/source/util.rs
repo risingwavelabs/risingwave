@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::error::{ConnectorError, ConnectorResult};
@@ -21,18 +21,18 @@ use crate::source::nats::split::NatsSplit;
 
 pub fn fill_adaptive_split(
     split_template: &SplitImpl,
-    actor_in_use: &HashSet<u32>,
+    actor_count: usize,
 ) -> ConnectorResult<BTreeMap<Arc<str>, SplitImpl>> {
     // Just Nats is adaptive for now
     if let SplitImpl::Nats(split) = split_template {
         let mut new_splits = BTreeMap::new();
-        for actor_id in actor_in_use {
-            let actor_id: Arc<str> = actor_id.to_string().into();
+        for idx in 0..actor_count {
+            let split_id: Arc<str> = idx.to_string().into();
             new_splits.insert(
-                actor_id.clone(),
+                split_id.clone(),
                 SplitImpl::Nats(NatsSplit::new(
                     split.subject.clone(),
-                    actor_id,
+                    split_id,
                     split.start_sequence.clone(),
                 )),
             );
