@@ -395,7 +395,7 @@ services:
     command: --replSet rs0 --oplogSize 128
     restart: always
     healthcheck:
-      test: "echo 'db.runCommand({ping: 1})' | mongo"
+      test: "echo 'db.runCommand({ping: 1})' | mongosh"
       interval: 5s
       timeout: 10s
       retries: 3
@@ -408,7 +408,7 @@ services:
       [
         "bash",
         "-c",
-        "sleep 10 && mongo --host mongodb:27017 /config-replica.js && sleep 10",
+        "sleep 10 && mongosh --host mongodb:27017 /config-replica.js && sleep 10",
       ]
     restart: "no"
     volumes:
