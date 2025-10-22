@@ -366,8 +366,8 @@ async fn render_no_shuffle_ensembles<C>(
     id_gen: &IdGeneratorManagerRef,
     ensembles: &[NoShuffleEnsemble],
     fragment_map: &HashMap<FragmentId, fragment::Model>,
-    jobs: &HashMap<ObjectId, streaming_job::Model>,
-    workers: &BTreeMap<WorkerId, WorkerInfo>,
+    job_map: &HashMap<ObjectId, streaming_job::Model>,
+    worker_map: &BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 ) -> MetaResult<FragmentRenderMap>
 where
@@ -377,53 +377,12 @@ where
         return Ok(HashMap::new());
     }
 
-    #[cfg(debug_assertions)]
-    {
-        // Debug-only assertions to catch inconsistent ensemble metadata early.
-        debug_assert!(
-            ensembles
-                .iter()
-                .all(|ensemble| ensemble.entries.is_subset(&ensemble.components)),
-            "entries must be subset of components"
-        );
-
-        let fragment_ids: Vec<_> = ensembles
-            .iter()
-            .flat_map(|ensemble| ensemble.components.iter())
-            .collect();
-
-        let missing_fragments: Vec<_> = fragment_ids
-            .iter()
-            .filter(|fragment_id| !fragment_map.contains_key(fragment_id))
-            .collect();
-
-        debug_assert!(
-            missing_fragments.is_empty(),
-            "missing fragments in fragment_map: {:?}",
-            missing_fragments
-        );
-
-        let missing_jobs: Vec<ObjectId> = fragment_ids
-            .iter()
-            .filter_map(|fragment_id| {
-                fragment_map
-                    .get(fragment_id)
-                    .map(|fragment| fragment.job_id)
-            })
-            .filter(|jid| !jobs.contains_key(jid))
-            .collect();
-
-        debug_assert!(
-            missing_jobs.is_empty(),
-            "missing jobs for fragments' job_id: {:?}",
-            missing_jobs
-        );
-    }
+    debug_sanity_check(ensembles, fragment_map, job_map);
 
     let (fragment_source_ids, fragment_splits) =
         resolve_source_fragments(txn, fragment_map).await?;
 
-    let job_ids = jobs.keys().copied().collect_vec();
+    let job_ids = job_map.keys().copied().collect_vec();
 
     let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
         .select_only()
@@ -481,9 +440,9 @@ where
             .exactly_one()
             .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
 
-        let job = jobs
+        let job = job_map
             .get(&job_id)
-            .unwrap_or_else(|| panic!("streaming job {job_id} not found"));
+            .ok_or_else(|| anyhow!("streaming job {job_id} not found"))?;
 
         let resource_group = match &job.specific_resource_group {
             None => {
@@ -496,7 +455,7 @@ where
             Some(resource_group) => resource_group.clone(),
         };
 
-        let available_workers: BTreeMap<WorkerId, NonZeroUsize> = workers
+        let available_workers: BTreeMap<WorkerId, NonZeroUsize> = worker_map
             .iter()
             .filter_map(|(worker_id, worker)| {
                 if worker
@@ -523,7 +482,8 @@ where
             }
             StreamingParallelism::Fixed(n) => *n,
         }
-        .min(vnode_count);
+        .min(vnode_count)
+        .min(job.max_parallelism as usize);
 
         tracing::debug!(
             "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {} fragment_override {:?}",
@@ -555,12 +515,12 @@ where
             Some(entry_fragment) => {
                 let source_id = fragment_source_ids
                     .get(&entry_fragment.fragment_id)
-                    .unwrap_or_else(|| {
-                        panic!(
+                    .ok_or_else(|| {
+                        anyhow!(
                             "missing source id in source fragment {}",
                             entry_fragment.fragment_id
                         )
-                    });
+                    })?;
 
                 let entry_fragment_id = entry_fragment.fragment_id;
 
@@ -653,9 +613,9 @@ where
                     .collect(),
             };
 
-            let &database_id = streaming_job_databases.get(&job_id).unwrap_or_else(|| {
-                panic!("streaming job {job_id} not found in streaming_job_databases")
-            });
+            let &database_id = streaming_job_databases.get(&job_id).ok_or_else(|| {
+                anyhow!("streaming job {job_id} not found in streaming_job_databases")
+            })?;
 
             all_fragments
                 .entry(database_id)
@@ -667,6 +627,74 @@ where
     }
 
     Ok(all_fragments)
+}
+
+fn debug_sanity_check(
+    ensembles: &[NoShuffleEnsemble],
+    fragment_map: &HashMap<FragmentId, fragment::Model>,
+    jobs: &HashMap<ObjectId, streaming_job::Model>,
+) {
+    #[cfg(debug_assertions)]
+    {
+        // Debug-only assertions to catch inconsistent ensemble metadata early.
+        debug_assert!(
+            ensembles
+                .iter()
+                .all(|ensemble| ensemble.entries.is_subset(&ensemble.components)),
+            "entries must be subset of components"
+        );
+
+        let mut missing_fragments = BTreeSet::new();
+        let mut missing_jobs = BTreeSet::new();
+
+        for fragment_id in ensembles
+            .iter()
+            .flat_map(|ensemble| ensemble.components.iter())
+        {
+            match fragment_map.get(fragment_id) {
+                Some(fragment) => {
+                    if !jobs.contains_key(&fragment.job_id) {
+                        missing_jobs.insert(fragment.job_id);
+                    }
+                }
+                None => {
+                    missing_fragments.insert(*fragment_id);
+                }
+            }
+        }
+
+        debug_assert!(
+            missing_fragments.is_empty(),
+            "missing fragments in fragment_map: {:?}",
+            missing_fragments
+        );
+
+        debug_assert!(
+            missing_jobs.is_empty(),
+            "missing jobs for fragments' job_id: {:?}",
+            missing_jobs
+        );
+
+        for ensemble in ensembles {
+            let unique_vnode_counts: Vec<_> = ensemble
+                .components
+                .iter()
+                .flat_map(|fragment_id| {
+                    fragment_map
+                        .get(fragment_id)
+                        .map(|fragment| fragment.vnode_count)
+                })
+                .unique()
+                .collect();
+
+            debug_assert!(
+                unique_vnode_counts.len() <= 1,
+                "components in ensemble must share same vnode_count: ensemble={:?}, vnode_counts={:?}",
+                ensemble.components,
+                unique_vnode_counts
+            );
+        }
+    }
 }
 
 async fn resolve_source_fragments<C>(
