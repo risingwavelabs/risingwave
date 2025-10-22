@@ -48,8 +48,8 @@ use risingwave_meta_model::{
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
 };
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
-    Subscription, Table, View,
+    Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable, Schema, Secret,
+    Source, Subscription, Table, View,
 };
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
@@ -780,6 +780,55 @@ impl DdlController {
             .await;
         tracing::debug!("finish drop subscription");
         Ok(version)
+    }
+
+    pub async fn validate_mux_source_connection(
+        &self,
+        connection_id: ConnectionId,
+        new_source: &PbSource,
+    ) -> MetaResult<()> {
+        let sources = self
+            .metadata_manager
+            .catalog_controller
+            .get_connection_sources(connection_id)
+            .await?;
+
+        let mut existing_keys = HashSet::new();
+
+        for source in sources {
+            let props = source.with_properties.into_inner();
+            let props = ConnectorProperties::extract(
+                WithOptionsSecResolved::without_secrets(props),
+                false,
+            )?;
+
+            if let Some(key) = props.unique_key_under_connection()
+                && !existing_keys.insert(key.clone())
+            {
+                bail!(
+                    "Duplicate unique key `{}` found in connection `{}`",
+                    key,
+                    connection_id
+                );
+            }
+        }
+
+        let new_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(new_source.with_properties.clone()),
+            false,
+        )?;
+
+        if let Some(new_key) = new_props.unique_key_under_connection()
+            && existing_keys.contains(&new_key)
+        {
+            bail!(
+                "Duplicate unique key `{}` found in connection `{}`",
+                new_key,
+                connection_id
+            );
+        }
+
+        Ok(())
     }
 
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node

@@ -23,7 +23,7 @@ use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxSourceChunkStream, CdcAutoSchemaChangeFailCallback, ConnectorState, CreateSplitReaderResult,
-    SourceContext, SourceCtrlOpts, SplitMetaData, StreamChunkWithState,
+    ReleaseHandle, SourceContext, SourceCtrlOpts, SplitMetaData, StreamChunkWithState,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
@@ -47,6 +47,7 @@ pub(crate) struct StreamReaderBuilder {
     // cdc related
     pub is_auto_schema_change_enable: bool,
     pub actor_ctx: ActorContextRef,
+    pub last_release_handles: Arc<tokio::sync::Mutex<Option<Vec<ReleaseHandle>>>>,
 }
 
 impl StreamReaderBuilder {
@@ -153,6 +154,7 @@ impl StreamReaderBuilder {
             self.source_desc.source.config.clone(),
             schema_change_tx,
             on_cdc_auto_schema_change_failure,
+            Some(self.source_desc.source_info.clone()),
         );
 
         (column_ids, source_ctx)
@@ -177,6 +179,7 @@ impl StreamReaderBuilder {
             .await
             .map_err(StreamExecutorError::connector_error)?;
         self.reader_stream = Some(stream);
+
         Ok(res)
     }
 
@@ -215,6 +218,13 @@ impl StreamReaderBuilder {
             let build_stream_result = if let Some(exist_stream) = self.reader_stream.take() {
                 Ok((exist_stream, CreateSplitReaderResult::default()))
             } else {
+                if let Some(last_release_handles) = self.last_release_handles.lock().await.take() {
+                    // release the last handle if exists
+                    for handle in last_release_handles {
+                        handle.release().await;
+                    }
+                }
+
                 self.source_desc
                     .source
                     .build_stream(
@@ -248,7 +258,18 @@ impl StreamReaderBuilder {
                 }
             }
 
-            let (stream, _) = build_stream_result.unwrap();
+            let (
+                stream,
+                CreateSplitReaderResult {
+                    release_handles, ..
+                },
+            ) = build_stream_result.unwrap();
+
+            self.last_release_handles
+                .lock()
+                .await
+                .replace(release_handles);
+
             let stream = apply_rate_limit(stream, self.rate_limit).boxed();
             let mut is_error = false;
             #[for_await]

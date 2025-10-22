@@ -355,7 +355,6 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let req = request.into_inner();
         let source = req.get_source()?.clone();
-
         match req.fragment_graph {
             None => {
                 let version = self
@@ -368,8 +367,14 @@ impl DdlService for DdlServiceImpl {
                 }))
             }
             Some(fragment_graph) => {
+                if let Some(connection_id) = source.connection_id {
+                    self.ddl_controller
+                        .validate_mux_source_connection(connection_id as _, &source)
+                        .await?;
+                }
                 // The id of stream job has been set above
                 let stream_job = StreamingJob::Source(source);
+
                 let version = self
                     .ddl_controller
                     .run_command(DdlCommand::CreateStreamingJob {
