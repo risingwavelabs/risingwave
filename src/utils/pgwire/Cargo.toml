@@ -35,6 +35,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-openssl = "0.6.3"
 tracing = "0.1"
 ldap3 = "0.11.0-beta.1"
+native-tls = "0.2.11"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

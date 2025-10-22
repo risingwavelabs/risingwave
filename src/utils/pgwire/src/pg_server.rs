@@ -258,10 +258,10 @@ impl UserAuthenticator {
                 .map_err(PsqlError::StartupError)?
             }
             UserAuthenticator::Ldap(user_name, hba_entry) => {
+                // let x = self.
                 let ldap_auth = LdapAuthenticator::new(&hba_entry)?;
                 // Convert password to string, defaulting to empty if not valid UTF-8
                 let password_str = String::from_utf8_lossy(password).into_owned();
-                // Implement a username placeholder. In RisingWave, this would be passed from the session context
                 ldap_auth.authenticate(user_name, &password_str).await?
             }
         };

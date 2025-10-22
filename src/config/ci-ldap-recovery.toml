@@ -27,7 +27,9 @@ auth_method = "ldap"
 
 [frontend.hba_config.entries.auth_options]
 ldapserver = "127.0.0.1"
-ldapport = "389"
+#ldapscheme = "ldaps"
+#ldapport = "636"
+ldaptls = "true"
 ldapbasedn = "ou=people,dc=example,dc=com"
 
 [streaming]

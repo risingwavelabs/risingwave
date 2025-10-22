@@ -9572,6 +9572,7 @@ dependencies = [
  "jsonwebtoken",
  "ldap3",
  "madsim-tokio",
+ "native-tls",
  "openssl",
  "panic-message",
  "parking_lot 0.12.1",
