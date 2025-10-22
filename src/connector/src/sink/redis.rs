@@ -439,13 +439,16 @@ impl Sink for RedisSink {
                     TemplateStringEncoder::check_string_format(value_format, &all_map)?;
                 }
                 Some(REDIS_VALUE_TYPE_STREAM) => {
+                    risingwave_common::license::Feature::RedisSinkStream
+                        .check_available()
+                        .map_err(|e| anyhow::anyhow!(e))?;
                     let stream = self.format_desc.options.get(STREAM);
                     let stream_column = self.format_desc.options.get(STREAM_COLUMN);
                     if (stream.is_none() && stream_column.is_none())
                         || (stream.is_some() && stream_column.is_some())
                     {
                         return Err(SinkError::Config(anyhow!(
-                            "`{STREAM}` and `{STREAM_COLUMN}` only one can be set"
+                            "Please specific either `{STREAM}` or `{STREAM_COLUMN}`. They are mutually exclusive options."
                         )));
                     }
 

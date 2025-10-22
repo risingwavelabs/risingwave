@@ -24,6 +24,11 @@
             "const": "SnowflakeSink"
         },
         {
+            "description": "Delivering data to redis stream.",
+            "type": "string",
+            "const": "RedisSinkStream"
+        },
+        {
             "description": "Delivering data to DynamoDb.",
             "type": "string",
             "const": "DynamoDbSink"
