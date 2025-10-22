@@ -434,47 +434,52 @@ impl Binder {
                 ("inner_product", raw_call(ExprType::InnerProduct)),
                 ("vector_norm", raw_call(ExprType::L2Norm)),
                 ("l2_normalize", raw_call(ExprType::L2Normalize)),
-                ("subvector", guard_by_len::<3>(|_, [vector_expr, start_expr, len_expr]| {
-                    let length = if let DataType::Vector(length) = vector_expr.return_type() {
+                ("subvector", guard_by_len(|_, [vector_expr, start_expr, len_expr]| {
+                    let dimensions = if let DataType::Vector(length) = vector_expr.return_type() {
                         length as i32
                     } else {
                         return Err(ErrorCode::BindError("subvector expects `vector(dim)` input".into()).into());
                     };
                     let start = start_expr
-                        .as_literal()
-                        .and_then(|lit| match lit.get_data() {
-                            Some(ScalarImpl::Int32(v)) => Some(*v),
+                        .try_fold_const()
+                        .transpose()?
+                        .and_then(|datum| match datum {
+                            Some(ScalarImpl::Int32(v)) => Some(v),
                             _ => None,
                         })
-                        .ok_or_else(|| ErrorCode::ExprError("`start` must be an Int32 literal".into()))?;
+                        .ok_or_else(|| ErrorCode::ExprError("`start` must be an Int32 constant".into()))?;
+
                     let len = len_expr
-                        .as_literal()
-                        .and_then(|lit| match lit.get_data() {
-                            Some(ScalarImpl::Int32(v)) => Some(*v),
+                        .try_fold_const()
+                        .transpose()?
+                        .and_then(|datum| match datum {
+                            Some(ScalarImpl::Int32(v)) => Some(v),
                             _ => None,
-                        }).ok_or_else(|| ErrorCode::ExprError("`count` must be an Int32 literal".into()))?;
+                        })
+                        .ok_or_else(|| ErrorCode::ExprError("`count` must be an Int32 constant".into()))?;
                     if len < 1 {
                         return Err(ErrorCode::InvalidParameterValue(format!("vector must have at least 1 dimension, not {}", len)).into());
                     }
 
-                    let mut start = start;
-                    let end = if start > length - len {
-                        length + 1
-                    } else {
-                        start + len
-                    };
-                    if start < 1 {
-                        start = 1
-                    } else if start > length {
-                        return Err(ErrorCode::InvalidParameterValue(format!("vector must have at least 1 dimension, not {}", start)).into());
+                    let end = start + len - 1;
+
+                    if start < 1 || end < 1 || start > dimensions || end > dimensions {
+                        return Err(ErrorCode::InvalidParameterValue(format!(
+                                "vector slice range out of bounds: start={}, end={}, valid range is [1, {}]",
+                                start,
+                                end,
+                                dimensions
+                            )).into());
                     }
-                    let dim = (end - start) as usize;
-                    if !(1..=DataType::VEC_MAX_SIZE).contains(&dim) {
+
+                    let dim = (end - start + 1) as usize;
+                    if dim < 1 {
                         return Err(ErrorCode::InvalidParameterValue(
                             format!(
                                 "(start..end) range is invalid: computed dim = {}, must be within (1..={})",
                                 dim,
-                                DataType::VEC_MAX_SIZE
+                                dimensions
+
                             )
                         ).into());
                     }

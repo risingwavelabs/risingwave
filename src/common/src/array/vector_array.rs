@@ -336,6 +336,14 @@ impl VectorVal {
 #[repr(transparent)]
 pub struct Finite32(f32);
 
+impl Finite32 {
+    /// Creates a `Finite32` value without checking for `NaN` or infinity.
+    #[inline]
+    pub fn from_unchecked(value: f32) -> Self {
+        Self(value)
+    }
+}
+
 impl TryFrom<f32> for Finite32 {
     type Error = String;
 

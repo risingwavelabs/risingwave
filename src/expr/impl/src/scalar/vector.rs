@@ -522,6 +522,21 @@ fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
     vector.normalized()
 }
 
+#[derive(Debug)]
+pub struct SubvectorContext {
+    pub start: i32,
+    pub end: i32,
+}
+
+impl SubvectorContext {
+    pub fn from_start_count(start: i32, count: i32) -> Result<Self> {
+        Ok(Self {
+            start,
+            end: start + count,
+        })
+    }
+}
+
 /// ```slt
 /// query R
 /// SELECT subvector('[1,2,3,4,5]'::vector(5), 1, 3);
@@ -534,45 +549,32 @@ fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
 /// [3,4]
 ///
 /// query R
-/// SELECT subvector('[1,2,3,4,5]'::vector(5), -1, 3);
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 1, 5);
 /// ----
-/// [1]
+/// [1,2,3,4,5]
 ///
 /// query R
-/// SELECT subvector('[1,2,3,4,5]'::vector(5), 3, 9);
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 5, 1);
 /// ----
-/// [3,4,5]
+/// [5]
 ///
 /// query R
-/// SELECT subvector('[1,2,3,4,5]'::vector(5), -2147483644, 2147483647);
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 2, 3);
 /// ----
-/// [1,2]
-///
-/// query R
-/// SELECT subvector('[1,2,3,4,5]'::vector(5), 3, 2147483647);
-/// ----
-/// [3,4,5]
+/// [2,3,4]
 /// ```
-#[function("subvector(vector, int4, int4) -> vector", type_infer = "unreachable")]
-fn subvector(v: VectorRef<'_>, start: i32, count: i32) -> Result<VectorVal> {
+#[function(
+    "subvector(vector, int4, int4) -> vector",
+    prebuild = "SubvectorContext::from_start_count($1, $2)?",
+    type_infer = "unreachable"
+)]
+fn subvector(v: VectorRef<'_>, ctx: &SubvectorContext) -> Result<VectorVal> {
     let vector = v.as_slice();
-    let length = vector.len() as i32;
-    let mut start = start;
-    let end = if start > length - count {
-        length + 1
-    } else {
-        start + count
-    };
 
-    if start < 1 {
-        start = 1
-    }
-
-    let result = vector[(start - 1) as usize..(end - 1) as usize]
+    let result = vector[(ctx.start - 1) as usize..(ctx.end - 1) as usize]
         .iter()
         .copied()
-        .map(|v| Finite32::try_from(f32::from(v)))
-        .try_collect()
-        .map_err(|_| ExprError::NumericOverflow)?;
+        .map(|v| Finite32::from_unchecked(f32::from(v)))
+        .collect();
     Ok(result)
 }
