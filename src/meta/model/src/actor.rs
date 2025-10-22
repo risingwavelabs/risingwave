@@ -60,7 +60,6 @@ pub struct Model {
     #[deprecated]
     pub upstream_actor_ids: ActorUpstreamActors,
     pub vnode_bitmap: Option<VnodeBitmap>,
-    // pub expr_context: ExprContext,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

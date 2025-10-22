@@ -658,7 +658,7 @@ impl<S: Hash + Copy> AssignerBuilder<S> {
             salt,
             actor_capacity: CapacityMode::Weighted,
             balance_strategy: BalancedBy::RawWorkerWeights,
-            vnode_chunking_strategy: VnodeChunkingStrategy::MaximizeContiguity,
+            vnode_chunking_strategy: VnodeChunkingStrategy::NoChunking,
         }
     }
 
@@ -2836,8 +2836,6 @@ mod multi_group_cluster_simulation_tests {
                 BalancedBy::RawWorkerWeights => self.with_worker_oriented_balancing(),
                 BalancedBy::ActorCounts => self.with_actor_oriented_balancing(),
             };
-
-            self.with_vnode_chunking_strategy(VnodeChunkingStrategy::NoChunking);
             self.build()
         }
     }

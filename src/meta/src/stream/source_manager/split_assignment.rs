@@ -448,8 +448,8 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    tracing::debug!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
-    tracing::debug!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
+    tracing::trace!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
+    tracing::trace!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
 
     let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
 
