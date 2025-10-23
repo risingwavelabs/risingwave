@@ -475,7 +475,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
@@ -520,6 +521,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         CreateSourceType::Table,
         rate_limit,
         sql_column_strategy,
+        refresh_mode,
     )
     .await?;
 

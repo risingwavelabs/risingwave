@@ -403,9 +403,10 @@ fn resolve_secret_refs_inner(
 
 pub(crate) fn resolve_source_refresh_mode_in_with_option(
     with_options: &mut WithOptions,
-) -> RwResult<SourceRefreshMode> {
-    let source_refresh_mode = with_options.remove(SOURCE_REFRESH_MODE_KEY);
-    let source_refresh_mode = if let Some(source_refresh_mode_str) = source_refresh_mode {
+) -> RwResult<Option<SourceRefreshMode>> {
+    let source_refresh_mode = if let Some(source_refresh_mode_str) =
+        with_options.remove(SOURCE_REFRESH_MODE_KEY)
+    {
         match source_refresh_mode_str.to_uppercase().as_str() {
             "STREAMING" => SourceRefreshMode {
                 refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
@@ -423,11 +424,9 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             }
         }
     } else {
-        SourceRefreshMode {
-            refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
-        }
+        return Ok(None);
     };
-    Ok(source_refresh_mode)
+    Ok(Some(source_refresh_mode))
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(
