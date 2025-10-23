@@ -83,6 +83,23 @@ impl Binder {
             .into());
         }
 
+        // Validate that the interval is not zero (only works for constant intervals)
+        if let ExprImpl::Literal(literal) = &interval {
+            if let Some(value) = literal.get_data() {
+                if let risingwave_common::types::ScalarImpl::Interval(interval_value) = value {
+                    if interval_value.months() == 0
+                        && interval_value.days() == 0
+                        && interval_value.usecs() == 0
+                    {
+                        return Err(ErrorCode::BindError(
+                            "The gap fill interval cannot be zero".to_string(),
+                        )
+                        .into());
+                    }
+                }
+            }
+        }
+
         let mut fill_strategies = vec![];
         for arg in args_iter {
             let (strategy, target_col) =
@@ -92,7 +109,7 @@ impl Binder {
                     let strategy = match name.as_str() {
                         "interpolate" => FillStrategy::Interpolate,
                         "locf" => FillStrategy::Locf,
-                        "null" => FillStrategy::Null,
+                        "keepnull" => FillStrategy::Null,
                         _ => {
                             return Err(ErrorCode::BindError(format!(
                                 "Unsupported fill strategy: {}",
@@ -118,6 +135,17 @@ impl Binder {
                     })?;
 
                     if let ExprImpl::InputRef(input_ref) = arg_expr {
+                        // Check datatype for interpolate
+                        if matches!(strategy, FillStrategy::Interpolate) {
+                            let data_type = &input_ref.data_type;
+                            if !data_type.is_numeric() || matches!(data_type, DataType::Serial) {
+                                return Err(ErrorCode::BindError(format!(
+                                    "INTERPOLATE only supports numeric types, got {}",
+                                    data_type
+                                ))
+                                .into());
+                            }
+                        }
                         (strategy, *input_ref)
                     } else {
                         return Err(ErrorCode::BindError(

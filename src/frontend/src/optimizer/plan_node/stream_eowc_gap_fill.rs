@@ -41,8 +41,27 @@ impl StreamEowcGapFill {
     pub fn new(core: generic::GapFill<PlanRef<Stream>>) -> Self {
         let input = &core.input;
 
+        // Verify that time_col is part of the upstream stream key to ensure
+        // that there are no duplicate rows for the same time point.
+        let time_col_idx = core.time_col.index();
+        let input_stream_key = input.expect_stream_key();
+        assert!(
+            input_stream_key.contains(&time_col_idx),
+            "GapFill time column (index {}) must be part of the upstream stream key {:?} to avoid logic errors with duplicate rows",
+            time_col_idx,
+            input_stream_key
+        );
+
+        // Verify that a watermark is defined on the gap fill column.
+        let input_watermark_cols = input.watermark_columns();
+        assert!(
+            input_watermark_cols.contains(time_col_idx),
+            "GapFill time column (index {}) must have a watermark defined for EOWC mode",
+            time_col_idx
+        );
+
         // Force singleton distribution for GapFill operations.
-        // GapFill requires access to all data across time ranges to correctly identify and fill gaps,
+        // GapFill requires access to all data across time ranges to correctly identify and fill gaps, so that missing intervals can be detected and filled appropriately.
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::Single,
