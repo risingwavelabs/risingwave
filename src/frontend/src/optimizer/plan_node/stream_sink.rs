@@ -635,13 +635,6 @@ impl StreamSink {
     ) -> Result<Vec<usize>> {
         // If the user defines the downstream primary key, we find out their indices.
         let downstream_pk = downstream_pk_str.split(',').collect_vec();
-        if downstream_pk.is_empty() {
-            bail_invalid_input_syntax!(
-                "Specified primary key should not be empty. \
-                To use derived primary key, remove {DOWNSTREAM_PK_KEY} from WITH options instead."
-            );
-        }
-
         let mut downstream_pk_indices = Vec::with_capacity(downstream_pk.len());
         for key in downstream_pk {
             let trimmed_key = key.trim();
@@ -649,6 +642,12 @@ impl StreamSink {
                 continue;
             }
             downstream_pk_indices.push(find_column_idx_by_name(columns, trimmed_key)?);
+        }
+        if downstream_pk_indices.is_empty() {
+            bail_invalid_input_syntax!(
+                "Specified primary key should not be empty. \
+                To use derived primary key, remove {DOWNSTREAM_PK_KEY} from WITH options instead."
+            );
         }
         Ok(downstream_pk_indices)
     }

@@ -137,11 +137,8 @@ impl SinkDesc {
                 .map(|column| column.to_protobuf())
                 .collect_vec(),
             plan_pk: self.plan_pk.iter().map(|k| k.to_protobuf()).collect_vec(),
-            downstream_pk: if let Some(pk) = &self.downstream_pk {
-                pk.iter().map(|idx| *idx as _).collect_vec()
-            } else {
-                Vec::new()
-            },
+            downstream_pk: (self.downstream_pk.as_ref())
+                .map_or_else(Vec::new, |pk| pk.iter().map(|idx| *idx as _).collect_vec()),
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,

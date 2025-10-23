@@ -397,11 +397,8 @@ impl SinkCatalog {
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
             plan_pk: self.plan_pk.iter().map(|o| o.to_protobuf()).collect(),
-            downstream_pk: if let Some(pk) = &self.downstream_pk {
-                pk.iter().map(|idx| *idx as i32).collect_vec()
-            } else {
-                vec![]
-            },
+            downstream_pk: (self.downstream_pk.as_ref())
+                .map_or_else(Vec::new, |pk| pk.iter().map(|idx| *idx as _).collect_vec()),
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -463,11 +460,6 @@ impl SinkCatalog {
         Schema { fields }
     }
 
-    pub fn downstream_pk_indices(&self) -> Vec<usize> {
-        // self.downstream_pk.clone()
-        todo!()
-    }
-
     pub fn unique_identity(&self) -> String {
         // We need to align with meta here, so we've utilized the proto method.
         self.to_proto().unique_identity()
@@ -516,8 +508,7 @@ impl From<PbSink> for SinkCatalog {
                 None
             } else {
                 Some(
-                    pb.downstream_pk
-                        .into_iter()
+                    (pb.downstream_pk.into_iter())
                         .map(|idx| idx as usize)
                         .collect_vec(),
                 )
