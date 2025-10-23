@@ -23,7 +23,7 @@ use futures::future;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeMask};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::ActorMapping;
 use risingwave_meta_model::{
     ObjectId, StreamingParallelism, WorkerId, fragment, fragment_relation,
@@ -92,6 +92,7 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::{
     StreamingJobExtraInfo, compose_dispatchers, get_streaming_job_extra_info,
 };
+use crate::stream::cdc::assign_cdc_table_snapshot_splits_impl;
 
 pub type ScaleControllerRef = Arc<ScaleController>;
 
@@ -850,7 +851,7 @@ impl ScaleController {
                     ))
                 })?;
 
-                let reschedule = self.diff_fragment(
+                let mut reschedule = self.diff_fragment(
                     prev_fragment,
                     actors,
                     upstream_fragments,
@@ -858,6 +859,31 @@ impl ScaleController {
                     all_actor_dispatchers,
                     job_extra_info.get(job_id),
                 )?;
+
+                // We only handle CDC splits at this stage, so it should have been empty before.
+                debug_assert!(reschedule.cdc_table_id.is_none());
+                debug_assert!(reschedule.cdc_table_snapshot_split_assignment.is_empty());
+                let cdc_info = if fragment_info
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::StreamCdcScan)
+                {
+                    let assignment = assign_cdc_table_snapshot_splits_impl(
+                        *job_id as _,
+                        actors.keys().copied().collect(),
+                        self.env.meta_store_ref(),
+                        None,
+                    )
+                    .await?;
+                    Some((job_id, assignment))
+                } else {
+                    None
+                };
+
+                if let Some((cdc_table_id, cdc_table_snapshot_split_assignment)) = cdc_info {
+                    reschedule.cdc_table_id = Some(*cdc_table_id as u32);
+                    reschedule.cdc_table_snapshot_split_assignment =
+                        cdc_table_snapshot_split_assignment;
+                }
 
                 reschedules.insert(*fragment_id as FragmentId, reschedule);
             }
