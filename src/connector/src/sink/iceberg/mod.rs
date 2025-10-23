@@ -124,6 +124,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_some_true() -> Option<bool> {
+    Some(true)
+}
+
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 pub struct IcebergConfig {
@@ -149,7 +153,7 @@ pub struct IcebergConfig {
     #[serde(default)]
     pub partition_by: Option<String>,
 
-    /// Commit every n(>0) checkpoints, default is 10.
+    /// Commit every n(>0) checkpoints, default is 60.
     #[serde(default = "iceberg_default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
@@ -159,7 +163,7 @@ pub struct IcebergConfig {
     pub create_table_if_not_exists: bool,
 
     /// Whether it is `exactly_once`, the default is not.
-    #[serde(default)]
+    #[serde(default = "default_some_true")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
     // Retry commit num when iceberg commit fail. default is 8.
