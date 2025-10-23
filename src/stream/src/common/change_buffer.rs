@@ -188,6 +188,12 @@ where
     }
 }
 
+impl<K, R> Default for ChangeBuffer<K, R> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K, R> ChangeBuffer<K, R> {
     /// Create a new `ChangeBuffer` that panics on inconsistency.
     pub fn new() -> Self {
