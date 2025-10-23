@@ -502,7 +502,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .await?;
 
                     let background_jobs = {
-                        let unfinished_jobs = HashMap::new();
+                        let mut unfinished_jobs = HashMap::new();
                         let mut background_jobs = self
                             .list_background_job_progress()
                             .await
@@ -518,7 +518,7 @@ impl GlobalBarrierWorkerContextImpl {
                                     .finish_streaming_job(job_id.table_id as _)
                                     .await?;
                             } else {
-                                background_jobs
+                                unfinished_jobs
                                     .try_insert(*job_id, definition)
                                     .expect("non-duplicate");
                             }
