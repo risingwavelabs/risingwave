@@ -124,10 +124,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_some_true() -> Option<bool> {
-    Some(true)
-}
-
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 pub struct IcebergConfig {
@@ -163,7 +159,7 @@ pub struct IcebergConfig {
     pub create_table_if_not_exists: bool,
 
     /// Whether it is `exactly_once`, the default is not.
-    #[serde(default = "default_some_true")]
+    #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
     // Retry commit num when iceberg commit fail. default is 8.
