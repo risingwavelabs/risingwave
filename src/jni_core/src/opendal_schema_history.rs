@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use jni::objects::{JByteArray, JObject, JString};
@@ -21,10 +21,11 @@ use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
+use tokio::sync::OnceCell;
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
 
-static OBJECT_STORE_INSTANCE: OnceLock<Arc<ObjectStoreImpl>> = OnceLock::new();
+static OBJECT_STORE_INSTANCE: OnceCell<Arc<ObjectStoreImpl>> = OnceCell::const_new();
 
 /// Security safeguard: Check if file has .dat extension
 /// This prevents accidental overwriting of Hummock data or other critical files.
@@ -57,21 +58,20 @@ fn prepend_data_directory(path: &str) -> String {
 }
 
 async fn get_object_store() -> Arc<ObjectStoreImpl> {
-    if let Some(store) = OBJECT_STORE_INSTANCE.get() {
-        store.clone()
-    } else {
-        let hummock_url = STATE_STORE_URL.get().unwrap();
-        let object_store = build_remote_object_store(
-            hummock_url.strip_prefix("hummock+").unwrap_or("memory"),
-            Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone()),
-            "rw-cdc-schema-history",
-            Arc::new(ObjectStoreConfig::default()),
-        )
-        .await;
-        let arc = Arc::new(object_store);
-        let _ = OBJECT_STORE_INSTANCE.set(arc.clone());
-        arc
-    }
+    OBJECT_STORE_INSTANCE
+        .get_or_init(|| async {
+            let hummock_url = STATE_STORE_URL.get().unwrap();
+            let object_store = build_remote_object_store(
+                hummock_url.strip_prefix("hummock+").unwrap_or("memory"),
+                Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone()),
+                "rw-cdc-schema-history",
+                Arc::new(ObjectStoreConfig::default()),
+            )
+            .await;
+            Arc::new(object_store)
+        })
+        .await
+        .clone()
 }
 
 #[unsafe(no_mangle)]
@@ -138,7 +138,7 @@ fn strip_data_directory_prefix(path: &str) -> Result<String, String> {
     let data_directory = DATA_DIRECTORY
         .get()
         .map(|s| s.as_str())
-        .ok_or_else(|| "expect DATA_DIRECTORY")?;
+        .ok_or("expect DATA_DIRECTORY")?;
     let relative_path = path.strip_prefix(data_directory).ok_or_else(|| {
         format!(
             "DATA_DIRECTORY {} is not prefix of path {}",
