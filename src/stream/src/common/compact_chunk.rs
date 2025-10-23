@@ -150,7 +150,7 @@ mod tests {
         let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
         let mut iter = compactor.into_compacted_chunks_inline(InconsistencyBehavior::Panic);
 
-        let chunk = iter.next().unwrap().compact();
+        let chunk = iter.next().unwrap().compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -165,7 +165,7 @@ mod tests {
             chunk.to_pretty()
         );
 
-        let chunk = iter.next().unwrap().compact();
+        let chunk = iter.next().unwrap().compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(

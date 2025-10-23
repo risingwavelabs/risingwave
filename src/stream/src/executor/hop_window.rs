@@ -118,10 +118,10 @@ impl HopWindowExecutor {
                     }
 
                     // TODO: compact may be not necessary here.
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
                     let (data_chunk, ops) = chunk.into_parts();
                     // SAFETY: Already compacted.
-                    assert!(data_chunk.is_compacted());
+                    assert!(data_chunk.is_vis_compacted());
                     let len = data_chunk.cardinality();
 
                     // Collect each window's data into a chunk.
