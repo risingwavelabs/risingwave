@@ -600,7 +600,7 @@ impl CatalogController {
                         .map(|(actor_id, actor_info)| ActorModel {
                             actor_id: *actor_id as _,
                             fragment_id: fm.fragment_id,
-                            status: ActorStatus::Running, // Placeholder, actual status should be fetched from DB if needed
+                            status: ActorStatus::Running, // status is always Running in the shared info
                             worker_id: actor_info.worker_id as _,
                             splits:    ConnectorSplits::from(&PbConnectorSplits {
                                 splits: actor_info.splits.iter().map(ConnectorSplit::from).collect(),

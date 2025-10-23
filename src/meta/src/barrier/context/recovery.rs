@@ -404,7 +404,6 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
-                    // FIXME: Transactions should be used.
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
@@ -414,7 +413,11 @@ impl GlobalBarrierWorkerContextImpl {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
                             })?
                     } else {
-                        bail!("unimpl");
+                        bail!(
+                            "Recovery for unreschedulable background jobs is not yet implemented. \
+                             This path is triggered when the following jobs have at least one scan type that is not reschedulable: {:?}.",
+                            unreschedulable_jobs
+                        );
                     };
 
                     let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
