@@ -14,9 +14,10 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{Context, ensure};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::for_await;
@@ -25,7 +26,7 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{OnceCell as TokioOnceCell, RwLock, mpsc};
 
 use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
@@ -46,10 +47,13 @@ pub struct KafkaMuxReader {
     senders: RwLock<HashMap<PartitionRoute, mpsc::Sender<Vec<OwnedMessage>>>>,
 }
 
-static GLOBAL: OnceCell<RwLock<HashMap<ReaderKey, Arc<KafkaMuxReader>>>> = OnceCell::new();
+type Registry = HashMap<ReaderKey, Arc<TokioOnceCell<Arc<KafkaMuxReader>>>>;
+
+static GLOBAL: OnceCell<RwLock<Registry>> = OnceCell::new();
+static ACTIVE_MUX_READERS: AtomicUsize = AtomicUsize::new(0);
 
 impl KafkaMuxReader {
-    fn registry() -> &'static RwLock<HashMap<ReaderKey, Arc<KafkaMuxReader>>> {
+    fn registry() -> &'static RwLock<Registry> {
         GLOBAL.get_or_init(|| RwLock::new(HashMap::new()))
     }
 
@@ -59,12 +63,39 @@ impl KafkaMuxReader {
         properties: KafkaProperties,
         source_ctx: SourceContextRef,
     ) -> Result<Arc<Self>> {
-        // fast path – already exists
-        if let Some(r) = Self::registry().read().await.get(&connection_id).cloned() {
+        let cell = {
+            let mut registry = Self::registry().write().await;
+            registry
+                .entry(connection_id.clone())
+                .or_insert_with(|| Arc::new(TokioOnceCell::new()))
+                .clone()
+        };
+
+        if let Some(reader) = cell.get() {
             tracing::info!("Reusing existing KafkaMuxReader for connection_id: {connection_id}");
-            return Ok(r);
+            return Ok(reader.clone());
         }
 
+        let reader_ref = cell
+            .get_or_try_init(|| {
+                let properties = properties.clone();
+                let source_ctx = source_ctx.clone();
+                let key = connection_id.clone();
+                async move {
+                    tracing::info!("Creating new KafkaMuxReader for connection_id: {key}");
+                    Self::build_reader(key, properties, source_ctx).await
+                }
+            })
+            .await?;
+
+        Ok(reader_ref.clone())
+    }
+
+    async fn build_reader(
+        connection_id: ReaderKey,
+        properties: KafkaProperties,
+        source_ctx: SourceContextRef,
+    ) -> Result<Arc<Self>> {
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.connection.brokers;
@@ -113,12 +144,15 @@ impl KafkaMuxReader {
             senders: RwLock::new(HashMap::new()),
         });
 
+        let active = ACTIVE_MUX_READERS.fetch_add(1, Ordering::Relaxed) + 1;
+        tracing::info!(
+            reader = %reader.key,
+            active_mux_readers = active,
+            "Kafka mux reader created"
+        );
+
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
 
-        Self::registry()
-            .write()
-            .await
-            .insert(connection_id, Arc::clone(&reader));
         tokio::spawn(Self::poll_loop(Arc::clone(&reader), max_chunk_size));
         Ok(reader)
     }
@@ -128,51 +162,82 @@ impl KafkaMuxReader {
 
         #[for_await]
         for messages_result in stream.ready_chunks(max_chunk_size) {
-            let owned_msgs: Vec<OwnedMessage> = messages_result
-                .into_iter()
-                .filter_map(|res| res.ok().map(|m| m.detach()))
-                .collect();
-
-            if owned_msgs.is_empty() {
-                continue;
-            }
-
             let mut grouped_messages: HashMap<String, HashMap<i32, Vec<OwnedMessage>>> =
                 HashMap::new();
 
-            for msg in owned_msgs {
-                let topic_str = msg.topic();
-                let partition_num = msg.partition();
-
-                if !grouped_messages.contains_key(topic_str) {
-                    grouped_messages.insert(topic_str.to_owned(), HashMap::new());
+            for msg in messages_result {
+                match msg {
+                    Ok(msg) => {
+                        let msg = msg.detach();
+                        grouped_messages
+                            .entry(msg.topic().to_owned())
+                            .or_default()
+                            .entry(msg.partition())
+                            .or_default()
+                            .push(msg);
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            error = %err,
+                            reader = %this.key,
+                            "Kafka mux poll error"
+                        );
+                    }
                 }
-
-                grouped_messages
-                    .get_mut(topic_str)
-                    .unwrap()
-                    .entry(partition_num)
-                    .or_default()
-                    .push(msg);
             }
 
-            let senders_guard = this.senders.read().await;
+            if grouped_messages.is_empty() {
+                continue;
+            }
 
             for (topic, partition_map) in grouped_messages {
                 for (partition, messages) in partition_map {
                     let key = (topic.clone(), partition);
-                    if let Some(sender) = senders_guard.get(&key)
-                        && sender.send(messages).await.is_err()
-                    {
-                        eprintln!(
-                            "Failed to send messages to topic '{}' partition {}. Receiver is closed.",
-                            topic, partition
+                    let sender_opt = {
+                        let guard = this.senders.read().await;
+                        guard.get(&key).cloned()
+                    };
+
+                    let Some(sender) = sender_opt else {
+                        tracing::warn!(
+                            reader = %this.key,
+                            topic = %topic,
+                            partition,
+                            "No receiver registered for mux reader; dropping messages"
                         );
-                        break;
+                        continue;
+                    };
+
+                    let batch_size = messages.len();
+                    tracing::debug!(
+                        reader = %this.key,
+                        topic = %topic,
+                        partition,
+                        batch_size,
+                        "Dispatching mux reader batch"
+                    );
+
+                    match sender.send(messages).await {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::SendError(_messages)) => {
+                            tracing::warn!(
+                                reader = %this.key,
+                                topic = %topic,
+                                partition,
+                                "Mux reader failed to deliver messages; receiver dropped"
+                            );
+                            let mut guard = this.senders.write().await;
+                            guard.remove(&key);
+                        }
                     }
                 }
             }
         }
+
+        tracing::info!(
+            reader = %this.key,
+            "Kafka mux poll loop exited"
+        );
     }
 
     pub async fn register_topic_partition_list(
@@ -229,18 +294,37 @@ impl KafkaMuxReader {
             self.key
         );
 
-        let is_empty_after_removal;
-        {
+        const MAX_RETRIES: usize = 3;
+        let mut attempt = 0;
+        loop {
+            match self
+                .consumer
+                .incremental_unassign(&tpl)
+                .context("unassign failed")
+            {
+                Ok(_) => break,
+                Err(err) => {
+                    attempt += 1;
+                    if attempt >= MAX_RETRIES {
+                        return Err(err);
+                    }
+                    tracing::warn!(
+                        reader = %self.key,
+                        attempt,
+                        "Failed to unassign mux reader partitions, retrying"
+                    );
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
+        }
+
+        let is_empty_after_removal = {
             let mut map = self.senders.write().await;
             for element in tpl.elements() {
                 map.remove(&(element.topic().to_owned(), element.partition()));
             }
-            is_empty_after_removal = map.is_empty();
-        }
-
-        self.consumer
-            .incremental_unassign(&tpl)
-            .context("unassign failed")?;
+            map.is_empty()
+        };
 
         if is_empty_after_removal {
             tracing::info!(
@@ -260,6 +344,43 @@ impl KafkaMuxReader {
         Ok(())
     }
 
+    pub async fn reassign_partitions(
+        &self,
+        tpl_with_offset: TopicPartitionList,
+    ) -> anyhow::Result<()> {
+        let count = tpl_with_offset.count();
+        if count == 0 {
+            return Ok(());
+        }
+
+        let elements = tpl_with_offset.elements();
+        let mut unassign_tpl = TopicPartitionList::with_capacity(count);
+
+        {
+            let map = self.senders.read().await;
+            for element in elements {
+                let key = (element.topic().to_owned(), element.partition());
+                ensure!(
+                    map.contains_key(&key),
+                    "split ({:?}) not registered in mux reader {}",
+                    key,
+                    self.key
+                );
+                unassign_tpl.add_partition(&key.0, key.1);
+            }
+        }
+
+        self.consumer
+            .incremental_unassign(&unassign_tpl)
+            .context("unassign failed during reassign")?;
+
+        self.consumer
+            .incremental_assign(&tpl_with_offset)
+            .context("assign failed during reassign")?;
+
+        Ok(())
+    }
+
     // pub async fn seek(
     //     &self,
     //     topic_partition_list: TopicPartitionList,
@@ -269,6 +390,18 @@ impl KafkaMuxReader {
     //     //     .seek_partitions(topic_partition_list.clone(), sync_call_timeout)
     //     //     .await
     // }
+}
+
+impl Drop for KafkaMuxReader {
+    fn drop(&mut self) {
+        let prev = ACTIVE_MUX_READERS.fetch_sub(1, Ordering::Relaxed);
+        let active = prev.saturating_sub(1);
+        tracing::info!(
+            reader = %self.key,
+            active_mux_readers = active,
+            "Kafka mux reader dropped"
+        );
+    }
 }
 
 use crate::source::kafka::source::reader::KafkaMetaFetcher;

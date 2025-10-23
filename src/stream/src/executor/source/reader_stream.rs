@@ -27,6 +27,7 @@ use risingwave_connector::source::{
 };
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task;
 
 use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
@@ -51,6 +52,18 @@ pub(crate) struct StreamReaderBuilder {
 }
 
 impl StreamReaderBuilder {
+    fn spawn_release_last_handles(&self) {
+        let handles_arc = self.last_release_handles.clone();
+        task::spawn(async move {
+            if let Some(handles) = {
+                let mut guard = handles_arc.lock().await;
+                guard.take()
+            } {
+                release_handles(handles).await;
+            }
+        });
+    }
+
     fn setup_auto_schema_change(&self) -> AutoSchemaChangeSetup {
         if self.is_auto_schema_change_enable {
             let (schema_change_tx, mut schema_change_rx) =
@@ -218,12 +231,7 @@ impl StreamReaderBuilder {
             let build_stream_result = if let Some(exist_stream) = self.reader_stream.take() {
                 Ok((exist_stream, CreateSplitReaderResult::default()))
             } else {
-                if let Some(last_release_handles) = self.last_release_handles.lock().await.take() {
-                    // release the last handle if exists
-                    for handle in last_release_handles {
-                        handle.release().await;
-                    }
-                }
+                release_handles_from_arc(self.last_release_handles.clone()).await;
 
                 self.source_desc
                     .source
@@ -330,5 +338,31 @@ impl StreamReaderBuilder {
             tracing::info!("stream source reader error, retry in 1s");
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
+        release_handles_from_arc(self.last_release_handles.clone()).await;
+    }
+}
+
+async fn release_handles(handles: Vec<ReleaseHandle>) {
+    for handle in handles {
+        handle.release().await;
+    }
+}
+
+async fn release_handles_from_arc(
+    handles_arc: Arc<tokio::sync::Mutex<Option<Vec<ReleaseHandle>>>>,
+) {
+    let handles = {
+        let mut guard = handles_arc.lock().await;
+        guard.take()
+    };
+
+    if let Some(handles) = handles {
+        release_handles(handles).await;
+    }
+}
+
+impl Drop for StreamReaderBuilder {
+    fn drop(&mut self) {
+        self.spawn_release_last_handles();
     }
 }

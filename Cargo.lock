@@ -7887,7 +7887,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.32"
-source = "git+https://github.com/shanicky/madsim?rev=6be9c75e775fd48d76e4fcb2b000443b86313014#6be9c75e775fd48d76e4fcb2b000443b86313014"
+source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7899,7 +7899,7 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "libc",
- "madsim-macros 0.2.12 (git+https://github.com/shanicky/madsim?rev=6be9c75e775fd48d76e4fcb2b000443b86313014)",
+ "madsim-macros 0.2.12 (git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38)",
  "naive-timer",
  "panic-message",
  "rand 0.8.5",
@@ -7979,7 +7979,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/shanicky/madsim?rev=6be9c75e775fd48d76e4fcb2b000443b86313014#6be9c75e775fd48d76e4fcb2b000443b86313014"
+source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7990,7 +7990,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "git+https://github.com/shanicky/madsim?rev=6be9c75e775fd48d76e4fcb2b000443b86313014#6be9c75e775fd48d76e4fcb2b000443b86313014"
+source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",

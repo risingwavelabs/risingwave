@@ -202,7 +202,7 @@ pin-project-lite = "0.2"
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/shanicky/madsim", rev = "6be9c75e775fd48d76e4fcb2b000443b86313014", features = [
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38", features = [
     "cmake-build",
 ] }
 redis = { version = "0.32" }
