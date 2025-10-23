@@ -81,7 +81,7 @@ use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
 
-use super::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
+use super::decouple_checkpoint_log_sink::iceberg_default_commit_checkpoint_interval;
 use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
     SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
@@ -150,7 +150,7 @@ pub struct IcebergConfig {
     pub partition_by: Option<String>,
 
     /// Commit every n(>0) checkpoints, default is 10.
-    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde(default = "iceberg_default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,

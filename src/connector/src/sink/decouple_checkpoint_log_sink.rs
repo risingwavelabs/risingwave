@@ -29,6 +29,10 @@ pub fn default_commit_checkpoint_interval() -> u64 {
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
 }
 
+pub fn iceberg_default_commit_checkpoint_interval() -> u64 {
+    60
+}
+
 /// The `LogSinker` implementation used for commit-decoupled sinks (such as `Iceberg`, `DeltaLake` and `StarRocks`).
 /// The concurrent/frequent commit capability of these sinks is poor, so by leveraging the decoupled log reader,
 /// we delay the checkpoint barrier to make commits less frequent.
