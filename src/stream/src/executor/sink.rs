@@ -817,7 +817,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: pk_indices.clone(),
+            downstream_pk: Some(pk_indices.clone()),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
@@ -946,7 +946,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: vec![0],
+            downstream_pk: Some(vec![0]),
             sink_type: SinkType::Upsert,
             format_desc: None,
             db_name: "test".into(),
@@ -1048,7 +1048,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: pk_indices.clone(),
+            downstream_pk: Some(pk_indices.clone()),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
