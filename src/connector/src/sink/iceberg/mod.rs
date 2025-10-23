@@ -81,7 +81,7 @@ use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
 
-use super::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
+use super::decouple_checkpoint_log_sink::iceberg_default_commit_checkpoint_interval;
 use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
     SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
@@ -149,8 +149,8 @@ pub struct IcebergConfig {
     #[serde(default)]
     pub partition_by: Option<String>,
 
-    /// Commit every n(>0) checkpoints, default is 10.
-    #[serde(default = "default_commit_checkpoint_interval")]
+    /// Commit every n(>0) checkpoints, default is 60.
+    #[serde(default = "iceberg_default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
@@ -2271,7 +2271,7 @@ mod test {
     use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
-    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
+    use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
         COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
         ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, MAX_SNAPSHOTS_NUM,
@@ -2518,7 +2518,7 @@ mod test {
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
                 .collect(),
-            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+            commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
             create_table_if_not_exists: false,
             is_exactly_once: None,
             commit_retry_num: 8,
