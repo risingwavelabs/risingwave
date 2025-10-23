@@ -240,7 +240,8 @@ pub struct SinkParam {
     pub sink_name: String,
     pub properties: BTreeMap<String, String>,
     pub columns: Vec<ColumnDesc>,
-    pub downstream_pk: Vec<usize>,
+    /// User-defined primary key indices for upsert sink, if any.
+    pub downstream_pk: Option<Vec<usize>>,
     pub sink_type: SinkType,
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
@@ -272,11 +273,15 @@ impl SinkParam {
             sink_name: pb_param.sink_name,
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
-            downstream_pk: table_schema
-                .pk_indices
-                .iter()
-                .map(|i| *i as usize)
-                .collect(),
+            downstream_pk: if table_schema.pk_indices.is_empty() {
+                None
+            } else {
+                Some(
+                    (table_schema.pk_indices.iter())
+                        .map(|i| *i as usize)
+                        .collect(),
+                )
+            },
             sink_type: SinkType::from_proto(
                 PbSinkType::try_from(pb_param.sink_type).expect("should be able to convert"),
             ),
@@ -293,7 +298,8 @@ impl SinkParam {
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
-                pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
+                pk_indices: (self.downstream_pk.as_ref())
+                    .map_or_else(Vec::new, |pk| pk.iter().map(|i| *i as u32).collect()),
             }),
             sink_type: self.sink_type.to_proto().into(),
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
@@ -306,6 +312,15 @@ impl SinkParam {
         Schema {
             fields: self.columns.iter().map(Field::from).collect(),
         }
+    }
+
+    /// Get the downstream primary key indices specified by the user. If not specified, return
+    /// an empty vector.
+    ///
+    /// Prefer directly accessing the `downstream_pk` field, as it uses `None` to represent
+    /// unspecified values, making it clearer.
+    pub fn downstream_pk_or_empty(&self) -> Vec<usize> {
+        self.downstream_pk.clone().unwrap_or_default()
     }
 
     // `SinkParams` should only be used when there is a secret context.
@@ -337,9 +352,7 @@ impl SinkParam {
             sink_name: sink_catalog.name,
             properties: properties_with_secret,
             columns,
-            // TODO: Here we use empty value to represent the semantics that user doesn't specify the
-            // downstream pk. We'd better use an `Option` to make it more explicit.
-            downstream_pk: sink_catalog.downstream_pk.unwrap_or_default(),
+            downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
             format_desc: format_desc_with_secret,
             db_name: sink_catalog.db_name,

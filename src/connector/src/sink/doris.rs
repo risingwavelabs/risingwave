@@ -285,13 +285,9 @@ impl TryFrom<SinkParam> for DorisSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = DorisConfig::from_btreemap(param.properties)?;
-        DorisSink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        DorisSink::new(config, schema, pk_indices, param.sink_type.is_append_only())
     }
 }
 

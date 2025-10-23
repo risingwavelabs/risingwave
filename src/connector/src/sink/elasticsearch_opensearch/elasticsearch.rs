@@ -49,11 +49,12 @@ impl TryFrom<SinkParam> for ElasticSearchSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = ElasticSearchConfig::from_btreemap(param.properties)?.inner;
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
             is_append_only: param.sink_type.is_append_only(),
         })
     }
