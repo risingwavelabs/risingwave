@@ -39,6 +39,7 @@ use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::task;
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
@@ -115,6 +116,20 @@ impl<S: StateStore> SourceExecutor<S> {
             reader_stream: None,
             last_release_handles: self.last_release_handles.clone(),
         }
+    }
+
+    fn spawn_release_last_handles(&self) {
+        let handles_arc = self.last_release_handles.clone();
+        task::spawn(async move {
+            if let Some(handles) = {
+                let mut guard = handles_arc.lock().await;
+                guard.take()
+            } {
+                for handle in handles {
+                    handle.release().await;
+                }
+            }
+        });
     }
 
     async fn spawn_wait_checkpoint_worker(
@@ -437,7 +452,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         yield Message::Barrier(first_barrier);
 
-        let mut core = self.stream_source_core;
+        let core = &mut self.stream_source_core;
         let source_id = core.source_id;
 
         // Build source description from the builder.
@@ -447,7 +462,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)?;
 
         let mut wait_checkpoint_task_builder = Self::spawn_wait_checkpoint_worker(
-            &core,
+            core,
             source_desc.source.clone(),
             self.metrics.clone(),
         )
@@ -483,9 +498,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
-
-        // Return the ownership of `stream_source_core` to the source executor.
-        self.stream_source_core = core;
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
@@ -927,6 +939,12 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                 }
             }
         }
+    }
+}
+
+impl<S: StateStore> Drop for SourceExecutor<S> {
+    fn drop(&mut self) {
+        self.spawn_release_last_handles();
     }
 }
 
