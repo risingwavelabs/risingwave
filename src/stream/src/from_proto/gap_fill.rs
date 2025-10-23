@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::gap_fill_types::FillStrategy;
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::GapFillNode;
@@ -60,7 +61,7 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             .collect::<anyhow::Result<_>>()?;
 
         let fill_columns_with_strategies: Vec<(usize, FillStrategy)> =
-            fill_columns.into_iter().zip(fill_strategies).collect();
+            fill_columns.into_iter().zip_eq(fill_strategies).collect();
 
         let state_table =
             StateTableBuilder::new(node.get_state_table().as_ref().unwrap(), store, None)
@@ -72,7 +73,7 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             ctx: params.actor_context,
             input,
             schema: params.info.schema.clone(),
-            chunk_size: 1024,
+            chunk_size: params.env.config().developer.chunk_size,
             time_column_index,
             fill_columns: fill_columns_with_strategies,
             gap_interval: interval_expr,
