@@ -540,11 +540,6 @@ impl GlobalBarrierWorkerContextImpl {
                         })
                         .collect();
 
-                    // update and build all actors.
-                    // let stream_actors = self.load_all_actors().await.inspect_err(|err| {
-                    //     warn!(error = %err.as_report(), "update actors failed");
-                    // })?;
-
                     let stream_actors = self.load_stream_actors(info.clone()).await?;
 
                     let fragment_relations = self
