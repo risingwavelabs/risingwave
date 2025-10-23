@@ -182,6 +182,8 @@ impl DataChunk {
         self.visibility = visibility;
     }
 
+    /// Returns whether all rows in the chunk are visible, i.e., the chunk is compacted
+    /// in terms of row visibility.
     pub fn is_vis_compacted(&self) -> bool {
         self.visibility.all()
     }
@@ -224,11 +226,10 @@ impl DataChunk {
         proto
     }
 
-    /// `compact` will convert the chunk to compact format.
-    /// Compacting removes the hidden rows, and returns a new visibility
-    /// mask which indicates this.
+    /// Removes the invisible rows based on `visibility`. Returns a new compacted chunk
+    /// with all rows visible.
     ///
-    /// `compact` has trade-offs:
+    /// `compact_vis` has trade-offs:
     ///
     /// Cost:
     /// It has to rebuild the each column, meaning it will incur cost

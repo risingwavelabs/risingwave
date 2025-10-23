@@ -169,7 +169,13 @@ impl StreamChunk {
         &self.data
     }
 
-    /// compact the `StreamChunk` with its visibility map
+    /// Removes the invisible rows based on `visibility`. Returns a new compacted chunk
+    /// with all rows visible.
+    ///
+    /// This does not change the visible content of the chunk. Not to be confused with
+    /// `StreamChunkCompactor`, which removes unnecessary changes based on the key.
+    ///
+    /// See [`DataChunk::compact_vis`] for more details.
     pub fn compact_vis(self) -> Self {
         if self.is_vis_compacted() {
             return self;
