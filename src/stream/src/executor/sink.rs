@@ -854,7 +854,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 3 2 1",
@@ -866,7 +866,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 3 4 1
@@ -983,7 +983,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 1 1 10",
@@ -995,7 +995,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 U- 1 1 10

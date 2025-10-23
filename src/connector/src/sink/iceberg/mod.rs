@@ -1215,7 +1215,7 @@ impl SinkWriter for IcebergSinkWriter {
         };
 
         // Process the chunk.
-        let (mut chunk, ops) = chunk.compact().into_parts();
+        let (mut chunk, ops) = chunk.compact_vis().into_parts();
         match &self.project_idx_vec {
             ProjectIdxVec::None => {}
             ProjectIdxVec::Prepare(idx) => {
@@ -1247,7 +1247,7 @@ impl SinkWriter for IcebergSinkWriter {
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
                 chunk.set_visibility(filters);
                 IcebergArrowConvert
-                    .to_record_batch(self.arrow_schema.clone(), &chunk.compact())
+                    .to_record_batch(self.arrow_schema.clone(), &chunk.compact_vis())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
             }
             IcebergWriterDispatch::PartitionUpsert {

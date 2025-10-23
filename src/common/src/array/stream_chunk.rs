@@ -170,8 +170,8 @@ impl StreamChunk {
     }
 
     /// compact the `StreamChunk` with its visibility map
-    pub fn compact(self) -> Self {
-        if self.is_compacted() {
+    pub fn compact_vis(self) -> Self {
+        if self.is_vis_compacted() {
             return self;
         }
 
@@ -182,7 +182,7 @@ impl StreamChunk {
             .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
         let columns: Vec<_> = columns
             .into_iter()
-            .map(|col| col.compact(&visibility, cardinality).into())
+            .map(|col| col.compact_vis(&visibility, cardinality).into())
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
         for idx in visibility.iter_ones() {
@@ -230,8 +230,8 @@ impl StreamChunk {
     }
 
     pub fn to_protobuf(&self) -> PbStreamChunk {
-        if !self.is_compacted() {
-            return self.clone().compact().to_protobuf();
+        if !self.is_vis_compacted() {
+            return self.clone().compact_vis().to_protobuf();
         }
         PbStreamChunk {
             cardinality: self.cardinality() as u32,

@@ -377,7 +377,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         backfill_state: &LocalityBackfillState,
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<StreamChunk> {
-        let chunk = chunk.compact();
+        let chunk = chunk.compact_vis();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = risingwave_common::bitmap::BitmapBuilder::with_capacity(ops.len());
 
@@ -606,7 +606,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                     }
                                     Message::Chunk(chunk) => {
                                         // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(chunk.compact());
+                                        upstream_chunk_buffer.push(chunk.compact_vis());
                                     }
                                     Message::Watermark(_) => {
                                         // Ignore watermark during backfill.
