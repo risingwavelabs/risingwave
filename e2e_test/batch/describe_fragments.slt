@@ -167,7 +167,7 @@ skipif madsim
 system ok
 psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.snk" \
 --expected 'Fragment % (Actor %)
-StreamSink { type: upsert, columns: [id, name, age, created_at, type], downstream_pk: [] }
+StreamSink { type: upsert, columns: [id, name, age, created_at, type] }
 ├── output: [ tbl.id, tbl.name, tbl.age, tbl.created_at, $expr1 ]
 ├── stream key: [ tbl.id ]
 └── StreamProject { exprs: [tbl.id, tbl.name, tbl.age, tbl.created_at, JsonbAccessStr(tbl.data, '\''type'\'':Varchar) as $expr1] }
