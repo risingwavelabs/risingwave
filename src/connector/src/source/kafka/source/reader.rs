@@ -19,7 +19,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -35,7 +35,7 @@ use tokio_stream::Stream;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::connector_common::read_kafka_log_level;
-use crate::error::ConnectorResult as Result;
+use crate::error::{ConnectorError, ConnectorResult as Result};
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::kafka::source::mux_reader::KafkaMuxReader;
@@ -178,10 +178,14 @@ impl SplitReader for KafkaSplitReader {
         let source_info = &source_ctx.source_info;
 
         let connection_id = source_info.as_ref().and_then(|s| s.connection_id);
+        let mux_enabled = properties.enable_mux_reader.unwrap_or(false);
 
-        let (message_reader, backfill_info) = if let Some(connection_id) = connection_id
-            && properties.enable_mux_reader.unwrap_or(false)
-        {
+        let (message_reader, backfill_info) = if mux_enabled {
+            let connection_id = connection_id.ok_or_else(|| {
+                ConnectorError::from(anyhow!(
+                    "Kafka mux reader requires a connection bound via WITH CONNECTION when `enable.mux.reader` is true"
+                ))
+            })?;
             let reader = KafkaMuxReader::get_or_create(
                 connection_id.to_string(),
                 properties.clone(),
@@ -358,11 +362,13 @@ impl SplitReader for KafkaSplitReader {
                 Ok(latest_splits)
             }
             MessageReader::MuxReader { reader, .. } => {
-                let (latest_splits, _tpl) =
+                let (latest_splits, tpl) =
                     fetch_latest_splits_meta(&**reader, &self.splits, self.sync_call_timeout)
                         .await?;
-                // // todo
-                // // let _ = reader.seek(tpl, self.sync_call_timeout).await?;
+                reader
+                    .reassign_partitions(tpl)
+                    .await
+                    .context("failed to reassign mux reader partitions")?;
                 Ok(latest_splits)
             }
         }
