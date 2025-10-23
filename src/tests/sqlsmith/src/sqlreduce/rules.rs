@@ -326,6 +326,34 @@ pub enum ReductionOperation {
     RemoveListElement(usize),
 }
 
+impl ReductionOperation {
+    /// Get the priority score for this operation (higher = tried first).
+    /// Operations with higher success rates and lower risk get higher priority.
+    pub fn priority(&self) -> i32 {
+        match self {
+            // List element removal: Very safe, high success rate
+            // Removing a single item rarely breaks the query structure
+            ReductionOperation::RemoveListElement(_) => 100,
+
+            // Remove optional attributes: Safe, commonly succeeds
+            // Removing WHERE, HAVING, ORDER BY etc. often preserves semantics
+            ReductionOperation::Remove(_) => 80,
+
+            // Replace with subtree: Medium risk, good success rate
+            // Simplifies structure while preserving a valid subtree
+            ReductionOperation::Replace(_) => 60,
+
+            // Pullup: Medium-low risk, variable success rate
+            // Depends heavily on context compatibility
+            ReductionOperation::Pullup(_) => 40,
+
+            // Try NULL: High risk, lower success rate
+            // Often breaks type constraints or NOT NULL requirements
+            ReductionOperation::TryNull => 20,
+        }
+    }
+}
+
 /// A reduction candidate: a path to a node and the operation to apply.
 #[derive(Debug, Clone)]
 pub struct ReductionCandidate {
@@ -458,10 +486,24 @@ pub fn generate_reduction_candidates(
     }
 
     tracing::debug!(
-        "Generated {} total candidates from {} paths",
+        "Generated {} total candidates from {} paths (before sorting)",
         candidates.len(),
         paths.len()
     );
+
+    // Sort candidates by priority (higher priority first)
+    // This ensures we try low-risk, high-success-rate operations first
+    candidates.sort_by(|a, b| b.operation.priority().cmp(&a.operation.priority()));
+
+    tracing::debug!(
+        "Sorted candidates by priority - first 5: {:?}",
+        candidates
+            .iter()
+            .take(5)
+            .map(|c| (c.operation.priority(), format!("{:?}", c.operation)))
+            .collect::<Vec<_>>()
+    );
+
     candidates
 }
 

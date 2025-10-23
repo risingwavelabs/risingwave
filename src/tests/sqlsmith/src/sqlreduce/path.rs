@@ -524,7 +524,17 @@ impl AstNode {
         new_child: Option<AstNode>,
     ) -> Option<AstNode> {
         match (self, component) {
-            // Statement field modifications
+            // Handle Statement::Query (root query statements)
+            (AstNode::Statement(Statement::Query(_)), PathComponent::Field(field))
+                if *field == AstField::Query =>
+            {
+                if let Some(AstNode::Query(new_query)) = new_child {
+                    Some(AstNode::Statement(Statement::Query(new_query)))
+                } else {
+                    None
+                }
+            }
+
             (
                 AstNode::Statement(Statement::CreateView {
                     name,
@@ -887,8 +897,29 @@ impl AstNode {
 
             _ => {
                 // Add debug logging for unmatched cases
+                let node_type = match self {
+                    AstNode::Statement(_) => "Statement",
+                    AstNode::Query(_) => "Query",
+                    AstNode::Select(_) => "Select",
+                    AstNode::Expr(_) => "Expr",
+                    AstNode::SelectItem(_) => "SelectItem",
+                    AstNode::TableWithJoins(_) => "TableWithJoins",
+                    AstNode::Join(_) => "Join",
+                    AstNode::TableFactor(_) => "TableFactor",
+                    AstNode::OrderByExpr(_) => "OrderByExpr",
+                    AstNode::With(_) => "With",
+                    AstNode::Cte(_) => "Cte",
+                    AstNode::ExprList(_) => "ExprList",
+                    AstNode::SelectItemList(_) => "SelectItemList",
+                    AstNode::TableList(_) => "TableList",
+                    AstNode::JoinList(_) => "JoinList",
+                    AstNode::OrderByList(_) => "OrderByList",
+                    AstNode::CteList(_) => "CteList",
+                    AstNode::Option(_) => "Option",
+                };
                 tracing::debug!(
-                    "set_child: No match for {:?} with component {:?}",
+                    "set_child: No match for {} ({:?}) with component {:?}",
+                    node_type,
                     std::mem::discriminant(self),
                     component
                 );
