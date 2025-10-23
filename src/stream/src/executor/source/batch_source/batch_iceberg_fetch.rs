@@ -37,8 +37,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::prelude::*;
 use crate::executor::source::{
-    ChunksWithState, PersistedFileScanTask, StreamSourceCore, barrier_to_message_stream,
-    prune_additional_cols,
+    ChunksWithState, PersistedFileScanTask, StreamSourceCore, prune_additional_cols,
 };
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
@@ -122,10 +121,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             match msg {
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
-                    splits_on_fetch = 0;
                     file_queue.clear();
-                    is_refreshing = false;
-                    is_list_finished = false;
                     *is_load_finished.write() = false;
                     return Err(e);
                 }
@@ -343,6 +339,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                     chunk_size: streaming_config.developer.chunk_size,
                     need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
+                    handle_delete_files: true, // Enable delete file handling for streaming source
                 },
                 None,
             ) {

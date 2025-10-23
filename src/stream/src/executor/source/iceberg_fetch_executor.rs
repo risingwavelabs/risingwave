@@ -364,6 +364,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     chunk_size: streaming_config.developer.chunk_size,
                     need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
+                    handle_delete_files: false,
                 },
                 None,
             ) {

@@ -18,7 +18,7 @@ mod metrics;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
@@ -33,6 +33,7 @@ use phf::{Set, phf_set};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bail;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
     Schema,
@@ -630,23 +631,27 @@ pub struct IcebergScanOpts {
     pub chunk_size: usize,
     pub need_seq_num: bool,
     pub need_file_path_and_pos: bool,
+    pub handle_delete_files: bool,
 }
 
+/// Scan a data file and optionally apply delete files (both position delete and equality delete).
+/// This is the enhanced version that supports delete file processing.
 #[try_stream(ok = DataChunk, error = ConnectorError)]
-pub async fn scan_task_to_chunk(
+pub async fn scan_task_to_chunk_with_deletes(
     table: Table,
     data_file_scan_task: FileScanTask,
     IcebergScanOpts {
         chunk_size,
         need_seq_num,
         need_file_path_and_pos,
+        handle_delete_files,
     }: IcebergScanOpts,
     metrics: Option<Arc<IcebergScanMetrics>>,
 ) {
     let table_name = table.identifier().name().to_owned();
 
     let mut read_bytes = scopeguard::guard(0, |read_bytes| {
-        if let Some(metrics) = metrics {
+        if let Some(metrics) = metrics.clone() {
             metrics
                 .iceberg_read_bytes
                 .with_guarded_label_values(&[&table_name])
@@ -657,6 +662,128 @@ pub async fn scan_task_to_chunk(
     let data_file_path = data_file_scan_task.data_file_path.clone();
     let data_sequence_number = data_file_scan_task.sequence_number;
 
+    // Extract delete files before moving data_file_scan_task (only if delete handling is enabled)
+    let position_delete_tasks: Vec<_> = if handle_delete_files {
+        data_file_scan_task
+            .deletes
+            .iter()
+            .filter(|delete| delete.data_file_content == DataContentType::PositionDeletes)
+            .cloned()
+            .collect()
+    } else {
+        vec![]
+    };
+
+    let equality_delete_tasks: Vec<_> = if handle_delete_files {
+        data_file_scan_task
+            .deletes
+            .iter()
+            .filter(|delete| delete.data_file_content == DataContentType::EqualityDeletes)
+            .cloned()
+            .collect()
+    } else {
+        vec![]
+    };
+
+    // Read position delete files to build a set of positions to delete
+    // Position delete format: (file_path: String, pos: i64)
+    let mut position_deletes: HashMap<String, HashSet<i64>> = HashMap::new();
+
+    if !position_delete_tasks.is_empty() {
+        for delete_task in position_delete_tasks {
+            let delete_reader = table.reader_builder().with_batch_size(chunk_size).build();
+            let delete_stream = tokio_stream::once(Ok((*delete_task).clone()));
+            let mut delete_record_stream = delete_reader.read(Box::pin(delete_stream)).await?;
+
+            while let Some(record_batch) = delete_record_stream.next().await {
+                let record_batch = record_batch?;
+
+                // Position delete files have schema: file_path (string), pos (long)
+                // Extract file_path and pos columns
+                if let Some(file_path_col) = record_batch.column_by_name("file_path") {
+                    if let Some(pos_col) = record_batch.column_by_name("pos") {
+                        use risingwave_common::array::arrow::arrow_array_iceberg::Array;
+
+                        let file_paths = file_path_col
+                            .as_any()
+                            .downcast_ref::<risingwave_common::array::arrow::arrow_array_iceberg::StringArray>()
+                            .with_context(|| "file_path column is not StringArray")?;
+                        let positions = pos_col
+                            .as_any()
+                            .downcast_ref::<risingwave_common::array::arrow::arrow_array_iceberg::Int64Array>()
+                            .with_context(|| "pos column is not Int64Array")?;
+
+                        for idx in 0..record_batch.num_rows() {
+                            if !file_paths.is_null(idx) && !positions.is_null(idx) {
+                                let file_path = file_paths.value(idx);
+                                let pos = positions.value(idx);
+                                position_deletes
+                                    .entry(file_path.to_string())
+                                    .or_insert_with(HashSet::new)
+                                    .insert(pos);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Read equality delete files to build a set of rows to delete based on equality columns
+    // Equality delete format: contains the equality columns specified in equality_ids
+    // We need to extract equality_ids and build a hashset of delete keys
+    let mut equality_deletes: Option<(Vec<String>, HashSet<Vec<String>>)> = None;
+
+    if !equality_delete_tasks.is_empty() {
+        // Get equality_ids from the first delete task (they should all be the same)
+        let equality_ids = equality_delete_tasks[0].equality_ids.clone();
+
+        // Get the schema and map field IDs to field names
+        let schema = table.metadata().current_schema();
+        let equality_field_names: Vec<String> = equality_ids
+            .iter()
+            .filter_map(|id| schema.name_by_field_id(*id).map(|s| s.to_owned()))
+            .collect();
+
+        if !equality_field_names.is_empty() {
+            let mut delete_key_set: HashSet<Vec<String>> = HashSet::new();
+
+            for delete_task in equality_delete_tasks {
+                let delete_reader = table.reader_builder().with_batch_size(chunk_size).build();
+                let delete_stream = tokio_stream::once(Ok((*delete_task).clone()));
+                let mut delete_record_stream = delete_reader.read(Box::pin(delete_stream)).await?;
+
+                while let Some(record_batch) = delete_record_stream.next().await {
+                    let record_batch = record_batch?;
+                    let delete_chunk =
+                        IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+
+                    // Extract the equality columns and build keys
+                    for row_idx in 0..delete_chunk.capacity() {
+                        let mut key = Vec::with_capacity(equality_field_names.len());
+                        for field_name in &equality_field_names {
+                            // Find the column index for this field
+                            if let Some(col_idx) = record_batch
+                                .schema()
+                                .column_with_name(field_name)
+                                .map(|(idx, _)| idx)
+                            {
+                                let col = delete_chunk.column_at(col_idx);
+                                let datum = col.value_at(row_idx);
+                                // Convert datum to string for key comparison
+                                key.push(format!("{:?}", datum));
+                            }
+                        }
+                        delete_key_set.insert(key);
+                    }
+                }
+            }
+
+            equality_deletes = Some((equality_field_names, delete_key_set));
+        }
+    }
+
+    // Now read the data file
     let reader = table.reader_builder().with_batch_size(chunk_size).build();
     let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
@@ -667,6 +794,76 @@ pub async fn scan_task_to_chunk(
         let record_batch = record_batch?;
 
         let mut chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+
+        // Apply position deletes if any
+        if !position_deletes.is_empty() {
+            if let Some(deleted_positions) = position_deletes.get(&data_file_path) {
+                let index_start = (index * chunk_size) as i64;
+                let mut visibility = vec![true; chunk.capacity()];
+
+                for row_idx in 0..chunk.capacity() {
+                    let global_pos = index_start + row_idx as i64;
+                    if deleted_positions.contains(&global_pos) {
+                        visibility[row_idx] = false;
+                    }
+                }
+
+                let (columns, _) = chunk.into_parts();
+                let columns: Vec<_> = columns.into_iter().collect();
+                chunk = DataChunk::from_parts(columns.into(), Bitmap::from_bool_slice(&visibility));
+            }
+        }
+
+        // Apply equality deletes if any
+        // For equality deletes, we need to check if any row in the chunk matches
+        // the delete predicates based on equality columns
+        if let Some((ref equality_field_names, ref delete_key_set)) = equality_deletes {
+            // Get the schema for the current record batch to map field names to column indices
+            let data_schema = record_batch.schema();
+
+            // Build a mapping from equality field names to column indices in the data
+            let equality_col_indices: Vec<usize> = equality_field_names
+                .iter()
+                .filter_map(|field_name| {
+                    data_schema.column_with_name(field_name).map(|(idx, _)| idx)
+                })
+                .collect();
+
+            // Only apply equality deletes if we found all the equality columns
+            if equality_col_indices.len() == equality_field_names.len() {
+                let (columns, visibility) = chunk.into_parts();
+                let mut new_visibility_vec = vec![true; columns[0].len()];
+
+                // For each row in the chunk, build the key and check if it's in the delete set
+                for row_idx in 0..columns[0].len() {
+                    // Only check rows that are currently visible
+                    if visibility.is_set(row_idx) {
+                        let mut row_key = Vec::with_capacity(equality_field_names.len());
+
+                        // Build the key for this row using equality columns
+                        for &col_idx in &equality_col_indices {
+                            let datum = columns[col_idx].value_at(row_idx);
+                            row_key.push(format!("{:?}", datum));
+                        }
+
+                        // If this row's key is in the delete set, mark it as invisible
+                        if delete_key_set.contains(&row_key) {
+                            new_visibility_vec[row_idx] = false;
+                        }
+                    } else {
+                        // If already invisible, keep it invisible
+                        new_visibility_vec[row_idx] = false;
+                    }
+                }
+
+                let columns: Vec<_> = columns.into_iter().collect();
+                chunk = DataChunk::from_parts(
+                    columns.into(),
+                    Bitmap::from_bool_slice(&new_visibility_vec),
+                );
+            }
+        }
+
         if need_seq_num {
             let (mut columns, visibility) = chunk.into_parts();
             columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
@@ -687,6 +884,21 @@ pub async fn scan_task_to_chunk(
         }
         *read_bytes += chunk.estimated_heap_size() as u64;
         yield chunk;
+    }
+}
+
+/// Legacy scan function that doesn't process delete files.
+/// Kept for backward compatibility. Delegates to scan_task_to_chunk_with_deletes.
+#[try_stream(ok = DataChunk, error = ConnectorError)]
+pub async fn scan_task_to_chunk(
+    table: Table,
+    data_file_scan_task: FileScanTask,
+    opts: IcebergScanOpts,
+    metrics: Option<Arc<IcebergScanMetrics>>,
+) {
+    #[for_await]
+    for chunk in scan_task_to_chunk_with_deletes(table, data_file_scan_task, opts, metrics) {
+        yield chunk?;
     }
 }
 
