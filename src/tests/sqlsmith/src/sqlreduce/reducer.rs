@@ -234,145 +234,154 @@ impl Reducer {
         final_sql
     }
 
-    /// Path-based reduction approach using systematic AST traversal.
+    /// Try to apply a batch of candidates with binary search fallback.
     ///
-    /// This method:
-    /// 1. Enumerates all reduction paths in the AST
-    /// 2. Generates reduction candidates based on rules
-    /// 3. Applies candidates in fixed-point fashion until no more reductions are possible
-    /// 4. Uses a seen-query cache to avoid redundant checks
-    async fn reduce_path_based(&mut self, sql: &str) -> String {
-        let sql_statements = parse_sql(sql);
-        let mut ast_node = statement_to_ast_node(&sql_statements[0]);
-        let mut seen_queries = HashSet::new();
-        let mut iteration = 0;
-        let mut sql_len = sql.len();
-        let mut candidate_index = 0;
+    /// Returns `Some((new_ast, batch_size, new_sql, new_len))` if successful, `None` otherwise.
+    fn try_batch_reduction<'a>(
+        &'a mut self,
+        ast_node: &'a AstNode,
+        candidates: &'a [ReductionCandidate],
+        batch_size: usize,
+        original_sql: &'a str,
+        seen_queries: &'a mut HashSet<String>,
+        candidate_index: &'a mut usize,
+    ) -> BatchReductionFuture<'a> {
+        Box::pin(async move {
+            if candidates.is_empty() || batch_size == 0 {
+                return None;
+            }
 
-        // Track the original query
-        seen_queries.insert(sql.to_owned());
+            let actual_batch_size = batch_size.min(candidates.len());
+            tracing::debug!(
+                "Trying batch of {} candidates (priorities: {})",
+                actual_batch_size,
+                candidates[..actual_batch_size]
+                    .iter()
+                    .map(|c| c.operation.priority())
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
 
-        tracing::info!(
-            "Starting path-based reduction with initial SQL length: {}",
-            sql_len
-        );
+            // Try applying all candidates in the batch
+            let mut current_ast = ast_node.clone();
+            let mut applied_count = 0;
 
-        loop {
-            iteration += 1;
-            tracing::info!("Path-based iteration {} starting", iteration);
-            let mut found_reduction = false;
+            for candidate in &candidates[..actual_batch_size] {
+                *candidate_index += 1;
 
-            // Enumerate all paths in the current AST
-            let paths = enumerate_reduction_paths(&ast_node, vec![]);
-            tracing::debug!("Found {} reduction paths in AST", paths.len());
-
-            // Generate reduction candidates
-            let candidates = generate_reduction_candidates(&ast_node, &self.rules, &paths);
-            tracing::debug!("Generated {} reduction candidates", candidates.len());
-
-            // Try applying each candidate
-            for (i, candidate) in candidates.iter().enumerate() {
-                candidate_index += 1;
-                tracing::debug!(
-                    "Trying candidate {} of {} (global #{}): {:?}",
-                    i + 1,
-                    candidates.len(),
-                    candidate_index,
-                    candidate
-                );
-
-                let Some(new_ast) = apply_reduction_operation(&ast_node, candidate) else {
-                    tracing::debug!("Failed to apply reduction operation");
-                    continue;
-                };
-
-                let Some(new_stmt) = ast_node_to_statement(&new_ast) else {
-                    tracing::debug!("Failed to convert reduced AST back to statement");
-                    continue;
-                };
-
-                let new_sql = new_stmt.to_string();
-                let new_len = new_sql.len();
-
-                tracing::debug!(
-                    "Generated candidate SQL with length: {} (reduction: {})",
-                    new_len,
-                    sql_len as i32 - new_len as i32
-                );
-
-                // Only consider if it's actually smaller and we haven't seen it
-                if new_len >= sql_len {
+                if let Some(new_ast) = apply_reduction_operation(&current_ast, candidate) {
+                    current_ast = new_ast;
+                    applied_count += 1;
                     tracing::debug!(
-                        "Candidate not smaller ({} >= {}), skipping",
-                        new_len,
-                        sql_len
+                        "Applied candidate #{} (priority: {}, op: {:?})",
+                        *candidate_index,
+                        candidate.operation.priority(),
+                        candidate.operation
                     );
-                    continue;
+                } else {
+                    tracing::debug!(
+                        "Skipping candidate #{} (priority: {}, failed to apply): {:?}",
+                        *candidate_index,
+                        candidate.operation.priority(),
+                        candidate
+                    );
                 }
+            }
 
-                if seen_queries.contains(&new_sql) {
-                    tracing::debug!("Candidate already seen, skipping");
-                    continue;
-                }
+            if applied_count == 0 {
+                tracing::debug!("No candidates in batch could be applied");
+                return None;
+            }
 
-                tracing::debug!(
-                    "SQL changes from:\n{}\nto:\n{}",
-                    ast_node_to_statement(&ast_node)
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "<failed to convert AST to statement>".to_owned()),
-                    new_sql
-                );
+            // Convert to SQL
+            let Some(new_stmt) = ast_node_to_statement(&current_ast) else {
+                tracing::debug!("Failed to convert batch-reduced AST to statement");
+                return None;
+            };
 
+            let new_sql = new_stmt.to_string();
+            let new_len = new_sql.len();
+
+            // Check if smaller and not seen
+            let orig_stmt = ast_node_to_statement(ast_node)?;
+            let orig_len = orig_stmt.to_string().len();
+            if new_len >= orig_len {
+                tracing::debug!("Batch result not smaller, skipping");
+                return None;
+            }
+
+            if seen_queries.contains(&new_sql) {
+                tracing::debug!("Batch result already seen, skipping");
+                return None;
+            }
+
+            tracing::debug!(
+                "Batch applied {} operations, validating result (len: {})",
+                applied_count,
+                new_len
+            );
+
+            // Validate the batch result
+            if self
+                .checker
+                .is_failure_preserved(original_sql, &new_sql)
+                .await
+            {
                 seen_queries.insert(new_sql.clone());
+                return Some((current_ast, actual_batch_size, new_sql, new_len));
+            }
 
-                // Check if the failure is preserved
-                tracing::debug!("Checking if failure is preserved");
-                if !self.checker.is_failure_preserved(sql, &new_sql).await {
-                    tracing::debug!("Reduction not valid; failure not preserved");
-                    continue;
+            // Validation failed - try binary search if batch size > 1
+            if actual_batch_size > 1 {
+                tracing::debug!(
+                    "Batch validation failed, trying binary search (left half: {})",
+                    actual_batch_size / 2
+                );
+
+                // Try left half
+                if let Some(result) = self
+                    .try_batch_reduction(
+                        ast_node,
+                        candidates,
+                        actual_batch_size / 2,
+                        original_sql,
+                        seen_queries,
+                        candidate_index,
+                    )
+                    .await
+                {
+                    return Some(result);
                 }
 
-                tracing::info!("✓ Valid reduction found! SQL len {} → {}", sql_len, new_len);
-                tracing::info!("Applying candidate and continuing to next iteration");
-                ast_node = new_ast;
-                sql_len = new_len;
-                found_reduction = true;
-                break;
+                // Try right half
+                let right_start = actual_batch_size / 2;
+                if right_start < actual_batch_size {
+                    tracing::debug!(
+                        "Left half failed, trying right half starting at candidate {}",
+                        right_start
+                    );
+
+                    if let Some(result) = self
+                        .try_batch_reduction(
+                            ast_node,
+                            &candidates[right_start..],
+                            actual_batch_size - right_start,
+                            original_sql,
+                            seen_queries,
+                            candidate_index,
+                        )
+                        .await
+                    {
+                        return Some(result);
+                    }
+                }
             }
 
-            if !found_reduction {
-                tracing::info!(
-                    "Path-based iteration {} complete: no valid reductions found",
-                    iteration
-                );
-                tracing::info!(
-                    "Path-based reduction finished after {} iterations",
-                    iteration
-                );
-                tracing::info!(
-                    "Final SQL length: {} (reduced by {} characters)",
-                    sql_len,
-                    sql.len() as i32 - sql_len as i32
-                );
-                break;
-            } else {
-                tracing::debug!(
-                    "Path-based iteration {} complete: found valid reduction, continuing",
-                    iteration
-                );
-            }
-        }
-
-        let final_sql = ast_node_to_statement(&ast_node)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| sql.to_owned());
-
-        tracing::info!(
-            "Path-based reduction complete. Processed {} total candidates across {} iterations",
-            candidate_index,
-            iteration
-        );
-
-        final_sql
+            tracing::debug!("Batch and binary search all failed");
+            None
+        })
     }
 }
