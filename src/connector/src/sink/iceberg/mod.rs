@@ -2271,7 +2271,9 @@ mod test {
     use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::IcebergCommon;
-    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
+    use crate::sink::decouple_checkpoint_log_sink::{
+        ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+    };
     use crate::sink::iceberg::{
         COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
         ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, MAX_SNAPSHOTS_NUM,
@@ -2518,7 +2520,7 @@ mod test {
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
                 .collect(),
-            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+            commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
             create_table_if_not_exists: false,
             is_exactly_once: None,
             commit_retry_num: 8,
