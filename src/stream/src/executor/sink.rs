@@ -101,7 +101,7 @@ struct UpsertBehavior {
 impl UpsertBehavior {
     /// NOTE(kwannoel):
     ///
-    /// After the optimization in https://github.com/risingwavelabs/risingwave/pull/12250,
+    /// After the optimization in <https://github.com/risingwavelabs/risingwave/pull/12250>,
     /// `DELETE`s will be sequenced before `INSERT`s in JDBC sinks and PG rust sink.
     /// There's a risk that adjacent chunks with `DELETE`s on the same PK will get
     /// merged into a single chunk, since the logstore format doesn't preserve chunk
@@ -221,7 +221,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
 
         let upsert_behavior = if let SinkType::Upsert = sink_param.sink_type {
-            let stream_key = info.pk_indices.clone();
+            let stream_key = &info.pk_indices;
             let pk_specified_and_matched = (sink_param.downstream_pk.as_ref())
                 .is_some_and(|downstream_pk| stream_key.iter().all(|i| downstream_pk.contains(i)));
             Some(UpsertBehavior {
