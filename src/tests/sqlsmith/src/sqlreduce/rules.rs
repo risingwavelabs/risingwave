@@ -380,13 +380,15 @@ pub fn generate_reduction_candidates(
             tracing::debug!("Path {}: {} ({})", path_idx, path_str, node_type);
 
             // Handle list/tuple removals (most important for reduction)
+            // Generate in reverse order so batch processing works correctly:
+            // removing higher indices first doesn't affect lower indices
             match &node {
                 AstNode::SelectItemList(items) if items.len() > 1 => {
                     tracing::debug!(
-                        "    Adding {} RemoveListElement candidates for SelectItemList",
+                        "Adding {} RemoveListElement candidates for SelectItemList (reverse order)",
                         items.len()
                     );
-                    for i in 0..items.len() {
+                    for i in (0..items.len()).rev() {
                         candidates.push(ReductionCandidate {
                             path: path.clone(),
                             operation: ReductionOperation::RemoveListElement(i),
@@ -395,10 +397,10 @@ pub fn generate_reduction_candidates(
                 }
                 AstNode::ExprList(exprs) if exprs.len() > 1 => {
                     tracing::debug!(
-                        "    Adding {} RemoveListElement candidates for ExprList",
+                        "Adding {} RemoveListElement candidates for ExprList (reverse order)",
                         exprs.len()
                     );
-                    for i in 0..exprs.len() {
+                    for i in (0..exprs.len()).rev() {
                         candidates.push(ReductionCandidate {
                             path: path.clone(),
                             operation: ReductionOperation::RemoveListElement(i),
@@ -407,10 +409,10 @@ pub fn generate_reduction_candidates(
                 }
                 AstNode::TableList(tables) if tables.len() > 1 => {
                     tracing::debug!(
-                        "    Adding {} RemoveListElement candidates for TableList",
+                        "Adding {} RemoveListElement candidates for TableList (reverse order)",
                         tables.len()
                     );
-                    for i in 0..tables.len() {
+                    for i in (0..tables.len()).rev() {
                         candidates.push(ReductionCandidate {
                             path: path.clone(),
                             operation: ReductionOperation::RemoveListElement(i),
@@ -419,10 +421,10 @@ pub fn generate_reduction_candidates(
                 }
                 AstNode::OrderByList(orders) if orders.len() > 1 => {
                     tracing::debug!(
-                        "    Adding {} RemoveListElement candidates for OrderByList",
+                        "Adding {} RemoveListElement candidates for OrderByList (reverse order)",
                         orders.len()
                     );
-                    for i in 0..orders.len() {
+                    for i in (0..orders.len()).rev() {
                         candidates.push(ReductionCandidate {
                             path: path.clone(),
                             operation: ReductionOperation::RemoveListElement(i),
@@ -474,7 +476,7 @@ pub fn generate_reduction_candidates(
 
                 if rule_candidates > 0 {
                     tracing::debug!(
-                        "    Added {} rule-based candidates for {}",
+                        "Added {} rule-based candidates for {}",
                         rule_candidates,
                         node_type
                     );
