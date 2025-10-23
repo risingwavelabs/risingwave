@@ -335,8 +335,8 @@ pub struct SinkCatalog {
     /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
-    /// User-defined primary key indices for upsert sink.
-    pub downstream_pk: Vec<usize>,
+    /// User-defined primary key indices for upsert sink, if any.
+    pub downstream_pk: Option<Vec<usize>>,
 
     /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
@@ -397,11 +397,11 @@ impl SinkCatalog {
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
             plan_pk: self.plan_pk.iter().map(|o| o.to_protobuf()).collect(),
-            downstream_pk: self
-                .downstream_pk
-                .iter()
-                .map(|idx| *idx as i32)
-                .collect_vec(),
+            downstream_pk: if let Some(pk) = &self.downstream_pk {
+                pk.iter().map(|idx| *idx as i32).collect_vec()
+            } else {
+                vec![]
+            },
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -464,7 +464,8 @@ impl SinkCatalog {
     }
 
     pub fn downstream_pk_indices(&self) -> Vec<usize> {
-        self.downstream_pk.clone()
+        // self.downstream_pk.clone()
+        todo!()
     }
 
     pub fn unique_identity(&self) -> String {
@@ -511,7 +512,16 @@ impl From<PbSink> for SinkCatalog {
                 .iter()
                 .map(ColumnOrder::from_protobuf)
                 .collect_vec(),
-            downstream_pk: pb.downstream_pk.into_iter().map(|k| k as _).collect_vec(),
+            downstream_pk: if pb.downstream_pk.is_empty() {
+                None
+            } else {
+                Some(
+                    pb.downstream_pk
+                        .into_iter()
+                        .map(|idx| idx as usize)
+                        .collect_vec(),
+                )
+            },
             distribution_key: pb
                 .distribution_key
                 .into_iter()

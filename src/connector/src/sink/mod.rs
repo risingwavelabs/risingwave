@@ -337,7 +337,9 @@ impl SinkParam {
             sink_name: sink_catalog.name,
             properties: properties_with_secret,
             columns,
-            downstream_pk: sink_catalog.downstream_pk,
+            // TODO: Here we use empty value to represent the semantics that user doesn't specify the
+            // downstream pk. We'd better use an `Option` to make it more explicit.
+            downstream_pk: sink_catalog.downstream_pk.unwrap_or_default(),
             sink_type: sink_catalog.sink_type,
             format_desc: format_desc_with_secret,
             db_name: sink_catalog.db_name,
