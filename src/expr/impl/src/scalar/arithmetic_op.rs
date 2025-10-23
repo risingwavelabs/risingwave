@@ -21,6 +21,7 @@ use risingwave_common::types::{
 };
 use risingwave_expr::{ExprError, Result, function};
 use rust_decimal::MathematicalOps;
+use special::{Gamma, Primitive};
 
 #[function("add(*int, *int) -> auto")]
 #[function("add(decimal, decimal) -> auto")]
@@ -434,6 +435,58 @@ pub fn decimal_min_scale(d: Decimal) -> Option<i32> {
 #[function("trim_scale(decimal) -> decimal")]
 pub fn decimal_trim_scale(d: Decimal) -> Decimal {
     d.normalize()
+}
+
+/// ```slt
+/// query R
+/// SELECT gamma('+inf'::float8);
+/// ----
+/// Infinity
+///
+/// query R
+/// SELECT gamma('nan'::float8);
+/// ----
+/// NaN
+/// ```
+#[function("gamma(float8) -> float8")]
+pub fn gamma_f64(input: F64) -> Result<F64> {
+    let mut result = input;
+    if input.is_nan() {
+        return Ok(result);
+    } else if input.is_infinite() {
+        if !input.is_negative() {
+            return Err(ExprError::InvalidParam {
+                name: "gamma",
+                reason: "value out of range: overflow".into(),
+            });
+        }
+    } else {
+        result = F64::from(Gamma::gamma(input.0));
+        if result.is_nan() || result.is_infinite() {
+            if !result.is_zero() {
+                return Err(ExprError::InvalidParam {
+                    name: "gamma",
+                    reason: "value out of range: overflow".into(),
+                });
+            } else {
+                return Err(ExprError::InvalidParam {
+                    name: "gamma",
+                    reason: "value out of range: underflow".into(),
+                });
+            }
+        } else if result.is_zero() {
+            return Err(ExprError::InvalidParam {
+                name: "gamma",
+                reason: "value out of range: underflow".into(),
+            });
+        }
+    }
+    Ok(result)
+}
+
+#[function("lgamma(float8) -> float8")]
+pub fn lgamma_f64(input: F64) -> Result<F64> {
+    unimplemented!()
 }
 
 #[cfg(test)]
