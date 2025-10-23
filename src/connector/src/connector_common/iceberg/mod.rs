@@ -90,11 +90,6 @@ pub struct IcebergCommon {
     /// URI of iceberg catalog, only applicable in rest catalog.
     #[serde(rename = "catalog.uri")]
     pub catalog_uri: Option<String>,
-    #[serde(rename = "database.name")]
-    pub database_name: Option<String>,
-    /// Full name of table, must include schema name.
-    #[serde(rename = "table.name")]
-    pub table_name: String,
     /// Credential for accessing iceberg catalog, only applicable in rest catalog.
     /// A credential to exchange for a token in the `OAuth2` client credentials flow.
     #[serde(rename = "catalog.credential")]
@@ -167,6 +162,37 @@ impl EnforceSecret for IcebergCommon {
         "adlsgen2.account_key",
         "adlsgen2.client_secret",
     };
+}
+
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
+#[serde(deny_unknown_fields)]
+pub struct IcebergTableIdentifier {
+    #[serde(rename = "database.name")]
+    pub database_name: Option<String>,
+    /// Full name of table, must include schema name when database is provided.
+    #[serde(rename = "table.name")]
+    pub table_name: String,
+}
+
+impl IcebergTableIdentifier {
+    pub fn database_name(&self) -> Option<&str> {
+        self.database_name.as_deref()
+    }
+
+    pub fn table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    pub fn to_table_ident(&self) -> ConnectorResult<TableIdent> {
+        let ret = if let Some(database_name) = &self.database_name {
+            TableIdent::from_strs(vec![database_name, &self.table_name])
+        } else {
+            TableIdent::from_strs(vec![&self.table_name])
+        };
+
+        Ok(ret.context("Failed to create table identifier")?)
+    }
 }
 
 impl IcebergCommon {
@@ -465,16 +491,6 @@ impl IcebergCommon {
 }
 
 impl IcebergCommon {
-    pub fn full_table_name(&self) -> ConnectorResult<TableIdent> {
-        let ret = if let Some(database_name) = &self.database_name {
-            TableIdent::from_strs(vec![database_name, &self.table_name])
-        } else {
-            TableIdent::from_strs(vec![&self.table_name])
-        };
-
-        Ok(ret.context("Failed to create table identifier")?)
-    }
-
     /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
     pub async fn create_catalog(
         &self,
@@ -668,6 +684,7 @@ impl IcebergCommon {
     /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
     pub async fn load_table(
         &self,
+        table: &IcebergTableIdentifier,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<Table> {
         let catalog = self
@@ -675,8 +692,8 @@ impl IcebergCommon {
             .await
             .context("Unable to load iceberg catalog")?;
 
-        let table_id = self
-            .full_table_name()
+        let table_id = table
+            .to_table_ident()
             .context("Unable to parse table name")?;
 
         catalog.load_table(&table_id).await.map_err(Into::into)
