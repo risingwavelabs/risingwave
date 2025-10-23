@@ -23,6 +23,8 @@ use crate::sink::{LogSinker, Result, SinkLogReader, SinkWriterMetrics};
 
 pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE: u64 = 10;
 pub const DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE: u64 = 1;
+
+pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL: u64 = 60;
 pub const COMMIT_CHECKPOINT_INTERVAL: &str = "commit_checkpoint_interval";
 
 pub fn default_commit_checkpoint_interval() -> u64 {
@@ -30,7 +32,7 @@ pub fn default_commit_checkpoint_interval() -> u64 {
 }
 
 pub fn iceberg_default_commit_checkpoint_interval() -> u64 {
-    60
+    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
 }
 
 /// The `LogSinker` implementation used for commit-decoupled sinks (such as `Iceberg`, `DeltaLake` and `StarRocks`).
