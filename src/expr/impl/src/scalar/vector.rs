@@ -524,15 +524,15 @@ fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
 
 #[derive(Debug)]
 pub struct SubvectorContext {
-    pub start: i32,
-    pub end: i32,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl SubvectorContext {
     pub fn from_start_count(start: i32, count: i32) -> Result<Self> {
         Ok(Self {
-            start,
-            end: start + count,
+            start: (start - 1) as usize,
+            end: (start + count - 1) as usize,
         })
     }
 }
@@ -562,6 +562,21 @@ impl SubvectorContext {
 /// SELECT subvector('[1,2,3,4,5]'::vector(5), 2, 3);
 /// ----
 /// [2,3,4]
+///
+/// query R
+/// select subvector(vec, 1, 3) from (values ('[1,2,3,4,5]'::vector(5)), ('[6,7,8,9,10]'::vector(5))) as t(vec);
+/// ----
+/// [1,2,3]
+/// [6,7,8]
+///
+/// statement error
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), -1, 2);
+///
+/// statement error
+/// SELECT subvector('[6,7,8,9,10]'::vector(5), 1, 6);
+///
+/// statement error
+/// SELECT subvector('[6,7,8,9,10]'::vector(5), 5, 2);
 /// ```
 #[function(
     "subvector(vector, int4, int4) -> vector",
@@ -569,12 +584,5 @@ impl SubvectorContext {
     type_infer = "unreachable"
 )]
 fn subvector(v: VectorRef<'_>, ctx: &SubvectorContext) -> Result<VectorVal> {
-    let vector = v.as_slice();
-
-    let result = vector[(ctx.start - 1) as usize..(ctx.end - 1) as usize]
-        .iter()
-        .copied()
-        .map(|v| Finite32::from_unchecked(f32::from(v)))
-        .collect();
-    Ok(result)
+    Ok(v.subvector(ctx.start, ctx.end))
 }

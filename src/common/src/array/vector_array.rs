@@ -336,14 +336,6 @@ impl VectorVal {
 #[repr(transparent)]
 pub struct Finite32(f32);
 
-impl Finite32 {
-    /// Creates a `Finite32` value without checking for `NaN` or infinity.
-    #[inline]
-    pub fn from_unchecked(value: f32) -> Self {
-        Self(value)
-    }
-}
-
 impl TryFrom<f32> for Finite32 {
     type Error = String;
 
@@ -427,6 +419,13 @@ impl<'a> VectorRef<'a> {
             item.serialize(&mut *serializer)?;
         }
         Ok(())
+    }
+
+    pub fn subvector(&self, start: usize, end: usize) -> VectorVal {
+        let slice = &self.inner[start..end];
+        VectorInner {
+            inner: slice.to_vec().into_boxed_slice(),
+        }
     }
 }
 

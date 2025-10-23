@@ -457,13 +457,13 @@ impl Binder {
                             _ => None,
                         })
                         .ok_or_else(|| ErrorCode::ExprError("`count` must be an Int32 constant".into()))?;
-                    if len < 1 {
-                        return Err(ErrorCode::InvalidParameterValue(format!("vector must have at least 1 dimension, not {}", len)).into());
+                    if len < 1 || len > DataType::VEC_MAX_SIZE as i32 {
+                        return Err(ErrorCode::InvalidParameterValue(format!("Invalid vector size: expected 1..={}, got {}", DataType::VEC_MAX_SIZE, len)).into());
                     }
 
                     let end = start + len - 1;
 
-                    if start < 1 || end < 1 || start > dimensions || end > dimensions {
+                    if start < 1 || end > dimensions {
                         return Err(ErrorCode::InvalidParameterValue(format!(
                                 "vector slice range out of bounds: start={}, end={}, valid range is [1, {}]",
                                 start,
@@ -472,18 +472,7 @@ impl Binder {
                             )).into());
                     }
 
-                    let dim = (end - start + 1) as usize;
-                    if dim < 1 {
-                        return Err(ErrorCode::InvalidParameterValue(
-                            format!(
-                                "(start..end) range is invalid: computed dim = {}, must be within (1..={})",
-                                dim,
-                                dimensions
-
-                            )
-                        ).into());
-                    }
-                    Ok(FunctionCall::new_unchecked(ExprType::Subvector, vec![vector_expr, start_expr, len_expr], DataType::Vector(dim)).into())
+                    Ok(FunctionCall::new_unchecked(ExprType::Subvector, vec![vector_expr, start_expr, len_expr], DataType::Vector(len as usize)).into())
                 })),
                 // Functions that return a constant value
                 ("pi", pi()),
