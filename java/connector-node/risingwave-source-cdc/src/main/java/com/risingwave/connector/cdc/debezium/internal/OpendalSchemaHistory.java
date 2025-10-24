@@ -134,12 +134,9 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             // 2. Initialize sequence number from existing files
             initializeSequenceNumber(historyFiles);
 
-            // 3. Simple sequential loading approach - much more efficient than lazy loading
-            // For most cases, loading all records sequentially is faster and simpler
+            // 3. Load all records and initialize cache
+            // loadAllHistoryRecords will also initialize the cache for the latest file
             this.records = loadAllHistoryRecords(historyFiles);
-
-            // 4. Initialize cache for the latest file to optimize future store operations
-            initializeLatestFileCache(historyFiles);
 
             LOGGER.info(
                     "Loaded schema history with {} total records from {} files. Current sequence number: {}",
@@ -262,7 +259,11 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         if (m.find()) {
             return Long.parseLong(m.group(1));
         }
-        return 0L;
+        // This should never happen as files are pre-filtered, but throw exception for safety
+        throw new SchemaHistoryException(
+                String.format(
+                        "Invalid schema history file name format: %s. Expected format: schema_history_<number>.dat",
+                        fileName));
     }
 
     /**
@@ -270,42 +271,61 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
      * that have already been used.
      */
     private void initializeSequenceNumber(List<String> historyFiles) {
-        long maxSequence = 0;
-
-        // Find the maximum sequence number from existing files
-        for (String fileName : historyFiles) {
-            long sequence = extractSequenceFromFileName(fileName);
-            if (sequence > maxSequence) {
-                maxSequence = sequence;
-            }
+        if (historyFiles.isEmpty()) {
+            sequenceNumber.set(0);
+            LOGGER.info("No existing files, initialized sequence number to 0");
+        } else {
+            // historyFiles is already sorted by sequence number in listAndSortHistoryFiles(),
+            // so the last file has the maximum sequence number
+            long maxSequence =
+                    extractSequenceFromFileName(historyFiles.get(historyFiles.size() - 1));
+            sequenceNumber.set(maxSequence);
+            LOGGER.info("Initialized sequence number to {} from existing files", maxSequence);
         }
-
-        sequenceNumber.set(maxSequence);
-        LOGGER.info("Initialized sequence number to {} from existing files", maxSequence);
     }
 
     /**
      * Load all history records from files sequentially. This is much simpler and more efficient
      * than the lazy loading approach. Schema history recovery typically needs all records anyway,
      * so there's no benefit to complex on-demand loading.
+     *
+     * <p>This method also initializes the cache for the latest file to avoid re-reading it later.
      */
     private List<HistoryRecord> loadAllHistoryRecords(List<String> historyFiles) {
         List<HistoryRecord> allRecords = new ArrayList<>();
 
         LOGGER.info("Loading schema history from {} files...", historyFiles.size());
 
-        for (String filePath : historyFiles) {
+        for (int i = 0; i < historyFiles.size(); i++) {
+            String filePath = historyFiles.get(i);
             try {
                 byte[] data = getObject(filePath);
                 List<HistoryRecord> records = toHistoryRecords(data);
                 allRecords.addAll(records);
 
                 LOGGER.debug("Loaded {} records from file: {}", records.size(), filePath);
+
+                // Initialize cache when processing the last file to avoid re-reading it later
+                if (i == historyFiles.size() - 1) {
+                    cachedLatestFile = filePath;
+                    cachedFileRecordCount = records.size();
+                    LOGGER.debug(
+                            "Initialized cache: latest file {} with {} records",
+                            cachedLatestFile,
+                            cachedFileRecordCount);
+                }
             } catch (Exception e) {
                 LOGGER.error("Failed to load history records from file: {}", filePath, e);
                 throw new SchemaHistoryException(
                         "Failed to load history records from file: " + filePath, e);
             }
+        }
+
+        // If no files were loaded, reset cache
+        if (historyFiles.isEmpty()) {
+            cachedLatestFile = null;
+            cachedFileRecordCount = 0;
+            LOGGER.debug("No existing history files found, cache initialized as empty");
         }
 
         LOGGER.info("Successfully loaded {} total history records", allRecords.size());
@@ -322,36 +342,5 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         historyFiles.removeIf(file -> !HISTORY_FILE_PATTERN.matcher(file).find());
         Collections.sort(historyFiles, Comparator.comparingLong(this::extractSequenceFromFileName));
         return historyFiles;
-    }
-
-    /**
-     * Initialize cache for the latest file information to optimize future store operations. This
-     * avoids expensive list operations on every doStoreRecord call.
-     */
-    private void initializeLatestFileCache(List<String> historyFiles) {
-        if (!historyFiles.isEmpty()) {
-            cachedLatestFile = historyFiles.get(historyFiles.size() - 1);
-            try {
-                // Get the current record count in the latest file
-                byte[] data = getObject(cachedLatestFile);
-                List<HistoryRecord> records = toHistoryRecords(data);
-                cachedFileRecordCount = records.size();
-
-                LOGGER.debug(
-                        "Initialized cache: latest file {} with {} records",
-                        cachedLatestFile,
-                        cachedFileRecordCount);
-            } catch (Exception e) {
-                LOGGER.warn("Failed to initialize cache for latest file: {}", cachedLatestFile, e);
-                // Reset cache on error
-                cachedLatestFile = null;
-                cachedFileRecordCount = 0;
-            }
-        } else {
-            // No existing files
-            cachedLatestFile = null;
-            cachedFileRecordCount = 0;
-            LOGGER.debug("No existing history files found, cache initialized as empty");
-        }
     }
 }
