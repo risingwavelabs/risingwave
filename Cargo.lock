@@ -2545,7 +2545,7 @@ checksum = "a90d114103adbc625300f346d4d09dfb4ab1c4a8df6868435dd903392ecf4354"
 dependencies = [
  "libc",
  "once_cell",
- "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "wasm-bindgen",
 ]
 
@@ -6139,7 +6139,7 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "wasm-bindgen",
 ]
 
@@ -7899,7 +7899,7 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "libc",
- "madsim-macros 0.2.12 (git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38)",
+ "madsim-macros",
  "naive-timer",
  "panic-message",
  "rand 0.8.5",
@@ -7909,39 +7909,7 @@ dependencies = [
  "spin 0.9.8",
  "tokio",
  "tokio-util",
- "toml 0.8.12",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "madsim"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18351aac4194337d6ea9ffbd25b3d1540ecc0754142af1bff5ba7392d1f6f771"
-dependencies = [
- "ahash 0.8.11",
- "async-channel 2.2.1",
- "async-stream",
- "async-task",
- "bincode 1.3.3",
- "bytes",
- "downcast-rs 1.2.1",
- "errno",
- "futures-util",
- "lazy_static",
- "libc",
- "madsim-macros 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
- "naive-timer",
- "panic-message",
- "rand 0.8.5",
- "rand_xoshiro",
- "rustversion",
- "serde",
- "spin 0.9.8",
- "tokio",
- "tokio-util",
- "toml 0.9.6",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]
@@ -7949,8 +7917,7 @@ dependencies = [
 [[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.5.0+1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b442215f0047e7e7df7b98991129c43ee5fb186ce899e8f7e27515bc99de508"
+source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http 0.60.12",
@@ -7959,21 +7926,9 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 1.3.1",
- "madsim 0.2.34",
+ "madsim",
  "spin 0.9.8",
  "tracing",
-]
-
-[[package]]
-name = "madsim-macros"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
-dependencies = [
- "darling 0.14.4",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -7998,7 +7953,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
- "madsim 0.2.32",
+ "madsim",
  "rdkafka-sys",
  "serde",
  "serde_derive",
@@ -8013,10 +7968,9 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d3eb2acc57c82d21d699119b859e2df70a91dbdb84734885a1e72be83bdecb5"
+source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
 dependencies = [
- "madsim 0.2.34",
+ "madsim",
  "spin 0.9.8",
  "tokio",
 ]
@@ -8024,13 +7978,12 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.5.1+0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c668c82f0c2aca7ffed3235047f2539e6e41278c7c47a822999f3b7a067887"
+source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
 dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
- "madsim 0.2.34",
+ "madsim",
  "tokio",
  "tonic",
  "tower 0.4.13",
@@ -8039,9 +7992,8 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.5.0+0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f271a476bbaa9d2139e1e1a5beb869c6119e805a0b67ad2b2857e4a8785b111a"
+version = "0.5.1+0.12.3"
+source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -8217,7 +8169,7 @@ dependencies = [
  "hermit-abi",
  "libc",
  "log",
- "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.52.0",
 ]
 
@@ -10319,7 +10271,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.107",
@@ -12653,7 +12605,7 @@ dependencies = [
  "hyper 0.14.27",
  "hyper-rustls 0.24.2",
  "itertools 0.14.0",
- "madsim 0.2.34",
+ "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
@@ -12807,7 +12759,7 @@ dependencies = [
  "glob",
  "indexmap 2.12.0",
  "itertools 0.14.0",
- "madsim 0.2.34",
+ "madsim",
  "madsim-rdkafka",
  "madsim-tokio",
  "maplit",
@@ -14120,15 +14072,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_spanned"
-version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e24345aa0fe688594e73770a5f6d1b216508b4f93484c0026d521acd30134392"
-dependencies = [
- "serde_core",
-]
-
-[[package]]
 name = "serde_tokenstream"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14479,7 +14422,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.107",
@@ -15724,24 +15667,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9dd1545e8208b4a5af1aa9bbd0b4cf7e9ea08fabc5d0a5c67fcaafa17433aa3"
 dependencies = [
  "serde",
- "serde_spanned 0.6.5",
- "toml_datetime 0.6.5",
+ "serde_spanned",
+ "toml_datetime",
  "toml_edit 0.22.9",
-]
-
-[[package]]
-name = "toml"
-version = "0.9.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae2a4cf385da23d1d53bc15cdfa5c2109e93d8d362393c801e87da2f72f0e201"
-dependencies = [
- "indexmap 2.12.0",
- "serde_core",
- "serde_spanned 1.0.3",
- "toml_datetime 0.7.3",
- "toml_parser",
- "toml_writer",
- "winnow 0.7.13",
 ]
 
 [[package]]
@@ -15754,22 +15682,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "toml_datetime"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2cdb639ebbc97961c51720f858597f7f24c4fc295327923af55b74c3c724533"
-dependencies = [
- "serde_core",
-]
-
-[[package]]
 name = "toml_edit"
 version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap 2.12.0",
- "toml_datetime 0.6.5",
+ "toml_datetime",
  "winnow 0.5.15",
 ]
 
@@ -15780,7 +15699,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
 dependencies = [
  "indexmap 2.12.0",
- "toml_datetime 0.6.5",
+ "toml_datetime",
  "winnow 0.5.15",
 ]
 
@@ -15792,25 +15711,10 @@ checksum = "8e40bb779c5187258fd7aad0eb68cb8706a0a81fa712fbea808ab43c4b8374c4"
 dependencies = [
  "indexmap 2.12.0",
  "serde",
- "serde_spanned 0.6.5",
- "toml_datetime 0.6.5",
+ "serde_spanned",
+ "toml_datetime",
  "winnow 0.6.26",
 ]
-
-[[package]]
-name = "toml_parser"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0cbe268d35bdb4bb5a56a2de88d0ad0eb70af5384a99d648cd4b3d04039800e"
-dependencies = [
- "winnow 0.7.13",
-]
-
-[[package]]
-name = "toml_writer"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df8b2b54733674ad286d16267dcfc7a71ed5c776e4ac7aa3c3e2561f7c637bf2"
 
 [[package]]
 name = "tonic"
@@ -16488,9 +16392,9 @@ dependencies = [
 
 [[package]]
 name = "wasi"
-version = "0.11.0+wasi-snapshot-preview1"
+version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
+checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasi"
@@ -16752,7 +16656,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sha2",
- "toml 0.8.12",
+ "toml",
  "windows-sys 0.59.0",
  "zstd 0.13.2",
 ]
