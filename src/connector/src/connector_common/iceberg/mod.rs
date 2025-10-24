@@ -149,6 +149,10 @@ pub struct IcebergCommon {
     /// - Multiple headers can be specified, separated by a ';'.
     #[serde(rename = "catalog.header")]
     pub header: Option<String>,
+
+    /// Enable vended credentials for iceberg REST catalog.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub vended_credentials: Option<bool>,
 }
 
 impl EnforceSecret for IcebergCommon {
@@ -197,7 +201,16 @@ impl IcebergTableIdentifier {
 
 impl IcebergCommon {
     pub fn catalog_type(&self) -> &str {
-        self.catalog_type.as_deref().unwrap_or("storage")
+        let catalog_type: &str = self.catalog_type.as_deref().unwrap_or("storage");
+        if self.vended_credentials() && catalog_type == "rest" {
+            "rest_rust"
+        } else {
+            catalog_type
+        }
+    }
+
+    pub fn vended_credentials(&self) -> bool {
+        self.vended_credentials.unwrap_or(false)
     }
 
     pub fn catalog_name(&self) -> String {
@@ -214,6 +227,14 @@ impl IcebergCommon {
             Deployment::Cloud => "RisingWave(Cloud)".to_owned(),
             Deployment::Other => "RisingWave(OSS)".to_owned(),
         };
+        if let Some(vended_credentials) = self.vended_credentials {
+            if vended_credentials {
+                headers.insert(
+                    "X-Iceberg-Access-Delegation".to_owned(),
+                    "vended-credentials".to_owned(),
+                );
+            }
+        }
         headers.insert("User-Agent".to_owned(), user_agent);
         if let Some(header) = &self.header {
             for pair in header.split(';') {
@@ -406,8 +427,8 @@ impl IcebergCommon {
                 java_catalog_configs.insert(format!("header.{}", header_name), header_value);
             }
 
-            match self.catalog_type.as_deref() {
-                Some("rest") => {
+            match self.catalog_type() {
+                "rest" => {
                     if let Some(credential) = &self.credential {
                         java_catalog_configs.insert("credential".to_owned(), credential.clone());
                     }
@@ -448,7 +469,7 @@ impl IcebergCommon {
                         }
                     }
                 }
-                Some("glue") => {
+                "glue" => {
                     if !enable_config_load {
                         java_catalog_configs.insert(
                             "client.credentials-provider".to_owned(),

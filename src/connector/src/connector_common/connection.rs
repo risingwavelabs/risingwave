@@ -183,7 +183,7 @@ impl Connection for IcebergConnection {
                 let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
                 let url = Url::parse(warehouse_path);
                 if (url.is_err() || is_s3_tables)
-                    && matches!(common.catalog_type.as_deref(), Some("rest" | "rest_rust"))
+                    && matches!(common.catalog_type(), "rest" | "rest_rust")
                 {
                     // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog,
                     // Or it could be a s3tables path, which is not a valid URL but a valid warehouse path,
@@ -203,7 +203,7 @@ impl Connection for IcebergConnection {
                 }
             }
             None => {
-                if matches!(common.catalog_type.as_deref(), Some("rest" | "rest_rust")) {
+                if matches!(common.catalog_type(), "rest" | "rest_rust") {
                     None
                 } else {
                     bail!("`warehouse.path` must be set");
