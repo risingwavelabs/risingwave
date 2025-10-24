@@ -278,8 +278,10 @@ impl Strong {
             | ExprType::ArraySum
             | ExprType::ArraySort
             | ExprType::ArrayContains
+            | ExprType::ArrayOverlap
             | ExprType::ArrayContained
             | ExprType::ArrayFlatten
+            | ExprType::ArrayIntersect
             | ExprType::HexToInt256
             | ExprType::JsonbAccess
             | ExprType::JsonbAccessStr
