@@ -34,7 +34,8 @@ use parquet::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
     iceberg_compaction_enable_dynamic_size_estimation,
     iceberg_compaction_enable_heuristic_output_parallelism,
-    iceberg_compaction_max_concurrent_closes, iceberg_compaction_size_estimation_smoothing_factor,
+    iceberg_compaction_max_concurrent_closes, iceberg_compaction_max_file_group_size_bytes,
+    iceberg_compaction_size_estimation_smoothing_factor,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::{
@@ -102,6 +103,8 @@ pub struct IcebergCompactorRunnerConfig {
     pub enable_dynamic_size_estimation: bool,
     #[builder(default = "iceberg_compaction_size_estimation_smoothing_factor()")]
     pub size_estimation_smoothing_factor: f64,
+    #[builder(default = "iceberg_compaction_max_file_group_size_bytes()")]
+    pub max_file_group_size_bytes: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -360,11 +363,12 @@ impl IcebergCompactorRunner {
             // Phase 1: Planning
             let compaction_type = Self::get_compaction_type(self.task_type);
 
+            // Prohibit the use of `grouping_strategy` in COW write mode. Currently, COW relies on the results of Full-Compaction to update the main-branch.
             let grouping_strategy = match self.iceberg_config.write_mode.as_str() {
                 "copy_on_write" => iceberg_compaction_core::config::GroupingStrategy::Noop,
                 _ => iceberg_compaction_core::config::GroupingStrategy::BinPack(
                     iceberg_compaction_core::config::BinPackConfig::new(
-                        32 * 1024 * 1024, // 32MB
+                        self.config.max_file_group_size_bytes,
                     ),
                 ),
             };
@@ -453,6 +457,8 @@ impl IcebergCompactorRunner {
 
                 all_stats.push(plan_stats);
             }
+
+            // TODO(li0k): Support merge commit for all plans to reduce the number of snapshots.
 
             // Merge all statistics
             let merged_stats = Self::merge_rewrite_stats(all_stats);

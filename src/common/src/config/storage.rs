@@ -1073,6 +1073,10 @@ pub mod default {
         pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
             50 * 1024 // 50GB
         }
+
+        pub fn iceberg_compaction_max_file_group_size_bytes() -> u64 {
+            100 * 1024 * 1024 * 1024 // 100GB
+        }
     }
 
     pub mod file_cache {
