@@ -25,7 +25,7 @@ jobs:
           remove-docker-images: 'true'
           root-reserve-mb: 10240
           temp-reserve-mb: 10240
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Rust toolchain
         run: rustup show
       - name: Install dependencies for compiling RisingWave
