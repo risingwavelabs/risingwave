@@ -250,18 +250,6 @@ impl LogicalSource {
         // Iceberg source supports column pruning at source level
         // Schema invariant: [table columns] + [_iceberg_sequence_number, _iceberg_file_path, _iceberg_file_pos, _row_id]
         // The last 4 columns are always: 3 iceberg hidden columns + _row_id
-        //
-        // If the iceberg source has a primary key, the row_id column is not included in the schema.
-
-        // For `refreshable` iceberg table, it requires a primary key, so the row_id column is not included in the schema.
-        let is_refresh_table_iceberg = self.source_catalog().is_some_and(|catalog| {
-            catalog.refresh_mode.is_some_and(|refresh_mode| {
-                matches!(
-                    refresh_mode.refresh_mode,
-                    Some(RefreshMode::ManualTrigger(_))
-                )
-            })
-        });
 
         let schema_len = self.schema().len();
         assert!(

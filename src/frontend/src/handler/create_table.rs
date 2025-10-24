@@ -46,8 +46,9 @@ use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
 use risingwave_pb::plan_common::{
-    AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
+    AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc, SourceRefreshMode,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
@@ -2039,7 +2040,8 @@ pub async fn create_iceberg_engine_table(
 
     let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
-    let with_properties = bind_connector_props(&source_handler_args, &format_encode, true)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&source_handler_args, &format_encode, true)?;
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
     // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
@@ -2079,6 +2081,7 @@ pub async fn create_iceberg_engine_table(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
+        refresh_mode,
     )
     .await?;
 
