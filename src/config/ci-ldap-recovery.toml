@@ -30,7 +30,15 @@ ldapserver = "127.0.0.1"
 #ldapscheme = "ldaps"
 #ldapport = "636"
 ldaptls = "true"
+# simple bind
+#ldapprefix = "uid="
+#ldapsuffix = ",ou=people,dc=example,dc=com"
+# search and bind
 ldapbasedn = "ou=people,dc=example,dc=com"
+ldapsearchattribute = "uid"
+# required for non-anonymous search
+ldapbinddn = "cn=admin,dc=example,dc=com"
+ldapbindpasswd = "admin123"
 
 [streaming]
 in_flight_barrier_nums = 10

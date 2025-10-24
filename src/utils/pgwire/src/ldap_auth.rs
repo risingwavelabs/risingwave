@@ -27,6 +27,12 @@ const LDAP_PORT_KEY: &str = "ldapport";
 const LDAP_SCHEME_KEY: &str = "ldapscheme";
 const LDAP_BASE_DN_KEY: &str = "ldapbasedn";
 const LDAP_SEARCH_FILTER_KEY: &str = "ldapsearchfilter";
+const LDAP_SEARCH_ATTRIBUTE_KEY: &str = "ldapsearchattribute";
+const LDAP_BIND_DN_KEY: &str = "ldapbinddn";
+const LDAP_BIND_PASSWD_KEY: &str = "ldapbindpasswd";
+const LDAP_PREFIX_KEY: &str = "ldapprefix";
+const LDAP_SUFFIX_KEY: &str = "ldapsuffix";
+const LDAP_URL_KEY: &str = "ldapurl";
 
 const LDAP_TLS: &str = "ldaptls";
 
@@ -39,6 +45,16 @@ pub struct LdapConfig {
     pub base_dn: Option<String>,
     /// LDAP search filter template
     pub search_filter: Option<String>,
+    /// LDAP search attribute (defaults to "uid")
+    pub search_attribute: String,
+    /// DN to bind as when performing searches
+    pub bind_dn: Option<String>,
+    /// Password for bind DN
+    pub bind_passwd: Option<String>,
+    /// Prefix to prepend to username in simple bind
+    pub prefix: Option<String>,
+    /// Suffix to append to username in simple bind
+    pub suffix: Option<String>,
     /// Whether to use STARTTLS
     pub start_tls: bool,
     /// Additional LDAP configuration options
@@ -49,6 +65,11 @@ pub struct LdapConfig {
 impl LdapConfig {
     /// Create LDAP configuration from HBA entry options
     pub fn from_hba_options(options: &HashMap<String, String>) -> PsqlResult<Self> {
+        // Check if ldapurl is provided - it takes precedence over individual parameters
+        if let Some(ldap_url) = options.get(LDAP_URL_KEY) {
+            return Self::from_ldap_url(ldap_url, options);
+        }
+
         let server = options
             .get(LDAP_SERVER_KEY)
             .ok_or_else(|| PsqlError::StartupError("LDAP server (ldapserver) is required".into()))?
@@ -77,11 +98,125 @@ impl LdapConfig {
         let server = format!("{}://{}:{}", scheme, server, port);
         let base_dn = options.get(LDAP_BASE_DN_KEY).cloned();
         let search_filter = options.get(LDAP_SEARCH_FILTER_KEY).cloned();
+        let search_attribute = options
+            .get(LDAP_SEARCH_ATTRIBUTE_KEY)
+            .cloned()
+            .unwrap_or_else(|| "uid".to_owned());
+        let bind_dn = options.get(LDAP_BIND_DN_KEY).cloned();
+        let bind_passwd = options.get(LDAP_BIND_PASSWD_KEY).cloned();
+        let prefix = options.get(LDAP_PREFIX_KEY).cloned();
+        let suffix = options.get(LDAP_SUFFIX_KEY).cloned();
 
         Ok(Self {
             server,
             base_dn,
             search_filter,
+            search_attribute,
+            bind_dn,
+            bind_passwd,
+            prefix,
+            suffix,
+            start_tls,
+            options: options.clone(),
+        })
+    }
+
+    /// Parse LDAP URL (RFC 4516 format)
+    /// Format: ldap[s]://host:port/basedn?attributes?scope?filter
+    fn from_ldap_url(ldap_url: &str, options: &HashMap<String, String>) -> PsqlResult<Self> {
+        // Validate that conflicting parameters are not present
+        // According to PostgreSQL docs, ldapurl cannot be mixed with parameters that would conflict
+        let conflicting_params = [
+            LDAP_SERVER_KEY,
+            LDAP_PORT_KEY,
+            LDAP_SCHEME_KEY,
+            LDAP_BASE_DN_KEY,
+            LDAP_SEARCH_ATTRIBUTE_KEY,
+            LDAP_SEARCH_FILTER_KEY,
+            LDAP_PREFIX_KEY,
+            LDAP_SUFFIX_KEY,
+        ];
+
+        for param in &conflicting_params {
+            if options.contains_key(*param) {
+                return Err(PsqlError::StartupError(
+                    format!("Cannot specify both ldapurl and {} parameter", param).into(),
+                ));
+            }
+        }
+
+        // Parse the URL using standard URL parsing
+        let url = url::Url::parse(ldap_url)
+            .map_err(|e| PsqlError::StartupError(format!("Invalid LDAP URL: {}", e).into()))?;
+
+        // Validate scheme
+        let scheme = url.scheme();
+        if scheme != "ldap" && scheme != "ldaps" {
+            return Err(PsqlError::StartupError(
+                "LDAP URL scheme must be either 'ldap' or 'ldaps'".into(),
+            ));
+        }
+
+        // Extract host and port
+        let host = url
+            .host_str()
+            .ok_or_else(|| PsqlError::StartupError("LDAP URL must contain a host".into()))?;
+        let port = url
+            .port()
+            .unwrap_or_else(|| if scheme == "ldaps" { 636 } else { 389 });
+
+        let server = format!("{}://{}:{}", scheme, host, port);
+
+        // Extract basedn from path (remove leading /)
+        let base_dn = if url.path().len() > 1 {
+            Some(url.path()[1..].to_string())
+        } else {
+            None
+        };
+
+        // Parse query parameters for attributes, scope, filter
+        // Format: ?attributes?scope?filter
+        let mut search_attribute = "uid".to_owned();
+        let mut search_filter = None;
+
+        if let Some(query) = url.query() {
+            let parts: Vec<&str> = query.split('?').collect();
+
+            // First part is attributes (comma-separated, we only care about the first one for search)
+            if !parts.is_empty() && !parts[0].is_empty() {
+                search_attribute = parts[0].split(',').next().unwrap_or("uid").to_owned();
+            }
+
+            // Third part is filter (index 2)
+            if parts.len() > 2 && !parts[2].is_empty() {
+                search_filter = Some(parts[2].to_owned());
+            }
+        }
+
+        // Only allow supplementary parameters with ldapurl:
+        // - ldaptls: for StartTLS
+        // - ldapbinddn/ldapbindpasswd: for authenticated searches
+        let start_tls = options
+            .get(LDAP_TLS)
+            .map(|s| s.as_str().parse::<bool>().unwrap())
+            .unwrap_or(false);
+
+        let bind_dn = options.get(LDAP_BIND_DN_KEY).cloned();
+        let bind_passwd = options.get(LDAP_BIND_PASSWD_KEY).cloned();
+
+        // prefix and suffix are not allowed with ldapurl
+        let prefix = None;
+        let suffix = None;
+
+        Ok(Self {
+            server,
+            base_dn,
+            search_filter,
+            search_attribute,
+            bind_dn,
+            bind_passwd,
+            prefix,
+            suffix,
             start_tls,
             options: options.clone(),
         })
@@ -115,12 +250,32 @@ impl LdapAuthenticator {
             return Ok(false);
         }
 
-        // Determine the authentication strategy
-        if self.config.base_dn.is_some() && self.config.search_filter.is_some() {
-            // Search-then-bind authentication
+        // Determine the authentication strategy based on configured parameters
+        // According to PostgreSQL documentation:
+        // - Simple bind mode: Uses ldapprefix and/or ldapsuffix
+        // - Search+bind mode: Uses ldapbasedn with optional search parameters
+        // - It's an error to mix both modes
+
+        let has_simple_bind_params = self.config.prefix.is_some() || self.config.suffix.is_some();
+        let has_search_bind_params = self.config.search_filter.is_some()
+            || self.config.bind_dn.is_some()
+            || self.config.search_attribute != "uid";
+
+        // Validate that we don't mix simple bind and search+bind parameters
+        if has_simple_bind_params && has_search_bind_params {
+            return Err(PsqlError::StartupError(
+                "Cannot mix simple bind parameters (ldapprefix/ldapsuffix) with search+bind parameters (ldapsearchfilter/ldapbinddn/ldapsearchattribute)".into()
+            ));
+        }
+
+        if has_simple_bind_params {
+            // Simple bind mode: use prefix/suffix to construct DN
+            self.simple_bind(username, password).await
+        } else if self.config.base_dn.is_some() {
+            // Search+bind mode: search for user in directory then bind
             self.search_and_bind(username, password).await
         } else {
-            // Simple bind authentication
+            // No basedn, use username directly as DN
             self.simple_bind(username, password).await
         }
     }
@@ -264,18 +419,39 @@ impl LdapAuthenticator {
             PsqlError::StartupError(format!("LDAP connection failed: {}", e).into())
         })?;
 
-        // Validate base_dn and search_filter configuration
+        // Validate base_dn configuration
         let base_dn = self
             .config
             .base_dn
             .as_ref()
             .ok_or_else(|| PsqlError::StartupError("LDAP base_dn not configured".into()))?;
-        let search_filter =
-            self.config.search_filter.as_ref().ok_or_else(|| {
-                PsqlError::StartupError("LDAP search_filter not configured".into())
-            })?;
 
-        let search_filter = search_filter.replace("{username}", username);
+        // If bind_dn and bind_passwd are provided, bind as that user first
+        if let (Some(bind_dn), Some(bind_passwd)) = (&self.config.bind_dn, &self.config.bind_passwd)
+        {
+            ldap.simple_bind(bind_dn, bind_passwd)
+                .await
+                .map_err(|e| {
+                    PsqlError::StartupError(
+                        format!("LDAP bind as search user failed: {}", e).into(),
+                    )
+                })?
+                .success()
+                .map_err(|e| {
+                    PsqlError::StartupError(
+                        format!("LDAP bind as search user failed: {}", e).into(),
+                    )
+                })?;
+        }
+
+        // Build search filter
+        let search_filter = if let Some(filter_template) = &self.config.search_filter {
+            // Use custom filter template with {username} placeholder
+            filter_template.replace("{username}", username)
+        } else {
+            // Default filter using search_attribute
+            format!("({}={})", self.config.search_attribute, username)
+        };
 
         let rs = ldap
             .search(base_dn, Scope::Subtree, &search_filter, vec!["dn"])
@@ -314,10 +490,24 @@ impl LdapAuthenticator {
 
     /// Simple bind authentication
     async fn simple_bind(&self, username: &str, password: &str) -> PsqlResult<bool> {
-        // Construct DN from username
+        // Construct DN from username with optional prefix and suffix
         let dn = if let Some(base_dn) = &self.config.base_dn {
-            format!("uid={},{}", username, base_dn)
+            // Use base_dn with optional prefix/suffix
+            let prefix = self.config.prefix.as_deref().unwrap_or("uid=");
+            let suffix = self.config.suffix.as_deref().unwrap_or("");
+
+            if suffix.is_empty() {
+                format!("{}{},{}", prefix, username, base_dn)
+            } else {
+                format!("{}{}{}", prefix, username, suffix)
+            }
+        } else if self.config.prefix.is_some() || self.config.suffix.is_some() {
+            // Use only prefix and suffix without base_dn
+            let prefix = self.config.prefix.as_deref().unwrap_or("");
+            let suffix = self.config.suffix.as_deref().unwrap_or("");
+            format!("{}{}{}", prefix, username, suffix)
         } else {
+            // Use username as-is
             username.to_owned()
         };
 

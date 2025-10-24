@@ -201,15 +201,15 @@ impl HbaConfig {
         entry_type: &ConnectionType,
         actual_type: &ConnectionType,
     ) -> bool {
-        match (entry_type, actual_type) {
-            (ConnectionType::Local, ConnectionType::Local) => true,
-            (ConnectionType::Host, ConnectionType::Host) => true,
-            (ConnectionType::Host, ConnectionType::HostSsl) => true,
-            (ConnectionType::Host, ConnectionType::HostNoSsl) => true,
-            (ConnectionType::HostSsl, ConnectionType::HostSsl) => true,
-            (ConnectionType::HostNoSsl, ConnectionType::HostNoSsl) => true,
-            _ => false,
-        }
+        matches!(
+            (entry_type, actual_type),
+            (ConnectionType::Local, ConnectionType::Local)
+                | (ConnectionType::Host, ConnectionType::Host)
+                | (ConnectionType::Host, ConnectionType::HostSsl)
+                | (ConnectionType::Host, ConnectionType::HostNoSsl)
+                | (ConnectionType::HostSsl, ConnectionType::HostSsl)
+                | (ConnectionType::HostNoSsl, ConnectionType::HostNoSsl)
+        )
     }
 
     fn matches_list(&self, list: &[String], value: &str) -> bool {

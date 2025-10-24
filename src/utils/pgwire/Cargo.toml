@@ -38,6 +38,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-openssl = "0.6.3"
 tracing = "0.1"
 rustls-native-certs = "0.6.3"
+url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

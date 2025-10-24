@@ -9668,6 +9668,7 @@ dependencies = [
  "tokio-openssl",
  "tokio-postgres",
  "tracing",
+ "url",
  "workspace-hack",
 ]
 
