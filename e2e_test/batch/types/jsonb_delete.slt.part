@@ -1,0 +1,83 @@
+query T
+select jsonb_strip_nulls(null);
+----
+NULL
+
+query T
+select jsonb_strip_nulls('1');
+----
+1
+
+query T
+select jsonb_strip_nulls('"a string"');
+----
+"a string"
+
+query T
+select jsonb_strip_nulls('null');
+----
+null
+
+query T
+select jsonb_strip_nulls('[1,2,null,3,4]');
+----
+[1, 2, null, 3, 4]
+
+query T
+select jsonb_strip_nulls('{"a":1,"b":null,"c":[2,null,3],"d":{"e":4,"f":null}}');
+----
+{"a": 1, "c": [2, null, 3], "d": {"e": 4}}
+
+query T
+select jsonb_strip_nulls('[1,{"a":1,"b":null,"c":2},3]');
+----
+[1, {"a": 1, "c": 2}, 3]
+
+# an empty object is not null and should not be stripped
+query T
+select jsonb_strip_nulls('{"a": {"b": null, "c": null}, "d": {} }');
+----
+{"a": {}, "d": {}}
+
+# jsonb_strip_nulls with strip_in_arrays=true
+
+query T
+select jsonb_strip_nulls(null, true);
+----
+NULL
+
+query T
+select jsonb_strip_nulls('1', true);
+----
+1
+
+query T
+select jsonb_strip_nulls('"a string"', true);
+----
+"a string"
+
+query T
+select jsonb_strip_nulls('null', true);
+----
+null
+
+query T
+select jsonb_strip_nulls('[1,2,null,3,4]', true);
+----
+[1, 2, 3, 4]
+
+query T
+select jsonb_strip_nulls('{"a":1,"b":null,"c":[2,null,3],"d":{"e":4,"f":null}}', true);
+----
+{"a": 1, "c": [2, 3], "d": {"e": 4}}
+
+query T
+select jsonb_strip_nulls('[1,{"a":1,"b":null,"c":2},3]', true);
+----
+[1, {"a": 1, "c": 2}, 3]
+
+# an empty object is not null and should not be stripped
+query T
+select jsonb_strip_nulls('{"a": {"b": null, "c": null}, "d": {} }', true);
+----
+{"a": {}, "d": {}}

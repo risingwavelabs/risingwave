@@ -383,12 +383,20 @@ fn normalize_array_index(len: usize, index: i32) -> Option<usize> {
 fn jsonb_strip_nulls(v: JsonbRef<'_>) -> JsonbVal {
     let jsonb: ValueRef<'_> = v.into();
     let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(jsonb.capacity());
-    jsonbb_strip_nulls(jsonb, &mut builder);
+    jsonbb_strip_nulls(jsonb, &mut builder, false);
+    JsonbVal::from(builder.finish())
+}
+
+#[function("jsonb_strip_nulls(jsonb, boolean) -> jsonb")]
+fn jsonb_strip_nulls_with_arrays(v: JsonbRef<'_>, strip_in_arrays: bool) -> JsonbVal {
+    let jsonb: ValueRef<'_> = v.into();
+    let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(jsonb.capacity());
+    jsonbb_strip_nulls(jsonb, &mut builder, strip_in_arrays);
     JsonbVal::from(builder.finish())
 }
 
 /// Recursively removes all object fields that have null values from the given JSON value.
-fn jsonbb_strip_nulls(jsonb: ValueRef<'_>, builder: &mut jsonbb::Builder) {
+fn jsonbb_strip_nulls(jsonb: ValueRef<'_>, builder: &mut jsonbb::Builder, strip_in_arrays: bool) {
     match jsonb {
         ValueRef::Object(obj) => {
             builder.begin_object();
@@ -397,14 +405,17 @@ fn jsonbb_strip_nulls(jsonb: ValueRef<'_>, builder: &mut jsonbb::Builder) {
                     continue;
                 }
                 builder.add_string(k);
-                jsonbb_strip_nulls(v, builder);
+                jsonbb_strip_nulls(v, builder, strip_in_arrays);
             }
             builder.end_object();
         }
         ValueRef::Array(array) => {
             builder.begin_array();
             for v in array.iter() {
-                jsonbb_strip_nulls(v, builder);
+                match (strip_in_arrays, v) {
+                    (true, ValueRef::Null) => (),
+                    _ => jsonbb_strip_nulls(v, builder, strip_in_arrays),
+                }
             }
             builder.end_array();
         }
