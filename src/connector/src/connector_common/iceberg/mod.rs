@@ -227,13 +227,11 @@ impl IcebergCommon {
             Deployment::Cloud => "RisingWave(Cloud)".to_owned(),
             Deployment::Other => "RisingWave(OSS)".to_owned(),
         };
-        if let Some(vended_credentials) = self.vended_credentials {
-            if vended_credentials {
-                headers.insert(
-                    "X-Iceberg-Access-Delegation".to_owned(),
-                    "vended-credentials".to_owned(),
-                );
-            }
+        if self.vended_credentials() {
+            headers.insert(
+                "X-Iceberg-Access-Delegation".to_owned(),
+                "vended-credentials".to_owned(),
+            );
         }
         headers.insert("User-Agent".to_owned(), user_agent);
         if let Some(header) = &self.header {
