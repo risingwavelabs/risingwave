@@ -40,8 +40,6 @@ maplit = "1.0.2"
 notify = { version = "8", default-features = false, features = [
     "macos_fsevent",
 ] }
-num-integer = "0.1"
-num-traits = "0.2"
 otlp-embedded = { workspace = true }
 parking_lot = { workspace = true }
 pretty_assertions = "1"

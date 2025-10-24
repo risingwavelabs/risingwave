@@ -12,202 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::ops::{BitAnd, BitOrAssign};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::num::NonZeroUsize;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog;
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{
-    Actor, Fragment, FragmentRelation, Sink, Source, StreamingJob, Table,
+    Database, Fragment, FragmentRelation, FragmentSplits, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    ConnectorSplits, DispatcherType, FragmentId, ObjectId, VnodeBitmap, actor, fragment,
-    fragment_relation, sink, source, streaming_job, table,
+    DatabaseId, DispatcherType, FragmentId, ObjectId, SourceId, StreamingParallelism, TableId,
+    WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink, source,
+    streaming_job, table,
 };
-use risingwave_meta_model_migration::{
-    Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
-    UnionType, WithClause, WithQuery,
-};
-use risingwave_pb::stream_plan::PbDispatcher;
+use risingwave_meta_model_migration::Condition;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbErr, DerivePartialModel, EntityTrait, FromQueryResult,
-    QueryFilter, QuerySelect, Statement, TransactionTrait,
+    ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, QueryTrait,
+    RelationTrait,
 };
 
-use crate::controller::catalog::CatalogController;
-use crate::controller::utils::{get_existing_job_resource_group, get_fragment_actor_dispatchers};
-use crate::model::ActorId;
-use crate::{MetaError, MetaResult};
-
-/// This function will construct a query using recursive cte to find `no_shuffle` upstream relation graph for target fragments.
-///
-/// # Examples
-///
-/// ```
-/// use risingwave_meta::controller::scale::construct_no_shuffle_upstream_traverse_query;
-/// use sea_orm::sea_query::*;
-/// use sea_orm::*;
-///
-/// let query = construct_no_shuffle_upstream_traverse_query(vec![2, 3]);
-///
-/// assert_eq!(query.to_string(MysqlQueryBuilder), r#"WITH RECURSIVE `shuffle_deps` (`source_fragment_id`, `dispatcher_type`, `target_fragment_id`) AS (SELECT DISTINCT `fragment_relation`.`source_fragment_id`, `fragment_relation`.`dispatcher_type`, `fragment_relation`.`target_fragment_id` FROM `fragment_relation` WHERE `fragment_relation`.`dispatcher_type` = 'NO_SHUFFLE' AND `fragment_relation`.`target_fragment_id` IN (2, 3) UNION ALL (SELECT `fragment_relation`.`source_fragment_id`, `fragment_relation`.`dispatcher_type`, `fragment_relation`.`target_fragment_id` FROM `fragment_relation` INNER JOIN `shuffle_deps` ON `shuffle_deps`.`source_fragment_id` = `fragment_relation`.`target_fragment_id` WHERE `fragment_relation`.`dispatcher_type` = 'NO_SHUFFLE')) SELECT DISTINCT `source_fragment_id`, `dispatcher_type`, `target_fragment_id` FROM `shuffle_deps`"#);
-/// assert_eq!(query.to_string(PostgresQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("source_fragment_id", "dispatcher_type", "target_fragment_id") AS (SELECT DISTINCT "fragment_relation"."source_fragment_id", "fragment_relation"."dispatcher_type", "fragment_relation"."target_fragment_id" FROM "fragment_relation" WHERE "fragment_relation"."dispatcher_type" = 'NO_SHUFFLE' AND "fragment_relation"."target_fragment_id" IN (2, 3) UNION ALL (SELECT "fragment_relation"."source_fragment_id", "fragment_relation"."dispatcher_type", "fragment_relation"."target_fragment_id" FROM "fragment_relation" INNER JOIN "shuffle_deps" ON "shuffle_deps"."source_fragment_id" = "fragment_relation"."target_fragment_id" WHERE "fragment_relation"."dispatcher_type" = 'NO_SHUFFLE')) SELECT DISTINCT "source_fragment_id", "dispatcher_type", "target_fragment_id" FROM "shuffle_deps""#);
-/// assert_eq!(query.to_string(SqliteQueryBuilder), r#"WITH RECURSIVE "shuffle_deps" ("source_fragment_id", "dispatcher_type", "target_fragment_id") AS (SELECT DISTINCT "fragment_relation"."source_fragment_id", "fragment_relation"."dispatcher_type", "fragment_relation"."target_fragment_id" FROM "fragment_relation" WHERE "fragment_relation"."dispatcher_type" = 'NO_SHUFFLE' AND "fragment_relation"."target_fragment_id" IN (2, 3) UNION ALL SELECT "fragment_relation"."source_fragment_id", "fragment_relation"."dispatcher_type", "fragment_relation"."target_fragment_id" FROM "fragment_relation" INNER JOIN "shuffle_deps" ON "shuffle_deps"."source_fragment_id" = "fragment_relation"."target_fragment_id" WHERE "fragment_relation"."dispatcher_type" = 'NO_SHUFFLE') SELECT DISTINCT "source_fragment_id", "dispatcher_type", "target_fragment_id" FROM "shuffle_deps""#);
-/// ```
-pub fn construct_no_shuffle_upstream_traverse_query(fragment_ids: Vec<FragmentId>) -> WithQuery {
-    construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::Upstream)
-}
-
-pub fn construct_no_shuffle_downstream_traverse_query(fragment_ids: Vec<FragmentId>) -> WithQuery {
-    construct_no_shuffle_traverse_query_helper(fragment_ids, NoShuffleResolveDirection::Downstream)
-}
-
-enum NoShuffleResolveDirection {
-    Upstream,
-    Downstream,
-}
-
-fn construct_no_shuffle_traverse_query_helper(
-    fragment_ids: Vec<FragmentId>,
-    direction: NoShuffleResolveDirection,
-) -> WithQuery {
-    let cte_alias = Alias::new("shuffle_deps");
-
-    // If we need to look upwards
-    //     resolve by upstream fragment_id -> downstream fragment_id
-    // and if downwards
-    //     resolve by downstream fragment_id -> upstream fragment_id
-    let (cte_ref_column, compared_column) = match direction {
-        NoShuffleResolveDirection::Upstream => (
-            (
-                cte_alias.clone(),
-                fragment_relation::Column::SourceFragmentId,
-            )
-                .into_column_ref(),
-            (
-                FragmentRelation,
-                fragment_relation::Column::TargetFragmentId,
-            )
-                .into_column_ref(),
-        ),
-        NoShuffleResolveDirection::Downstream => (
-            (
-                cte_alias.clone(),
-                fragment_relation::Column::TargetFragmentId,
-            )
-                .into_column_ref(),
-            (
-                FragmentRelation,
-                fragment_relation::Column::SourceFragmentId,
-            )
-                .into_column_ref(),
-        ),
-    };
-
-    let mut base_query = SelectStatement::new()
-        .column((
-            FragmentRelation,
-            fragment_relation::Column::SourceFragmentId,
-        ))
-        .column((FragmentRelation, fragment_relation::Column::DispatcherType))
-        .column((
-            FragmentRelation,
-            fragment_relation::Column::TargetFragmentId,
-        ))
-        .distinct()
-        .from(FragmentRelation)
-        .and_where(
-            Expr::col((FragmentRelation, fragment_relation::Column::DispatcherType))
-                .eq(DispatcherType::NoShuffle),
-        )
-        .and_where(Expr::col(compared_column.clone()).is_in(fragment_ids))
-        .to_owned();
-
-    let cte_referencing = SelectStatement::new()
-        .column((
-            FragmentRelation,
-            fragment_relation::Column::SourceFragmentId,
-        ))
-        .column((FragmentRelation, fragment_relation::Column::DispatcherType))
-        .column((
-            FragmentRelation,
-            fragment_relation::Column::TargetFragmentId,
-        ))
-        // NOTE: Uncomment me once MySQL supports DISTINCT in the recursive block of CTE.
-        //.distinct()
-        .from(FragmentRelation)
-        .inner_join(
-            cte_alias.clone(),
-            Expr::col(cte_ref_column).eq(Expr::col(compared_column)),
-        )
-        .and_where(
-            Expr::col((FragmentRelation, fragment_relation::Column::DispatcherType))
-                .eq(DispatcherType::NoShuffle),
-        )
-        .to_owned();
-
-    let mut common_table_expr = CommonTableExpression::new();
-    common_table_expr
-        .query(base_query.union(UnionType::All, cte_referencing).to_owned())
-        .column(fragment_relation::Column::SourceFragmentId)
-        .column(fragment_relation::Column::DispatcherType)
-        .column(fragment_relation::Column::TargetFragmentId)
-        .table_name(cte_alias.clone());
-
-    SelectStatement::new()
-        .column(fragment_relation::Column::SourceFragmentId)
-        .column(fragment_relation::Column::DispatcherType)
-        .column(fragment_relation::Column::TargetFragmentId)
-        .distinct()
-        .from(cte_alias)
-        .to_owned()
-        .with(
-            WithClause::new()
-                .recursive(true)
-                .cte(common_table_expr)
-                .to_owned(),
-        )
-}
-
-#[derive(Debug, Clone)]
-pub struct RescheduleWorkingSet {
-    pub fragments: HashMap<FragmentId, fragment::Model>,
-    pub actors: HashMap<ActorId, actor::Model>,
-    pub actor_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
-
-    pub fragment_downstreams: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
-    pub fragment_upstreams: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
-
-    pub job_resource_groups: HashMap<ObjectId, String>,
-    pub related_jobs: HashMap<ObjectId, (streaming_job::Model, String)>,
-}
-
-async fn resolve_no_shuffle_query<C>(
-    txn: &C,
-    query: WithQuery,
-) -> MetaResult<Vec<(FragmentId, DispatcherType, FragmentId)>>
-where
-    C: ConnectionTrait,
-{
-    let (sql, values) = query.build_any(&*txn.get_database_backend().get_query_builder());
-
-    let result = txn
-        .query_all(Statement::from_sql_and_values(
-            txn.get_database_backend(),
-            sql,
-            values,
-        ))
-        .await?
-        .into_iter()
-        .map(|res| res.try_get_many_by_index())
-        .collect::<Result<Vec<(FragmentId, DispatcherType, FragmentId)>, DbErr>>()
-        .map_err(MetaError::from)?;
-
-    Ok(result)
-}
+use crate::MetaResult;
+use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::id::{IdCategory, IdGeneratorManagerRef};
+use crate::manager::ActiveStreamingWorkerNodes;
+use crate::model::{ActorId, StreamActor};
+use crate::stream::{AssignerBuilder, SplitDiffOptions};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
@@ -270,394 +106,971 @@ where
     Ok(definitions)
 }
 
-impl CatalogController {
-    pub async fn resolve_working_set_for_reschedule_fragments(
-        &self,
-        fragment_ids: Vec<FragmentId>,
-    ) -> MetaResult<RescheduleWorkingSet> {
-        let inner = self.inner.read().await;
-        self.resolve_working_set_for_reschedule_helper(&inner.db, fragment_ids)
-            .await
+pub async fn load_fragment_info<C>(
+    txn: &C,
+    id_gen: &IdGeneratorManagerRef,
+    database_id: Option<DatabaseId>,
+    worker_nodes: &ActiveStreamingWorkerNodes,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+) -> MetaResult<FragmentRenderMap>
+where
+    C: ConnectionTrait,
+{
+    let mut query = StreamingJob::find()
+        .select_only()
+        .column(streaming_job::Column::JobId);
+
+    if let Some(database_id) = database_id {
+        query = query
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+            .filter(object::Column::DatabaseId.eq(database_id));
     }
 
-    pub async fn resolve_working_set_for_reschedule_tables(
-        &self,
-        table_ids: Vec<ObjectId>,
-    ) -> MetaResult<RescheduleWorkingSet> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
+    let jobs: Vec<ObjectId> = query.into_tuple().all(txn).await?;
 
-        let fragment_ids: Vec<FragmentId> = Fragment::find()
-            .select_only()
-            .column(fragment::Column::FragmentId)
-            .filter(fragment::Column::JobId.is_in(table_ids))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        self.resolve_working_set_for_reschedule_helper(&txn, fragment_ids)
-            .await
+    if jobs.is_empty() {
+        return Ok(HashMap::new());
     }
 
-    pub async fn resolve_working_set_for_reschedule_helper<C>(
-        &self,
-        txn: &C,
-        fragment_ids: Vec<FragmentId>,
-    ) -> MetaResult<RescheduleWorkingSet>
-    where
-        C: ConnectionTrait,
-    {
-        // NO_SHUFFLE related multi-layer upstream fragments
-        let no_shuffle_related_upstream_fragment_ids = resolve_no_shuffle_query(
-            txn,
-            construct_no_shuffle_upstream_traverse_query(fragment_ids.clone()),
-        )
+    let jobs: HashSet<ObjectId> = jobs.into_iter().collect();
+
+    let available_workers: BTreeMap<_, _> = worker_nodes
+        .current()
+        .values()
+        .filter(|worker| worker.is_streaming_schedulable())
+        .map(|worker| {
+            (
+                worker.id as i32,
+                WorkerInfo {
+                    weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                    resource_group: worker.resource_group(),
+                },
+            )
+        })
+        .collect();
+
+    let RenderedGraph { fragments, .. } = render_jobs(
+        txn,
+        id_gen,
+        jobs,
+        available_workers,
+        adaptive_parallelism_strategy,
+    )
+    .await?;
+
+    Ok(fragments)
+}
+
+#[derive(Debug)]
+pub struct TargetResourcePolicy {
+    pub resource_group: Option<String>,
+    pub parallelism: StreamingParallelism,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkerInfo {
+    pub weight: NonZeroUsize,
+    pub resource_group: Option<String>,
+}
+
+pub type FragmentRenderMap =
+    HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>;
+
+#[derive(Default)]
+pub struct RenderedGraph {
+    pub fragments: FragmentRenderMap,
+    pub ensembles: Vec<NoShuffleEnsemble>,
+}
+
+impl RenderedGraph {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+}
+
+/// Fragment-scoped rendering entry point used by operational tooling.
+/// It validates that the requested fragments are roots of their no-shuffle ensembles,
+/// resolves only the metadata required for those components, and then reuses the shared
+/// rendering pipeline to materialize actor assignments.
+pub async fn render_fragments<C>(
+    txn: &C,
+    id_gen: &IdGeneratorManagerRef,
+    ensembles: Vec<NoShuffleEnsemble>,
+    workers: BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+) -> MetaResult<RenderedGraph>
+where
+    C: ConnectionTrait,
+{
+    if ensembles.is_empty() {
+        return Ok(RenderedGraph::empty());
+    }
+
+    let required_fragment_ids: HashSet<_> = ensembles
+        .iter()
+        .flat_map(|ensemble| ensemble.components.iter().copied())
+        .collect();
+
+    let fragment_models = Fragment::find()
+        .filter(fragment::Column::FragmentId.is_in(required_fragment_ids.iter().copied()))
+        .all(txn)
         .await?;
 
-        // NO_SHUFFLE related multi-layer downstream fragments
-        let no_shuffle_related_downstream_fragment_ids = resolve_no_shuffle_query(
-            txn,
-            construct_no_shuffle_downstream_traverse_query(
-                no_shuffle_related_upstream_fragment_ids
+    let found_fragment_ids: HashSet<_> = fragment_models
+        .iter()
+        .map(|fragment| fragment.fragment_id)
+        .collect();
+
+    if found_fragment_ids.len() != required_fragment_ids.len() {
+        let missing = required_fragment_ids
+            .difference(&found_fragment_ids)
+            .copied()
+            .collect_vec();
+        return Err(anyhow!("fragments {:?} not found", missing).into());
+    }
+
+    let fragment_map: HashMap<_, _> = fragment_models
+        .into_iter()
+        .map(|fragment| (fragment.fragment_id, fragment))
+        .collect();
+
+    let job_ids: HashSet<_> = fragment_map
+        .values()
+        .map(|fragment| fragment.job_id)
+        .collect();
+
+    if job_ids.is_empty() {
+        return Ok(RenderedGraph::empty());
+    }
+
+    let jobs: HashMap<_, _> = StreamingJob::find()
+        .filter(streaming_job::Column::JobId.is_in(job_ids.iter().copied().collect_vec()))
+        .all(txn)
+        .await?
+        .into_iter()
+        .map(|job| (job.job_id, job))
+        .collect();
+
+    let found_job_ids: HashSet<_> = jobs.keys().copied().collect();
+    if found_job_ids.len() != job_ids.len() {
+        let missing = job_ids.difference(&found_job_ids).copied().collect_vec();
+        return Err(anyhow!("streaming jobs {:?} not found", missing).into());
+    }
+
+    let fragments = render_no_shuffle_ensembles(
+        txn,
+        id_gen,
+        &ensembles,
+        &fragment_map,
+        &jobs,
+        &workers,
+        adaptive_parallelism_strategy,
+    )
+    .await?;
+
+    Ok(RenderedGraph {
+        fragments,
+        ensembles,
+    })
+}
+
+/// Job-scoped rendering entry point that walks every no-shuffle root belonging to the
+/// provided streaming jobs before delegating to the shared rendering backend.
+pub async fn render_jobs<C>(
+    txn: &C,
+    id_gen: &IdGeneratorManagerRef,
+    job_ids: HashSet<ObjectId>,
+    workers: BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+) -> MetaResult<RenderedGraph>
+where
+    C: ConnectionTrait,
+{
+    let excluded_fragments_query = FragmentRelation::find()
+        .select_only()
+        .column(fragment_relation::Column::TargetFragmentId)
+        .filter(fragment_relation::Column::DispatcherType.eq(DispatcherType::NoShuffle))
+        .into_query();
+
+    let condition = Condition::all()
+        .add(fragment::Column::JobId.is_in(job_ids.clone()))
+        .add(fragment::Column::FragmentId.not_in_subquery(excluded_fragments_query));
+
+    let fragments: Vec<FragmentId> = Fragment::find()
+        .select_only()
+        .column(fragment::Column::FragmentId)
+        .filter(condition)
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let ensembles = find_fragment_no_shuffle_dags_detailed(txn, &fragments).await?;
+
+    let fragments = Fragment::find()
+        .filter(
+            fragment::Column::FragmentId.is_in(
+                ensembles
                     .iter()
-                    .map(|(src, _, _)| *src)
-                    .chain(fragment_ids.iter().cloned())
-                    .unique()
-                    .collect(),
+                    .flat_map(|graph| graph.components.iter())
+                    .cloned()
+                    .collect_vec(),
             ),
         )
+        .all(txn)
         .await?;
 
-        // We need to identify all other types of dispatchers that are Leaves in the NO_SHUFFLE dependency tree.
-        let extended_fragment_ids: HashSet<_> = no_shuffle_related_upstream_fragment_ids
+    let fragment_map: HashMap<_, _> = fragments
+        .into_iter()
+        .map(|fragment| (fragment.fragment_id, fragment))
+        .collect();
+
+    let job_ids = fragment_map
+        .values()
+        .map(|fragment| fragment.job_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect_vec();
+
+    let jobs: HashMap<_, _> = StreamingJob::find()
+        .filter(streaming_job::Column::JobId.is_in(job_ids))
+        .all(txn)
+        .await?
+        .into_iter()
+        .map(|job| (job.job_id, job))
+        .collect();
+
+    let fragments = render_no_shuffle_ensembles(
+        txn,
+        id_gen,
+        &ensembles,
+        &fragment_map,
+        &jobs,
+        &workers,
+        adaptive_parallelism_strategy,
+    )
+    .await?;
+
+    Ok(RenderedGraph {
+        fragments,
+        ensembles,
+    })
+}
+
+/// Core rendering routine that consumes no-shuffle ensembles and produces
+/// `InflightFragmentInfo`s by:
+///   * determining the eligible worker pools and effective parallelism,
+///   * generating actor→worker assignments plus vnode bitmaps and source splits,
+///   * grouping the rendered fragments by database and streaming job.
+async fn render_no_shuffle_ensembles<C>(
+    txn: &C,
+    id_gen: &IdGeneratorManagerRef,
+    ensembles: &[NoShuffleEnsemble],
+    fragment_map: &HashMap<FragmentId, fragment::Model>,
+    job_map: &HashMap<ObjectId, streaming_job::Model>,
+    worker_map: &BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+) -> MetaResult<FragmentRenderMap>
+where
+    C: ConnectionTrait,
+{
+    if ensembles.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        debug_sanity_check(ensembles, fragment_map, job_map);
+    }
+
+    let (fragment_source_ids, fragment_splits) =
+        resolve_source_fragments(txn, fragment_map).await?;
+
+    let job_ids = job_map.keys().copied().collect_vec();
+
+    let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
+        .select_only()
+        .column(streaming_job::Column::JobId)
+        .column(object::Column::DatabaseId)
+        .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+        .filter(streaming_job::Column::JobId.is_in(job_ids))
+        .into_tuple()
+        .all(txn)
+        .await?
+        .into_iter()
+        .collect();
+
+    let database_map: HashMap<_, _> = Database::find()
+        .filter(
+            database::Column::DatabaseId
+                .is_in(streaming_job_databases.values().copied().collect_vec()),
+        )
+        .all(txn)
+        .await?
+        .into_iter()
+        .map(|db| (db.database_id, db))
+        .collect();
+
+    let mut all_fragments: FragmentRenderMap = HashMap::new();
+
+    for NoShuffleEnsemble {
+        entries,
+        components,
+    } in ensembles
+    {
+        tracing::debug!("rendering ensemble entries {:?}", entries);
+
+        let entry_fragments = entries
             .iter()
-            .chain(no_shuffle_related_downstream_fragment_ids.iter())
-            .flat_map(|(src, _, dst)| [*src, *dst])
-            .chain(fragment_ids.iter().cloned())
-            .collect();
+            .map(|fragment_id| fragment_map.get(fragment_id).unwrap())
+            .collect_vec();
 
-        let query = FragmentRelation::find()
-            .select_only()
-            .column(fragment_relation::Column::SourceFragmentId)
-            .column(fragment_relation::Column::DispatcherType)
-            .column(fragment_relation::Column::TargetFragmentId)
-            .distinct();
-
-        // single-layer upstream fragment ids
-        let upstream_fragments: Vec<(FragmentId, DispatcherType, FragmentId)> = query
-            .clone()
-            .filter(
-                fragment_relation::Column::TargetFragmentId.is_in(extended_fragment_ids.clone()),
-            )
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        // single-layer downstream fragment ids
-        let downstream_fragments: Vec<(FragmentId, DispatcherType, FragmentId)> = query
-            .clone()
-            .filter(
-                fragment_relation::Column::SourceFragmentId.is_in(extended_fragment_ids.clone()),
-            )
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        let all_fragment_relations: HashSet<_> = no_shuffle_related_upstream_fragment_ids
-            .into_iter()
-            .chain(no_shuffle_related_downstream_fragment_ids.into_iter())
-            .chain(upstream_fragments.into_iter())
-            .chain(downstream_fragments.into_iter())
-            .collect();
-
-        let mut fragment_upstreams: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>> =
-            HashMap::new();
-        let mut fragment_downstreams: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>> =
-            HashMap::new();
-
-        for (src, dispatcher_type, dst) in &all_fragment_relations {
-            fragment_upstreams
-                .entry(*dst)
-                .or_default()
-                .insert(*src, *dispatcher_type);
-            fragment_downstreams
-                .entry(*src)
-                .or_default()
-                .insert(*dst, *dispatcher_type);
-        }
-
-        let all_fragment_ids: HashSet<_> = all_fragment_relations
+        let entry_fragment_parallelism = entry_fragments
             .iter()
-            .flat_map(|(src, _, dst)| [*src, *dst])
-            .chain(extended_fragment_ids.into_iter())
-            .collect();
-
-        let fragments: Vec<_> = Fragment::find()
-            .filter(fragment::Column::FragmentId.is_in(all_fragment_ids.clone()))
-            .all(txn)
-            .await?;
-
-        let actors: Vec<_> = Actor::find()
-            .filter(actor::Column::FragmentId.is_in(all_fragment_ids.clone()))
-            .all(txn)
-            .await?;
-
-        let actors: HashMap<_, _> = actors
-            .into_iter()
-            .map(|actor| (actor.actor_id as _, actor))
-            .collect();
-
-        let fragments: HashMap<FragmentId, _> = fragments
-            .into_iter()
-            .map(|fragment| (fragment.fragment_id, fragment))
-            .collect();
-
-        let related_job_ids: HashSet<_> =
-            fragments.values().map(|fragment| fragment.job_id).collect();
-
-        let mut job_resource_groups = HashMap::new();
-        for &job_id in &related_job_ids {
-            let resource_group = get_existing_job_resource_group(txn, job_id).await?;
-            job_resource_groups.insert(job_id, resource_group);
-        }
-
-        let related_job_definitions =
-            resolve_streaming_job_definition(txn, &related_job_ids).await?;
-
-        let related_jobs = StreamingJob::find()
-            .filter(streaming_job::Column::JobId.is_in(related_job_ids))
-            .all(txn)
-            .await?;
-
-        let related_jobs = related_jobs
-            .into_iter()
-            .map(|job| {
-                let job_id = job.job_id;
-                (
-                    job_id,
-                    (
-                        job,
-                        related_job_definitions
-                            .get(&job_id)
-                            .cloned()
-                            .unwrap_or("".to_owned()),
-                    ),
+            .map(|fragment| fragment.parallelism.clone())
+            .dedup()
+            .exactly_one()
+            .map_err(|_| {
+                anyhow!(
+                    "entry fragments {:?} have inconsistent parallelism settings",
+                    entries.iter().copied().collect_vec()
                 )
+            })?;
+
+        let (job_id, vnode_count) = entry_fragments
+            .iter()
+            .map(|f| (f.job_id, f.vnode_count as usize))
+            .dedup()
+            .exactly_one()
+            .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
+
+        let job = job_map
+            .get(&job_id)
+            .ok_or_else(|| anyhow!("streaming job {job_id} not found"))?;
+
+        let resource_group = match &job.specific_resource_group {
+            None => {
+                let database = streaming_job_databases
+                    .get(&job_id)
+                    .and_then(|database_id| database_map.get(database_id))
+                    .unwrap();
+                database.resource_group.clone()
+            }
+            Some(resource_group) => resource_group.clone(),
+        };
+
+        let available_workers: BTreeMap<WorkerId, NonZeroUsize> = worker_map
+            .iter()
+            .filter_map(|(worker_id, worker)| {
+                if worker
+                    .resource_group
+                    .as_deref()
+                    .unwrap_or(DEFAULT_RESOURCE_GROUP)
+                    == resource_group.as_str()
+                {
+                    Some((*worker_id, worker.weight))
+                } else {
+                    None
+                }
             })
             .collect();
 
-        let fragment_actor_dispatchers = get_fragment_actor_dispatchers(
-            txn,
-            fragments
-                .keys()
-                .map(|fragment_id| *fragment_id as _)
-                .collect(),
-        )
+        let total_parallelism = available_workers.values().map(|w| w.get()).sum::<usize>();
+
+        let actual_parallelism = match entry_fragment_parallelism
+            .as_ref()
+            .unwrap_or(&job.parallelism)
+        {
+            StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
+                adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
+            }
+            StreamingParallelism::Fixed(n) => *n,
+        }
+        .min(vnode_count)
+        .min(job.max_parallelism as usize);
+
+        tracing::debug!(
+            "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {} fragment_override {:?}",
+            job_id,
+            actual_parallelism,
+            job.parallelism,
+            total_parallelism,
+            job.max_parallelism,
+            vnode_count,
+            entry_fragment_parallelism
+        );
+
+        let assigner = AssignerBuilder::new(job_id).build();
+
+        let actors = (0..actual_parallelism).collect_vec();
+        let vnodes = (0..vnode_count).collect_vec();
+
+        let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
+
+        let source_entry_fragment = entry_fragments.iter().find(|f| {
+            let mask = FragmentTypeMask::from(f.fragment_type_mask);
+            if mask.contains(FragmentTypeFlag::Source) {
+                assert!(!mask.contains(FragmentTypeFlag::SourceScan))
+            }
+            mask.contains(FragmentTypeFlag::Source) && !mask.contains(FragmentTypeFlag::Dml)
+        });
+
+        let (fragment_splits, shared_source_id) = match source_entry_fragment {
+            Some(entry_fragment) => {
+                let source_id = fragment_source_ids
+                    .get(&entry_fragment.fragment_id)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "missing source id in source fragment {}",
+                            entry_fragment.fragment_id
+                        )
+                    })?;
+
+                let entry_fragment_id = entry_fragment.fragment_id;
+
+                let empty_actor_splits: HashMap<_, _> = actors
+                    .iter()
+                    .map(|actor_id| (*actor_id as u32, vec![]))
+                    .collect();
+
+                let splits = fragment_splits
+                    .get(&entry_fragment_id)
+                    .cloned()
+                    .unwrap_or_default();
+
+                let splits: BTreeMap<_, _> = splits.into_iter().map(|s| (s.id(), s)).collect();
+
+                let fragment_splits = crate::stream::source_manager::reassign_splits(
+                    entry_fragment_id as u32,
+                    empty_actor_splits,
+                    &splits,
+                    SplitDiffOptions::default(),
+                )
+                .unwrap_or_default();
+                (fragment_splits, Some(*source_id))
+            }
+            None => (HashMap::new(), None),
+        };
+
+        for component_fragment_id in components {
+            let &fragment::Model {
+                fragment_id,
+                job_id,
+                fragment_type_mask,
+                distribution_type,
+                ref stream_node,
+                ref state_table_ids,
+                ..
+            } = fragment_map.get(component_fragment_id).unwrap();
+
+            let actor_id_base =
+                id_gen.generate_interval::<{ IdCategory::Actor }>(actors.len() as u64) as u32;
+
+            let actors: HashMap<ActorId, InflightActorInfo> = assignment
+                .iter()
+                .flat_map(|(worker_id, actors)| {
+                    actors
+                        .iter()
+                        .map(move |(actor_id, vnodes)| (worker_id, actor_id, vnodes))
+                })
+                .map(|(&worker_id, &actor_idx, vnodes)| {
+                    let vnode_bitmap = match distribution_type {
+                        DistributionType::Single => None,
+                        DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
+                    };
+
+                    let actor_id = actor_id_base + actor_idx as u32;
+
+                    let splits = if let Some(source_id) = fragment_source_ids.get(&fragment_id) {
+                        assert_eq!(shared_source_id, Some(*source_id));
+
+                        fragment_splits
+                            .get(&(actor_idx as u32))
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        vec![]
+                    };
+
+                    (
+                        actor_id,
+                        InflightActorInfo {
+                            worker_id,
+                            vnode_bitmap,
+                            splits,
+                        },
+                    )
+                })
+                .collect();
+
+            let fragment = InflightFragmentInfo {
+                fragment_id: fragment_id as u32,
+                distribution_type,
+                fragment_type_mask: fragment_type_mask.into(),
+                vnode_count,
+                nodes: stream_node.to_protobuf(),
+                actors,
+                state_table_ids: state_table_ids
+                    .inner_ref()
+                    .iter()
+                    .map(|id| catalog::TableId::new(*id as _))
+                    .collect(),
+            };
+
+            let &database_id = streaming_job_databases.get(&job_id).ok_or_else(|| {
+                anyhow!("streaming job {job_id} not found in streaming_job_databases")
+            })?;
+
+            all_fragments
+                .entry(database_id)
+                .or_default()
+                .entry(job_id)
+                .or_default()
+                .insert(fragment_id, fragment);
+        }
+    }
+
+    Ok(all_fragments)
+}
+
+#[cfg(debug_assertions)]
+fn debug_sanity_check(
+    ensembles: &[NoShuffleEnsemble],
+    fragment_map: &HashMap<FragmentId, fragment::Model>,
+    jobs: &HashMap<ObjectId, streaming_job::Model>,
+) {
+    // Debug-only assertions to catch inconsistent ensemble metadata early.
+    debug_assert!(
+        ensembles
+            .iter()
+            .all(|ensemble| ensemble.entries.is_subset(&ensemble.components)),
+        "entries must be subset of components"
+    );
+
+    let mut missing_fragments = BTreeSet::new();
+    let mut missing_jobs = BTreeSet::new();
+
+    for fragment_id in ensembles
+        .iter()
+        .flat_map(|ensemble| ensemble.components.iter())
+    {
+        match fragment_map.get(fragment_id) {
+            Some(fragment) => {
+                if !jobs.contains_key(&fragment.job_id) {
+                    missing_jobs.insert(fragment.job_id);
+                }
+            }
+            None => {
+                missing_fragments.insert(*fragment_id);
+            }
+        }
+    }
+
+    debug_assert!(
+        missing_fragments.is_empty(),
+        "missing fragments in fragment_map: {:?}",
+        missing_fragments
+    );
+
+    debug_assert!(
+        missing_jobs.is_empty(),
+        "missing jobs for fragments' job_id: {:?}",
+        missing_jobs
+    );
+
+    for ensemble in ensembles {
+        let unique_vnode_counts: Vec<_> = ensemble
+            .components
+            .iter()
+            .flat_map(|fragment_id| {
+                fragment_map
+                    .get(fragment_id)
+                    .map(|fragment| fragment.vnode_count)
+            })
+            .unique()
+            .collect();
+
+        debug_assert!(
+            unique_vnode_counts.len() <= 1,
+            "components in ensemble must share same vnode_count: ensemble={:?}, vnode_counts={:?}",
+            ensemble.components,
+            unique_vnode_counts
+        );
+    }
+}
+
+async fn resolve_source_fragments<C>(
+    txn: &C,
+    fragment_map: &HashMap<FragmentId, fragment::Model>,
+) -> MetaResult<(
+    HashMap<FragmentId, SourceId>,
+    HashMap<FragmentId, Vec<SplitImpl>>,
+)>
+where
+    C: ConnectionTrait,
+{
+    let mut source_fragment_ids = HashMap::new();
+    for (fragment_id, fragment) in fragment_map {
+        let mask = FragmentTypeMask::from(fragment.fragment_type_mask);
+        if mask.contains(FragmentTypeFlag::Source)
+            && let Some(source_id) = fragment.stream_node.to_protobuf().find_stream_source()
+        {
+            source_fragment_ids
+                .entry(source_id)
+                .or_insert_with(BTreeSet::new)
+                .insert(fragment_id);
+        }
+
+        if mask.contains(FragmentTypeFlag::SourceScan)
+            && let Some((source_id, _)) = fragment.stream_node.to_protobuf().find_source_backfill()
+        {
+            source_fragment_ids
+                .entry(source_id)
+                .or_insert_with(BTreeSet::new)
+                .insert(fragment_id);
+        }
+    }
+
+    let fragment_source_ids: HashMap<_, _> = source_fragment_ids
+        .iter()
+        .flat_map(|(source_id, fragment_ids)| {
+            fragment_ids
+                .iter()
+                .map(|fragment_id| (**fragment_id, *source_id as SourceId))
+        })
+        .collect();
+
+    let fragment_ids = fragment_source_ids.keys().copied().collect_vec();
+
+    let fragment_splits: Vec<_> = FragmentSplits::find()
+        .filter(fragment_splits::Column::FragmentId.is_in(fragment_ids))
+        .all(txn)
         .await?;
 
-        Ok(RescheduleWorkingSet {
-            fragments,
-            actors,
-            actor_dispatchers: fragment_actor_dispatchers.into_values().flatten().collect(),
-            fragment_downstreams,
-            fragment_upstreams,
-            job_resource_groups,
-            related_jobs,
+    let fragment_splits: HashMap<_, _> = fragment_splits
+        .into_iter()
+        .flat_map(|model| {
+            model.splits.map(|splits| {
+                (
+                    model.fragment_id,
+                    splits
+                        .to_protobuf()
+                        .splits
+                        .iter()
+                        .flat_map(SplitImpl::try_from)
+                        .collect_vec(),
+                )
+            })
         })
+        .collect();
+
+    Ok((fragment_source_ids, fragment_splits))
+}
+
+// Helper struct to make the function signature cleaner and to properly bundle the required data.
+#[derive(Debug)]
+pub struct ActorGraph<'a> {
+    pub fragments: &'a HashMap<FragmentId, (Fragment, Vec<StreamActor>)>,
+    pub locations: &'a HashMap<ActorId, WorkerId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NoShuffleEnsemble {
+    entries: HashSet<FragmentId>,
+    components: HashSet<FragmentId>,
+}
+
+impl NoShuffleEnsemble {
+    pub fn fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.components.iter().cloned()
+    }
+
+    pub fn entry_fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.entries.iter().copied()
+    }
+
+    pub fn component_fragments(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.components.iter().copied()
+    }
+
+    pub fn contains_entry(&self, fragment_id: &FragmentId) -> bool {
+        self.entries.contains(fragment_id)
     }
 }
 
-macro_rules! crit_check_in_loop {
-    ($flag:expr, $condition:expr, $message:expr) => {
-        if !$condition {
-            tracing::error!("Integrity check failed: {}", $message);
-            $flag = true;
+pub async fn find_fragment_no_shuffle_dags_detailed(
+    db: &impl ConnectionTrait,
+    initial_fragment_ids: &[FragmentId],
+) -> MetaResult<Vec<NoShuffleEnsemble>> {
+    let all_no_shuffle_relations: Vec<(_, _)> = FragmentRelation::find()
+        .columns([
+            fragment_relation::Column::SourceFragmentId,
+            fragment_relation::Column::TargetFragmentId,
+        ])
+        .filter(fragment_relation::Column::DispatcherType.eq(DispatcherType::NoShuffle))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    let mut forward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+    let mut backward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+
+    for (src, dst) in all_no_shuffle_relations {
+        forward_edges.entry(src).or_default().push(dst);
+        backward_edges.entry(dst).or_default().push(src);
+    }
+
+    find_no_shuffle_graphs(initial_fragment_ids, &forward_edges, &backward_edges)
+}
+
+fn find_no_shuffle_graphs(
+    initial_fragment_ids: &[FragmentId],
+    forward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
+    backward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
+) -> MetaResult<Vec<NoShuffleEnsemble>> {
+    let mut graphs: Vec<NoShuffleEnsemble> = Vec::new();
+    let mut globally_visited: HashSet<FragmentId> = HashSet::new();
+
+    for &init_id in initial_fragment_ids {
+        if globally_visited.contains(&init_id) {
             continue;
         }
-    };
-}
 
-impl CatalogController {
-    pub async fn integrity_check(&self) -> MetaResult<()> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-        Self::graph_check(&txn).await
+        // Found a new component. Traverse it to find all its nodes.
+        let mut components = HashSet::new();
+        let mut queue: VecDeque<FragmentId> = VecDeque::new();
+
+        queue.push_back(init_id);
+        globally_visited.insert(init_id);
+
+        while let Some(current_id) = queue.pop_front() {
+            components.insert(current_id);
+            let neighbors = forward_edges
+                .get(&current_id)
+                .into_iter()
+                .flatten()
+                .chain(backward_edges.get(&current_id).into_iter().flatten());
+
+            for &neighbor_id in neighbors {
+                if globally_visited.insert(neighbor_id) {
+                    queue.push_back(neighbor_id);
+                }
+            }
+        }
+
+        // For the newly found component, identify its roots.
+        let mut entries = HashSet::new();
+        for &node_id in &components {
+            let is_root = match backward_edges.get(&node_id) {
+                Some(parents) => parents.iter().all(|p| !components.contains(p)),
+                None => true,
+            };
+            if is_root {
+                entries.insert(node_id);
+            }
+        }
+
+        // Store the detailed DAG structure (roots, all nodes in this DAG).
+        if !entries.is_empty() {
+            graphs.push(NoShuffleEnsemble {
+                entries,
+                components,
+            });
+        }
     }
 
-    // Perform integrity checks on the Actor, ActorDispatcher and Fragment tables.
-    pub async fn graph_check<C>(txn: &C) -> MetaResult<()>
-    where
-        C: ConnectionTrait,
-    {
-        #[derive(Clone, DerivePartialModel, FromQueryResult)]
-        #[sea_orm(entity = "Fragment")]
-        pub struct PartialFragment {
-            pub fragment_id: FragmentId,
-            pub distribution_type: DistributionType,
-            pub vnode_count: i32,
+    Ok(graphs)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use super::*;
+
+    // Helper type aliases for cleaner test code
+    // Using the actual FragmentId type from the module
+    type Edges = (
+        HashMap<FragmentId, Vec<FragmentId>>,
+        HashMap<FragmentId, Vec<FragmentId>>,
+    );
+
+    /// A helper function to build forward and backward edge maps from a simple list of tuples.
+    /// This reduces boilerplate in each test.
+    fn build_edges(relations: &[(FragmentId, FragmentId)]) -> Edges {
+        let mut forward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+        let mut backward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
+        for &(src, dst) in relations {
+            forward_edges.entry(src).or_default().push(dst);
+            backward_edges.entry(dst).or_default().push(src);
         }
+        (forward_edges, backward_edges)
+    }
 
-        #[derive(Clone, DerivePartialModel, FromQueryResult)]
-        #[sea_orm(entity = "Actor")]
-        pub struct PartialActor {
-            pub actor_id: risingwave_meta_model::ActorId,
-            pub fragment_id: FragmentId,
-            pub status: ActorStatus,
-            pub splits: Option<ConnectorSplits>,
-            pub vnode_bitmap: Option<VnodeBitmap>,
-        }
+    /// Helper function to create a `HashSet` from a slice easily.
+    fn to_hashset(ids: &[FragmentId]) -> HashSet<FragmentId> {
+        ids.iter().cloned().collect()
+    }
 
-        let mut flag = false;
+    #[test]
+    fn test_single_linear_chain() {
+        // Scenario: A simple linear graph 1 -> 2 -> 3.
+        // We start from the middle node (2).
+        let (forward, backward) = build_edges(&[(1, 2), (2, 3)]);
+        let initial_ids = &[2];
 
-        let fragments: Vec<PartialFragment> =
-            Fragment::find().into_partial_model().all(txn).await?;
+        // Act
+        let result = find_no_shuffle_graphs(initial_ids, &forward, &backward);
 
-        let fragment_map: HashMap<_, _> = fragments
-            .into_iter()
-            .map(|fragment| (fragment.fragment_id, fragment))
-            .collect();
+        // Assert
+        assert!(result.is_ok());
+        let graphs = result.unwrap();
 
-        let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(txn).await?;
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[1]));
+        assert_eq!(graph.components, to_hashset(&[1, 2, 3]));
+    }
 
-        let mut fragment_actors = HashMap::new();
-        for actor in &actors {
-            fragment_actors
-                .entry(actor.fragment_id)
-                .or_insert(HashSet::new())
-                .insert(actor.actor_id);
-        }
+    #[test]
+    fn test_two_disconnected_graphs() {
+        // Scenario: Two separate graphs: 1->2 and 10->11.
+        // We start with one node from each graph.
+        let (forward, backward) = build_edges(&[(1, 2), (10, 11)]);
+        let initial_ids = &[2, 10];
 
-        let actor_map: HashMap<_, _> = actors
-            .into_iter()
-            .map(|actor| (actor.actor_id, actor))
-            .collect();
+        // Act
+        let mut graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
 
-        for (fragment_id, actor_ids) in &fragment_actors {
-            crit_check_in_loop!(
-                flag,
-                fragment_map.contains_key(fragment_id),
-                format!("Fragment {fragment_id} has actors {actor_ids:?} which does not exist",)
-            );
+        // Assert
+        assert_eq!(graphs.len(), 2);
 
-            let mut split_map = HashMap::new();
-            for actor_id in actor_ids {
-                let actor = &actor_map[actor_id];
+        // Sort results to make the test deterministic, as HashMap iteration order is not guaranteed.
+        graphs.sort_by_key(|g| *g.components.iter().min().unwrap_or(&0));
 
-                if let Some(splits) = &actor.splits {
-                    for split in splits.to_protobuf().splits {
-                        let Ok(split_impl) = SplitImpl::try_from(&split) else {
-                            continue;
-                        };
+        // Graph 1
+        assert_eq!(graphs[0].entries, to_hashset(&[1]));
+        assert_eq!(graphs[0].components, to_hashset(&[1, 2]));
 
-                        let dup_split_actor = split_map.insert(split_impl.id(), actor_id);
-                        crit_check_in_loop!(
-                            flag,
-                            dup_split_actor.is_none(),
-                            format!(
-                                "Fragment {fragment_id} actor {actor_id} has duplicate split {split:?} from actor {dup_split_actor:?}",
-                            )
-                        );
-                    }
-                }
-            }
+        // Graph 2
+        assert_eq!(graphs[1].entries, to_hashset(&[10]));
+        assert_eq!(graphs[1].components, to_hashset(&[10, 11]));
+    }
 
-            let fragment = &fragment_map[fragment_id];
+    #[test]
+    fn test_multiple_entries_in_one_graph() {
+        // Scenario: A graph with two roots feeding into one node: 1->3, 2->3.
+        let (forward, backward) = build_edges(&[(1, 3), (2, 3)]);
+        let initial_ids = &[3];
 
-            match fragment.distribution_type {
-                DistributionType::Single => {
-                    crit_check_in_loop!(
-                        flag,
-                        actor_ids.len() == 1,
-                        format!(
-                            "Fragment {fragment_id} has more than one actors {actor_ids:?} for single distribution type",
-                        )
-                    );
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
 
-                    let actor_id = actor_ids.iter().exactly_one().unwrap();
-                    let actor = &actor_map[actor_id];
+        // Assert
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[1, 2]));
+        assert_eq!(graph.components, to_hashset(&[1, 2, 3]));
+    }
 
-                    crit_check_in_loop!(
-                        flag,
-                        actor.vnode_bitmap.is_none(),
-                        format!(
-                            "Fragment {fragment_id} actor {actor_id} has vnode_bitmap set for single distribution type",
-                        )
-                    );
-                }
-                DistributionType::Hash => {
-                    crit_check_in_loop!(
-                        flag,
-                        !actor_ids.is_empty(),
-                        format!(
-                            "Fragment {fragment_id} has less than one actors {actor_ids:?} for hash distribution type",
-                        )
-                    );
+    #[test]
+    fn test_diamond_shape_graph() {
+        // Scenario: A diamond shape: 1->2, 1->3, 2->4, 3->4
+        let (forward, backward) = build_edges(&[(1, 2), (1, 3), (2, 4), (3, 4)]);
+        let initial_ids = &[4];
 
-                    let fragment_vnode_count = fragment.vnode_count as usize;
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
 
-                    let mut result_bitmap = Bitmap::zeros(fragment_vnode_count);
+        // Assert
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[1]));
+        assert_eq!(graph.components, to_hashset(&[1, 2, 3, 4]));
+    }
 
-                    for actor_id in actor_ids {
-                        let actor = &actor_map[actor_id];
+    #[test]
+    fn test_starting_with_multiple_nodes_in_same_graph() {
+        // Scenario: Start with two different nodes (2 and 4) from the same component.
+        // Should only identify one graph, not two.
+        let (forward, backward) = build_edges(&[(1, 2), (2, 3), (3, 4)]);
+        let initial_ids = &[2, 4];
 
-                        crit_check_in_loop!(
-                            flag,
-                            actor.vnode_bitmap.is_some(),
-                            format!(
-                                "Fragment {fragment_id} actor {actor_id} has no vnode_bitmap set for hash distribution type",
-                            )
-                        );
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
 
-                        let bitmap =
-                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap().to_protobuf());
+        // Assert
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[1]));
+        assert_eq!(graph.components, to_hashset(&[1, 2, 3, 4]));
+    }
 
-                        crit_check_in_loop!(
-                            flag,
-                            result_bitmap.clone().bitand(&bitmap).count_ones() == 0,
-                            format!(
-                                "Fragment {fragment_id} actor {actor_id} has duplicate vnode_bitmap with other actor for hash distribution type, actor bitmap {bitmap:?}, other all bitmap {result_bitmap:?}",
-                            )
-                        );
+    #[test]
+    fn test_empty_initial_ids() {
+        // Scenario: The initial ID list is empty.
+        let (forward, backward) = build_edges(&[(1, 2)]);
+        let initial_ids = &[];
 
-                        result_bitmap.bitor_assign(&bitmap);
-                    }
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
 
-                    crit_check_in_loop!(
-                        flag,
-                        result_bitmap.all(),
-                        format!(
-                            "Fragment {fragment_id} has incomplete vnode_bitmap for hash distribution type",
-                        )
-                    );
+        // Assert
+        assert!(graphs.is_empty());
+    }
 
-                    let discovered_vnode_count = result_bitmap.count_ones();
+    #[test]
+    fn test_isolated_node_as_input() {
+        // Scenario: Start with an ID that has no relations.
+        let (forward, backward) = build_edges(&[(1, 2)]);
+        let initial_ids = &[100];
 
-                    crit_check_in_loop!(
-                        flag,
-                        discovered_vnode_count == fragment_vnode_count,
-                        format!(
-                            "Fragment {fragment_id} has different vnode_count {fragment_vnode_count} with discovered vnode count {discovered_vnode_count} for hash distribution type",
-                        )
-                    );
-                }
-            }
-        }
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
 
-        for PartialActor {
-            actor_id, status, ..
-        } in actor_map.values()
-        {
-            crit_check_in_loop!(
-                flag,
-                *status == ActorStatus::Running,
-                format!("Actor {actor_id} has status {status:?} which is not Running",)
-            );
-        }
+        // Assert
+        assert_eq!(graphs.len(), 1);
+        let graph = &graphs[0];
+        assert_eq!(graph.entries, to_hashset(&[100]));
+        assert_eq!(graph.components, to_hashset(&[100]));
+    }
 
-        if flag {
-            return Err(MetaError::integrity_check_failed());
-        }
+    #[test]
+    fn test_graph_with_a_cycle() {
+        // Scenario: A graph with a cycle: 1 -> 2 -> 3 -> 1.
+        // The algorithm should correctly identify all nodes in the component.
+        // Crucially, NO node is a root because every node has a parent *within the component*.
+        // Therefore, the `entries` set should be empty, and the graph should not be included in the results.
+        let (forward, backward) = build_edges(&[(1, 2), (2, 3), (3, 1)]);
+        let initial_ids = &[2];
 
-        Ok(())
+        // Act
+        let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert!(
+            graphs.is_empty(),
+            "A graph with no entries should not be returned"
+        );
+    }
+    #[test]
+    fn test_custom_complex() {
+        let (forward, backward) = build_edges(&[(1, 3), (1, 8), (2, 3), (4, 3), (3, 5), (6, 7)]);
+        let initial_ids = &[1, 2, 4, 6];
+
+        // Act
+        let mut graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
+
+        // Assert
+        assert_eq!(graphs.len(), 2);
+        // Sort results to make the test deterministic, as HashMap iteration order is not guaranteed.
+        graphs.sort_by_key(|g| *g.components.iter().min().unwrap_or(&0));
+
+        // Graph 1
+        assert_eq!(graphs[0].entries, to_hashset(&[1, 2, 4]));
+        assert_eq!(graphs[0].components, to_hashset(&[1, 2, 3, 4, 5, 8]));
+
+        // Graph 2
+        assert_eq!(graphs[1].entries, to_hashset(&[6]));
+        assert_eq!(graphs[1].components, to_hashset(&[6, 7]));
     }
 }

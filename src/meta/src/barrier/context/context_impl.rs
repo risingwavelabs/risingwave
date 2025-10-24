@@ -296,11 +296,6 @@ impl CommandContext {
             }) => {
                 barrier_manager_context
                     .metadata_manager
-                    .update_actor_splits_by_split_assignment(assignment)
-                    .await?;
-
-                barrier_manager_context
-                    .metadata_manager
                     .update_fragment_splits(assignment)
                     .await?;
             }
@@ -388,7 +383,6 @@ impl CommandContext {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     ..
                 } = info;
                 let new_sink_downstream =
@@ -408,9 +402,7 @@ impl CommandContext {
                     .catalog_controller
                     .post_collect_job_fragments(
                         stream_job_fragments.stream_job_id().table_id as _,
-                        stream_job_fragments.actor_ids(),
                         upstream_fragment_downstreams,
-                        init_split_assignment,
                         new_sink_downstream,
                     )
                     .await?;
@@ -430,14 +422,10 @@ impl CommandContext {
                     .update_fragment_splits(&info.init_split_assignment)
                     .await?;
             }
-            Command::RescheduleFragment {
-                reschedules,
-                post_updates,
-                ..
-            } => {
+            Command::RescheduleFragment { reschedules, .. } => {
                 barrier_manager_context
                     .scale_controller
-                    .post_apply_reschedule(reschedules, post_updates)
+                    .post_apply_reschedule(reschedules)
                     .await?;
 
                 let fragment_splits = reschedules
@@ -470,9 +458,7 @@ impl CommandContext {
                     .catalog_controller
                     .post_collect_job_fragments(
                         new_fragments.stream_job_id.table_id as _,
-                        new_fragments.actor_ids(),
                         upstream_fragment_downstreams,
-                        init_split_assignment,
                         None,
                     )
                     .await?;
@@ -484,9 +470,7 @@ impl CommandContext {
                             .catalog_controller
                             .post_collect_job_fragments(
                                 sink.tmp_sink_id,
-                                sink.actor_status.keys().cloned().collect(),
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
-                                &Default::default(), // no split assignment
                                 None, // no replace plan
                             )
                             .await?;
