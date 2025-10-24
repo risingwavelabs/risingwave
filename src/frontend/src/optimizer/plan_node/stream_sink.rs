@@ -21,7 +21,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, CreateType, FieldLike};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
@@ -31,6 +30,7 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
+use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::stream_plan::SinkLogStoreType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -258,7 +258,8 @@ impl StreamSink {
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let derived_pk = pk.iter().map(|k| k.column_index).collect_vec();
 
-        let mut downstream_pk = {
+        // Get downstream pk from user input, override and perform some checks if applicable.
+        let downstream_pk = {
             let downstream_pk = properties
                 .get(DOWNSTREAM_PK_KEY)
                 .map(|v| Self::parse_downstream_pk(v, &columns))
@@ -299,10 +300,30 @@ impl StreamSink {
                 && downstream_pk.is_none()
             {
                 Some(derived_pk.clone())
+            } else if properties.is_iceberg_connector()
+                && sink_type == SinkType::Upsert
+                && downstream_pk.is_none()
+            {
+                // If user doesn't specify the downstream primary key, we use the stream key as the pk.
+                Some(derived_pk.clone())
             } else {
                 downstream_pk
             }
         };
+
+        // Since we've already rejected empty pk in `parse_downstream_pk`, if we still get an empty pk here,
+        // it's likely that the derived stream key is used and it's empty, which is possible in cases of
+        // operators outputting at most one row (like `SimpleAgg`). This is legitimate. However, currently
+        // the sink implementation may confuse empty pk with not specifying pk, so we still reject this case
+        // for correctness.
+        if let Some(pk) = &downstream_pk
+            && pk.is_empty()
+        {
+            bail_invalid_input_syntax!(
+                "Empty primary key is not supported. \
+                 Please specify the primary key in WITH options."
+            )
+        }
 
         // The "upsert" property is defined based on a specific stream key: columns other than the stream key
         // might not be valid. We should reject the cases referencing such columns in primary key.
@@ -354,10 +375,6 @@ impl StreamSink {
                         RequiredDist::hash_shard(downstream_pk)
                     }
                     Some(s) if s == ICEBERG_SINK => {
-                        // If user doesn't specify the downstream primary key, we use the stream key as the pk.
-                        if sink_type.is_upsert() && downstream_pk.is_none() {
-                            downstream_pk = Some(derived_pk);
-                        }
                         let (required_dist, new_input, partition_col_idx) =
                             Self::derive_iceberg_sink_distribution(
                                 input,
