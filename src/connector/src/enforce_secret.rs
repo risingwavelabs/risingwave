@@ -46,4 +46,10 @@ pub trait EnforceSecret {
         }
         Ok(())
     }
+
+    fn allow_display_props<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Vec<bool> {
+        prop_iter
+            .map(|prop| Self::enforce_one(prop).is_ok())
+            .collect()
+    }
 }
