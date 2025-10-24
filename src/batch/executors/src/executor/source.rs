@@ -154,6 +154,7 @@ impl SourceExecutor {
             },
             ConnectorProperties::default(),
             None,
+            None,
         ));
         let (stream, _) = self
             .source
