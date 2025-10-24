@@ -316,6 +316,11 @@ pub fn start_iceberg_compactor(
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
 
+        // Track last logged state to avoid duplicate logs
+        let mut last_logged_state: Option<(u32, bool, u32)> = None;
+        let mut last_heartbeat_log = Instant::now();
+        const HEARTBEAT_LOG_INTERVAL: Duration = Duration::from_secs(60);
+
         // This outer loop is to recreate stream.
         'start_stream: loop {
             // reset state
@@ -396,11 +401,23 @@ pub fn start_iceberg_compactor(
                             }
                         }
 
-                        // tracing::info!(
-                        //     running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
-                        //     pull_task_ack = %pull_task_ack,
-                        //     pending_pull_task_count = %pending_pull_task_count
-                        // );
+                        let running_count = running_task_parallelism.load(Ordering::SeqCst);
+                        let current_state = (running_count, pull_task_ack, pending_pull_task_count);
+
+                        // Log only when state changes or periodically as heartbeat
+                        let should_log = last_logged_state.as_ref() != Some(&current_state)
+                            || last_heartbeat_log.elapsed() >= HEARTBEAT_LOG_INTERVAL;
+
+                        if should_log {
+                            tracing::info!(
+                                running_parallelism_count = %running_count,
+                                pull_task_ack = %pull_task_ack,
+                                pending_pull_task_count = %pending_pull_task_count,
+                                "Iceberg compactor periodic pull task",
+                            );
+                            last_logged_state = Some(current_state);
+                            last_heartbeat_log = Instant::now();
+                        }
 
                         continue;
                     }
@@ -584,6 +601,11 @@ pub fn start_compactor(
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
 
+        // Track last logged state to avoid duplicate logs
+        let mut last_logged_state: Option<(u32, bool, u32)> = None;
+        let mut last_heartbeat_log = Instant::now();
+        const HEARTBEAT_LOG_INTERVAL: Duration = Duration::from_secs(60);
+
         // This outer loop is to recreate stream.
         'start_stream: loop {
             // reset state
@@ -682,11 +704,22 @@ pub fn start_compactor(
                             }
                         }
 
-                        tracing::info!(
-                            running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
-                            pull_task_ack = %pull_task_ack,
-                            pending_pull_task_count = %pending_pull_task_count
-                        );
+                        let running_count = running_task_parallelism.load(Ordering::SeqCst);
+                        let current_state = (running_count, pull_task_ack, pending_pull_task_count);
+
+                        // Log only when state changes or periodically as heartbeat
+                        let should_log = last_logged_state.as_ref() != Some(&current_state)
+                            || last_heartbeat_log.elapsed() >= HEARTBEAT_LOG_INTERVAL;
+
+                        if should_log {
+                            tracing::info!(
+                                running_parallelism_count = %running_count,
+                                pull_task_ack = %pull_task_ack,
+                                pending_pull_task_count = %pending_pull_task_count
+                            );
+                            last_logged_state = Some(current_state);
+                            last_heartbeat_log = Instant::now();
+                        }
 
                         continue;
                     }
