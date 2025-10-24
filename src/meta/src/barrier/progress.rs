@@ -33,12 +33,13 @@ use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments
 use crate::stream::{SourceChange, SourceManagerRef};
 
 type ConsumedRows = u64;
+type BufferedRows = u64;
 
 #[derive(Clone, Copy, Debug)]
 enum BackfillState {
     Init,
-    ConsumingUpstream(#[expect(dead_code)] Epoch, ConsumedRows),
-    Done(ConsumedRows),
+    ConsumingUpstream(#[expect(dead_code)] Epoch, ConsumedRows, BufferedRows),
+    Done(ConsumedRows, BufferedRows),
 }
 
 /// Represents the backfill nodes that need to be scheduled or cleaned up.
@@ -70,6 +71,9 @@ pub(super) struct Progress {
     upstream_mvs_total_key_count: u64,
     mv_backfill_consumed_rows: u64,
     source_backfill_consumed_rows: u64,
+    /// Buffered rows (for locality backfill) that are yet to be consumed
+    /// This is used to calculate precise progress: consumed / (`upstream_total` + buffered)
+    mv_backfill_buffered_rows: u64,
 
     /// DDL definition
     definition: String,
@@ -103,6 +107,7 @@ impl Progress {
             upstream_mvs_total_key_count: upstream_total_key_count,
             mv_backfill_consumed_rows: 0,
             source_backfill_consumed_rows: 0,
+            mv_backfill_buffered_rows: 0,
             definition,
             create_type,
             backfill_order_state,
@@ -121,25 +126,29 @@ impl Progress {
         self.upstream_mvs_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
         let backfill_upstream_type = self.backfill_upstream_types.get(&actor).unwrap();
-        tracing::debug!(?actor, states = ?self.states, "update progress for actor");
 
-        let mut old = 0;
-        let mut new = 0;
+        let mut old_consumed_row = 0;
+        let mut new_consumed_row = 0;
+        let mut old_buffered_row = 0;
+        let mut new_buffered_row = 0;
         match self.states.remove(&actor).unwrap() {
             BackfillState::Init => {}
-            BackfillState::ConsumingUpstream(_, old_consumed_rows) => {
-                old = old_consumed_rows;
+            BackfillState::ConsumingUpstream(_, consumed_rows, buffered_rows) => {
+                old_consumed_row = consumed_rows;
+                old_buffered_row = buffered_rows;
             }
-            BackfillState::Done(_) => panic!("should not report done multiple times"),
+            BackfillState::Done(_, _) => panic!("should not report done multiple times"),
         };
         match &new_state {
             BackfillState::Init => {}
-            BackfillState::ConsumingUpstream(_, new_consumed_rows) => {
-                new = *new_consumed_rows;
+            BackfillState::ConsumingUpstream(_, consumed_rows, buffered_rows) => {
+                new_consumed_row = *consumed_rows;
+                new_buffered_row = *buffered_rows;
             }
-            BackfillState::Done(new_consumed_rows) => {
+            BackfillState::Done(consumed_rows, buffered_rows) => {
                 tracing::debug!("actor {} done", actor);
-                new = *new_consumed_rows;
+                new_consumed_row = *consumed_rows;
+                new_buffered_row = *buffered_rows;
                 self.done_count += 1;
                 let before_backfill_nodes = self
                     .backfill_order_state
@@ -168,20 +177,29 @@ impl Progress {
                 );
             }
         };
-        debug_assert!(new >= old, "backfill progress should not go backward");
+        debug_assert!(
+            new_consumed_row >= old_consumed_row,
+            "backfill progress should not go backward"
+        );
+        debug_assert!(
+            new_buffered_row >= old_buffered_row,
+            "backfill progress should not go backward"
+        );
         match backfill_upstream_type {
             BackfillUpstreamType::MView => {
-                self.mv_backfill_consumed_rows += new - old;
+                self.mv_backfill_consumed_rows += new_consumed_row - old_consumed_row;
             }
             BackfillUpstreamType::Source => {
-                self.source_backfill_consumed_rows += new - old;
+                self.source_backfill_consumed_rows += new_consumed_row - old_consumed_row;
             }
             BackfillUpstreamType::Values => {
                 // do not consider progress for values
             }
             BackfillUpstreamType::LocalityProvider => {
                 // Track LocalityProvider progress similar to MView
-                self.mv_backfill_consumed_rows += new - old;
+                // Update buffered rows for precise progress calculation
+                self.mv_backfill_consumed_rows += new_consumed_row - old_consumed_row;
+                self.mv_backfill_buffered_rows += new_buffered_row - old_buffered_row;
             }
         }
         self.states.insert(actor, new_state);
@@ -222,11 +240,15 @@ impl Progress {
         }
 
         let mv_progress = (mv_count > 0).then_some({
-            if self.upstream_mvs_total_key_count == 0 {
+            // Include buffered rows in total for precise progress calculation
+            // Progress = consumed / (upstream_total + buffered)
+            let total_rows_to_consume =
+                self.upstream_mvs_total_key_count + self.mv_backfill_buffered_rows;
+            if total_rows_to_consume == 0 {
                 "99.99%".to_owned()
             } else {
-                let mut progress = self.mv_backfill_consumed_rows as f64
-                    / (self.upstream_mvs_total_key_count as f64);
+                let mut progress =
+                    self.mv_backfill_consumed_rows as f64 / (total_rows_to_consume as f64);
                 if progress > 1.0 {
                     progress = 0.9999;
                 }
@@ -234,7 +256,7 @@ impl Progress {
                     "{:.2}% ({}/{})",
                     progress * 100.0,
                     self.mv_backfill_consumed_rows,
-                    self.upstream_mvs_total_key_count
+                    total_rows_to_consume
                 )
             }
         });
@@ -385,7 +407,7 @@ impl CreateMviewProgressTracker {
             let actors = table_fragments.tracking_progress_actor_ids();
             for (actor, backfill_upstream_type) in actors {
                 actor_map.insert(actor, creating_table_id);
-                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
+                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
                 backfill_upstream_types.insert(actor, backfill_upstream_type);
             }
             let source_backfill_fragments = table_fragments.source_backfill_fragments();
@@ -441,6 +463,7 @@ impl CreateMviewProgressTracker {
             upstream_mvs_total_key_count,
             mv_backfill_consumed_rows: 0, // Fill only after first barrier pass
             source_backfill_consumed_rows: 0, // Fill only after first barrier pass
+            mv_backfill_buffered_rows: 0, // Fill only after first barrier pass
             definition,
             create_type: CreateType::Background,
         }
@@ -687,22 +710,26 @@ impl CreateMviewProgressTracker {
         };
 
         let new_state = if progress.done {
-            BackfillState::Done(progress.consumed_rows)
+            BackfillState::Done(progress.consumed_rows, progress.buffered_rows)
         } else {
-            BackfillState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
+            BackfillState::ConsumingUpstream(
+                progress.consumed_epoch.into(),
+                progress.consumed_rows,
+                progress.buffered_rows,
+            )
         };
 
         match self.progress_map.entry(table_id) {
             Entry::Occupied(mut o) => {
-                let progress = &mut o.get_mut().0;
+                let progress_state = &mut o.get_mut().0;
 
                 let upstream_total_key_count: u64 =
-                    calculate_total_key_count(&progress.upstream_mv_count, version_stats);
+                    calculate_total_key_count(&progress_state.upstream_mv_count, version_stats);
 
                 tracing::debug!(?table_id, "updating progress for table");
-                let pending = progress.update(actor, new_state, upstream_total_key_count);
+                let pending = progress_state.update(actor, new_state, upstream_total_key_count);
 
-                if progress.is_done() {
+                if progress_state.is_done() {
                     tracing::debug!(
                         "all actors done for creating mview with table_id {}!",
                         table_id

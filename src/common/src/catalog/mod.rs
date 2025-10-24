@@ -253,6 +253,10 @@ impl TableId {
     pub fn table_id(&self) -> u32 {
         self.table_id
     }
+
+    pub fn is_placeholder(&self) -> bool {
+        self.table_id == OBJECT_ID_PLACEHOLDER
+    }
 }
 
 impl From<u32> for TableId {

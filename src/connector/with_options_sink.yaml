@@ -578,9 +578,9 @@ IcebergConfig:
     default: Default::default
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, default is 10.
+    comments: Commit every n(>0) checkpoints, default is 60.
     required: false
-    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
     allow_alter_on_fly: true
   - name: create_table_if_not_exists
     field_type: bool
@@ -588,9 +588,9 @@ IcebergConfig:
     default: Default::default
   - name: is_exactly_once
     field_type: bool
-    comments: Whether it is `exactly_once`, the default is not.
+    comments: Whether it is `exactly_once`, the default is true.
     required: false
-    default: Default::default
+    default: Some (true)
   - name: commit_retry_num
     field_type: u32
     required: false

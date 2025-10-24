@@ -15,7 +15,6 @@
 use std::ops::Deref;
 
 use iceberg::table::Table;
-use jsonbb::{Value, ValueRef};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::error::ConnectorResult;
@@ -75,14 +74,9 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
                             snapshot.timestamp()?.timestamp_millis(),
                         ),
                         manifest_list: snapshot.manifest_list().to_owned(),
-                        summary: Value::object(
-                            snapshot
-                                .summary()
-                                .additional_properties
-                                .iter()
-                                .map(|(k, v)| (k.as_str(), ValueRef::String(v))),
-                        )
-                        .into(),
+                        summary: jsonbb::to_value(&snapshot.summary().additional_properties)
+                            .unwrap()
+                            .into(),
                     })
                 })
                 .collect();

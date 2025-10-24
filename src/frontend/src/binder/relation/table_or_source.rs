@@ -174,6 +174,16 @@ impl Binder {
                             .get_view_by_name(&db_name, schema_path, table_name)
                     {
                         self.resolve_view_relation(&view_catalog.clone())?
+                    } else if let Some(table_catalog) =
+                        self.staging_catalog_manager.get_table(table_name)
+                    {
+                        // don't care about the database and schema
+                        self.resolve_table_relation(
+                            table_catalog.clone().into(),
+                            &db_name,
+                            schema_name,
+                            as_of,
+                        )?
                     } else {
                         return Err(CatalogError::NotFound(
                             "table or source",
@@ -239,6 +249,16 @@ impl Binder {
                                     schema.get_view_by_name(table_name)
                                 {
                                     return self.resolve_view_relation(&view_catalog.clone());
+                                } else if let Some(table_catalog) =
+                                    self.staging_catalog_manager.get_table(table_name)
+                                {
+                                    // don't care about the database and schema
+                                    return self.resolve_table_relation(
+                                        table_catalog.clone().into(),
+                                        &db_name,
+                                        schema_name,
+                                        as_of,
+                                    );
                                 }
                             }
                         }
@@ -447,7 +467,7 @@ impl Binder {
     ) -> Result<Vec<Arc<IndexCatalog>>> {
         let schema = self.catalog.get_schema_by_name(db_name, schema_name)?;
         assert!(
-            schema.get_table_by_id(&table_id).is_some(),
+            schema.get_table_by_id(&table_id).is_some() || table_id.is_placeholder(),
             "table {table_id} not found in {db_name}.{schema_name}"
         );
 

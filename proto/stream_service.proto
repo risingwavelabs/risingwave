@@ -52,6 +52,8 @@ message BarrierCompleteResponse {
     // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
     uint64 pending_epoch_lag = 5;
+    // Buffered rows that are yet to be consumed (used by locality backfill to report precise progress)
+    uint64 buffered_rows = 6;
   }
   message CdcTableBackfillProgress {
     uint32 actor_id = 1;

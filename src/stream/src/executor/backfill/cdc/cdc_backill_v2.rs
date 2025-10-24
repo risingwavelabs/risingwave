@@ -495,7 +495,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     ) && filtered_chunk.cardinality() > 0
                                     {
                                         // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(filtered_chunk.compact());
+                                        upstream_chunk_buffer.push(filtered_chunk.compact_vis());
                                     }
                                 }
                                 Message::Watermark(_) => {
@@ -820,7 +820,7 @@ mod tests {
 
         let bound = Some((OwnedRow::new(vec![None]), OwnedRow::new(vec![None])));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
-        assert_eq!(c.unwrap().compact(), chunk);
+        assert_eq!(c.unwrap().compact_vis(), chunk);
 
         let bound = Some((
             OwnedRow::new(vec![None]),
@@ -828,7 +828,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              + 1 6
@@ -842,7 +842,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
             U- 3 7
@@ -856,7 +856,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              - 2 .
@@ -871,7 +871,7 @@ mod tests {
 
         let bound = Some((OwnedRow::new(vec![None]), OwnedRow::new(vec![None])));
         let c = filter_stream_chunk(chunk.clone(), &bound, 1);
-        assert_eq!(c.unwrap().compact(), chunk);
+        assert_eq!(c.unwrap().compact_vis(), chunk);
 
         let bound = Some((
             OwnedRow::new(vec![None]),
@@ -879,7 +879,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 1);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              + 1 6
@@ -894,7 +894,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk, &bound, 1);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
             U- 3 7",
