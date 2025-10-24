@@ -577,19 +577,22 @@ pub fn gamma_f64(input: F64) -> Result<F64> {
 ///
 /// statement error
 /// SELECT lgamma('-1'::float8);
-/// 
+///
 /// query R
 /// SELECT lgamma('-1000.5'::float8);
 /// ----
 /// -5914.437701116853
-/// 
+///
 /// statement error
 /// SELECT gamma('0'::float8);
-/// 
+///
 /// query R
 /// SELECT lgamma('1000'::float8);
 /// ----
 /// 5905.220423209181
+///
+/// statement error
+/// SELECT gamma('1e308'::float8);
 /// ```
 #[function("lgamma(float8) -> float8")]
 pub fn lgamma_f64(input: F64) -> Result<F64> {
