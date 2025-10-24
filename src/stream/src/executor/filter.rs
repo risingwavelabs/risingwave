@@ -179,7 +179,7 @@ impl<const UPSERT: bool> FilterExecutorInner<UPSERT> {
             match msg {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
 
                     let pred_output = self.expr.eval_infallible(chunk.data_chunk()).await;
 

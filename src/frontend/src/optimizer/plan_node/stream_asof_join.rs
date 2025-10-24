@@ -162,7 +162,7 @@ impl StreamAsOfJoin {
             internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
         });
 
-        internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
+        internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
 
         (
             internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),

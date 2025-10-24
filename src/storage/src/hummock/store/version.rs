@@ -22,6 +22,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -67,7 +68,7 @@ use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
 use crate::store::{
-    OnNearestItemFn, ReadLogOptions, ReadOptions, Vector, VectorNearestOptions, gen_min_epoch,
+    OnNearestItemFn, ReadLogOptions, ReadOptions, VectorNearestOptions, gen_min_epoch,
 };
 use crate::vector::hnsw::nearest;
 use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
@@ -588,14 +589,14 @@ impl HummockVersionReader {
 const SLOW_ITER_FETCH_META_DURATION_SECOND: f64 = 5.0;
 
 impl HummockVersionReader {
-    pub async fn get<O>(
-        &self,
+    pub async fn get<'a, O>(
+        &'a self,
         table_key: TableKey<Bytes>,
         epoch: u64,
         table_id: TableId,
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
-        on_key_value_fn: impl crate::store::KeyValueFn<O>,
+        on_key_value_fn: impl crate::store::KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
 
@@ -1201,13 +1202,13 @@ impl HummockVersionReader {
         .await
     }
 
-    pub async fn nearest<M: MeasureDistanceBuilder, O: Send>(
-        &self,
+    pub async fn nearest<'a, M: MeasureDistanceBuilder, O: Send>(
+        &'a self,
         version: PinnedVersion,
         table_id: TableId,
-        target: Vector,
+        target: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> HummockResult<Vec<O>> {
         let Some(index) = version.vector_indexes.get(&table_id) else {
             return Ok(vec![]);
@@ -1221,7 +1222,7 @@ impl HummockVersionReader {
         }
         match &index.inner {
             VectorIndexImpl::Flat(flat) => {
-                let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
+                let mut builder = NearestBuilder::<'_, O, M>::new(target, options.top_n);
                 for vector_file in &flat.vector_store_info.vector_files {
                     let meta = self.sstable_store.get_vector_file_meta(vector_file).await?;
                     for (i, block_meta) in meta.block_metas.iter().enumerate() {
@@ -1246,7 +1247,7 @@ impl HummockVersionReader {
                 let (items, _stats) = nearest::<O, M>(
                     &vector_store,
                     &*graph,
-                    target.to_ref(),
+                    target,
                     on_nearest_item_fn,
                     options.hnsw_ef_search,
                     options.top_n,

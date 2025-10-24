@@ -219,7 +219,7 @@ impl MergeExecutor {
         };
 
         // Futures of all active upstreams.
-        SelectReceivers::new(upstreams, None, merge_barrier_align_duration.clone())
+        SelectReceivers::new(upstreams, None, merge_barrier_align_duration)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

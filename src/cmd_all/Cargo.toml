@@ -36,7 +36,7 @@ all-connectors = ["risingwave_connector/all-sinks", "risingwave_connector/all-so
 
 [dependencies]
 clap = { workspace = true }
-console = "0.15"
+console = "0.16"
 const-str = "0.7"
 home = "0.5"
 risingwave_batch_executors = { workspace = true }

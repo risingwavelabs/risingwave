@@ -843,10 +843,7 @@ mod tests {
         let watermark_type = WatermarkSerdeType::PkPrefix;
         let mut table_watermarks = TableWatermarks::single_epoch(
             epoch1,
-            vec![VnodeWatermark::new(
-                build_bitmap(vec![0, 1, 2]),
-                watermark1.clone(),
-            )],
+            vec![VnodeWatermark::new(build_bitmap(vec![0, 1, 2]), watermark1)],
             direction,
             watermark_type,
         );
@@ -855,7 +852,7 @@ mod tests {
             epoch2,
             vec![VnodeWatermark::new(
                 build_bitmap(vec![0, 1, 2, 3]),
-                watermark2.clone(),
+                watermark2,
             )]
             .into(),
             direction,
@@ -878,7 +875,7 @@ mod tests {
             epoch3,
             vec![VnodeWatermark::new(
                 build_bitmap(0..VirtualNode::COUNT_FOR_TEST),
-                watermark3.clone(),
+                watermark3,
             )]
             .into(),
             direction,
@@ -898,11 +895,7 @@ mod tests {
         );
         second_table_watermark.add_new_epoch_watermarks(
             epoch5,
-            vec![VnodeWatermark::new(
-                build_bitmap(vec![0, 3, 4]),
-                watermark4.clone(),
-            )]
-            .into(),
+            vec![VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4)].into(),
             direction,
             watermark_type,
         );
@@ -922,10 +915,7 @@ mod tests {
         let watermark_type = WatermarkSerdeType::PkPrefix;
         let mut table_watermarks = TableWatermarks::single_epoch(
             epoch1,
-            vec![VnodeWatermark::new(
-                build_bitmap(vec![0, 1, 2]),
-                watermark1.clone(),
-            )],
+            vec![VnodeWatermark::new(build_bitmap(vec![0, 1, 2]), watermark1)],
             direction,
             watermark_type,
         );
@@ -977,7 +967,7 @@ mod tests {
                         epoch2,
                         vec![VnodeWatermark::new(
                             build_bitmap(vec![0, 1, 2, 3]),
-                            watermark2.clone(),
+                            watermark2,
                         )]
                         .into()
                     ),
@@ -1064,10 +1054,10 @@ mod tests {
                 watermarks: vec![(
                     epoch5,
                     vec![
-                        VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4.clone()),
+                        VnodeWatermark::new(build_bitmap(vec![0, 3, 4]), watermark4),
                         VnodeWatermark::new(
                             build_bitmap((1..3).chain(5..VirtualNode::COUNT_FOR_TEST)),
-                            watermark3.clone()
+                            watermark3
                         )
                     ]
                     .into()
@@ -1237,7 +1227,7 @@ mod tests {
         );
         check_watermark_range(
             (Excluded(watermark2.clone()), Excluded(watermark3.clone())),
-            Some((Excluded(watermark2.clone()), Excluded(watermark3.clone()))),
+            Some((Excluded(watermark2.clone()), Excluded(watermark3))),
         );
 
         // test read from single vnode and end key right at watermark
@@ -1246,8 +1236,8 @@ mod tests {
             None,
         );
         check_watermark_range(
-            (Excluded(watermark1.clone()), Included(watermark2.clone())),
-            Some((Included(watermark2.clone()), Included(watermark2.clone()))),
+            (Excluded(watermark1), Included(watermark2.clone())),
+            Some((Included(watermark2.clone()), Included(watermark2))),
         );
 
         index
@@ -1260,9 +1250,9 @@ mod tests {
         let watermark3 = Bytes::from_static(b"watermark3");
         build_and_test_watermark_index(
             WatermarkDirection::Ascending,
-            watermark1.clone(),
-            watermark2.clone(),
-            watermark3.clone(),
+            watermark1,
+            watermark2,
+            watermark3,
         );
     }
 
@@ -1273,9 +1263,9 @@ mod tests {
         let watermark3 = Bytes::from_static(b"watermark252");
         build_and_test_watermark_index(
             WatermarkDirection::Descending,
-            watermark1.clone(),
-            watermark2.clone(),
-            watermark3.clone(),
+            watermark1,
+            watermark2,
+            watermark3,
         );
     }
 
@@ -1288,7 +1278,7 @@ mod tests {
             WatermarkDirection::Ascending,
             watermark1.clone(),
             watermark2.clone(),
-            watermark3.clone(),
+            watermark3,
         );
 
         let test_table_id = TableId::from(233);
@@ -1348,7 +1338,7 @@ mod tests {
         let index = build_and_test_watermark_index(
             WatermarkDirection::Ascending,
             watermark1.clone(),
-            watermark2.clone(),
+            watermark2,
             watermark3.clone(),
         );
 

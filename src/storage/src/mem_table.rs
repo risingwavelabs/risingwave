@@ -23,7 +23,6 @@ use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::TableKey;
 use thiserror::Error;
 use thiserror_ext::AsReport;
-use tracing::error;
 
 use crate::hummock::iterator::{Backward, Forward, FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};

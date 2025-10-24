@@ -143,11 +143,11 @@ impl MessageIndexes {
         const TAG_MESSAGE_NESTED: i32 = 3;
 
         let mut indexes = vec![];
-        let mut path = desc.path().array_chunks();
-        let &[tag, idx] = path.next().unwrap();
+        let mut path = desc.path().iter().copied().array_chunks();
+        let [tag, idx] = path.next().unwrap();
         assert_eq!(tag, TAG_FILE_MESSAGE);
         indexes.push(idx);
-        for &[tag, idx] in path {
+        for [tag, idx] in path {
             assert_eq!(tag, TAG_MESSAGE_NESTED);
             indexes.push(idx);
         }
@@ -175,7 +175,7 @@ impl MessageIndexes {
 /// * For `validate`, the inputs are (RisingWave type, ProtoBuf type).
 /// * For `encode`, the inputs are (RisingWave type, RisingWave data, ProtoBuf type).
 ///
-/// Thus we impl [`MaybeData`] for both [`()`] and [`ScalarRefImpl`].
+/// Thus we impl [`MaybeData`] for both `()` and [`ScalarRefImpl`].
 trait MaybeData: std::fmt::Debug {
     type Out;
 
@@ -580,8 +580,7 @@ mod tests {
             },
         ]);
 
-        let encoder =
-            ProtoEncoder::new(schema, None, descriptor.clone(), ProtoHeader::None).unwrap();
+        let encoder = ProtoEncoder::new(schema, None, descriptor, ProtoHeader::None).unwrap();
         let m = encoder.encode(row).unwrap();
         expect_test::expect![[r#"
             field: FieldDescriptor {

@@ -106,6 +106,7 @@ use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
@@ -632,7 +633,7 @@ impl SinkMetaClient {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Fialed to add sink fail event to event log.");
+                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Failed to add sink fail event to event log.");
                     }
                 }
             }
@@ -691,10 +692,17 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
                 }
                 None => match user_specified {
                     SinkDecouple::Default | SinkDecouple::Enable => {
-                        desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
-                            DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
-                        );
+                        if matches!(Self::SINK_NAME, ICEBERG_SINK) {
+                            desc.properties.insert(
+                                COMMIT_CHECKPOINT_INTERVAL.to_owned(),
+                                ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            );
+                        } else {
+                            desc.properties.insert(
+                                COMMIT_CHECKPOINT_INTERVAL.to_owned(),
+                                DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
+                            );
+                        }
                     }
                     SinkDecouple::Disable => {
                         desc.properties.insert(

@@ -30,14 +30,16 @@ const MV5: &str = "create materialized view m5 as select * from m4;";
 
 #[tokio::test]
 async fn test_simple_cascade_materialized_view() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let configuration = Configuration::for_scale();
+    let total_cores = configuration.total_streaming_cores();
+    let mut cluster = Cluster::start(configuration).await?;
     let mut session = cluster.start_session();
     let arrangement_backfill_is_enabled = session.is_arrangement_backfill_enabled().await?;
 
     session.run(ROOT_TABLE_CREATE).await?;
     session.run(MV1).await?;
 
-    let fragment = cluster
+    let t1_fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
             no_identity_contains("StreamTableScan"),
@@ -46,16 +48,17 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         ])
         .await?;
 
-    let id = fragment.id();
+    let id = t1_fragment.id();
 
-    let all_workers = fragment.all_worker_count().into_keys().collect_vec();
+    let all_workers = t1_fragment.all_worker_count().into_keys().collect_vec();
 
     cluster
-        .reschedule(format!(
-            "{id}:[{}]",
-            all_workers.iter().map(|w| format!("{w}:-1")).join(",")
+        .run(format!(
+            "alter table t1 set parallelism = {}",
+            total_cores - all_workers.len() as u32
         ))
         .await?;
+
     sleep(Duration::from_secs(3)).await;
 
     let fragment = cluster.locate_fragment_by_id(id).await?;
@@ -95,10 +98,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         .assert_result_eq("5");
 
     cluster
-        .reschedule(format!(
-            "{id}:[{}]",
-            all_workers.iter().map(|w| format!("{w}:1")).join(",")
-        ))
+        .run(format!("alter table t1 set parallelism = {}", total_cores))
         .await?;
     sleep(Duration::from_secs(3)).await;
 
@@ -138,7 +138,9 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 
 #[tokio::test]
 async fn test_diamond_cascade_materialized_view() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let configuration = Configuration::for_scale();
+    let total_cores = configuration.total_streaming_cores();
+    let mut cluster = Cluster::start(configuration).await?;
     let mut session = cluster.start_session();
 
     session.run(ROOT_TABLE_CREATE).await?;
@@ -148,7 +150,7 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
     session.run(MV4).await?;
     session.run(MV5).await?;
 
-    let fragment = cluster
+    let t1_fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
             no_identity_contains("StreamTableScan"),
@@ -157,14 +159,14 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
         ])
         .await?;
 
-    let id = fragment.id();
+    let id = t1_fragment.id();
 
-    let all_workers = fragment.all_worker_count().into_keys().collect_vec();
+    let all_workers = t1_fragment.all_worker_count().into_keys().collect_vec();
 
     cluster
-        .reschedule(format!(
-            "{id}:[{}]",
-            all_workers.iter().map(|w| format!("{w}:-1")).join(",")
+        .run(format!(
+            "alter table t1 set parallelism = {}",
+            total_cores - all_workers.len() as u32
         ))
         .await?;
 
@@ -187,10 +189,7 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
         .assert_result_eq("0");
 
     cluster
-        .reschedule(format!(
-            "{id}:[{}]",
-            all_workers.iter().map(|w| format!("{w}:1")).join(",")
-        ))
+        .run(format!("alter table t1 set parallelism = {}", total_cores))
         .await?;
 
     sleep(Duration::from_secs(3)).await;

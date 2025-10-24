@@ -346,7 +346,7 @@ mod tests {
         ($t:ty, $lhs:expr, $rhs:expr, [$($f:ident),+]) => {
             $(assert_eq!(
                 Int256::from($lhs as $t).$f(&Int256::from($rhs as $t)),
-                ($lhs as $t).$f(($rhs as $t)).map(Int256::from)
+                ($lhs as $t).$f($rhs as $t).map(Int256::from)
             );)+
         };
     }

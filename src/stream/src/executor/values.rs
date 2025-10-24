@@ -220,7 +220,7 @@ mod tests {
         let result = values_msg
             .into_chunk()
             .unwrap()
-            .compact()
+            .compact_vis()
             .data_chunk()
             .to_owned();
 

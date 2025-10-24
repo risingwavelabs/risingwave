@@ -18,7 +18,7 @@ use super::Row;
 use crate::types::DatumRef;
 
 /// Row for the [`project`](super::RowExt::project) method.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Project<'i, R> {
     row: R,
     indices: &'i [usize],

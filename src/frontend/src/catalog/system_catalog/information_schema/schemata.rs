@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The view schemata contains all schemas in the current database that the current user has access to (by way of being the owner or having some privilege).
-/// Ref: [`https://www.postgresql.org/docs/current/infoschema-schemata.html`]
+/// Ref: `https://www.postgresql.org/docs/current/infoschema-schemata.html`
 #[system_catalog(
     view,
     "information_schema.schemata",

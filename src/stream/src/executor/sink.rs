@@ -42,7 +42,9 @@ use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 
-use crate::common::compact_chunk::{InconsistencyBehavior, StreamChunkCompactor, merge_chunk_row};
+use crate::common::compact_chunk::{
+    InconsistencyBehavior, StreamChunkCompactor, compact_chunk_inline,
+};
 use crate::executor::prelude::*;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -458,7 +460,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             let mut insert_chunks = vec![];
 
                             for c in StreamChunkCompactor::new(stream_key.clone(), chunks)
-                                .into_compacted_chunks(input_compact_ib)
+                                .into_compacted_chunks_inline(input_compact_ib)
                             {
                                 // We only enter the branch if need_advance_delete, in which case `sink_type` is not ForceAppendOnly or AppendOnly.
                                 {
@@ -484,7 +486,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         };
                         if re_construct_with_sink_pk {
                             let chunks = StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
-                                .reconstructed_compacted_chunks(
+                                .into_compacted_chunks_reconstructed(
                                     chunk_size,
                                     input_data_types.clone(),
                                     // When compacting based on user provided primary key, we should never panic
@@ -530,7 +532,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
                         if compact_chunk {
-                            chunk = merge_chunk_row(chunk, &stream_key, input_compact_ib);
+                            chunk = compact_chunk_inline(chunk, &stream_key, input_compact_ib);
                         }
                         match sink_type {
                             SinkType::AppendOnly => yield Message::Chunk(chunk),
@@ -616,7 +618,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 // `append_only`, we should only append to downstream, so there should not be any
                 // overlapping keys.
                 let chunk = if pk_matched && matches!(sink_param.sink_type, SinkType::Upsert) {
-                    merge_chunk_row(chunk, &downstream_pk, input_compact_ib)
+                    compact_chunk_inline(chunk, &downstream_pk, input_compact_ib)
                 } else {
                     chunk
                 };
@@ -852,7 +854,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 3 2 1",
@@ -864,7 +866,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 3 4 1
@@ -981,7 +983,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 1 1 10",
@@ -993,7 +995,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 U- 1 1 10

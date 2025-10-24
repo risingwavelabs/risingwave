@@ -146,7 +146,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
         let column_orders = Arc::new(column_orders);
 
         let exchange_node = sort_merge_node.get_exchange()?;
-        let proto_sources: Vec<PbExchangeSource> = exchange_node.get_sources().to_vec();
+        let proto_sources: Vec<PbExchangeSource> = exchange_node.get_sources().clone();
         let source_creators =
             vec![DefaultCreateSource::new(source.context().client_pool()); proto_sources.len()];
         ensure!(!exchange_node.get_sources().is_empty());
