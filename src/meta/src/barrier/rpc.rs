@@ -57,7 +57,7 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
+use super::{BarrierKind, Command, TracedEpoch};
 use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
@@ -71,7 +71,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
-use crate::model::{ActorId, FragmentId, StreamActor, StreamJobActorsToCreate};
+use crate::model::{ActorId, FragmentId, StreamActor, StreamJobActorsToCreate, SubscriptionId};
 use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
@@ -451,7 +451,7 @@ impl ControlStreamManager {
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<TableId, String>,
-        mut subscription_info: InflightSubscriptionInfo,
+        mv_depended_subscriptions: &mut HashMap<TableId, HashMap<SubscriptionId, u64>>,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignmentWithGeneration,
@@ -525,19 +525,22 @@ impl ControlStreamManager {
             prev_epoch
         }
 
-        let mut subscribers: HashMap<_, HashMap<_, _>> = subscription_info
-            .mv_depended_subscriptions
-            .into_iter()
-            .map(|(job_id, subscriptions)| {
-                (
-                    job_id,
-                    subscriptions
-                        .into_iter()
-                        .map(|(subscription_id, retention)| {
-                            (subscription_id, SubscriberType::Subscription(retention))
-                        })
-                        .collect(),
-                )
+        let mut subscribers: HashMap<_, HashMap<_, _>> = jobs
+            .keys()
+            .filter_map(|job_id| {
+                mv_depended_subscriptions
+                    .remove(job_id)
+                    .map(|subscriptions| {
+                        (
+                            *job_id,
+                            subscriptions
+                                .into_iter()
+                                .map(|(subscription_id, retention)| {
+                                    (subscription_id, SubscriberType::Subscription(retention))
+                                })
+                                .collect(),
+                        )
+                    })
             })
             .collect();
 
@@ -545,21 +548,21 @@ impl ControlStreamManager {
         let mut snapshot_backfill_jobs = HashMap::new();
         let mut background_mviews = HashMap::new();
 
-        for (job_id, job) in jobs {
+        for (job_id, job_fragments) in jobs {
             if let Some(definition) = background_jobs.remove(&job_id) {
-                if job.fragment_infos().any(|fragment| {
+                if job_fragments.values().any(|fragment| {
                     fragment
                         .fragment_type_mask
                         .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
                 }) {
                     debug!(%job_id, definition, "recovered snapshot backfill job");
-                    snapshot_backfill_jobs.insert(job_id, (job, definition));
+                    snapshot_backfill_jobs.insert(job_id, (job_fragments, definition));
                 } else {
-                    database_jobs.insert(job_id, job);
+                    database_jobs.insert(job_id, job_fragments);
                     background_mviews.insert(job_id, definition);
                 }
             } else {
-                database_jobs.insert(job_id, job);
+                database_jobs.insert(job_id, job_fragments);
             }
         }
 

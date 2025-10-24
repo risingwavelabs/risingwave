@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::Epoch;
+use tracing::warn;
 
 use crate::barrier::info::{
     BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, SharedActorInfos, SubscriberType,
@@ -181,13 +183,34 @@ impl BarrierWorkerState {
             }
         }
 
-        if let Some(Command::DropSubscription {
-            subscription_id,
-            upstream_mv_table_id,
-        }) = &command
-        {
-            self.inflight_graph_info
-                .unregister_subscriber(*upstream_mv_table_id, *subscription_id);
+        match &command {
+            Some(Command::DropSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+            }) => {
+                if self
+                    .inflight_graph_info
+                    .unregister_subscriber(*upstream_mv_table_id, *subscription_id)
+                    .is_none()
+                {
+                    warn!(subscription_id, %upstream_mv_table_id, "no subscription to drop");
+                }
+            }
+            Some(Command::MergeSnapshotBackfillStreamingJobs(snapshot_backfill_jobs)) => {
+                for (snapshot_backfill_job_id, (upstream_mv_table_ids, _)) in snapshot_backfill_jobs
+                {
+                    for upstream_mv_table_id in upstream_mv_table_ids {
+                        assert_matches!(
+                            self.inflight_graph_info.unregister_subscriber(
+                                *upstream_mv_table_id,
+                                snapshot_backfill_job_id.table_id
+                            ),
+                            Some(SubscriberType::SnapshotBackfill)
+                        );
+                    }
+                }
+            }
+            _ => {}
         }
 
         let prev_is_paused = self.is_paused();

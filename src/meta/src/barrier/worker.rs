@@ -773,7 +773,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 database_job_infos,
                 mut state_table_committed_epochs,
                 mut state_table_log_epochs,
-                mut subscription_infos,
+                mut mv_depended_subscriptions,
                 stream_actors,
                 fragment_relations,
                 mut source_splits,
@@ -815,7 +815,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &stream_actors,
                         &mut source_splits,
                         &mut background_jobs,
-                        subscription_infos.remove(&database_id).unwrap_or_default(),
+                        &mut mv_depended_subscriptions,
                         is_paused,
                         &hummock_version_stats,
                         &mut cdc_table_snapshot_split_assignment,
@@ -902,8 +902,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !background_jobs.is_empty() {
                     warn!(job_ids = ?background_jobs.keys().collect_vec(), "unused recovered background mview in recovery");
                 }
-                if !subscription_infos.is_empty() {
-                    warn!(?subscription_infos, "unused subscription infos in recovery");
+                if !mv_depended_subscriptions.is_empty() {
+                    warn!(?mv_depended_subscriptions, "unused subscription infos in recovery");
                 }
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");

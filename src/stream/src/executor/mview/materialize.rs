@@ -256,13 +256,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
         let may_have_downstream = actor_context.initial_dispatch_num != 0;
-        let subscriber_ids = actor_context
-            .initial_subscriber_ids.clone();
-        let op_consistency_level = get_op_consistency_level(
-            conflict_behavior,
-            may_have_downstream,
-            &subscriber_ids,
-        );
+        let subscriber_ids = actor_context.initial_subscriber_ids.clone();
+        let op_consistency_level =
+            get_op_consistency_level(conflict_behavior, may_have_downstream, &subscriber_ids);
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)

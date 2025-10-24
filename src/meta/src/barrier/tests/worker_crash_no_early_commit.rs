@@ -263,7 +263,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             (table2, initial_epoch),
         ]),
         state_table_log_epochs: Default::default(),
-        subscription_infos: Default::default(),
+        mv_depended_subscriptions: Default::default(),
         stream_actors: HashMap::from_iter([
             (actor1.actor_id as _, actor1.clone()),
             (actor2.actor_id as _, actor2.clone()),
