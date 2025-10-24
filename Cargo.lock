@@ -1917,9 +1917,9 @@ checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitfield-struct"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3ca019570363e800b05ad4fd890734f28ac7b72f563ad8a35079efb793616f8"
+checksum = "daf8e49a3d89a0183e7044ff82975c2b8badcd72e22c6be54e441914bda56e97"
 dependencies = [
  "proc-macro2",
  "quote",
