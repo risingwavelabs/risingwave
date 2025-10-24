@@ -136,6 +136,74 @@
     ├─LogicalScan { table: t1, columns: [v1] }
     └─LogicalScan { table: t2, columns: [v2] }
 
+- id: explain trace should output partial results even if it fails
+  sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain (logical, trace) create materialized view m1 as select * from t1 join t2 on v1>v2;
+  explain_output: |
+    Begin:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+
+    Project Remove:
+
+    apply ProjectJoinMergeRule 1 time(s)
+
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+
+    Common Sub-plan Sharing:
+
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+
+    Predicate Push Down:
+
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+
+    Predicate Push Down:
+
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+
+    Push down the calculation of inputs of join's condition:
+
+    apply PushCalculationOfJoinRule 1 time(s)
+
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+
+    Predicate Push Down:
+
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1, _row_id, _rw_timestamp] }
+    └─LogicalScan { table: t2, columns: [v2, _row_id, _rw_timestamp] }
+
+    Prune Columns:
+
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1] }
+    └─LogicalScan { table: t2, columns: [v2] }
+
+    Predicate Push Down:
+
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1] }
+    └─LogicalScan { table: t2, columns: [v2] }
+
+    ERROR: Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/
 - sql: |
     explain (logical) create table t1(v1 int);
   explain_output: |
