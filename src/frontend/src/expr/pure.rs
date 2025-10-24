@@ -283,6 +283,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::VecConcat
             | Type::L2Norm
             | Type::L2Normalize
+            | Type::Subvector
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull

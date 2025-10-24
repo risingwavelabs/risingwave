@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
+
 use auto_enums::auto_enum;
 
 use super::StreamChunk;
@@ -75,6 +77,28 @@ impl<R> Record<R> {
             Record::Delete { old_row } => Record::Delete { old_row },
             Record::Update { old_row, new_row } => Record::Update { old_row, new_row },
         }
+    }
+
+    /// Try mapping the row in the record to another row, returning error if any of the mapping fails.
+    pub fn try_map<R2, E>(self, f: impl Fn(R) -> Result<R2, E>) -> Result<Record<R2>, E> {
+        Ok(match self {
+            Record::Insert { new_row } => Record::Insert {
+                new_row: f(new_row)?,
+            },
+            Record::Delete { old_row } => Record::Delete {
+                old_row: f(old_row)?,
+            },
+            Record::Update { old_row, new_row } => Record::Update {
+                old_row: f(old_row)?,
+                new_row: f(new_row)?,
+            },
+        })
+    }
+
+    /// Map the row in the record to another row.
+    pub fn map<R2>(self, f: impl Fn(R) -> R2) -> Record<R2> {
+        let Ok(record) = self.try_map::<R2, Infallible>(|row| Ok(f(row)));
+        record
     }
 }
 

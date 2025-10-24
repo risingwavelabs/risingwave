@@ -288,7 +288,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
                     let (chunk, ops) = chunk.into_parts();
 
                     let mut builder = JoinStreamChunkBuilder::new(

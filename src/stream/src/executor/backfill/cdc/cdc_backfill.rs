@@ -551,7 +551,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         continue;
                                     }
                                     // Buffer the upstream chunk.
-                                    upstream_chunk_buffer.push(chunk.compact());
+                                    upstream_chunk_buffer.push(chunk.compact_vis());
                                 }
                                 Message::Watermark(_) => {
                                     // Ignore watermark during backfill.
@@ -890,7 +890,7 @@ async fn parse_debezium_chunk(
     // We should use the debezium parser to parse the first column,
     // then chain the parsed row with `_rw_offset` row to get a new row.
     let payloads = chunk.data_chunk().project(&[0]);
-    let offsets = chunk.data_chunk().project(&[1]).compact();
+    let offsets = chunk.data_chunk().project(&[1]).compact_vis();
 
     // TODO: preserve the transaction semantics
     for payload in payloads.rows() {

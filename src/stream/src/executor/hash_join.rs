@@ -3301,7 +3301,7 @@ mod tests {
             ",
         ));
         let chunk = hash_join.next_unwrap_ready_chunk()?;
-        let chunk = chunk.compact();
+        let chunk = chunk.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
