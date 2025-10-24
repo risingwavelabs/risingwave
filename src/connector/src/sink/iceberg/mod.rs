@@ -124,6 +124,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_some_true() -> Option<bool> {
+    Some(true)
+}
+
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 pub struct IcebergConfig {
@@ -158,8 +162,8 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
-    /// Whether it is `exactly_once`, the default is not.
-    #[serde(default)]
+    /// Whether it is `exactly_once`, the default is true.
+    #[serde(default = "default_some_true")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
     // Retry commit num when iceberg commit fail. default is 8.
@@ -2520,7 +2524,7 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
             create_table_if_not_exists: false,
-            is_exactly_once: None,
+            is_exactly_once: Some(true),
             commit_retry_num: 8,
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),

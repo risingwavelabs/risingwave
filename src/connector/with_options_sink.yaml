@@ -588,9 +588,9 @@ IcebergConfig:
     default: Default::default
   - name: is_exactly_once
     field_type: bool
-    comments: Whether it is `exactly_once`, the default is not.
+    comments: Whether it is `exactly_once`, the default is true.
     required: false
-    default: Default::default
+    default: Some (true)
   - name: commit_retry_num
     field_type: u32
     required: false
