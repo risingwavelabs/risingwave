@@ -30,6 +30,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::monitor::GroupTopNMetrics;
 use crate::executor::prelude::*;
+use crate::executor::top_n::top_n_cache::TopNStaging;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutor<K, S, WITH_TIES>>;
@@ -84,6 +85,9 @@ pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bo
     /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
 
+    /// Minimum cache capacity per group from config
+    topn_cache_min_capacity: usize,
+
     metrics: GroupTopNMetrics,
 }
 
@@ -123,6 +127,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             group_by,
             caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
+            topn_cache_min_capacity: ctx.streaming_config.developer.topn_cache_min_capacity,
             metrics,
         })
     }
@@ -165,7 +170,7 @@ where
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let keys = K::build_many(&self.group_by, chunk.data_chunk());
-        let mut stagings = HashMap::new(); // K -> `TopNStaging`
+        let mut stagings: HashMap<K, TopNStaging> = HashMap::new();
 
         for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row_ref)) = r else {
@@ -182,8 +187,12 @@ where
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
                 self.metrics.group_top_n_cache_miss_count.inc();
-                let mut topn_cache =
-                    TopNCache::new(self.offset, self.limit, self.schema.data_types());
+                let mut topn_cache = TopNCache::with_min_capacity(
+                    self.offset,
+                    self.limit,
+                    self.schema.data_types(),
+                    self.topn_cache_min_capacity,
+                );
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
@@ -224,8 +233,8 @@ where
         let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(chunk.capacity()));
         for staging in stagings.into_values() {
             for res in staging.into_deserialized_changes(&deserializer) {
-                let (op, row) = res?;
-                let _none = chunk_builder.append_row(op, row);
+                let record = res?;
+                let _none = chunk_builder.append_record(record);
             }
         }
         Ok(chunk_builder.take())

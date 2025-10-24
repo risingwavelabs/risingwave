@@ -83,7 +83,7 @@ pub struct SinkDesc {
     /// Whether the sink job should run in foreground or background.
     pub create_type: CreateType,
 
-    pub is_exactly_once: bool,
+    pub is_exactly_once: Option<bool>,
 
     pub auto_refresh_schema_from_table: Option<TableId>,
 }

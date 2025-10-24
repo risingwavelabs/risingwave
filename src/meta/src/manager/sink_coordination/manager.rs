@@ -125,8 +125,7 @@ impl SinkCoordinatorManager {
         metadata_manager: MetadataManager,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
-        let subscriber =
-            new_committed_epoch_subscriber(hummock_manager.clone(), metadata_manager.clone());
+        let subscriber = new_committed_epoch_subscriber(hummock_manager, metadata_manager);
         Self::start_worker_with_spawn_worker(move |param, manager_request_stream| {
             tokio::spawn(CoordinatorWorker::run(
                 param,
@@ -411,6 +410,7 @@ mod tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use risingwave_common::bitmap::BitmapBuilder;
+    use risingwave_common::catalog::Field;
     use risingwave_common::hash::VirtualNode;
     use risingwave_connector::sink::catalog::{SinkId, SinkType};
     use risingwave_connector::sink::{SinkCommitCoordinator, SinkError, SinkParam};
@@ -450,6 +450,7 @@ mod tests {
             &mut self,
             epoch: u64,
             metadata: Vec<SinkMetadata>,
+            _add_columns: Option<Vec<Field>>,
         ) -> risingwave_connector::sink::Result<()> {
             (self.f)(epoch, metadata, &mut self.context)
         }
@@ -593,6 +594,7 @@ mod tests {
                                 metadata: metadata[0][1].clone(),
                             })),
                         },
+                        None,
                     )
                     .map(|result| result.unwrap())
             );
@@ -611,6 +613,7 @@ mod tests {
                                 metadata: metadata[0][0].clone(),
                             })),
                         },
+                        None,
                     )
                     .map(|result| result.unwrap()),
             )
@@ -627,6 +630,7 @@ mod tests {
                             metadata: metadata[1][0].clone(),
                         })),
                     },
+                    None,
                 )
                 .map(|result| result.unwrap())
         );
@@ -645,6 +649,7 @@ mod tests {
                             metadata: metadata[1][1].clone(),
                         })),
                     },
+                    None,
                 )
                 .map(|result| result.unwrap()),
         )
@@ -769,6 +774,7 @@ mod tests {
                         metadata: metadata[0].clone(),
                     })),
                 },
+                None,
             )
             .await
             .unwrap();
@@ -781,6 +787,7 @@ mod tests {
                         metadata: metadata[1].clone(),
                     })),
                 },
+                None,
             )
             .await
             .unwrap();
@@ -867,6 +874,7 @@ mod tests {
                     metadata: vec![],
                 })),
             },
+            None,
         ));
         assert!(
             poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
@@ -961,6 +969,7 @@ mod tests {
                     metadata: vec![],
                 })),
             },
+            None,
         ));
         assert!(
             poll_fn(|cx| Poll::Ready(commit_future.as_mut().poll(cx)))
@@ -976,6 +985,7 @@ mod tests {
                         metadata: vec![],
                     })),
                 },
+                None,
             ),
         )
         .await;
@@ -1123,6 +1133,7 @@ mod tests {
                                 metadata: metadata[0][1].clone(),
                             })),
                         },
+                        None,
                     )
                     .map(|result| result.unwrap())
             );
@@ -1141,6 +1152,7 @@ mod tests {
                                 metadata: metadata[0][0].clone(),
                             })),
                         },
+                        None,
                     )
                     .map(|result| result.unwrap()),
             )
@@ -1176,6 +1188,7 @@ mod tests {
                                     metadata: metadata[1][0].clone(),
                                 })),
                             },
+                            None,
                         )
                         .map_err(Into::into)
                 );
@@ -1193,6 +1206,7 @@ mod tests {
                                 metadata: metadata[1][1].clone(),
                             })),
                         },
+                        None,
                     ),
                 )
                 .await
@@ -1225,6 +1239,7 @@ mod tests {
                         metadata: metadata_scale_out[2].clone(),
                     })),
                 },
+                None,
             ));
             assert!(
                 poll_fn(|cx| Poll::Ready(commit_future3.as_mut().poll(cx)))
@@ -1238,6 +1253,7 @@ mod tests {
                         metadata: metadata_scale_out[0].clone(),
                     })),
                 },
+                None,
             ));
             assert!(
                 poll_fn(|cx| Poll::Ready(commit_future1.as_mut().poll(cx)))
@@ -1257,6 +1273,7 @@ mod tests {
                             metadata: metadata_scale_out[1].clone(),
                         })),
                     },
+                    None,
                 ),
                 try_join(commit_future1, commit_future3),
             )
@@ -1293,6 +1310,7 @@ mod tests {
                                 metadata: metadata_scale_in[0].clone(),
                             })),
                         },
+                        None,
                     )
                     .map(|result| result.unwrap())
             );
@@ -1311,6 +1329,7 @@ mod tests {
                                 metadata: metadata_scale_in[1].clone(),
                             })),
                         },
+                        None,
                     )
                     .map(|result| result.unwrap()),
             )

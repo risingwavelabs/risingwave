@@ -286,6 +286,7 @@ pub mod verify {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_common::array::VectorRef;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -331,11 +332,11 @@ pub mod verify {
     }
 
     impl<A: StateStoreGet, E: StateStoreGet> StateStoreGet for VerifyStateStore<A, E> {
-        async fn on_key_value<O: Send + 'static>(
-            &self,
+        async fn on_key_value<'a, O: Send + 'a>(
+            &'a self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
-            on_key_value_fn: impl KeyValueFn<O>,
+            on_key_value_fn: impl KeyValueFn<'a, O>,
         ) -> StorageResult<Option<O>> {
             let actual: Option<(FullKey<Bytes>, Bytes)> = self
                 .actual
@@ -368,12 +369,12 @@ pub mod verify {
     impl<A: StateStoreReadVector, E: StateStoreReadVector> StateStoreReadVector
         for VerifyStateStore<A, E>
     {
-        fn nearest<O: Send + 'static>(
-            &self,
-            vec: Vector,
+        fn nearest<'a, O: Send + 'a>(
+            &'a self,
+            vec: VectorRef<'a>,
             options: VectorNearestOptions,
-            on_nearest_item_fn: impl OnNearestItemFn<O>,
-        ) -> impl StorageFuture<'_, Vec<O>> {
+            on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+        ) -> impl StorageFuture<'a, Vec<O>> {
             self.actual.nearest(vec, options, on_nearest_item_fn)
         }
     }
@@ -727,7 +728,7 @@ impl StateStoreImpl {
                             opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                         )
                         .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                        .with_blob_index_size(16 * KB)
+                        .with_blob_index_size(opts.meta_file_cache_blob_index_size_kb * KB)
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.meta_file_cache_fifo_probation_ratio,
                         ))]);
@@ -773,7 +774,7 @@ impl StateStoreImpl {
                             opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                         )
                         .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                        .with_blob_index_size(16 * KB)
+                        .with_blob_index_size(opts.data_file_cache_blob_index_size_kb * KB)
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.data_file_cache_fifo_probation_ratio,
                         ))]);
@@ -932,6 +933,7 @@ mod dyn_state_store {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_common::array::VectorRef;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -1244,12 +1246,12 @@ mod dyn_state_store {
 
     #[async_trait::async_trait]
     pub trait DynStateStoreWriteVector: DynStateStoreWriteEpochControl + StaticSendSync {
-        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()>;
+        fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
     impl<S: StateStoreWriteVector> DynStateStoreWriteVector for S {
-        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+        fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
             self.insert(vec, info)
         }
     }
@@ -1257,7 +1259,7 @@ mod dyn_state_store {
     pub type BoxDynStateStoreWriteVector = StateStorePointer<Box<dyn DynStateStoreWriteVector>>;
 
     impl StateStoreWriteVector for BoxDynStateStoreWriteVector {
-        fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+        fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
             self.0.insert(vec, info)
         }
     }
@@ -1268,7 +1270,7 @@ mod dyn_state_store {
     pub trait DynStateStoreReadVector: StaticSendSync {
         async fn nearest(
             &self,
-            vec: Vector,
+            vec: VectorRef<'_>,
             options: VectorNearestOptions,
         ) -> StorageResult<Vec<(Vector, VectorDistance, Bytes)>>;
     }
@@ -1277,12 +1279,13 @@ mod dyn_state_store {
     impl<S: StateStoreReadVector> DynStateStoreReadVector for S {
         async fn nearest(
             &self,
-            vec: Vector,
+            vec: VectorRef<'_>,
             options: VectorNearestOptions,
         ) -> StorageResult<Vec<(Vector, VectorDistance, Bytes)>> {
+            use risingwave_common::types::ScalarRef;
             self.nearest(vec, options, |vec, distance, info| {
                 (
-                    Vector::clone_from_ref(vec),
+                    vec.to_owned_scalar(),
                     distance,
                     Bytes::copy_from_slice(info),
                 )
@@ -1295,11 +1298,11 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreReadVector> + StaticSendSync,
     {
-        async fn nearest<O: Send + 'static>(
-            &self,
-            vec: Vector,
+        async fn nearest<'a, O: Send + 'a>(
+            &'a self,
+            vec: VectorRef<'a>,
             options: VectorNearestOptions,
-            on_nearest_item_fn: impl OnNearestItemFn<O>,
+            on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
         ) -> StorageResult<Vec<O>> {
             let output = self.as_ref().nearest(vec, options).await?;
             Ok(output
@@ -1420,11 +1423,11 @@ mod dyn_state_store {
     where
         StateStorePointer<P>: AsRef<dyn DynStateStoreGet> + StaticSendSync,
     {
-        async fn on_key_value<O: Send + 'static>(
-            &self,
+        async fn on_key_value<'a, O: Send + 'a>(
+            &'a self,
             key: TableKey<Bytes>,
             read_options: ReadOptions,
-            on_key_value_fn: impl KeyValueFn<O>,
+            on_key_value_fn: impl KeyValueFn<'a, O>,
         ) -> StorageResult<Option<O>> {
             let option = self.as_ref().get_keyed_row(key, read_options).await?;
             option

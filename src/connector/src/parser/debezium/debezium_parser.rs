@@ -77,6 +77,7 @@ async fn build_accessor_builder(
                     .timestamp_handling
                     .unwrap_or(TimestampHandling::GuessNumberUnit),
                 json_config.time_handling.unwrap_or(TimeHandling::Micro),
+                json_config.handle_toast_columns,
             )?,
         )),
         _ => bail!("unsupported encoding for Debezium"),
@@ -119,6 +120,7 @@ impl DebeziumParser {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -225,6 +227,7 @@ mod tests {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -270,7 +273,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_additional_columns() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
             ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
             ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
@@ -299,6 +302,7 @@ mod tests {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

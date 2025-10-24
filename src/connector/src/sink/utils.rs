@@ -38,6 +38,7 @@ pub(crate) mod dummy {
 
     use anyhow::anyhow;
     use phf::{Set, phf_set};
+    use risingwave_common::catalog::Field;
     use risingwave_pb::connector_service::SinkMetadata;
     use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::UnboundedSender;
@@ -50,6 +51,7 @@ pub(crate) mod dummy {
         LogSinker, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkLogReader,
     };
 
+    #[allow(dead_code)]
     pub fn err_feature_not_enabled(sink_name: &'static str) -> SinkError {
         SinkError::Config(anyhow!(
             "RisingWave is not compiled with feature `sink-{}`",
@@ -59,9 +61,11 @@ pub(crate) mod dummy {
 
     /// Implement this trait will bring a dummy `impl Sink` for the type which always returns an error.
     pub trait FeatureNotEnabledSinkMarker: Send + 'static {
+        #[allow(dead_code)]
         const SINK_NAME: &'static str;
     }
 
+    #[allow(dead_code)]
     pub struct FeatureNotEnabledCoordinator<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
     impl<S: FeatureNotEnabledSinkMarker> SinkCommitCoordinator for FeatureNotEnabledCoordinator<S> {
@@ -69,11 +73,17 @@ pub(crate) mod dummy {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
 
-        async fn commit(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
+        async fn commit(
+            &mut self,
+            _epoch: u64,
+            _metadata: Vec<SinkMetadata>,
+            _add_columns: Option<Vec<Field>>,
+        ) -> Result<()> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
     }
 
+    #[allow(dead_code)]
     pub struct FeatureNotEnabledLogSinker<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
     impl<S: FeatureNotEnabledSinkMarker> LogSinker for FeatureNotEnabledLogSinker<S> {

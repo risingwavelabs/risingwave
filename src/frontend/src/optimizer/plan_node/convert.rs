@@ -55,6 +55,26 @@ pub trait ToStream {
         let ret = self.to_stream(ctx)?;
         required_dist.streaming_enforce_if_not_satisfies(ret)
     }
+
+    fn try_better_locality(&self, _columns: &[usize]) -> Option<LogicalPlanRef> {
+        None
+    }
+}
+
+/// Try to enforce the locality requirement on the given columns.
+/// If a better plan can be found, return the better plan.
+/// If no better plan can be found, and locality backfill is enabled, wrap the plan
+/// with `LogicalLocalityProvider`.
+/// Otherwise, return the plan as is.
+pub fn try_enforce_locality_requirement(plan: LogicalPlanRef, columns: &[usize]) -> LogicalPlanRef {
+    assert!(!columns.is_empty());
+    if let Some(better_plan) = plan.try_better_locality(columns) {
+        better_plan
+    } else if plan.ctx().session_ctx().config().enable_locality_backfill() {
+        LogicalLocalityProvider::new(plan, columns.to_owned()).into()
+    } else {
+        plan
+    }
 }
 
 pub fn stream_enforce_eowc_requirement(

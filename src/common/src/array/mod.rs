@@ -65,8 +65,8 @@ pub use stream_chunk_builder::StreamChunkBuilder;
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 pub use vector_array::{
-    Finite32, VECTOR_DISTANCE_TYPE, VECTOR_ITEM_TYPE, VectorArray, VectorArrayBuilder,
-    VectorDistanceType, VectorItemType, VectorRef, VectorVal,
+    Finite32, VECTOR_AS_LIST_TYPE, VECTOR_DISTANCE_TYPE, VECTOR_ITEM_TYPE, VectorArray,
+    VectorArrayBuilder, VectorDistanceType, VectorItemType, VectorRef, VectorVal,
 };
 
 pub use self::error::ArrayError;
@@ -310,15 +310,12 @@ pub trait Array:
     }
 }
 
-/// Implement `compact` on array, which removes element according to `visibility`.
-trait CompactableArray: Array {
+/// Implement `compact_vis` on array, which removes element according to `visibility`.
+#[easy_ext::ext(ArrayCompactVisExt)]
+impl<A: Array> A {
     /// Select some elements from `Array` based on `visibility` bitmap.
     /// `cardinality` is only used to decide capacity of the new `Array`.
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self;
-}
-
-impl<A: Array> CompactableArray for A {
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
+    pub fn compact_vis(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         let mut builder = A::Builder::with_type(cardinality, self.data_type());
         for idx in visibility.iter_ones() {
             // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -588,9 +585,9 @@ impl ArrayImpl {
     }
 
     /// Select some elements from `Array` based on `visibility` bitmap.
-    pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
+    pub fn compact_vis(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         dispatch_array_variants!(self, inner, {
-            inner.compact(visibility, cardinality).into()
+            inner.compact_vis(visibility, cardinality).into()
         })
     }
 

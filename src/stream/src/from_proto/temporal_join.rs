@@ -22,7 +22,7 @@ use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
 use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTableBuilder};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     ActorContextRef, JoinType, NestedLoopTemporalJoinExecutor, TemporalJoinExecutor,
@@ -119,7 +119,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect_vec();
 
-            let null_safe = node.get_null_safe().to_vec();
+            let null_safe = node.get_null_safe().clone();
 
             let join_key_data_types = left_join_keys
                 .iter()
@@ -135,12 +135,12 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                             .expect("vnodes not set for temporal join"),
                     );
                     Some(
-                        StateTable::from_table_catalog(
-                            memo_table,
-                            store.clone(),
-                            Some(vnodes.clone()),
-                        )
-                        .await,
+                        StateTableBuilder::new(memo_table, store.clone(), Some(vnodes.clone()))
+                            .enable_preload_all_rows_by_config(
+                                &params.actor_context.streaming_config,
+                            )
+                            .build()
+                            .await,
                     )
                 }
                 Err(_) => None,

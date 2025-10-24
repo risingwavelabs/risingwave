@@ -26,13 +26,13 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::replace_job_plan::{
     ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
 };
 use risingwave_pb::ddl_service::{
-    PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType, WaitVersion,
-    alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request,
+    PbTableJobType, TableJobType, WaitVersion, alter_name_request, alter_owner_request,
+    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -141,7 +141,6 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<PbReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
     ) -> Result<()>;
@@ -183,12 +182,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        affected_table_change: Option<PbReplaceJobPlan>,
-    ) -> Result<()>;
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()>;
 
     async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
 
@@ -198,7 +192,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()>;
 
-    async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
+    async fn drop_function(&self, function_id: FunctionId, cascade: bool) -> Result<()>;
 
     async fn drop_connection(&self, connection_id: u32, cascade: bool) -> Result<()>;
 
@@ -251,6 +245,14 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         database_id: DatabaseId,
         param: AlterDatabaseParam,
+    ) -> Result<()>;
+
+    async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
     ) -> Result<()>;
 }
 
@@ -435,19 +437,12 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
         if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(
-                sink,
-                graph,
-                affected_table_change,
-                dependencies,
-                if_not_exists,
-            )
+            .create_sink(sink, graph, dependencies, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -534,16 +529,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_sink(
-        &self,
-        sink_id: u32,
-        cascade: bool,
-        affected_table_change: Option<ReplaceJobPlan>,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .drop_sink(sink_id, cascade, affected_table_change)
-            .await?;
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_sink(sink_id, cascade).await?;
         self.wait_version(version).await
     }
 
@@ -560,8 +547,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_function(&self, function_id: FunctionId) -> Result<()> {
-        let version = self.meta_client.drop_function(function_id).await?;
+    async fn drop_function(&self, function_id: FunctionId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_function(function_id, cascade).await?;
         self.wait_version(version).await
     }
 
@@ -685,6 +672,20 @@ impl CatalogWriter for CatalogWriterImpl {
             .alter_database_param(database_id, param)
             .await
             .map_err(|e| anyhow!(e))?;
+        self.wait_version(version).await
+    }
+
+    async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_iceberg_table(table_job_info, sink_job_info, iceberg_source, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 }

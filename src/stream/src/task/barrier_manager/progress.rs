@@ -20,32 +20,36 @@ use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgr
 
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
 use crate::task::barrier_worker::managed_state::DatabaseManagedBarrierState;
+use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, LocalBarrierManager};
 
 type ConsumedEpoch = u64;
 type ConsumedRows = u64;
+type BufferedRows = u64;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum BackfillState {
-    ConsumingUpstreamTableOrSource(ConsumedEpoch, ConsumedRows),
-    DoneConsumingUpstreamTableOrSource(ConsumedRows),
+    ConsumingUpstreamTableOrSource(ConsumedEpoch, ConsumedRows, BufferedRows),
+    DoneConsumingUpstreamTableOrSource(ConsumedRows, BufferedRows),
     ConsumingLogStore { pending_epoch_lag: u64 },
     DoneConsumingLogStore,
 }
 
 impl BackfillState {
     pub fn to_pb(self, actor_id: ActorId) -> PbCreateMviewProgress {
-        let (done, consumed_epoch, consumed_rows, pending_epoch_lag) = match self {
-            BackfillState::ConsumingUpstreamTableOrSource(consumed_epoch, consumed_rows) => {
-                (false, consumed_epoch, consumed_rows, 0)
+        let (done, consumed_epoch, consumed_rows, pending_epoch_lag, buffered_rows) = match self {
+            BackfillState::ConsumingUpstreamTableOrSource(
+                consumed_epoch,
+                consumed_rows,
+                buffered_rows,
+            ) => (false, consumed_epoch, consumed_rows, 0, buffered_rows),
+            BackfillState::DoneConsumingUpstreamTableOrSource(consumed_rows, buffered_rows) => {
+                (true, 0, consumed_rows, 0, buffered_rows)
             }
-            BackfillState::DoneConsumingUpstreamTableOrSource(consumed_rows) => {
-                (true, 0, consumed_rows, 0)
-            } // unused field for done
             BackfillState::ConsumingLogStore { pending_epoch_lag } => {
-                (false, 0, 0, pending_epoch_lag)
+                (false, 0, 0, pending_epoch_lag, 0)
             }
-            BackfillState::DoneConsumingLogStore => (true, 0, 0, 0),
+            BackfillState::DoneConsumingLogStore => (true, 0, 0, 0, 0),
         };
         PbCreateMviewProgress {
             backfill_actor_id: actor_id,
@@ -53,6 +57,7 @@ impl BackfillState {
             consumed_epoch,
             consumed_rows,
             pending_epoch_lag,
+            buffered_rows,
         }
     }
 }
@@ -60,15 +65,19 @@ impl BackfillState {
 impl Display for BackfillState {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            BackfillState::ConsumingUpstreamTableOrSource(epoch, rows) => {
+            BackfillState::ConsumingUpstreamTableOrSource(epoch, rows, buffered) => {
                 write!(
                     f,
-                    "ConsumingUpstreamTable(epoch: {}, rows: {})",
-                    epoch, rows
+                    "ConsumingUpstreamTable(epoch: {}, rows: {}, buffered: {})",
+                    epoch, rows, buffered
                 )
             }
-            BackfillState::DoneConsumingUpstreamTableOrSource(rows) => {
-                write!(f, "DoneConsumingUpstreamTable(rows: {})", rows)
+            BackfillState::DoneConsumingUpstreamTableOrSource(rows, buffered) => {
+                write!(
+                    f,
+                    "DoneConsumingUpstreamTable(rows: {}, buffered: {})",
+                    rows, buffered
+                )
             }
             BackfillState::ConsumingLogStore { pending_epoch_lag } => {
                 write!(
@@ -101,6 +110,26 @@ impl DatabaseManagedBarrierState {
                 .insert(actor, state);
         } else {
             warn!(?epoch, actor, ?state, "ignore create mview progress");
+        }
+    }
+
+    pub(crate) fn update_cdc_table_backfill_progress(
+        &mut self,
+        epoch: EpochPair,
+        actor: ActorId,
+        state: CdcTableBackfillState,
+    ) {
+        if let Some(actor_state) = self.actor_states.get(&actor)
+            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
+            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+        {
+            graph_state
+                .cdc_table_backfill_progress
+                .entry(epoch.curr)
+                .or_default()
+                .insert(actor, state);
+        } else {
+            warn!(?epoch, actor, ?state, "ignore CDC table backfill progress");
         }
     }
 }
@@ -188,8 +217,20 @@ impl CreateMviewProgressReporter {
         consumed_epoch: ConsumedEpoch,
         current_consumed_rows: ConsumedRows,
     ) {
+        self.update_with_buffered_rows(epoch, consumed_epoch, current_consumed_rows, 0);
+    }
+
+    /// Update the progress with buffered rows information.
+    /// This is used by locality backfill to report precise progress including buffered data.
+    pub fn update_with_buffered_rows(
+        &mut self,
+        epoch: EpochPair,
+        consumed_epoch: ConsumedEpoch,
+        current_consumed_rows: ConsumedRows,
+        buffered_rows: BufferedRows,
+    ) {
         match self.state {
-            Some(BackfillState::ConsumingUpstreamTableOrSource(last, last_consumed_rows)) => {
+            Some(BackfillState::ConsumingUpstreamTableOrSource(last, last_consumed_rows, _)) => {
                 assert!(
                     last <= consumed_epoch,
                     "last_epoch: {:#?} must be greater than consumed epoch: {:#?}",
@@ -211,11 +252,16 @@ impl CreateMviewProgressReporter {
             ?epoch,
             consumed_epoch,
             current_consumed_rows,
+            buffered_rows,
             "progress update"
         );
         self.update_inner(
             epoch,
-            BackfillState::ConsumingUpstreamTableOrSource(consumed_epoch, current_consumed_rows),
+            BackfillState::ConsumingUpstreamTableOrSource(
+                consumed_epoch,
+                current_consumed_rows,
+                buffered_rows,
+            ),
         );
     }
 
@@ -230,6 +276,7 @@ impl CreateMviewProgressReporter {
             Some(BackfillState::ConsumingUpstreamTableOrSource(
                 dummy_last_epoch,
                 _last_consumed_rows,
+                _,
             )) => {
                 debug_assert_eq!(dummy_last_epoch, 0);
             }
@@ -243,26 +290,39 @@ impl CreateMviewProgressReporter {
         };
         self.update_inner(
             epoch,
-            // fill a dummy ConsumedEpoch
-            BackfillState::ConsumingUpstreamTableOrSource(0, current_consumed_rows),
+            // fill a dummy ConsumedEpoch and no buffered rows
+            BackfillState::ConsumingUpstreamTableOrSource(0, current_consumed_rows, 0),
         );
     }
 
     /// Finish the progress. If the progress is already finished, then perform no-op.
     /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
     pub fn finish(&mut self, epoch: EpochPair, current_consumed_rows: ConsumedRows) {
-        if let Some(BackfillState::DoneConsumingUpstreamTableOrSource(_)) = self.state {
+        self.finish_with_buffered_rows(epoch, current_consumed_rows, 0);
+    }
+
+    /// Finish the progress with buffered rows information.
+    /// This is used by locality backfill to report any remaining buffered rows at completion.
+    pub fn finish_with_buffered_rows(
+        &mut self,
+        epoch: EpochPair,
+        current_consumed_rows: ConsumedRows,
+        buffered_rows: BufferedRows,
+    ) {
+        if let Some(BackfillState::DoneConsumingUpstreamTableOrSource(_, _)) = self.state {
             return;
         }
         tracing::debug!(
             actor_id = self.backfill_actor_id,
             ?epoch,
             current_consumed_rows,
+            buffered_rows,
             "progress finish"
         );
+        // When finishing, report the consumed rows and buffered rows separately
         self.update_inner(
             epoch,
-            BackfillState::DoneConsumingUpstreamTableOrSource(current_consumed_rows),
+            BackfillState::DoneConsumingUpstreamTableOrSource(current_consumed_rows, buffered_rows),
         );
     }
 
@@ -273,7 +333,7 @@ impl CreateMviewProgressReporter {
     ) {
         assert_matches!(
             self.state,
-            Some(BackfillState::DoneConsumingUpstreamTableOrSource(_))
+            Some(BackfillState::DoneConsumingUpstreamTableOrSource(_, _))
                 | Some(BackfillState::ConsumingLogStore { .. })
                 | None,
             "cannot update log store progress at state {:?}",
@@ -288,7 +348,7 @@ impl CreateMviewProgressReporter {
     pub(crate) fn finish_consuming_log_store(&mut self, epoch: EpochPair) {
         assert_matches!(
             self.state,
-            Some(BackfillState::DoneConsumingUpstreamTableOrSource(_))
+            Some(BackfillState::DoneConsumingUpstreamTableOrSource(_, _))
                 | Some(BackfillState::ConsumingLogStore { .. })
                 | None,
             "cannot finish log store progress at state {:?}",

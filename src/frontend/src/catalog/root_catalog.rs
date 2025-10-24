@@ -840,7 +840,22 @@ impl Catalog {
             .try_find(|schema_name| {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
-                    .get_index_by_name(index_name))
+                    .get_created_index_by_name(index_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_owned()))
+    }
+
+    pub fn get_any_index_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        index_name: &str,
+    ) -> CatalogResult<(&Arc<IndexCatalog>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_any_index_by_name(index_name))
             })?
             .ok_or_else(|| CatalogError::NotFound("index", index_name.to_owned()))
     }
@@ -1125,7 +1140,7 @@ impl Catalog {
             .unwrap()
             .get_schema_by_id(&schema_id)
             .unwrap()
-            .get_indexes_by_table_id(&mv_id)
+            .get_any_indexes_by_table_id(&mv_id)
     }
 
     pub fn get_id_by_class_name(
@@ -1140,14 +1155,16 @@ impl Catalog {
                 #[allow(clippy::manual_map)]
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
                     Ok(Some(item.id().into()))
-                } else if let Some(item) = schema.get_created_table_by_name(class_name) {
+                } else if let Some(item) = schema.get_any_table_by_name(class_name) {
                     Ok(Some(item.id().into()))
-                } else if let Some(item) = schema.get_index_by_name(class_name) {
+                } else if let Some(item) = schema.get_any_index_by_name(class_name) {
                     Ok(Some(item.id.into()))
                 } else if let Some(item) = schema.get_source_by_name(class_name) {
                     Ok(Some(item.id))
                 } else if let Some(item) = schema.get_view_by_name(class_name) {
                     Ok(Some(item.id))
+                } else if let Some(item) = schema.get_any_sink_by_name(class_name) {
+                    Ok(Some(item.id.into()))
                 } else {
                     Ok(None)
                 }

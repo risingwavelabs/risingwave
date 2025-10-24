@@ -67,7 +67,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
 use crate::error::ErrorCode;
-use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
+use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
@@ -132,6 +132,9 @@ pub struct Binder {
 
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
+
+    /// The staging catalogs that will be used during binding phase
+    staging_catalog_manager: StagingCatalogManager,
 
     /// Information for `secure_compare` function. It's ONLY available when binding the
     /// `VALIDATE` clause of Webhook source i.e. `VALIDATE SECRET ... AS SECURE_COMPARE(...)`.
@@ -228,11 +231,7 @@ impl ParameterTypes {
 }
 
 impl Binder {
-    fn new_inner(
-        session: &SessionImpl,
-        bind_for: BindFor,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
+    fn new(session: &SessionImpl, bind_for: BindFor) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             user: session.env().user_info_reader().read_guard(),
@@ -252,42 +251,39 @@ impl Binder {
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
             included_udfs: HashSet::new(),
-            param_types: ParameterTypes::new(param_types),
+            param_types: ParameterTypes::new(vec![]),
             temporary_source_manager: session.temporary_source_manager(),
+            staging_catalog_manager: session.staging_catalog_manager(),
             secure_compare_context: None,
         }
     }
 
-    pub fn new(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Batch, vec![])
-    }
-
-    pub fn new_with_param_types(
-        session: &SessionImpl,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
-        Self::new_inner(session, BindFor::Batch, param_types)
+    pub fn new_for_batch(session: &SessionImpl) -> Binder {
+        Self::new(session, BindFor::Batch)
     }
 
     pub fn new_for_stream(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Stream, vec![])
+        Self::new(session, BindFor::Stream)
     }
 
     pub fn new_for_ddl(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Ddl, vec![])
-    }
-
-    pub fn new_for_ddl_with_secure_compare(
-        session: &SessionImpl,
-        ctx: SecureCompareContext,
-    ) -> Binder {
-        let mut binder = Self::new_inner(session, BindFor::Ddl, vec![]);
-        binder.secure_compare_context = Some(ctx);
-        binder
+        Self::new(session, BindFor::Ddl)
     }
 
     pub fn new_for_system(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::System, vec![])
+        Self::new(session, BindFor::System)
+    }
+
+    /// Set the specified parameter types.
+    pub fn with_specified_params_types(mut self, param_types: Vec<Option<DataType>>) -> Self {
+        self.param_types = ParameterTypes::new(param_types);
+        self
+    }
+
+    /// Set the secure compare context.
+    pub fn with_secure_compare(mut self, ctx: SecureCompareContext) -> Self {
+        self.secure_compare_context = Some(ctx);
+        self
     }
 
     fn is_for_stream(&self) -> bool {
@@ -447,14 +443,12 @@ pub mod test_utils {
     use super::Binder;
     use crate::session::SessionImpl;
 
-    #[cfg(test)]
     pub fn mock_binder() -> Binder {
-        Binder::new(&SessionImpl::mock())
+        mock_binder_with_param_types(vec![])
     }
 
-    #[cfg(test)]
     pub fn mock_binder_with_param_types(param_types: Vec<Option<DataType>>) -> Binder {
-        Binder::new_with_param_types(&SessionImpl::mock(), param_types)
+        Binder::new_for_batch(&SessionImpl::mock()).with_specified_params_types(param_types)
     }
 }
 
@@ -864,9 +858,7 @@ mod tests {
                                             Literal {
                                                 data: Some(
                                                     Float64(
-                                                        OrderedFloat(
-                                                            0.5,
-                                                        ),
+                                                        0.5,
                                                     ),
                                                 ),
                                                 data_type: Some(
@@ -876,9 +868,7 @@ mod tests {
                                             Literal {
                                                 data: Some(
                                                     Float64(
-                                                        OrderedFloat(
-                                                            0.01,
-                                                        ),
+                                                        0.01,
                                                     ),
                                                 ),
                                                 data_type: Some(

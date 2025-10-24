@@ -16,8 +16,6 @@
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_try_insert)]
-#![feature(btree_extract_if)]
-#![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
@@ -29,6 +27,7 @@
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(duration_millis_float)]
 #![feature(iterator_try_reduce)]
+#![feature(iterator_try_collect)]
 
 pub mod backup_restore;
 pub mod barrier;

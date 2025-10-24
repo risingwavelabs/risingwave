@@ -25,7 +25,6 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
-use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_meta::MetaStoreBackend;
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
@@ -94,9 +93,7 @@ use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
-use crate::rpc::metrics::{
-    GLOBAL_META_METRICS, start_fragment_info_monitor, start_worker_info_monitor,
-};
+use crate::rpc::metrics::{GLOBAL_META_METRICS, start_info_monitor, start_worker_info_monitor};
 use crate::serving::ServingVnodeMapping;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
@@ -191,8 +188,6 @@ pub async fn rpc_serve_with_store(
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
-    register_jvm_builder();
-
     // TODO(shutdown): directly use cancellation token
     let (election_shutdown_tx, election_shutdown_rx) = watch::channel(());
 
@@ -473,9 +468,9 @@ pub async fn start_service_as_election_leader(
             barrier_scheduler.clone(),
             metadata_manager.clone(),
             meta_metrics.clone(),
+            env.clone(),
         )
-        .await
-        .unwrap(),
+        .await?,
     );
     tracing::info!("SourceManager started");
 
@@ -508,6 +503,7 @@ pub async fn start_service_as_election_leader(
 
     sub_tasks.push(IcebergCompactionManager::gc_loop(
         iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_gc_interval_sec,
     ));
 
     let scale_controller = Arc::new(ScaleController::new(
@@ -565,14 +561,15 @@ pub async fn start_service_as_election_leader(
     )
     .await;
 
+    sub_tasks.push(ddl_srv.start_migrate_table_fragments());
+
     let user_srv = UserServiceImpl::new(metadata_manager.clone());
 
     let scale_srv = ScaleServiceImpl::new(
         metadata_manager.clone(),
-        source_manager,
         stream_manager.clone(),
         barrier_manager.clone(),
-        scale_controller.clone(),
+        env.clone(),
     );
 
     let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.clone());
@@ -626,9 +623,10 @@ pub async fn start_service_as_election_leader(
         Duration::from_secs(env.opts.node_num_monitor_interval_sec),
         meta_metrics.clone(),
     ));
-    sub_tasks.push(start_fragment_info_monitor(
+    sub_tasks.push(start_info_monitor(
         metadata_manager.clone(),
         hummock_manager.clone(),
+        env.system_params_manager_impl_ref(),
         meta_metrics.clone(),
     ));
     sub_tasks.push(SystemParamsController::start_params_notifier(
@@ -738,8 +736,13 @@ pub async fn start_service_as_election_leader(
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
-        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .add_service(EventLogServiceServer::new(event_log_srv))
+        .add_service(
+            SinkCoordinationServiceServer::new(sink_coordination_srv)
+                .max_decoding_message_size(usize::MAX),
+        )
+        .add_service(
+            EventLogServiceServer::new(event_log_srv).max_decoding_message_size(usize::MAX),
+        )
         .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,

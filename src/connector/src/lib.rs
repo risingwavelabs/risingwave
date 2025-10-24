@@ -14,13 +14,11 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
-#![feature(array_chunks)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
@@ -39,6 +37,7 @@
 #![recursion_limit = "256"]
 #![feature(min_specialization)]
 #![feature(custom_inner_attributes)]
+#![feature(iter_array_chunks)]
 
 use std::time::Duration;
 
@@ -47,7 +46,6 @@ use serde::de;
 
 pub mod aws_utils;
 
-#[rustfmt::skip]
 pub mod allow_alter_on_fly_fields;
 
 mod enforce_secret;
@@ -71,6 +69,9 @@ pub use with_options::{Get, GetKeyIter, WithOptionsSecResolved, WithPropertiesEx
 mod with_options_test;
 
 pub const AUTO_SCHEMA_CHANGE_KEY: &str = "auto.schema.change";
+pub const SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY: &str = "create_table_if_not_exists";
+pub const SINK_TARGET_TABLE_NAME: &str = "table.name";
+pub const SINK_INTERMEDIATE_TABLE_NAME: &str = "intermediate.table.name";
 
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where

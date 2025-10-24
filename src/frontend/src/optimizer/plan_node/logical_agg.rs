@@ -25,11 +25,12 @@ use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamPlanRef, StreamProject,
     StreamShare, StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
+    try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
-    OrderBy, WindowFunction,
+    OrderBy, OrderByExpr, WindowFunction,
 };
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -83,7 +84,7 @@ impl LogicalAgg {
             approx_percentile_col_mapping,
             approx_percentile,
             core,
-        ) = self.prepare_approx_percentile(stream_input.clone())?;
+        ) = self.prepare_approx_percentile(stream_input)?;
 
         if core.agg_calls.is_empty() {
             if let Some(approx_percentile) = approx_percentile {
@@ -156,7 +157,7 @@ impl LogicalAgg {
         local_group_key.insert(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
         let local_agg = new_stream_hash_agg(
-            Agg::new(core.agg_calls.to_vec(), local_group_key, project.into()),
+            Agg::new(core.agg_calls.clone(), local_group_key, project.into()),
             Some(vnode_col_idx),
         )?;
         // Global group key excludes vnode.
@@ -348,7 +349,7 @@ impl LogicalAgg {
             || approx_percentile_agg_calls.len() >= 2;
         let input = if needs_row_merge {
             // If there's row merge, we need to share the input.
-            StreamShare::new_from_input(stream_input.clone()).into()
+            StreamShare::new_from_input(stream_input).into()
         } else {
             stream_input
         };
@@ -640,7 +641,7 @@ impl LogicalAggBuilder {
                     agg_call.distinct,
                     agg_call.order_by.clone(),
                     agg_call.filter.clone(),
-                    agg_call.direct_args.clone(),
+                    agg_call.direct_args,
                 )?)?);
 
                 Ok(FunctionCall::new(ExprType::Divide, Vec::from([sum, count]))?.into())
@@ -781,6 +782,61 @@ impl LogicalAggBuilder {
                     };
                     Ok(push_agg_call(new_agg_call)?.into())
                 }
+            }
+            AggType::Builtin(PbAggKind::ArgMin | PbAggKind::ArgMax) => {
+                let mut agg_call = agg_call;
+
+                let comparison_arg_type = agg_call.args[1].return_type();
+                match comparison_arg_type {
+                    DataType::Struct(_)
+                    | DataType::List(_)
+                    | DataType::Map(_)
+                    | DataType::Vector(_)
+                    | DataType::Jsonb => {
+                        bail!(format!(
+                            "{} does not support struct, array, map, vector, jsonb for comparison argument, got {}",
+                            agg_call.agg_type.to_string(),
+                            comparison_arg_type
+                        ));
+                    }
+                    _ => {}
+                }
+
+                let not_null_exprs: Vec<ExprImpl> = agg_call
+                    .args
+                    .iter()
+                    .map(|arg| -> Result<ExprImpl> {
+                        Ok(FunctionCall::new(ExprType::IsNotNull, vec![arg.clone()])?.into())
+                    })
+                    .try_collect()?;
+
+                let comparison_expr = agg_call.args[1].clone();
+                let mut order_exprs = vec![OrderByExpr {
+                    expr: comparison_expr,
+                    order_type: if agg_call.agg_type == AggType::Builtin(PbAggKind::ArgMin) {
+                        OrderType::ascending()
+                    } else {
+                        OrderType::descending()
+                    },
+                }];
+
+                order_exprs.extend(agg_call.order_by.sort_exprs);
+
+                let order_by = OrderBy::new(order_exprs);
+
+                let filter = agg_call.filter.clone().and(Condition {
+                    conjunctions: not_null_exprs,
+                });
+
+                agg_call.args.truncate(1);
+
+                let new_agg_call = AggCall {
+                    agg_type: AggType::Builtin(PbAggKind::FirstValue),
+                    order_by,
+                    filter,
+                    ..agg_call
+                };
+                Ok(push_agg_call(new_agg_call)?.into())
             }
             _ => Ok(push_agg_call(agg_call)?.into()),
         }
@@ -1137,7 +1193,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input)
+        Agg::new(self.agg_calls().clone(), self.group_key().clone(), input)
             .with_grouping_sets(self.grouping_sets().clone())
             .with_enable_two_phase(self.core().enable_two_phase)
             .into()
@@ -1360,13 +1416,14 @@ impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
-        for agg_call in self.agg_calls() {
-            if matches!(agg_call.agg_type, agg_types::unimplemented_in_stream!()) {
-                bail_not_implemented!("{} aggregation in materialized view", agg_call.agg_type);
-            }
-        }
         let eowc = ctx.emit_on_window_close();
-        let stream_input = self.input().to_stream(ctx)?;
+        let input = if self.group_key().is_empty() {
+            self.input()
+        } else {
+            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
+        };
+
+        let stream_input = input.to_stream(ctx)?;
 
         // Use Dedup operator, if possible.
         if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
@@ -1453,16 +1510,19 @@ impl ToStream for LogicalAgg {
         } else {
             // a `count(*)` is appended, should project the output
             assert_eq!(self.agg_calls().len() + 1, n_final_agg_calls);
-            Ok(StreamProject::new(generic::Project::with_out_col_idx(
+
+            let mut project = StreamProject::new(generic::Project::with_out_col_idx(
                 plan,
                 0..self.schema().len(),
-            ))
+            ));
             // If there's no agg call, then `count(*)` will be the only column in the output besides keys.
             // Since it'll be pruned immediately in `StreamProject`, the update records are likely to be
             // no-op. So we set the hint to instruct the executor to eliminate them.
             // See https://github.com/risingwavelabs/risingwave/issues/17030.
-            .with_noop_update_hint(self.agg_calls().is_empty())
-            .into())
+            if self.agg_calls().is_empty() {
+                project = project.with_noop_update_hint(true);
+            }
+            Ok(project.into())
         }
     }
 
@@ -1514,7 +1574,7 @@ mod tests {
             .unwrap();
 
             let logical_agg = plan.as_logical_agg().unwrap();
-            let agg_calls = logical_agg.agg_calls().to_vec();
+            let agg_calls = logical_agg.agg_calls().clone();
             let group_key = logical_agg.group_key().clone();
 
             (exprs, agg_calls, group_key)

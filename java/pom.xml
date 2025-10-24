@@ -49,6 +49,7 @@
         <module>connector-node/risingwave-source-cdc</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/risingwave-source-cdc-test</module>
+        <module>connector-node/risingwave-jdbc-runner</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
         <module>connector-node/tracing</module>
@@ -63,7 +64,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- dependency versions -->
         <protobuf.version>3.25.8</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
-        <grpc.version>1.74.0</grpc.version>
+        <grpc.version>1.75.0</grpc.version>
         <log4j.version>2.25.1</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
         <debezium.version>2.6.2.Final</debezium.version>
@@ -273,6 +274,11 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-cassandra</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
+                <artifactId>risingwave-jdbc-runner</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>

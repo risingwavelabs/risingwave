@@ -22,7 +22,7 @@ use super::utils::impl_distill_by_unit;
 use super::{
     BatchGroupTopN, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
     PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamPlanRef, StreamProject, ToBatch,
-    ToStream, gen_filter_and_pushdown, generic,
+    ToStream, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -323,8 +323,9 @@ impl ToStream for LogicalTopN {
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let input = self.input().to_stream(ctx)?;
-            let input = RequiredDist::hash_shard(self.group_key())
+            let logical_input = try_enforce_locality_requirement(self.input(), self.group_key());
+            let input = logical_input.to_stream(ctx)?;
+            let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
                 .streaming_enforce_if_not_satisfies(input)?;
             let core = self.core.clone_with_input(input);
             StreamGroupTopN::new(core, None)?.into()

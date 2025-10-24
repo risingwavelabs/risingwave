@@ -94,6 +94,7 @@ impl SpecificParserConfig {
             timestamp_handling: None,
             timestamptz_handling: None,
             time_handling: None,
+            handle_toast_columns: false,
         }),
         protocol_config: ProtocolProperties::Plain,
     };
@@ -181,11 +182,10 @@ impl SpecificParserConfig {
                     }
                 } else {
                     SchemaLocation::File {
-                        url: info.row_schema_location.clone(),
+                        url: info.row_schema_location,
                         aws_auth_props: Some(
                             serde_json::from_value::<AwsAuthProps>(
-                                serde_json::to_value(format_encode_options_with_secret.clone())
-                                    .unwrap(),
+                                serde_json::to_value(format_encode_options_with_secret).unwrap(),
                             )
                             .map_err(|e| anyhow::anyhow!(e))?,
                         ),
@@ -225,11 +225,10 @@ impl SpecificParserConfig {
                     }
                 } else {
                     SchemaLocation::File {
-                        url: info.row_schema_location.clone(),
+                        url: info.row_schema_location,
                         aws_auth_props: Some(
                             serde_json::from_value::<AwsAuthProps>(
-                                serde_json::to_value(format_encode_options_with_secret.clone())
-                                    .unwrap(),
+                                serde_json::to_value(format_encode_options_with_secret).unwrap(),
                             )
                             .map_err(|e| anyhow::anyhow!(e))?,
                         ),
@@ -271,6 +270,7 @@ impl SpecificParserConfig {
                     &format_encode_options_with_secret,
                 )?,
                 time_handling: None,
+                handle_toast_columns: false,
             }),
             (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
                 let props = MongoProperties::from(&format_encode_options_with_secret);
@@ -355,6 +355,7 @@ pub struct JsonProperties {
     pub timestamp_handling: Option<TimestampHandling>,
     pub timestamptz_handling: Option<TimestamptzHandling>,
     pub time_handling: Option<TimeHandling>,
+    pub handle_toast_columns: bool,
 }
 
 #[derive(Debug, Default, Clone)]

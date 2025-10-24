@@ -45,7 +45,7 @@ use super::{
     StreamSyncLogStore, generic,
 };
 use crate::TableCatalog;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
@@ -56,6 +56,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::WithOptionsSecResolved;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
+const CREATE_TABLE_IF_NOT_EXISTS: &str = "create_table_if_not_exists";
 
 /// ## Why we need `PartitionComputeInfo`?
 ///
@@ -255,8 +256,10 @@ impl StreamSink {
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
+        let derived_pk = pk.iter().map(|k| k.column_index).collect_vec();
+
         let mut downstream_pk = {
-            let from_properties =
+            let downstream_pk =
                 Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
             if let Some(t) = &target_table {
                 let user_defined_primary_key_table = t.row_id_index.is_none();
@@ -288,10 +291,27 @@ impl StreamSink {
                         })
                         .try_collect::<_, _, RwError>()?
                 }
+            } else if properties.get(CREATE_TABLE_IF_NOT_EXISTS) == Some(&"true".to_owned())
+                && sink_type == SinkType::Upsert
+                && downstream_pk.is_empty()
+            {
+                derived_pk.clone()
             } else {
-                from_properties
+                downstream_pk
             }
         };
+
+        // The "upsert" property is defined based on a specific stream key: columns other than the stream key
+        // might not be valid. We should reject the cases referencing such columns in primary key.
+        if let StreamKind::Upsert = input.stream_kind()
+            && !downstream_pk.iter().all(|i| derived_pk.contains(i))
+        {
+            bail_bind_error!(
+                "When sinking from an upsert stream, \
+                 the downstream primary key must be the same as or a subset of the one derived from the stream."
+            )
+        }
+
         if let Some(upstream_table) = &auto_refresh_schema_from_table
             && !downstream_pk.is_empty()
         {
@@ -332,7 +352,7 @@ impl StreamSink {
                     Some(s) if s == ICEBERG_SINK => {
                         // If user doesn't specify the downstream primary key, we use the stream key as the pk.
                         if sink_type.is_upsert() && downstream_pk.is_empty() {
-                            downstream_pk = pk.iter().map(|k| k.column_index).collect_vec();
+                            downstream_pk = derived_pk;
                         }
                         let (required_dist, new_input, partition_col_idx) =
                             Self::derive_iceberg_sink_distribution(
@@ -383,7 +403,8 @@ impl StreamSink {
         let (properties, secret_refs) = properties.into_parts();
         let is_exactly_once = properties
             .get("is_exactly_once")
-            .is_some_and(|v| v.to_lowercase() == "true");
+            .map(|v| v.to_lowercase() == "true");
+
         let mut sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -462,7 +483,25 @@ impl StreamSink {
                 )
                 .into());
             }
-            if sink_desc.is_exactly_once {
+
+            let is_exactly_once = match sink_desc.is_exactly_once {
+                Some(v) => v,
+                None => {
+                    if let Some(connector) = sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
+                        let connector_type = connector.to_lowercase();
+                        if connector_type == ICEBERG_SINK {
+                            // iceberg sink defaults to exactly once
+                            // However, when sink_decouple is disabled, we enforce it to false.
+                            sink_desc
+                                .properties
+                                .insert("is_exactly_once".to_owned(), "false".to_owned());
+                        }
+                    }
+                    false
+                }
+            };
+
+            if is_exactly_once {
                 return Err(ErrorCode::NotSupported(
                     "Exactly once sink can only be created with sink_decouple enabled.".to_owned(),
                     hint_string(true),

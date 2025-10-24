@@ -107,12 +107,12 @@ pub struct LocalHummockStorage {
 }
 
 impl LocalHummockFlushedSnapshotReader {
-    async fn get_flushed<O>(
-        hummock_version_reader: &HummockVersionReader,
+    async fn get_flushed<'a, O>(
+        hummock_version_reader: &'a HummockVersionReader,
         read_version: &HummockReadVersionRef,
         user_key: UserKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl crate::store::KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let table_key_range = (
             Bound::Included(user_key.table_key.clone()),
@@ -266,11 +266,11 @@ pub struct LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockFlushedSnapshotReader {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let key = UserKey::new(self.table_id, key);
         Self::get_flushed(
@@ -308,11 +308,11 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
 }
 
 impl StateStoreGet for LocalHummockStorage {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let key = UserKey::new(self.table_id, key);
         match self.mem_table.buffer.get(&key.table_key) {
@@ -437,6 +437,7 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
                 KeyOp::Insert(value) => {
                     if let Some(sanity_check_reader) = &sanity_check_flushed_snapshot_reader {
                         do_insert_sanity_check(
+                            self.table_id,
                             &key,
                             &value,
                             sanity_check_reader,
@@ -453,6 +454,7 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
                 KeyOp::Delete(old_value) => {
                     if let Some(sanity_check_reader) = &sanity_check_flushed_snapshot_reader {
                         do_delete_sanity_check(
+                            self.table_id,
                             &key,
                             &old_value,
                             sanity_check_reader,
@@ -469,6 +471,7 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
                 KeyOp::Update((old_value, new_value)) => {
                     if let Some(sanity_check_reader) = &sanity_check_flushed_snapshot_reader {
                         do_update_sanity_check(
+                            self.table_id,
                             &key,
                             &old_value,
                             &new_value,
@@ -744,7 +747,7 @@ impl LocalHummockStorage {
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
         Self {
-            mem_table: MemTable::new(option.op_consistency_level.clone()),
+            mem_table: MemTable::new(option.table_id, option.op_consistency_level.clone()),
             spill_offset: 0,
             epoch: None,
             table_id: option.table_id,

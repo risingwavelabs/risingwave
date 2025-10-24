@@ -58,6 +58,10 @@ if [ "$profile" == "ci-dev" ]; then
     risedev slt './e2e_test/debug_mode_only/debug_splits.slt'
 fi
 
+echo "--- Run mqtt test"
+risedev slt './e2e_test/mqtt/**/*.slt'
+echo "--- Run mqtt test done"
+
 echo "--- Run kafka sasl test"
 risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 echo "--- Run kafka sasl test done"

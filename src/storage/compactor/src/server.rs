@@ -30,7 +30,6 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
-use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_pb::common::WorkerType;
@@ -57,7 +56,10 @@ use tracing::info;
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
-use crate::{CompactorMode, CompactorOpts};
+use crate::{
+    CompactorMode, CompactorOpts, default_rpc_max_decoding_message_size_bytes,
+    default_rpc_max_encoding_message_size_bytes,
+};
 
 pub async fn prepare_start_parameters(
     compactor_opts: &CompactorOpts,
@@ -202,7 +204,7 @@ pub async fn compactor_serve(
         WorkerType::Compactor,
         &advertise_addr,
         Default::default(),
-        &config.meta,
+        Arc::new(config.meta.clone()),
     )
     .await;
 
@@ -278,8 +280,6 @@ pub async fn compactor_serve(
             ),
             CompactorMode::Shared => unreachable!(),
             CompactorMode::DedicatedIceberg => {
-                register_jvm_builder();
-
                 risingwave_storage::hummock::compactor::start_iceberg_compactor(
                     compactor_context.clone(),
                     hummock_meta_client.clone(),
@@ -393,8 +393,20 @@ pub async fn shared_compactor_serve(
         compactor_context,
     );
 
+    let rpc_max_encoding_message_size_bytes = opts
+        .rpc_max_encoding_message_size_bytes
+        .unwrap_or(default_rpc_max_encoding_message_size_bytes());
+
+    let rpc_max_decoding_message_size_bytes = opts
+        .rpc_max_decoding_message_size_bytes
+        .unwrap_or(default_rpc_max_decoding_message_size_bytes());
+
     let server = tonic::transport::Server::builder()
-        .add_service(CompactorServiceServer::new(compactor_srv))
+        .add_service(
+            CompactorServiceServer::new(compactor_srv)
+                .max_decoding_message_size(rpc_max_decoding_message_size_bytes)
+                .max_encoding_message_size(rpc_max_encoding_message_size_bytes),
+        )
         .add_service(MonitorServiceServer::new(monitor_srv))
         .monitored_serve_with_shutdown(
             listen_addr,

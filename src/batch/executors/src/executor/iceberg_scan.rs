@@ -148,7 +148,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             source_node.with_properties.clone(),
             source_node.secret_refs.clone(),
         );
-        let config = ConnectorProperties::extract(options_with_secret.clone(), false)?;
+        let config = ConnectorProperties::extract(options_with_secret, false)?;
 
         let split_list = source_node
             .split
@@ -168,7 +168,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             })
             .collect();
         let schema = Schema::new(fields);
-        let metrics = source.context().batch_metrics().clone();
+        let metrics = source.context().batch_metrics();
 
         if let ConnectorProperties::Iceberg(iceberg_properties) = config
             && let SplitImpl::Iceberg(split) = &split_list[0]

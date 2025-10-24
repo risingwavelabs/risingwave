@@ -174,6 +174,16 @@ impl Binder {
                             .get_view_by_name(&db_name, schema_path, table_name)
                     {
                         self.resolve_view_relation(&view_catalog.clone())?
+                    } else if let Some(table_catalog) =
+                        self.staging_catalog_manager.get_table(table_name)
+                    {
+                        // don't care about the database and schema
+                        self.resolve_table_relation(
+                            table_catalog.clone().into(),
+                            &db_name,
+                            schema_name,
+                            as_of,
+                        )?
                     } else {
                         return Err(CatalogError::NotFound(
                             "table or source",
@@ -239,6 +249,16 @@ impl Binder {
                                     schema.get_view_by_name(table_name)
                                 {
                                     return self.resolve_view_relation(&view_catalog.clone());
+                                } else if let Some(table_catalog) =
+                                    self.staging_catalog_manager.get_table(table_name)
+                                {
+                                    // don't care about the database and schema
+                                    return self.resolve_table_relation(
+                                        table_catalog.clone().into(),
+                                        &db_name,
+                                        schema_name,
+                                        as_of,
+                                    );
                                 }
                             }
                         }
@@ -288,11 +308,7 @@ impl Binder {
                     if self.database_id != database_id
                         && !user.has_privilege(&PbObject::DatabaseId(database_id), AclMode::Connect)
                     {
-                        let db_name = self
-                            .catalog
-                            .get_database_by_id(&database_id)?
-                            .name
-                            .to_owned();
+                        let db_name = self.catalog.get_database_by_id(&database_id)?.name.clone();
 
                         return Err(PermissionDenied(format!(
                             "permission denied for database \"{db_name}\""
@@ -451,11 +467,11 @@ impl Binder {
     ) -> Result<Vec<Arc<IndexCatalog>>> {
         let schema = self.catalog.get_schema_by_name(db_name, schema_name)?;
         assert!(
-            schema.get_table_by_id(&table_id).is_some(),
+            schema.get_table_by_id(&table_id).is_some() || table_id.is_placeholder(),
             "table {table_id} not found in {db_name}.{schema_name}"
         );
 
-        Ok(schema.get_indexes_by_table_id(&table_id))
+        Ok(schema.get_created_indexes_by_table_id(&table_id))
     }
 
     pub(crate) fn bind_table(

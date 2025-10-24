@@ -173,7 +173,7 @@ impl SourceExecutor {
 
 fn convert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
     // chunk read from source must be compact
-    assert!(chunk.data_chunk().is_compacted());
+    assert!(chunk.data_chunk().is_vis_compacted());
 
     if chunk.ops().iter().any(|op| *op != Op::Insert) {
         bail!("Only support insert op in batch source executor");

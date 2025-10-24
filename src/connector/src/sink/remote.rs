@@ -24,13 +24,12 @@ use async_trait::async_trait;
 use await_tree::{InstrumentAwait, span};
 use futures::TryStreamExt;
 use futures::future::select;
-use jni::JavaVM;
 use phf::phf_set;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::global_jvm::JVM;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
@@ -213,7 +212,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
             DataType::List(list) => {
-                if is_remote_es_sink(sink_name) || matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+                if is_remote_es_sink(sink_name) || matches!(list.elem(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
@@ -241,7 +240,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                             col.data_type,
                         )))}})?;
 
-    let jvm = JVM.get_or_init()?;
+    let jvm = Jvm::get_or_init()?;
     let sink_param = param.to_proto();
 
     spawn_blocking(move || -> anyhow::Result<()> {
@@ -697,20 +696,30 @@ impl SinkCommitCoordinator for RemoteCoordinator {
         Ok(None)
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        if let Some(add_columns) = add_columns {
+            return Err(anyhow!(
+                "remote coordinator not support add columns, but got: {:?}",
+                add_columns
+            )
+            .into());
+        }
         Ok(self.stream_handle.commit(epoch, metadata).await?)
     }
 }
 
 struct EmbeddedConnectorClient {
-    jvm: &'static JavaVM,
+    jvm: Jvm,
 }
 
 impl EmbeddedConnectorClient {
     fn new() -> Result<Self> {
-        let jvm = JVM
-            .get_or_init()
-            .context("failed to create EmbeddedConnectorClient")?;
+        let jvm = Jvm::get_or_init().context("failed to create EmbeddedConnectorClient")?;
         Ok(EmbeddedConnectorClient { jvm })
     }
 

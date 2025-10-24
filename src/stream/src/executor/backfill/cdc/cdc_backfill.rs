@@ -29,7 +29,9 @@ use risingwave_connector::parser::{
     TimestampHandling, TimestamptzHandling,
 };
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
+use risingwave_connector::source::cdc::external::{
+    CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
+};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
@@ -108,7 +110,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         );
 
         let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
-
         Self {
             actor_ctx,
             external_table,
@@ -225,6 +226,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimeHandling::Milli);
+        // Only postgres-cdc connector may trigger TOAST.
+        let handle_toast_columns: bool =
+            self.external_table.table_type() == &ExternalCdcTableType::Postgres;
         // Make sure to use mapping_message after transform_upstream.
         let mut upstream = transform_upstream(
             upstream,
@@ -232,6 +236,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            handle_toast_columns,
         )
         .boxed();
         loop {
@@ -546,7 +551,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         continue;
                                     }
                                     // Buffer the upstream chunk.
-                                    upstream_chunk_buffer.push(chunk.compact());
+                                    upstream_chunk_buffer.push(chunk.compact_vis());
                                 }
                                 Message::Watermark(_) => {
                                     // Ignore watermark during backfill.
@@ -824,6 +829,7 @@ pub async fn transform_upstream(
     timestamp_handling: Option<TimestampHandling>,
     timestamptz_handling: Option<TimestamptzHandling>,
     time_handling: Option<TimeHandling>,
+    handle_toast_columns: bool,
 ) {
     let props = SpecificParserConfig {
         encoding_config: EncodingProperties::Json(JsonProperties {
@@ -831,6 +837,7 @@ pub async fn transform_upstream(
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            handle_toast_columns,
         }),
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
@@ -883,7 +890,7 @@ async fn parse_debezium_chunk(
     // We should use the debezium parser to parse the first column,
     // then chain the parsed row with `_rw_offset` row to get a new row.
     let payloads = chunk.data_chunk().project(&[0]);
-    let offsets = chunk.data_chunk().project(&[1]).compact();
+    let offsets = chunk.data_chunk().project(&[1]).compact_vis();
 
     // TODO: preserve the transaction semantics
     for payload in payloads.rows() {
@@ -996,7 +1003,7 @@ mod tests {
             ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
         ];
 
-        let parsed_stream = transform_upstream(upstream, columns, None, None, None);
+        let parsed_stream = transform_upstream(upstream, columns, None, None, None, false);
         pin_mut!(parsed_stream);
         // the output chunk must contain the offset column
         if let Some(message) = parsed_stream.next().await {

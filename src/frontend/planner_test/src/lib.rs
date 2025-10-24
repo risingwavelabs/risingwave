@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 
 //! Data-driven tests.
@@ -438,7 +437,7 @@ impl TestCase {
                     source_watermarks,
                     append_only,
                     on_conflict,
-                    with_version_column,
+                    with_version_columns,
                     cdc_table_info,
                     include_column_options,
                     wildcard_idx,
@@ -459,7 +458,10 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         on_conflict,
-                        with_version_column.map(|x| x.real_value()),
+                        with_version_columns
+                            .iter()
+                            .map(|x| x.real_value())
+                            .collect(),
                         cdc_table_info,
                         include_column_options,
                         webhook_info,
@@ -606,7 +608,7 @@ impl TestCase {
         let mut ret = TestCaseResult::default();
 
         let bound = {
-            let mut binder = Binder::new(&session);
+            let mut binder = Binder::new_for_batch(&session);
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {
@@ -860,7 +862,7 @@ impl TestCase {
 
         'sink: {
             if self.expected_outputs.contains(&TestType::SinkPlan) {
-                let plan_root = plan_root.clone();
+                let plan_root = plan_root;
                 let sink_name = "sink_test";
                 let mut options = BTreeMap::new();
                 options.insert("connector".to_owned(), "blackhole".to_owned());

@@ -28,7 +28,7 @@ message RowSeqScanNode {
 
   // The pushed down `batch_limit`. Max rows needed to return.
   optional uint64 limit = 6;
-  optional plan_common.AsOf as_of = 7;
+  common.BatchQueryEpoch query_epoch = 7;
 }
 
 message SysRowSeqScanNode {
@@ -332,7 +332,8 @@ message TaskOutputId {
 
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
-  common.BatchQueryEpoch epoch = 2;
+  reserved "epoch";
+  reserved 2;
   map<string, string> tracing_context = 3;
 }
 
@@ -371,7 +372,7 @@ message LocalLookupJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 11;
-  optional plan_common.AsOf as_of = 12;
+  common.BatchQueryEpoch query_epoch = 12;
   optional plan_common.AsOfJoinDesc asof_desc = 13;
 }
 
@@ -389,7 +390,7 @@ message DistributedLookupJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 9;
-  optional plan_common.AsOf as_of = 10;
+  common.BatchQueryEpoch query_epoch = 10;
   optional plan_common.AsOfJoinDesc asof_desc = 11;
 }
 
@@ -404,15 +405,16 @@ message SortOverWindowNode {
 message MaxOneRowNode {}
 
 message VectorIndexNearestNode {
-  // The table_id of the vector index to search.
-  uint32 table_id = 2;
-  // The columns of the vector index info.
-  repeated plan_common.ColumnDesc info_column_desc = 3;
-  uint32 vector_column_idx = 4;
-  // The number of nearest neighbors to return.
-  uint32 top_n = 5;
-  // The distance metric to use for the search.
-  common.DistanceType distance_type = 6;
+  plan_common.VectorIndexReaderDesc reader_desc = 1;
+  uint32 vector_column_idx = 2;
+  common.BatchQueryEpoch query_epoch = 8;
+}
+
+message GetChannelDeltaStatsNode {
+  // Optional timestamp to get channel stats at a specific time
+  optional uint64 at_time = 1;
+  // Time offset in seconds for the query window
+  optional uint64 time_offset = 2;
 }
 
 message PlanNode {
@@ -456,6 +458,7 @@ message PlanNode {
     GcsFileScanNode gcs_file_scan = 42;
     AzblobFileScanNode azblob_file_scan = 43;
     VectorIndexNearestNode vector_index_nearest = 44;
+    GetChannelDeltaStatsNode get_channel_delta_stats = 45;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

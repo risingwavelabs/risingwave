@@ -146,9 +146,10 @@
     StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
     └─StreamRowIdGen { row_id_index: 2 }
       └─StreamUnion { all: true }
-        └─StreamExchange { dist: HashShard(_row_id) }
-          └─StreamDml { columns: [v1, v2, _row_id] }
-            └─StreamSource
+        ├─StreamExchange { dist: HashShard(_row_id) }
+        │ └─StreamDml { columns: [v1, v2, _row_id] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
 - sql: |
     explain create table t (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
   explain_output: |
@@ -157,9 +158,10 @@
       └─StreamUnion { all: true }
         ├─StreamExchange [no_shuffle] { dist: SomeShard }
         │ └─StreamSource { source: t, columns: [v1, v2, _row_id] }
-        └─StreamExchange { dist: HashShard(_row_id) }
-          └─StreamDml { columns: [v1, v2, _row_id] }
-            └─StreamSource
+        ├─StreamExchange { dist: HashShard(_row_id) }
+        │ └─StreamDml { columns: [v1, v2, _row_id] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
 - sql: |
     explain create table t (v1 int, v2 varchar) append only with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
   explain_output: |
@@ -168,9 +170,10 @@
       └─StreamUnion { all: true }
         ├─StreamExchange [no_shuffle] { dist: SomeShard }
         │ └─StreamSource { source: t, columns: [v1, v2, _row_id] }
-        └─StreamExchange [no_shuffle] { dist: SomeShard }
-          └─StreamDml { columns: [v1, v2, _row_id] }
-            └─StreamSource
+        ├─StreamExchange [no_shuffle] { dist: SomeShard }
+        │ └─StreamDml { columns: [v1, v2, _row_id] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
 - sql: |
     explain create table t (v1 int, v2 varchar primary key) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
   explain_output: |
@@ -178,9 +181,10 @@
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(v2) }
       │ └─StreamSource { source: t, columns: [v1, v2] }
-      └─StreamExchange { dist: HashShard(v2) }
-        └─StreamDml { columns: [v1, v2] }
-          └─StreamSource
+      ├─StreamExchange { dist: HashShard(v2) }
+      │ └─StreamDml { columns: [v1, v2] }
+      │   └─StreamSource
+      └─StreamUpstreamSinkUnion
 - sql: |
     explain create table t (v1 int, v2 varchar primary key) append only with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
   explain_output: |
@@ -188,6 +192,7 @@
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(v2) }
       │ └─StreamSource { source: t, columns: [v1, v2] }
-      └─StreamExchange { dist: HashShard(v2) }
-        └─StreamDml { columns: [v1, v2] }
-          └─StreamSource
+      ├─StreamExchange { dist: HashShard(v2) }
+      │ └─StreamDml { columns: [v1, v2] }
+      │   └─StreamSource
+      └─StreamUpstreamSinkUnion

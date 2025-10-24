@@ -93,10 +93,10 @@ impl ColumnIdGenerator {
                         });
                     }
                 }
-                DataType::List(inner) => {
+                DataType::List(list) => {
                     // There's no id for the element as list's own structure won't change.
                     with_segment!(Segment::ListElement, {
-                        handle(existing, path, ColumnId::placeholder(), *inner.clone());
+                        handle(existing, path, ColumnId::placeholder(), list.elem().clone());
                     });
                 }
                 DataType::Map(map) => {
@@ -249,17 +249,17 @@ impl ColumnIdGenerator {
                     }
                     DataType::Struct(StructType::new(new_fields).with_ids(ids))
                 }
-                DataType::List(inner) => {
-                    let (_, new_inner) =
-                        with_segment!(Segment::ListElement, { handle(this, path, *inner)? });
-                    DataType::List(Box::new(new_inner))
+                DataType::List(list) => {
+                    let (_, new_inner) = with_segment!(Segment::ListElement, {
+                        handle(this, path, list.into_elem())?
+                    });
+                    DataType::list(new_inner)
                 }
                 DataType::Map(map) => {
-                    let (_, new_key) =
-                        with_segment!(Segment::MapKey, { handle(this, path, map.key().clone())? });
-                    let (_, new_value) = with_segment!(Segment::MapValue, {
-                        handle(this, path, map.value().clone())?
-                    });
+                    let (key, value) = map.into_kv();
+                    let (_, new_key) = with_segment!(Segment::MapKey, { handle(this, path, key)? });
+                    let (_, new_value) =
+                        with_segment!(Segment::MapValue, { handle(this, path, value)? });
                     DataType::Map(MapType::from_kv(new_key, new_value))
                 }
 
@@ -423,10 +423,10 @@ mod tests {
                     "map",
                     MapType::from_kv(
                         DataType::Varchar,
-                        DataType::List(Box::new(
+                        DataType::list(
                             StructType::new([("f2", DataType::Int32), ("f3", DataType::Boolean)])
                                 .into(),
-                        )),
+                        ),
                     )
                     .into(),
                 ),
@@ -440,14 +440,14 @@ mod tests {
                     "map",
                     MapType::from_kv(
                         DataType::Varchar,
-                        DataType::List(Box::new(
+                        DataType::list(
                             StructType::new([
                                 ("f5", DataType::Int32),
                                 ("f3", DataType::Boolean),
                                 ("f6", DataType::Float32),
                             ])
                             .into(),
-                        )),
+                        ),
                     )
                     .into(),
                 ),
@@ -459,9 +459,7 @@ mod tests {
                 "map",
                 MapType::from_kv(
                     DataType::Varchar,
-                    DataType::List(Box::new(
-                        StructType::new([("f6", DataType::Float64)]).into(),
-                    )),
+                    DataType::list(StructType::new([("f6", DataType::Float64)]).into()),
                 )
                 .into(),
             )]))

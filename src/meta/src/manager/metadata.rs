@@ -19,26 +19,27 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{Either, select};
+use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep};
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::Reschedule;
+use crate::barrier::{Reschedule, SharedFragmentInfo};
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{
-    ActorId, ClusterId, Fragment, FragmentId, StreamActor, StreamJobFragments, SubscriptionId,
+    ActorId, ClusterId, FragmentId, StreamActor, StreamJobFragments, SubscriptionId,
 };
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -402,15 +403,14 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn running_fragment_parallelisms(
+    pub fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
         Ok(self
             .catalog_controller
-            .running_fragment_parallelisms(id_filter)
-            .await?
+            .running_fragment_parallelisms(id_filter)?
             .into_iter()
             .map(|(k, v)| (k as FragmentId, v))
             .collect())
@@ -423,7 +423,10 @@ impl MetadataManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, WorkerId>)> {
+    ) -> MetaResult<(
+        HashMap<TableId, (SharedFragmentInfo, PbStreamNode)>,
+        HashMap<ActorId, WorkerId>,
+    )> {
         let (upstream_root_fragments, actors) = self
             .catalog_controller
             .get_root_fragments(
@@ -484,15 +487,15 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_table_catalog_by_ids(&self, ids: Vec<u32>) -> MetaResult<Vec<PbTable>> {
+    pub async fn get_table_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbTable>> {
         self.catalog_controller
-            .get_table_by_ids(ids.into_iter().map(|id| id as _).collect(), false)
+            .get_table_by_ids(ids.iter().map(|id| *id as _).collect(), false)
             .await
     }
 
-    pub async fn get_sink_catalog_by_ids(&self, ids: &[u32]) -> MetaResult<Vec<PbSink>> {
+    pub async fn get_table_incoming_sinks(&self, table_id: u32) -> MetaResult<Vec<PbSink>> {
         self.catalog_controller
-            .get_sink_by_ids(ids.iter().map(|id| *id as _).collect())
+            .get_table_incoming_sinks(table_id as _)
             .await
     }
 
@@ -519,7 +522,7 @@ impl MetadataManager {
         &self,
         job_id: u32,
     ) -> MetaResult<(
-        Vec<(PbDispatcherType, Fragment)>,
+        Vec<(PbDispatcherType, SharedFragmentInfo, PbStreamNode)>,
         HashMap<ActorId, WorkerId>,
     )> {
         let (fragments, actors) = self
@@ -533,25 +536,6 @@ impl MetadataManager {
             .collect();
 
         Ok((fragments, actors))
-    }
-
-    pub async fn get_worker_actor_ids(
-        &self,
-        job_ids: HashSet<TableId>,
-    ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
-        let worker_actors = self
-            .catalog_controller
-            .get_worker_actor_ids(job_ids.into_iter().map(|id| id.table_id as _).collect())
-            .await?;
-        Ok(worker_actors
-            .into_iter()
-            .map(|(id, actors)| {
-                (
-                    id as WorkerId,
-                    actors.into_iter().map(|id| id as ActorId).collect(),
-                )
-            })
-            .collect())
     }
 
     pub async fn get_job_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
@@ -577,15 +561,9 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_running_actors_of_fragment(
-        &self,
-        id: FragmentId,
-    ) -> MetaResult<HashSet<ActorId>> {
-        let actor_ids = self
-            .catalog_controller
+    pub fn get_running_actors_of_fragment(&self, id: FragmentId) -> MetaResult<HashSet<ActorId>> {
+        self.catalog_controller
             .get_running_actors_of_fragment(id as _)
-            .await?;
-        Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 
     // (backfill_actor_id, upstream_source_actor_id)
@@ -607,21 +585,6 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn get_job_fragments_by_ids(
-        &self,
-        ids: &[TableId],
-    ) -> MetaResult<Vec<StreamJobFragments>> {
-        let mut table_fragments = vec![];
-        for id in ids {
-            table_fragments.push(
-                self.catalog_controller
-                    .get_job_fragments_by_id(id.table_id as _)
-                    .await?,
-            );
-        }
-        Ok(table_fragments)
-    }
-
     pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
@@ -635,8 +598,8 @@ impl MetadataManager {
         Ok(actor_maps)
     }
 
-    pub async fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
-        let actor_cnt = self.catalog_controller.worker_actor_count().await?;
+    pub fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
+        let actor_cnt = self.catalog_controller.worker_actor_count()?;
         Ok(actor_cnt
             .into_iter()
             .map(|(id, cnt)| (id as WorkerId, cnt))
@@ -728,6 +691,25 @@ impl MetadataManager {
         Ok(new_props)
     }
 
+    pub async fn update_iceberg_table_props_by_table_id(
+        &self,
+        table_id: TableId,
+        props: BTreeMap<String, String>,
+        alter_iceberg_table_props: Option<
+            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
+        >,
+    ) -> MetaResult<(HashMap<String, String>, u32)> {
+        let (new_props, sink_id) = self
+            .catalog_controller
+            .update_iceberg_table_props_by_table_id(
+                table_id.table_id as _,
+                props,
+                alter_iceberg_table_props,
+            )
+            .await?;
+        Ok((new_props, sink_id))
+    }
+
     pub async fn update_fragment_rate_limit_by_fragment_id(
         &self,
         fragment_id: FragmentId,
@@ -750,6 +732,26 @@ impl MetadataManager {
     ) -> MetaResult<()> {
         self.catalog_controller
             .update_actor_splits(split_assignment)
+            .await
+    }
+
+    #[await_tree::instrument]
+    pub async fn update_fragment_splits(
+        &self,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        let fragment_splits = split_assignment
+            .iter()
+            .map(|(fragment_id, splits)| {
+                (
+                    *fragment_id as _,
+                    splits.values().flatten().cloned().collect_vec(),
+                )
+            })
+            .collect();
+
+        self.catalog_controller
+            .update_fragment_splits(&fragment_splits)
             .await
     }
 

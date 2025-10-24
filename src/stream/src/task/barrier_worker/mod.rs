@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -27,7 +26,7 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCreateMviewProgress, PbLocalSstableInfo,
+    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -43,10 +42,10 @@ use self::managed_state::ManagedBarrierState;
 use crate::error::{ScoredStreamError, StreamError, StreamResult};
 #[cfg(test)]
 use crate::task::LocalBarrierManager;
+use crate::task::managed_state::BarrierToComplete;
 use crate::task::{
     ActorId, AtomicU64Ref, PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
 };
-
 pub mod managed_state;
 #[cfg(test)]
 mod tests;
@@ -85,8 +84,18 @@ pub struct BarrierCompleteResult {
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
 
+    /// The source IDs that have finished listing data for refreshable batch sources.
+    pub list_finished_source_ids: Vec<u32>,
+
     /// The source IDs that have finished loading data for refreshable batch sources.
     pub load_finished_source_ids: Vec<u32>,
+
+    pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+
+    /// The table IDs that should be truncated.
+    pub truncate_tables: Vec<u32>,
+    /// The table IDs that have finished refresh.
+    pub refresh_finished_tables: Vec<u32>,
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -618,7 +627,9 @@ mod await_epoch_completed_future {
     use futures::FutureExt;
     use futures::future::BoxFuture;
     use risingwave_hummock_sdk::SyncResult;
-    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+    use risingwave_pb::stream_service::barrier_complete_response::{
+        PbCdcTableBackfillProgress, PbCreateMviewProgress,
+    };
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
@@ -628,13 +639,18 @@ mod await_epoch_completed_future {
         + 'static;
 
     #[define_opaque(AwaitEpochCompletedFuture)]
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn instrument_complete_barrier_future(
         partial_graph_id: PartialGraphId,
         complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
         create_mview_progress: Vec<PbCreateMviewProgress>,
+        list_finished_source_ids: Vec<u32>,
         load_finished_source_ids: Vec<u32>,
+        cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+        truncate_tables: Vec<u32>,
+        refresh_finished_tables: Vec<u32>,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -652,7 +668,11 @@ mod await_epoch_completed_future {
                 result.map(|sync_result| BarrierCompleteResult {
                     sync_result,
                     create_mview_progress,
+                    list_finished_source_ids,
                     load_finished_source_ids,
+                    cdc_table_backfill_progress,
+                    truncate_tables,
+                    refresh_finished_tables,
                 }),
             )
         });
@@ -724,8 +744,16 @@ impl LocalBarrierWorker {
             else {
                 return;
             };
-            let (barrier, table_ids, create_mview_progress, load_finished_source_ids) =
-                database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
+            let BarrierToComplete {
+                barrier,
+                table_ids,
+                create_mview_progress,
+                list_finished_source_ids,
+                load_finished_source_ids,
+                cdc_table_backfill_progress,
+                truncate_tables,
+                refresh_finished_tables,
+            } = database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
                 BarrierKind::Unspecified => unreachable!(),
@@ -756,7 +784,11 @@ impl LocalBarrierWorker {
                         barrier,
                         self.actor_manager.await_tree_reg.as_ref(),
                         create_mview_progress,
+                        list_finished_source_ids,
                         load_finished_source_ids,
+                        cdc_table_backfill_progress,
+                        truncate_tables,
+                        refresh_finished_tables,
                     )
                 });
         }
@@ -772,7 +804,11 @@ impl LocalBarrierWorker {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
+            list_finished_source_ids,
             load_finished_source_ids,
+            cdc_table_backfill_progress,
+            truncate_tables,
+            refresh_finished_tables,
         } = result;
 
         let (synced_sstables, table_watermarks, old_value_ssts, vector_index_adds) = sync_result
@@ -819,6 +855,7 @@ impl LocalBarrierWorker {
                             .map(|sst| sst.sst_info.into())
                             .collect(),
                         database_id: database_id.database_id,
+                        list_finished_source_ids,
                         load_finished_source_ids,
                         vector_index_adds: vector_index_adds
                             .into_iter()
@@ -831,6 +868,9 @@ impl LocalBarrierWorker {
                                 )
                             })
                             .collect(),
+                        cdc_table_backfill_progress,
+                        truncate_tables,
+                        refresh_finished_tables,
                     },
                 )
             }
@@ -1063,7 +1103,7 @@ impl LocalBarrierWorker {
         };
 
         let actor_manager = Arc::new(StreamActorManager {
-            env: env.clone(),
+            env,
             streaming_metrics,
             watermark_epoch,
             await_tree_reg,

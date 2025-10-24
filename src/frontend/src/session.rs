@@ -35,6 +35,7 @@ use pgwire::pg_server::{
     UserAuthenticator,
 };
 use pgwire::types::{Format, FormatIterator};
+use prometheus_http_query::Client as PrometheusClient;
 use rand::RngCore;
 use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -81,13 +82,13 @@ use risingwave_rpc_client::{
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
-use tracing::log::error;
+use tracing::{error, info};
 
 use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
@@ -185,6 +186,12 @@ pub(crate) struct FrontendEnv {
 
     /// address of the serverless backfill controller.
     serverless_backfill_controller_addr: String,
+
+    /// Prometheus client for querying metrics.
+    prometheus_client: Option<PrometheusClient>,
+
+    /// The additional selector used when querying Prometheus.
+    prometheus_selector: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -254,7 +261,7 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             frontend_client_pool,
-            sessions_map: sessions_map.clone(),
+            sessions_map,
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
@@ -268,6 +275,8 @@ impl FrontendEnv {
             compute_runtime,
             mem_context: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
+            prometheus_client: None,
+            prometheus_selector: String::new(),
         }
     }
 
@@ -307,7 +316,7 @@ impl FrontendEnv {
                 internal_rpc_host_addr: internal_rpc_host_addr.to_string(),
                 ..Default::default()
             },
-            &config.meta,
+            Arc::new(config.meta.clone()),
         )
         .await;
 
@@ -486,6 +495,28 @@ impl FrontendEnv {
             batch_memory_limit as u64,
         );
 
+        // Initialize Prometheus client if endpoint is provided
+        let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
+            match PrometheusClient::try_from(endpoint.as_str()) {
+                Ok(client) => {
+                    info!("Prometheus client initialized with endpoint: {}", endpoint);
+                    Some(client)
+                }
+                Err(e) => {
+                    error!(
+                        error = %e.as_report(),
+                        "failed to initialize Prometheus client",
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Initialize Prometheus selector
+        let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
+
         info!(
             "Frontend  total_memory: {} batch_memory: {}",
             convert(total_memory_bytes as _),
@@ -521,6 +552,8 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                prometheus_client,
+                prometheus_selector,
             },
             join_handles,
             shutdown_senders,
@@ -583,6 +616,16 @@ impl FrontendEnv {
 
     pub fn sbc_address(&self) -> &String {
         &self.serverless_backfill_controller_addr
+    }
+
+    /// Get a reference to the Prometheus client if available.
+    pub fn prometheus_client(&self) -> Option<&PrometheusClient> {
+        self.prometheus_client.as_ref()
+    }
+
+    /// Get the Prometheus selector string.
+    pub fn prometheus_selector(&self) -> &str {
+        &self.prometheus_selector
     }
 
     pub fn server_address(&self) -> &HostAddr {
@@ -705,6 +748,9 @@ pub struct SessionImpl {
 
     /// temporary sources for the current session
     temporary_source_manager: Arc<Mutex<TemporarySourceManager>>,
+
+    /// staging catalogs for the current session
+    staging_catalog_manager: Arc<Mutex<StagingCatalogManager>>,
 }
 
 /// If TEMPORARY or TEMP is specified, the source is created as a temporary source.
@@ -741,6 +787,33 @@ impl TemporarySourceManager {
 
     pub fn keys(&self) -> Vec<String> {
         self.sources.keys().cloned().collect()
+    }
+}
+
+/// Staging catalog manager is used to manage the tables creating in the current session.
+#[derive(Default, Clone)]
+pub struct StagingCatalogManager {
+    // staging tables creating in the current session.
+    tables: HashMap<String, TableCatalog>,
+}
+
+impl StagingCatalogManager {
+    pub fn new() -> Self {
+        Self {
+            tables: HashMap::new(),
+        }
+    }
+
+    pub fn create_table(&mut self, name: String, table: TableCatalog) {
+        self.tables.insert(name, table);
+    }
+
+    pub fn drop_table(&mut self, name: &str) {
+        self.tables.remove(name);
+    }
+
+    pub fn get_table(&self, name: &str) -> Option<&TableCatalog> {
+        self.tables.get(name)
     }
 }
 
@@ -788,6 +861,7 @@ impl SessionImpl {
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
             temporary_source_manager: Default::default(),
+            staging_catalog_manager: Default::default(),
         }
     }
 
@@ -818,8 +892,9 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
+            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics)),
             temporary_source_manager: Default::default(),
+            staging_catalog_manager: Default::default(),
         }
     }
 
@@ -1322,6 +1397,20 @@ impl SessionImpl {
 
     pub fn temporary_source_manager(&self) -> TemporarySourceManager {
         self.temporary_source_manager.lock().clone()
+    }
+
+    pub fn create_staging_table(&self, table: TableCatalog) {
+        self.staging_catalog_manager
+            .lock()
+            .create_table(table.name.clone(), table);
+    }
+
+    pub fn drop_staging_table(&self, name: &str) {
+        self.staging_catalog_manager.lock().drop_table(name);
+    }
+
+    pub fn staging_catalog_manager(&self) -> StagingCatalogManager {
+        self.staging_catalog_manager.lock().clone()
     }
 
     pub async fn check_cluster_limits(&self) -> Result<()> {

@@ -24,7 +24,6 @@ use risingwave_storage::store::{
     InitOptions, NewVectorWriterOptions, SealCurrentEpochOptions, StateStoreWriteEpochControl,
     StateStoreWriteVector,
 };
-use risingwave_storage::vector::Vector;
 
 use crate::executor::prelude::try_stream;
 use crate::executor::{
@@ -99,7 +98,6 @@ impl<S: StateStore> VectorIndexWriteExecutor<S> {
                             continue;
                         };
                         let vector = vector_datum.into_vector();
-                        let vector = Vector::new(vector.into_slice());
                         let info = self
                             .serializer
                             .serialize(row.project(&info_column_indices))

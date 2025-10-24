@@ -382,10 +382,9 @@ fn bind_user_from_idents(session: &SessionImpl, names: Vec<Ident>) -> Result<Vec
         if let Some(user) = reader.get_user_by_name(&name.real_value()) {
             users.insert(user.id);
         } else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                format!("User \"{name}\" does not exist").to_owned(),
-            )
-            .into());
+            return Err(
+                ErrorCode::InvalidInputSyntax(format!("User \"{name}\" does not exist")).into(),
+            );
         }
     }
     Ok(users.into_iter().collect())
@@ -465,9 +464,9 @@ pub async fn handle_grant_privilege(
 
         // We remark that the user name is always case-sensitive.
         if reader.get_user_by_name(&granted_by.real_value()).is_none() {
-            return Err(ErrorCode::InvalidInputSyntax(
-                format!("Grantor \"{granted_by}\" does not exist").to_owned(),
-            )
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Grantor \"{granted_by}\" does not exist"
+            ))
             .into());
         }
     }
@@ -505,9 +504,9 @@ pub async fn handle_revoke_privilege(
         if let Some(user) = reader.get_user_by_name(&granted_by.real_value()) {
             granted_by_id = Some(user.id);
         } else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                format!("Grantor \"{granted_by}\" does not exist").to_owned(),
-            )
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Grantor \"{granted_by}\" does not exist"
+            ))
             .into());
         }
     }

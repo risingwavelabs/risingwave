@@ -62,9 +62,14 @@ impl StreamCdcTableScan {
         &self.core
     }
 
-    /// Build catalog for cdc backfill state
+    /// Build catalog for cdc backfill state.
+    ///
+    /// For non-parallelized cdc backfill:
     /// Right now we only persist whether the backfill is finished and the corresponding cdc offset
     /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
+    ///
+    /// For parallelized cdc backfill:
+    /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -78,6 +83,8 @@ impl StreamCdcTableScan {
             catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
             // `row_count` column, the number of rows read from snapshot
             catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset_low"));
+            catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset_high"));
             catalog_builder
                 .build(vec![], 1)
                 .with_id(state.gen_table_id_wrapped())
@@ -228,7 +235,7 @@ impl StreamCdcTableScan {
             stream_key: vec![], // not used
             stream_kind: PbStreamKind::AppendOnly as _,
             identity: "Exchange".to_owned(),
-            fields: cdc_source_schema.clone(),
+            fields: cdc_source_schema,
             node_body: Some(PbNodeBody::Exchange(Box::new(ExchangeNode {
                 strategy: Some(strategy),
             }))),

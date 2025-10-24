@@ -159,6 +159,13 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // DorisConfig
+    map.try_insert(
+        std::any::type_name::<DorisConfig>().to_owned(),
+        [
+            "doris.stream_load.http.timeout.ms".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // IcebergConfig
     map.try_insert(
         std::any::type_name::<IcebergConfig>().to_owned(),
@@ -167,10 +174,11 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "enable_compaction".to_owned(),
             "compaction_interval_sec".to_owned(),
             "enable_snapshot_expiration".to_owned(),
-            "snapshot_expiration_expire_older_than".to_owned(),
+            "snapshot_expiration_max_age_millis".to_owned(),
             "snapshot_expiration_retain_last".to_owned(),
             "snapshot_expiration_clear_expired_files".to_owned(),
             "snapshot_expiration_clear_expired_meta_data".to_owned(),
+            "max_snapshots_num_before_compaction".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig
@@ -202,10 +210,18 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.request.required.acks".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // SnowflakeV2Config
+    map.try_insert(
+        std::any::type_name::<SnowflakeV2Config>().to_owned(),
+        [
+            "commit_checkpoint_interval".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // StarrocksConfig
     map.try_insert(
         std::any::type_name::<StarrocksConfig>().to_owned(),
         [
+            "starrocks.stream_load.http.timeout.ms".to_owned(),
             "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();

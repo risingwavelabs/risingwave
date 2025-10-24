@@ -15,7 +15,7 @@
 - before:
     - create_table
   sql: |
-    select id, value, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding
+    select id, value, openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
     from t;
   expected_outputs:
     - logical_plan
@@ -26,7 +26,7 @@
     - create_table
   sql: |
     select id, value, id + 1 as id_plus_one,
-           openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding,
+           openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding,
            upper(value) as upper_value
     from t;
   expected_outputs:
@@ -52,7 +52,7 @@
 - before:
     - create_append_only_table
   sql: |
-    select id, value, openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding
+    select id, value, openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding
     from t;
   expected_outputs:
     - logical_plan
@@ -63,7 +63,7 @@
     - create_append_only_table
   sql: |
     select id, value, id + 1 as id_plus_one,
-           openai_embedding('sk-test-key', 'text-embedding-3-small', value) as embedding,
+           openai_embedding('{"api_key":"sk-test-key", "model": "text-embedding-3-small"}'::jsonb, value) as embedding,
            upper(value) as upper_value
     from t;
   expected_outputs:

@@ -26,7 +26,7 @@ use super::{
     BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
     LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     StreamEowcOverWindow, StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
-    gen_filter_and_pushdown,
+    gen_filter_and_pushdown, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -126,7 +126,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                         agg_call.args.clone(),
                         false, // we don't support `IGNORE NULLS` for these functions now
                         partition_by.clone(),
-                        agg_call.order_by.clone(),
+                        agg_call.order_by,
                         frame.clone(),
                     )?,
                 ))
@@ -660,7 +660,19 @@ impl ToStream for LogicalOverWindow {
             "must apply OverWindowSplitRule before generating physical plan"
         );
 
-        let stream_input = self.core.input.to_stream(ctx)?;
+        let partition_key_indices = self.window_functions()[0]
+            .partition_by
+            .iter()
+            .map(|e| e.index())
+            .collect_vec();
+        // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
+        // empty PARTITION BY by simply removing the following check.
+        if partition_key_indices.is_empty() {
+            empty_partition_by_not_implemented!();
+        }
+
+        let input = try_enforce_locality_requirement(self.input(), &partition_key_indices);
+        let stream_input = input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
             // Emit-On-Window-Close case
@@ -684,15 +696,6 @@ impl ToStream for LogicalOverWindow {
             }
             let order_key_index = order_by[0].column_index;
 
-            let partition_key_indices = self.window_functions()[0]
-                .partition_by
-                .iter()
-                .map(|e| e.index())
-                .collect_vec();
-            if partition_key_indices.is_empty() {
-                empty_partition_by_not_implemented!();
-            }
-
             let sort_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .streaming_enforce_if_not_satisfies(stream_input)?;
@@ -712,17 +715,6 @@ impl ToStream for LogicalOverWindow {
                     "Session frame is not yet supported in general streaming mode. \
                     Please consider using Emit-On-Window-Close mode."
                 );
-            }
-
-            // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
-            // empty PARTITION BY by simply removing the following check.
-            let partition_key_indices = self.window_functions()[0]
-                .partition_by
-                .iter()
-                .map(|e| e.index())
-                .collect_vec();
-            if partition_key_indices.is_empty() {
-                empty_partition_by_not_implemented!();
             }
 
             let new_input =
