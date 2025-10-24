@@ -203,7 +203,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         try {
             List<String> historyFiles = listAndSortHistoryFiles();
             boolean exists = !historyFiles.isEmpty();
-            LOGGER.info(
+            LOGGER.debug(
                     "Storage exists check: {} history files found, returning {}",
                     historyFiles.size(),
                     exists);
