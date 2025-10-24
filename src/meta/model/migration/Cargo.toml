@@ -9,10 +9,10 @@ repository = { workspace = true }
 
 [dependencies]
 easy-ext = "1"
+risingwave_common = { workspace = true }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 serde = { workspace = true }
 serde_json = "1"
 tokio = { version = "0.2", package = "madsim-tokio" }
-risingwave_common = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
