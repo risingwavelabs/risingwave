@@ -20,7 +20,7 @@ strum = { version = "0.27", features = ["derive"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tracing = "0.1"
-typify = "0.4.2"
+typify = "0.4.3"
 
 [dev-dependencies]
 expect-test = "1"
