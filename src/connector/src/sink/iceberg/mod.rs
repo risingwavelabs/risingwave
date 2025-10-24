@@ -86,7 +86,7 @@ use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
     SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
 };
-use crate::connector_common::{IcebergCommon, IcebergSinkCompactionUpdate};
+use crate::connector_common::{IcebergCommon, IcebergSinkCompactionUpdate, IcebergTableIdentifier};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::catalog::SinkId;
 use crate::sink::coordinate::CoordinatedLogSinker;
@@ -138,6 +138,9 @@ pub struct IcebergConfig {
 
     #[serde(flatten)]
     common: IcebergCommon,
+
+    #[serde(flatten)]
+    table: IcebergTableIdentifier,
 
     #[serde(
         rename = "primary_key",
@@ -312,7 +315,7 @@ impl IcebergConfig {
 
     pub async fn load_table(&self) -> Result<Table> {
         self.common
-            .load_table(&self.java_catalog_props)
+            .load_table(&self.table, &self.java_catalog_props)
             .await
             .map_err(Into::into)
     }
@@ -325,7 +328,7 @@ impl IcebergConfig {
     }
 
     pub fn full_table_name(&self) -> Result<TableIdent> {
-        self.common.full_table_name().map_err(Into::into)
+        self.table.to_table_ident().map_err(Into::into)
     }
 
     pub fn catalog_name(&self) -> String {
@@ -404,8 +407,8 @@ impl IcebergSink {
 
     pub async fn create_table_if_not_exists(&self) -> Result<()> {
         let catalog = self.config.create_catalog().await?;
-        let namespace = if let Some(database_name) = &self.config.common.database_name {
-            let namespace = NamespaceIdent::new(database_name.clone());
+        let namespace = if let Some(database_name) = self.config.table.database_name() {
+            let namespace = NamespaceIdent::new(database_name.to_owned());
             if !catalog
                 .namespace_exists(&namespace)
                 .await
@@ -454,7 +457,7 @@ impl IcebergSink {
 
             let location = {
                 let mut names = namespace.clone().inner();
-                names.push(self.config.common.table_name.clone());
+                names.push(self.config.table.table_name().to_owned());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
                         let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
@@ -514,7 +517,7 @@ impl IcebergSink {
             };
 
             let table_creation_builder = TableCreation::builder()
-                .name(self.config.common.table_name.clone())
+                .name(self.config.table.table_name().to_owned())
                 .schema(iceberg_schema);
 
             let table_creation = match (location, partition_spec) {
@@ -1999,10 +2002,7 @@ impl IcebergSinkCommitter {
         iceberg_config: &IcebergConfig,
         snapshot_id: i64,
     ) -> Result<bool> {
-        let iceberg_common = iceberg_config.common.clone();
-        let table = iceberg_common
-            .load_table(&iceberg_config.java_catalog_props)
-            .await?;
+        let table = iceberg_config.load_table().await?;
         if table.metadata().snapshot_by_id(snapshot_id).is_some() {
             Ok(true)
         } else {
@@ -2274,7 +2274,7 @@ mod test {
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::types::{DataType, MapType, StructType};
 
-    use crate::connector_common::IcebergCommon;
+    use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
     use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
         COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
@@ -2494,8 +2494,6 @@ mod test {
                 catalog_type: Some("jdbc".to_owned()),
                 glue_id: None,
                 catalog_name: Some("demo".to_owned()),
-                database_name: Some("demo_db".to_owned()),
-                table_name: "demo_table".to_owned(),
                 path_style_access: Some(true),
                 credential: None,
                 oauth2_server_uri: None,
@@ -2513,6 +2511,10 @@ mod test {
                 adlsgen2_account_name: None,
                 adlsgen2_account_key: None,
                 adlsgen2_endpoint: None,
+            },
+            table: IcebergTableIdentifier {
+                database_name: Some("demo_db".to_owned()),
+                table_name: "demo_table".to_owned(),
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
@@ -2540,7 +2542,7 @@ mod test {
         assert_eq!(iceberg_config, expected_iceberg_config);
 
         assert_eq!(
-            &iceberg_config.common.full_table_name().unwrap().to_string(),
+            &iceberg_config.full_table_name().unwrap().to_string(),
             "demo_db.demo_table"
         );
     }
