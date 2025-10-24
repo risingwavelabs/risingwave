@@ -149,6 +149,9 @@ message Source {
   // Used for secret connect options.
   map<string, secret.SecretRef> secret_refs = 19;
 
+  // Source refresh mode
+  plan_common.SourceRefreshMode refresh_mode = 20;
+
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
 

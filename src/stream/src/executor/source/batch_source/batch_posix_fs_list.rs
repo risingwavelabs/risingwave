@@ -137,7 +137,6 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
     fn report_list_finished(&self, epoch: crate::executor::EpochPair) {
         tracing::info!(
             ?epoch,
-            actor_id = self.actor_ctx.id,
             source_id = %self.stream_source_core.source_id,
             "reporting source list finished"
         );
@@ -235,6 +234,7 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
             match msg {
                 Err(e) => {
                     tracing::warn!(error = %e.as_report(), "encountered an error in batch posix fs list");
+                    return Err(e);
                 }
                 Ok(msg) => match msg {
                     // Barrier arrives.

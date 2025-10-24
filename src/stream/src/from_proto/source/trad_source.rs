@@ -31,9 +31,10 @@ use risingwave_pb::stream_plan::SourceNode;
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
-    SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    BatchIcebergListExecutor, BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor,
+    IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
+use crate::from_proto::source::is_manual_trigger_refresh;
 
 pub struct SourceExecutorBuilder;
 
@@ -142,6 +143,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
+            let is_manual_trigger_refresh = is_manual_trigger_refresh(&source.refresh_mode);
             let exec = {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();
@@ -211,20 +213,35 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    IcebergListExecutor::new(
-                        params.actor_context.clone(),
-                        stream_source_core,
-                        source
-                            .downstream_columns
-                            .as_ref()
-                            .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
-                        params.executor_stats.clone(),
-                        barrier_receiver,
-                        system_params,
-                        source.rate_limit,
-                        params.env.config().clone(),
-                    )
-                    .boxed()
+                    if is_manual_trigger_refresh {
+                        BatchIcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            params.local_barrier_manager.clone(),
+                        )
+                        .boxed()
+                    } else {
+                        IcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            system_params,
+                            source.rate_limit,
+                            params.env.config().clone(),
+                        )
+                        .boxed()
+                    }
                 } else if source.with_properties.is_batch_connector() {
                     if source
                         .with_properties
