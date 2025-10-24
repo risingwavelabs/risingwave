@@ -2511,6 +2511,7 @@ mod test {
                 adlsgen2_account_name: None,
                 adlsgen2_account_key: None,
                 adlsgen2_endpoint: None,
+                vended_credentials: None,
             },
             table: IcebergTableIdentifier {
                 database_name: Some("demo_db".to_owned()),
