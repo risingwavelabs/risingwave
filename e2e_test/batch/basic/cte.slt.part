@@ -76,3 +76,7 @@ query I
 with cte(a) as (select 1,2) select x,y from cte t(x,y);
 ----
 1 2
+
+# Test duplicate CTE names should fail
+statement error
+with cte1 as (select 42), cte1 as (select 43) select * FROM cte1;
