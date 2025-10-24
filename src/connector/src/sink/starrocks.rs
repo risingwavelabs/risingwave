@@ -181,7 +181,7 @@ impl EnforceSecret for StarrocksSink {
 
 impl StarrocksSink {
     pub fn new(param: SinkParam, config: StarrocksConfig, schema: Schema) -> Result<Self> {
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         let is_append_only = param.sink_type.is_append_only();
         Ok(Self {
             config,
