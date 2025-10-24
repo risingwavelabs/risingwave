@@ -39,6 +39,8 @@ mod project;
 pub use project::*;
 mod filter;
 pub use filter::*;
+mod gap_fill;
+pub use gap_fill::*;
 mod expand;
 pub use expand::*;
 mod source;
