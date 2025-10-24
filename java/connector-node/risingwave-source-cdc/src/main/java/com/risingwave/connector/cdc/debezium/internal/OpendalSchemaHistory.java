@@ -197,8 +197,21 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     public boolean storageExists() {
-        // Hummock bucket always exists.
-        return true;
+        // Check if there are actual schema history files in the storage
+        // Returning true only when history files exist ensures that schema snapshot
+        // will be triggered on first startup when no history exists yet
+        try {
+            List<String> historyFiles = listAndSortHistoryFiles();
+            boolean exists = !historyFiles.isEmpty();
+            LOGGER.info(
+                    "Storage exists check: {} history files found, returning {}",
+                    historyFiles.size(),
+                    exists);
+            return exists;
+        } catch (Exception e) {
+            LOGGER.warn("Failed to check storage existence, assuming storage does not exist", e);
+            return false;
+        }
     }
 
     @Override
