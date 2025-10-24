@@ -38,6 +38,10 @@ impl StreamChunkCompactor {
     }
 
     /// Remove unnecessary changes in the given chunks, by modifying the visibility and ops in place.
+    ///
+    /// Compared to [`Self::into_compacted_chunks_reconstructed`], this method does not allocate new
+    /// chunks, thus can be more efficient. However, since the rows cannot be reordered, `Update` pairs
+    /// might be broken into inconsecutive `Delete` and `Insert`.
     pub fn into_compacted_chunks_inline(
         self,
         ib: InconsistencyBehavior,
@@ -84,6 +88,11 @@ impl StreamChunkCompactor {
 
     /// Remove unnecessary changes in the given chunks, by filtering them out and constructing new
     /// chunks, with the given chunk size.
+    ///
+    /// Compared to [`Self::into_compacted_chunks_inline`], this method allocates new chunks, thus
+    /// can be less efficient. However, since the chunk is completely rebuilt, we can have `Delete`
+    /// and `Insert` being rewritten as `Update` pairs as much as possible, which is friendlier to
+    /// downstream executors, especially the sink.
     pub fn into_compacted_chunks_reconstructed(
         self,
         chunk_size: usize,
