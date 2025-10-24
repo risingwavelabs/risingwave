@@ -495,7 +495,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         if let Some(ub) = upsert_behavior
             && ub.should_reorder_records()
         {
-            assert_matches!(sink_type, SinkType::Upsert, " ");
+            assert_matches!(sink_type, SinkType::Upsert);
+
             let mut chunk_buffer = EstimatedVec::new();
             let mut watermark: Option<super::Watermark> = None;
             #[for_await]
