@@ -49,7 +49,10 @@
             <groupId>io.debezium</groupId>
             <artifactId>debezium-connector-sqlserver</artifactId>
         </dependency>
-
+                <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>java-binding</artifactId>
+        </dependency>
         <!-- database dependencies  -->
         <dependency>
             <groupId>com.mysql</groupId>
