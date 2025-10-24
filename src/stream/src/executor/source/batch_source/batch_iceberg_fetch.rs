@@ -33,7 +33,6 @@ use risingwave_connector::source::iceberg::{
 };
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::prelude::*;
 use crate::executor::source::{
@@ -105,12 +104,6 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             .iter()
             .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
             .unwrap();
-        // TODO: currently we generate row_id here. If for risingwave iceberg table engine, maybe we can use _risingwave_iceberg_row_id instead.
-        let row_id_idx = source_desc
-            .columns
-            .iter()
-            .position(|c| c.name == ROW_ID_COLUMN_NAME)
-            .unwrap();
 
         let mut stream = StreamReaderWithPause::<true, ChunksWithState>::new(
             upstream,
@@ -177,7 +170,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                         && file_queue.is_empty()
                                         && is_list_finished
                                         && is_refreshing
-                                        && *is_load_finished.read()
+                                    // && *is_load_finished.read()
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,
@@ -202,8 +195,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                     if need_rebuild_reader
                                         || (splits_on_fetch == 0
                                             && !file_queue.is_empty()
-                                            && is_refreshing
-                                            && *is_load_finished.read())
+                                            && is_refreshing)
                                     {
                                         Self::replace_with_new_batch_reader(
                                             &mut file_queue,
@@ -226,12 +218,18 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                             (file_name.to_owned(), split.to_owned_scalar())
                                         })
                                         .collect();
+                                    tracing::info!("received file assignments: {:?}", jsonb_values);
                                     file_queue.extend(jsonb_values);
                                 }
                                 Message::Watermark(_) => unreachable!(),
                             }
                         }
-                        Either::Right(ChunksWithState { chunks, .. }) => {
+                        Either::Right(ChunksWithState {
+                            chunks,
+                            data_file_path,
+                            ..
+                        }) => {
+                            tracing::info!("received chunks from file: {}", data_file_path);
                             splits_on_fetch -= 1;
 
                             for chunk in &chunks {
@@ -240,23 +238,6 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                     file_path_idx,
                                     file_pos_idx,
                                     &source_desc.columns,
-                                );
-                                // pad row_id
-                                let (chunk, op) = chunk.into_parts();
-                                let (mut columns, visibility) = chunk.into_parts();
-                                columns.insert(
-                                    row_id_idx,
-                                    Arc::new(
-                                        SerialArray::from_iter_bitmap(
-                                            itertools::repeat_n(Serial::from(0), columns[0].len()),
-                                            Bitmap::ones(columns[0].len()),
-                                        )
-                                        .into(),
-                                    ),
-                                );
-                                let chunk = StreamChunk::from_parts(
-                                    op,
-                                    DataChunk::from_parts(columns.into(), visibility),
                                 );
 
                                 yield Message::Chunk(chunk);
@@ -289,6 +270,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         if batch.is_empty() {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
+            tracing::info!("building batch reader with {} files", batch.len());
             *splits_on_fetch += batch.len();
             *read_finished.write() = false;
             let batch_reader = Self::build_batched_stream_reader(

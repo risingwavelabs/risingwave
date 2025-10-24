@@ -14,6 +14,7 @@
 
 use std::rc::Rc;
 
+use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
 use risingwave_common::catalog::{
@@ -369,7 +370,16 @@ impl Distill for LogicalSource {
 
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        if self.core.is_iceberg_connector() {
+        let is_refreshable_iceberg = self.source_catalog().is_some_and(|catalog| {
+            catalog.refresh_mode.is_some_and(|refresh_mode| {
+                matches!(
+                    refresh_mode.refresh_mode,
+                    Some(RefreshMode::ManualTrigger(_))
+                )
+            })
+        }); // for refreshable iceberg table, we does not expose iceberg hidden columns to the user
+
+        if self.core.is_iceberg_connector() && !is_refreshable_iceberg {
             self.prune_col_for_iceberg_source(required_cols)
         } else {
             // For other sources, use a LogicalProject to prune columns

@@ -733,10 +733,9 @@ pub fn bind_connector_props(
     let refresh_mode = {
         let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
         if is_create_source && refresh_mode.is_some() {
-            return Err(RwError::from(ProtocolError(format!(
-                "`refresh_mode` only supported for CREATE TABLE",
-            )))
-            .into());
+            return Err(RwError::from(ProtocolError(
+                "`refresh_mode` only supported for CREATE TABLE".to_owned(),
+            )));
         }
 
         refresh_mode.unwrap_or(SourceRefreshMode {

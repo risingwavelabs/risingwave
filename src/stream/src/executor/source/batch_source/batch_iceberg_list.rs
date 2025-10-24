@@ -118,7 +118,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                     return Err(e);
                 }
                 Ok(msg) => match msg {
-                    Either::Left(msg) => match &msg {
+                    Either::Left(msg) => match msg {
                         Message::Barrier(barrier) => {
                             if let Some(mutation) = barrier.mutation.as_deref() {
                                 match mutation {
@@ -164,6 +164,8 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                 );
                                 is_refreshing = false;
                             }
+
+                            yield Message::Barrier(barrier);
                         }
                         _ => unreachable!(),
                     },
