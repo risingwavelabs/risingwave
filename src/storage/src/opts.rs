@@ -179,6 +179,8 @@ pub struct StorageOpts {
     pub iceberg_compaction_enable_dynamic_size_estimation: bool,
     /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
+    /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
+    pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
 }
 
 impl Default for StorageOpts {
@@ -338,6 +340,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_size_estimation_smoothing_factor: c
                 .storage
                 .iceberg_compaction_size_estimation_smoothing_factor,
+            iceberg_compaction_pending_parallelism_budget_multiplier: c
+                .storage
+                .iceberg_compaction_pending_parallelism_budget_multiplier,
             vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
             vector_block_cache_capacity_mb: s.vector_block_cache_capacity_mb,
             vector_block_cache_shard_num: s.vector_block_cache_shard_num,

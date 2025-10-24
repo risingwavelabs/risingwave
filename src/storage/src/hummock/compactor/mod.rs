@@ -15,6 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
+mod iceberg_compaction;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ValidationTask};
@@ -40,7 +41,7 @@ mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -56,6 +57,11 @@ pub use context::{
     CompactionAwaitTreeRegRef, CompactorContext, await_tree_key, new_compaction_await_tree_reg_ref,
 };
 use futures::{StreamExt, pin_mut};
+// Import iceberg compactor runner types from the local `iceberg_compaction` module.
+use iceberg_compaction::iceberg_compactor_runner::{
+    IcebergCompactorRunner, IcebergCompactorRunnerConfigBuilder,
+};
+use iceberg_compaction::{IcebergTaskQueue, PushResult};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
@@ -91,9 +97,6 @@ use crate::compaction_catalog_manager::{
 };
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
-use crate::hummock::iceberg_compactor_runner::{
-    IcebergCompactorRunner, IcebergCompactorRunnerConfigBuilder, RunnerContext,
-};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
     BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
@@ -299,7 +302,6 @@ pub fn start_iceberg_compactor(
     let max_task_parallelism: u32 = (worker_num as f32
         * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
-    let running_task_parallelism = Arc::new(AtomicU32::new(0));
 
     const MAX_PULL_TASK_COUNT: u32 = 4;
     let max_pull_task_count = std::cmp::min(max_task_parallelism, MAX_PULL_TASK_COUNT);
@@ -310,9 +312,24 @@ pub fn start_iceberg_compactor(
     );
 
     let join_handle = tokio::spawn(async move {
-        // TODO: It's a workaround to use HashSet for filtering out duplicate tasks.
-        let iceberg_compaction_running_task_tracker =
-            Arc::new(Mutex::new((HashMap::new(), HashSet::new())));
+        // Initialize task queue with event-driven scheduling using Notify
+        let pending_parallelism_budget = (max_task_parallelism as f32
+            * compactor_context
+                .storage_opts
+                .iceberg_compaction_pending_parallelism_budget_multiplier)
+            .ceil() as u32;
+        let (mut task_queue, _schedule_notify) =
+            IcebergTaskQueue::new_with_notify(max_task_parallelism, pending_parallelism_budget);
+
+        // Shutdown tracking for running tasks (task_id -> shutdown_sender)
+        let shutdown_map = Arc::new(Mutex::new(
+            HashMap::<u64, tokio::sync::oneshot::Sender<()>>::new(),
+        ));
+
+        // Channel for task completion notifications
+        let (task_completion_tx, mut task_completion_rx) =
+            tokio::sync::mpsc::unbounded_channel::<u64>();
+
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
 
@@ -351,7 +368,7 @@ pub fn start_iceberg_compactor(
 
             pin_mut!(response_event_stream);
 
-            let executor = compactor_context.compaction_executor.clone();
+            let _executor = compactor_context.compaction_executor.clone();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -365,43 +382,39 @@ pub fn start_iceberg_compactor(
                     event_loop_iteration_now = Instant::now();
                 }
 
-                let running_task_parallelism = running_task_parallelism.clone();
                 let request_sender = request_sender.clone();
                 let event: Option<Result<SubscribeIcebergCompactionEventResponse, _>> = tokio::select! {
+                    // Handle task completion notifications
+                    Some(completed_task_id) = task_completion_rx.recv() => {
+                        tracing::debug!(task_id = completed_task_id, "Task completed, updating queue state");
+                        task_queue.finish_running(completed_task_id);
+                        continue 'consume_stream;
+                    }
+
+                    // Event-driven task scheduling - wait for tasks to become schedulable
+                    _ = task_queue.wait_schedulable() => {
+                        schedule_queued_tasks(
+                            &mut task_queue,
+                            &compactor_context,
+                            &shutdown_map,
+                            &task_completion_tx,
+                        );
+                        continue 'consume_stream;
+                    }
+
                     _ = periodic_event_interval.tick() => {
-                        let mut pending_pull_task_count = 0;
-                        if pull_task_ack {
-                            // TODO: Compute parallelism on meta side
-                            pending_pull_task_count = (max_task_parallelism - running_task_parallelism.load(Ordering::SeqCst)).min(max_pull_task_count);
-
-                            if pending_pull_task_count > 0 {
-                                if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {
-                                    event: Some(subscribe_iceberg_compaction_event_request::Event::PullTask(
-                                        subscribe_iceberg_compaction_event_request::PullTask {
-                                            pull_task_count: pending_pull_task_count,
-                                        }
-                                    )),
-                                    create_at: SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .expect("Clock may have gone backwards")
-                                        .as_millis() as u64,
-                                }) {
-                                    tracing::warn!(error = %e.as_report(), "Failed to pull task");
-
-                                    // re subscribe stream
-                                    continue 'start_stream;
-                                } else {
-                                    pull_task_ack = false;
-                                }
-                            }
-                        }
-
-                        tracing::info!(
-                            running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
-                            pull_task_ack = %pull_task_ack,
-                            pending_pull_task_count = %pending_pull_task_count
+                        // Only handle meta task pulling in periodic tick
+                        let should_restart_stream = handle_meta_task_pulling(
+                            &mut pull_task_ack,
+                            &task_queue,
+                            max_task_parallelism,
+                            max_pull_task_count,
+                            &request_sender,
                         );
 
+                        if should_restart_stream {
+                            continue 'start_stream;
+                        }
                         continue;
                     }
                     event = response_event_stream.next() => {
@@ -424,8 +437,6 @@ pub fn start_iceberg_compactor(
                             None => continue 'consume_stream,
                         };
 
-                        let iceberg_running_task_tracker =
-                            iceberg_compaction_running_task_tracker.clone();
                         match event {
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
@@ -465,7 +476,6 @@ pub fn start_iceberg_compactor(
                                     }
                                 };
 
-
                                 let iceberg_runner = match IcebergCompactorRunner::new(
                                     iceberg_compaction_task,
                                     compactor_runner_config,
@@ -478,56 +488,62 @@ pub fn start_iceberg_compactor(
                                     }
                                 };
 
-                                let task_unique_ident = format!(
-                                    "{}-{:?}",
-                                    iceberg_runner.iceberg_config.catalog_name(),
-                                    iceberg_runner.table_ident
-                                );
+                                // Push task to queue instead of directly spawning
+                                let meta = iceberg_runner.to_meta();
+                                let push_result = task_queue.push(meta.clone(), Some(iceberg_runner));
 
-                                {
-                                    let running_task_tracker_guard = iceberg_compaction_running_task_tracker
-                                        .lock()
-                                        .unwrap();
-
-                                    if running_task_tracker_guard.1.contains(&task_unique_ident) {
-                                        tracing::warn!(
-                                            task_id = %task_id,
-                                            task_unique_ident = %task_unique_ident,
-                                            "Iceberg compaction task already running, skip",
+                                match push_result {
+                                    PushResult::Added => {
+                                        tracing::info!(
+                                            task_id = task_id,
+                                            unique_ident = %meta.unique_ident,
+                                            required_parallelism = meta.required_parallelism,
+                                            "Iceberg compaction task added to queue"
                                         );
-                                        continue 'consume_stream;
+                                    },
+                                    PushResult::Replaced { old_task_id } => {
+                                        tracing::info!(
+                                            task_id = task_id,
+                                            old_task_id = old_task_id,
+                                            unique_ident = %meta.unique_ident,
+                                            required_parallelism = meta.required_parallelism,
+                                            "Iceberg compaction task replaced in queue"
+                                        );
+                                    },
+                                    PushResult::RejectedRunningDuplicate => {
+                                        tracing::warn!(
+                                            task_id = task_id,
+                                            unique_ident = %meta.unique_ident,
+                                            "Iceberg compaction task rejected - duplicate already running"
+                                        );
+                                    },
+                                    PushResult::RejectedCapacity => {
+                                        tracing::warn!(
+                                            task_id = task_id,
+                                            unique_ident = %meta.unique_ident,
+                                            required_parallelism = meta.required_parallelism,
+                                            pending_budget = pending_parallelism_budget,
+                                            "Iceberg compaction task rejected - queue capacity exceeded"
+                                        );
+                                    },
+                                    PushResult::RejectedTooLarge => {
+                                        tracing::error!(
+                                            task_id = task_id,
+                                            unique_ident = %meta.unique_ident,
+                                            required_parallelism = meta.required_parallelism,
+                                            max_parallelism = max_task_parallelism,
+                                            "Iceberg compaction task rejected - parallelism requirement exceeds max"
+                                        );
+                                    },
+                                    PushResult::RejectedInvalidParallelism => {
+                                        tracing::error!(
+                                            task_id = task_id,
+                                            unique_ident = %meta.unique_ident,
+                                            required_parallelism = meta.required_parallelism,
+                                            "Iceberg compaction task rejected - invalid parallelism (must be > 0)"
+                                        );
                                     }
                                 }
-
-                                executor.spawn(async move {
-                                    let (tx, rx) = tokio::sync::oneshot::channel();
-                                    {
-                                        let mut running_task_tracker_guard =
-                                            iceberg_running_task_tracker.lock().unwrap();
-                                        running_task_tracker_guard.0.insert(task_id, tx);
-                                        running_task_tracker_guard.1.insert(task_unique_ident.clone());
-                                    }
-
-                                    let _release_guard = scopeguard::guard(
-                                        iceberg_running_task_tracker.clone(),
-                                        move |tracker| {
-                                            let mut running_task_tracker_guard = tracker.lock().unwrap();
-                                            running_task_tracker_guard.0.remove(&task_id);
-                                            running_task_tracker_guard.1.remove(&task_unique_ident);
-                                        },
-                                    );
-
-                                    if let Err(e) = iceberg_runner.compact(
-                                        RunnerContext::new(
-                                            max_task_parallelism,
-                                            running_task_parallelism.clone(),
-                                        ),
-                                        rx,
-                                    )
-                                    .await {
-                                        tracing::warn!(error = %e.as_report(), "Failed to compact iceberg runner {}", task_id);
-                                    }
-                                });
                             },
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {
                                 // set flag
@@ -1066,4 +1082,109 @@ fn get_task_progress(
         progress_list.push(progress.snapshot(task_id));
     }
     progress_list
+}
+
+/// Schedule queued tasks if we have capacity
+fn schedule_queued_tasks(
+    task_queue: &mut IcebergTaskQueue,
+    compactor_context: &CompactorContext,
+    shutdown_map: &Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>>,
+    task_completion_tx: &tokio::sync::mpsc::UnboundedSender<u64>,
+) {
+    while let Some(popped_task) = task_queue.pop() {
+        let task_id = popped_task.meta.task_id;
+        let Some(runner) = popped_task.runner else {
+            tracing::error!(
+                task_id = task_id,
+                "Popped task missing runner - this should not happen"
+            );
+            task_queue.finish_running(task_id);
+            continue;
+        };
+
+        let executor = compactor_context.compaction_executor.clone();
+        let shutdown_map_clone = shutdown_map.clone();
+        let completion_tx_clone = task_completion_tx.clone();
+
+        tracing::info!(
+            task_id = task_id,
+            unique_ident = %popped_task.meta.unique_ident,
+            required_parallelism = popped_task.meta.required_parallelism,
+            "Starting iceberg compaction task from queue"
+        );
+
+        executor.spawn(async move {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            {
+                let mut shutdown_guard = shutdown_map_clone.lock().unwrap();
+                shutdown_guard.insert(task_id, tx);
+            }
+
+            let _cleanup_guard = scopeguard::guard(
+                (task_id, shutdown_map_clone, completion_tx_clone),
+                move |(task_id, shutdown_map, completion_tx)| {
+                    {
+                        let mut shutdown_guard = shutdown_map.lock().unwrap();
+                        shutdown_guard.remove(&task_id);
+                    }
+                    // Notify main loop that task is completed
+                    // Multiple tasks can send completion notifications concurrently via mpsc
+                    if completion_tx.send(task_id).is_err() {
+                        tracing::warn!(task_id = task_id, "Failed to notify task completion - main loop may have shut down");
+                    }
+                },
+            );
+
+            if let Err(e) = runner.compact(rx).await {
+                tracing::warn!(error = %e.as_report(), "Failed to compact iceberg runner {}", task_id);
+            }
+        });
+    }
+}
+
+/// Handle pulling new tasks from meta service
+/// Returns true if the stream should be restarted
+fn handle_meta_task_pulling(
+    pull_task_ack: &mut bool,
+    task_queue: &IcebergTaskQueue,
+    max_task_parallelism: u32,
+    max_pull_task_count: u32,
+    request_sender: &mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+) -> bool {
+    let mut pending_pull_task_count = 0;
+    if *pull_task_ack {
+        // Use queue's running parallelism for pull decision
+        let current_running_parallelism = task_queue.running_parallelism_sum();
+        pending_pull_task_count =
+            (max_task_parallelism - current_running_parallelism).min(max_pull_task_count);
+
+        if pending_pull_task_count > 0 {
+            if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {
+                event: Some(subscribe_iceberg_compaction_event_request::Event::PullTask(
+                    subscribe_iceberg_compaction_event_request::PullTask {
+                        pull_task_count: pending_pull_task_count,
+                    },
+                )),
+                create_at: SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
+            }) {
+                tracing::warn!(error = %e.as_report(), "Failed to pull task - will retry on stream restart");
+                return true; // Signal to restart stream
+            } else {
+                *pull_task_ack = false;
+            }
+        }
+    }
+
+    tracing::info!(
+        running_parallelism_count = %task_queue.running_parallelism_sum(),
+        waiting_parallelism_count = %task_queue.waiting_parallelism_sum(),
+        available_parallelism = %(max_task_parallelism.saturating_sub(task_queue.running_parallelism_sum())),
+        pull_task_ack = %*pull_task_ack,
+        pending_pull_task_count = %pending_pull_task_count
+    );
+
+    false // No need to restart stream
 }
