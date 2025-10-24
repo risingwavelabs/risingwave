@@ -26,7 +26,7 @@ use tokio::sync::oneshot::Sender;
 use self::notifier::Notifier;
 use crate::barrier::info::BarrierInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor};
+use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor, SubscriptionId};
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
@@ -55,7 +55,7 @@ pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
 };
-pub(crate) use self::info::{InflightSubscriptionInfo, SharedActorInfos, SharedFragmentInfo};
+pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
@@ -121,7 +121,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-    subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
+    mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -223,7 +223,7 @@ struct DatabaseRuntimeInfoSnapshot {
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-    subscription_info: InflightSubscriptionInfo,
+    mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,

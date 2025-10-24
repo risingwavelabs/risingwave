@@ -27,8 +27,8 @@ use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
+use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{PbSubscriptionUpstreamInfo, PbUpstreamSinkInfo};
 use tracing::warn;
 
 use crate::MetaResult;
@@ -38,7 +38,7 @@ use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
-use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments, SubscriptionId};
+use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
 
 #[derive(Debug, Clone)]
 pub struct SharedFragmentInfo {
@@ -364,12 +364,6 @@ pub(crate) enum CommandFragmentChanges {
     },
 }
 
-#[derive(Default, Clone, Debug)]
-pub struct InflightSubscriptionInfo {
-    /// `mv_table_id` => `subscription_id` => retention seconds
-    pub mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
-}
-
 #[derive(Clone, Debug)]
 pub enum SubscriberType {
     Subscription(u64),
@@ -488,13 +482,16 @@ impl InflightDatabaseInfo {
             .expect("non duplicate");
     }
 
-    pub fn unregister_subscriber(&mut self, job_id: TableId, subscriber_id: u32) {
+    pub fn unregister_subscriber(
+        &mut self,
+        job_id: TableId,
+        subscriber_id: u32,
+    ) -> Option<SubscriberType> {
         self.jobs
             .get_mut(&job_id)
             .expect("should exist")
             .subscribers
             .remove(&subscriber_id)
-            .expect("should exist");
     }
 
     fn fragment_mut(&mut self, fragment_id: FragmentId) -> (&mut InflightFragmentInfo, TableId) {
@@ -858,46 +855,7 @@ impl InflightDatabaseInfo {
         }
         Some(builder.build())
     }
-}
 
-impl InflightSubscriptionInfo {
-    pub fn pre_apply(&mut self, command: &Command) {
-        if let Command::CreateSubscription {
-            subscription_id,
-            upstream_mv_table_id,
-            retention_second,
-        } = command
-            && let Some(prev_retiontion) = self
-                .mv_depended_subscriptions
-                .entry(*upstream_mv_table_id)
-                .or_default()
-                .insert(*subscription_id, *retention_second)
-        {
-            warn!(subscription_id, ?upstream_mv_table_id, mv_depended_subscriptions = ?self.mv_depended_subscriptions, prev_retiontion, "add an existing subscription id");
-        }
-    }
-}
-
-impl<'a> IntoIterator for &'a InflightSubscriptionInfo {
-    type Item = PbSubscriptionUpstreamInfo;
-
-    type IntoIter = impl Iterator<Item = PbSubscriptionUpstreamInfo> + 'a;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.mv_depended_subscriptions
-            .iter()
-            .flat_map(|(table_id, subscriptions)| {
-                subscriptions
-                    .keys()
-                    .map(|subscriber_id| PbSubscriptionUpstreamInfo {
-                        subscriber_id: *subscriber_id,
-                        upstream_mv_table_id: table_id.table_id,
-                    })
-            })
-    }
-}
-
-impl InflightDatabaseInfo {
     /// Apply some actor changes after the barrier command is collected, if the command contains any actors that are dropped, we should
     /// remove that from the snapshot correspondingly.
     pub(crate) fn post_apply(
@@ -947,30 +905,6 @@ impl InflightDatabaseInfo {
             }
         }
         shared_actor_writer.finish();
-    }
-}
-
-impl InflightSubscriptionInfo {
-    pub fn post_apply(&mut self, command: &Command) {
-        if let Command::DropSubscription {
-            subscription_id,
-            upstream_mv_table_id,
-        } = command
-        {
-            let removed = match self.mv_depended_subscriptions.get_mut(upstream_mv_table_id) {
-                Some(subscriptions) => {
-                    let removed = subscriptions.remove(subscription_id).is_some();
-                    if removed && subscriptions.is_empty() {
-                        self.mv_depended_subscriptions.remove(upstream_mv_table_id);
-                    }
-                    removed
-                }
-                None => false,
-            };
-            if !removed {
-                warn!(subscription_id, ?upstream_mv_table_id, mv_depended_subscriptions = ?self.mv_depended_subscriptions, "remove a non-existing subscription id");
-            }
-        }
     }
 }
 
