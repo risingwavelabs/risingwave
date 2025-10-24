@@ -8,6 +8,11 @@ on:
         required: true
         type: string
         default: 'unlabeled'
+      fast_build:
+        description: 'Fast Build (ARM-only, LTO-disabled)'
+        required: false
+        type: boolean
+        default: false
       push_dockerhub:
         description: 'Whether to push to DockerHub'
         required: false
@@ -51,6 +56,18 @@ jobs:
           IMAGE_TAG="v$VERSION--$LABEL--$COMMIT_SHA--$NO_SLASH_BRANCH_NAME"
           echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+          SKIP_TARGET_AMD64="${{ inputs.fast_build }}"
+          echo "SKIP_TARGET_AMD64=$SKIP_TARGET_AMD64"
+          echo "SKIP_TARGET_AMD64=$SKIP_TARGET_AMD64" >> $GITHUB_ENV
+
+          # Only set CARGO_PROFILE for fast build
+          # Regular build uses the default
+          if [[ "${{ github.event.inputs.fast_build }}" == "true" ]]; then
+            CARGO_PROFILE="patch-production"
+            echo "CARGO_PROFILE=$CARGO_PROFILE"
+            echo "CARGO_PROFILE=$CARGO_PROFILE" >> $GITHUB_ENV
+          fi
 
           # Always set PUSH_DOCKERHUB based on input
           if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
