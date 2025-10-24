@@ -447,6 +447,51 @@ pub fn decimal_trim_scale(d: Decimal) -> Decimal {
 /// SELECT gamma('nan'::float8);
 /// ----
 /// NaN
+///
+/// statement error
+/// SELECT gamma('-inf'::float8);
+///
+/// query R
+/// SELECT gamma('0.5'::float8);
+/// ----
+/// 1.7724538509055159
+///
+/// query R
+/// SELECT gamma('1'::float8);
+/// ----
+/// 1
+///
+/// query R
+/// SELECT gamma('2'::float8);
+/// ----
+/// 1
+///
+/// query R
+/// SELECT gamma('3'::float8);
+/// ----
+/// 2
+///
+/// query R
+/// SELECT gamma('4'::float8);
+/// ----
+/// 6
+///
+/// query R
+/// SELECT gamma('5'::float8);
+/// ----
+/// 24
+///
+/// statement error
+/// SELECT gamma('-1'::float8);
+///
+/// statement error
+/// SELECT gamma('-1000.5'::float8);
+///
+/// statement error
+/// SELECT gamma('0'::float8);
+///
+/// statement error
+/// SELECT gamma('1000'::float8);
 /// ```
 #[function("gamma(float8) -> float8")]
 pub fn gamma_f64(input: F64) -> Result<F64> {
@@ -454,7 +499,7 @@ pub fn gamma_f64(input: F64) -> Result<F64> {
     if input.is_nan() {
         return Ok(result);
     } else if input.is_infinite() {
-        if !input.is_negative() {
+        if input.is_negative() {
             return Err(ExprError::InvalidParam {
                 name: "gamma",
                 reason: "value out of range: overflow".into(),
@@ -484,9 +529,78 @@ pub fn gamma_f64(input: F64) -> Result<F64> {
     Ok(result)
 }
 
+/// ```slt
+/// query R
+/// SELECT lgamma('+inf'::float8);
+/// ----
+/// Infinity
+///
+/// query R
+/// SELECT lgamma('nan'::float8);
+/// ----
+/// NaN
+///
+/// query R
+/// SELECT lgamma('-inf'::float8);
+/// ----
+/// Infinity
+///
+/// query R
+/// SELECT lgamma('0.5'::float8);
+/// ----
+/// 0.5723649429247001
+///
+/// query R
+/// SELECT lgamma('1'::float8);
+/// ----
+/// 0
+///
+/// query R
+/// SELECT lgamma('2'::float8);
+/// ----
+/// 0
+///
+/// query R
+/// SELECT lgamma('3'::float8);
+/// ----
+/// 0.6931471805599453
+///
+/// query R
+/// SELECT lgamma('4'::float8);
+/// ----
+/// 1.791759469228055
+///
+/// query R
+/// SELECT lgamma('5'::float8);
+/// ----
+/// 3.1780538303479458
+///
+/// statement error
+/// SELECT lgamma('-1'::float8);
+/// 
+/// query R
+/// SELECT lgamma('-1000.5'::float8);
+/// ----
+/// -5914.437701116853
+/// 
+/// statement error
+/// SELECT gamma('0'::float8);
+/// 
+/// query R
+/// SELECT lgamma('1000'::float8);
+/// ----
+/// 5905.220423209181
+/// ```
 #[function("lgamma(float8) -> float8")]
 pub fn lgamma_f64(input: F64) -> Result<F64> {
-    unimplemented!()
+    let (result, _sign) = input.0.lgamma();
+    if result.is_infinite() && input.is_finite() {
+        return Err(ExprError::InvalidParam {
+            name: "lgamma",
+            reason: "value out of range: overflow".into(),
+        });
+    }
+    Ok(F64::from(result))
 }
 
 #[cfg(test)]
