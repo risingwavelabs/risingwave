@@ -49,7 +49,7 @@ pub enum TimeHandling {
     Micro,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum BigintUnsignedHandlingMode {
     /// Convert unsigned bigint to signed bigint (default)
     Long,
@@ -427,39 +427,15 @@ impl JsonParseOptions {
                     _ => {}
                 }
 
-                match Decimal::from_str(str_val) {
-                    Ok(decimal) => decimal.into(),
-                    Err(_) => {
-                        // Only attempt base64 decoding in Precise mode
-                        match self.bigint_unsigned_handling {
-                            BigintUnsignedHandlingMode::Precise => {
-                                // When processing CDC data, if the upstream system has unsigned bigint (e.g., MySQL CDC),
-                                // the best practice is to upcast, i.e., convert unsigned bigint to decimal.
-                                // Only when users configure `debezium.bigint.unsigned.handling.mode='precise'`,
-                                // Debezium will convert unsigned bigint to base64-encoded decimal.
-                                // Reference: https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-property-bigint-unsigned-handling-mode
-                                //
-                                // Therefore, here we check if the string falls into the above case after Decimal::from_str returns an error.
-
-                                // A better approach would be to get bytes + org.apache.kafka.connect.data.Decimal from schema
-                                // instead of string, as described in https://github.com/risingwavelabs/risingwave/issues/16852.
-                                // However, Rust doesn't have a library to parse Kafka Connect metadata, so we'll refactor this
-                                // after implementing that functionality.
-                                let value = base64::engine::general_purpose::STANDARD
-                                    .decode(str_val)
-                                    .map_err(|_| create_error())?;
-                                let unscaled = num_bigint::BigInt::from_signed_bytes_be(&value);
-                                Decimal::from_str(&unscaled.to_string())
-                                    .map_err(|_| create_error())?
-                                    .into()
-                            }
-                            BigintUnsignedHandlingMode::Long => {
-                                // In Long mode, return the original error directly
-                                return Err(create_error());
-                            }
-                        }
-                    }
-                }
+                Decimal::from_str(str_val)
+                    .or_else(|_err| {
+                        try_base64_decode_decimal(
+                            str_val,
+                            self.bigint_unsigned_handling,
+                            create_error,
+                        )
+                    })?
+                    .into()
             }
 
             (DataType::Decimal, ValueType::F64) => {
@@ -712,6 +688,37 @@ impl JsonParseOptions {
             (_expected, _got) => Err(create_error())?,
         };
         Ok(DatumCow::Owned(Some(v)))
+    }
+}
+
+/// Try to decode a base64-encoded decimal string for unsigned bigint handling in Precise mode.
+///
+/// This is used when processing CDC data from upstream systems with unsigned bigint (e.g., MySQL CDC).
+/// When users configure `debezium.bigint.unsigned.handling.mode='precise'`, Debezium converts
+/// unsigned bigint to base64-encoded decimal.
+///
+/// Reference: <https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-property-bigint-unsigned-handling-mode>.
+fn try_base64_decode_decimal(
+    str_val: &str,
+    bigint_unsigned_handling: BigintUnsignedHandlingMode,
+    create_error: impl Fn() -> AccessError,
+) -> Result<Decimal, AccessError> {
+    match bigint_unsigned_handling {
+        BigintUnsignedHandlingMode::Precise => {
+            // A better approach would be to get bytes + org.apache.kafka.connect.data.Decimal from schema
+            // instead of string, as described in <https://github.com/risingwavelabs/risingwave/issues/16852>.
+            // However, Rust doesn't have a library to parse Kafka Connect metadata, so we'll refactor this
+            // after implementing that functionality.
+            let value = base64::engine::general_purpose::STANDARD
+                .decode(str_val)
+                .map_err(|_| create_error())?;
+            let unscaled = num_bigint::BigInt::from_signed_bytes_be(&value);
+            Decimal::from_str(&unscaled.to_string()).map_err(|_| create_error())
+        }
+        BigintUnsignedHandlingMode::Long => {
+            // In Long mode, don't attempt base64 decoding
+            Err(create_error())
+        }
     }
 }
 
