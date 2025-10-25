@@ -758,31 +758,20 @@ impl MetadataManager {
     pub async fn get_mv_depended_subscriptions(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+    ) -> MetaResult<HashMap<TableId, HashMap<SubscriptionId, u64>>> {
         let database_id = database_id.map(|database_id| database_id.database_id as _);
         Ok(self
             .catalog_controller
             .get_mv_depended_subscriptions(database_id)
             .await?
             .into_iter()
-            .map(|(loaded_database_id, mv_depended_subscriptions)| {
-                if let Some(database_id) = database_id {
-                    assert_eq!(loaded_database_id, database_id);
-                }
+            .map(|(table_id, subscriptions)| {
                 (
-                    DatabaseId::new(loaded_database_id as _),
-                    mv_depended_subscriptions
+                    TableId::new(table_id as _),
+                    subscriptions
                         .into_iter()
-                        .map(|(table_id, subscriptions)| {
-                            (
-                                TableId::new(table_id as _),
-                                subscriptions
-                                    .into_iter()
-                                    .map(|(subscription_id, retention_time)| {
-                                        (subscription_id as SubscriptionId, retention_time)
-                                    })
-                                    .collect(),
-                            )
+                        .map(|(subscription_id, retention_time)| {
+                            (subscription_id as SubscriptionId, retention_time)
                         })
                         .collect(),
                 )

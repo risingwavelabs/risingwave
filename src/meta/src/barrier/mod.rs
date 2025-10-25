@@ -24,9 +24,9 @@ use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::oneshot::Sender;
 
 use self::notifier::Notifier;
-use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
+use crate::barrier::info::BarrierInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor};
+use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor, SubscriptionId};
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
@@ -55,10 +55,11 @@ pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
 };
-pub(crate) use self::info::{InflightSubscriptionInfo, SharedActorInfos, SharedFragmentInfo};
+pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
+use crate::controller::fragment::InflightFragmentInfo;
 
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
@@ -115,11 +116,12 @@ pub(crate) enum BarrierManagerRequest {
 #[derive(Debug)]
 struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
-    database_job_infos: HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+    database_job_infos:
+        HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-    subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
+    mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -132,13 +134,13 @@ struct BarrierWorkerRuntimeInfoSnapshot {
 impl BarrierWorkerRuntimeInfoSnapshot {
     fn validate_database_info(
         database_id: DatabaseId,
-        database_jobs: &HashMap<TableId, InflightStreamingJobInfo>,
+        database_jobs: &HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
         active_streaming_nodes: &ActiveStreamingWorkerNodes,
         stream_actors: &HashMap<ActorId, StreamActor>,
         state_table_committed_epochs: &HashMap<TableId, u64>,
     ) -> MetaResult<()> {
         {
-            for fragment in database_jobs.values().flat_map(|job| job.fragment_infos()) {
+            for fragment in database_jobs.values().flat_map(|job| job.values()) {
                 for (actor_id, actor) in &fragment.actors {
                     if !active_streaming_nodes
                         .current()
@@ -165,15 +167,16 @@ impl BarrierWorkerRuntimeInfoSnapshot {
                     }
                 }
             }
-            for (job_id, job) in database_jobs {
-                let mut committed_epochs = job.existing_table_ids().map(|table_id| {
-                    (
-                        table_id,
-                        *state_table_committed_epochs
-                            .get(&table_id)
-                            .expect("checked exist"),
-                    )
-                });
+            for (job_id, fragments) in database_jobs {
+                let mut committed_epochs =
+                    InflightFragmentInfo::existing_table_ids(fragments.values()).map(|table_id| {
+                        (
+                            table_id,
+                            *state_table_committed_epochs
+                                .get(&table_id)
+                                .expect("checked exist"),
+                        )
+                    });
                 let (first_table, first_epoch) = committed_epochs.next().ok_or_else(|| {
                     anyhow!(
                         "job {} in database {} has no state table after recovery",
@@ -216,11 +219,11 @@ impl BarrierWorkerRuntimeInfoSnapshot {
 
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
-    job_infos: HashMap<TableId, InflightStreamingJobInfo>,
+    job_infos: HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-    subscription_info: InflightSubscriptionInfo,
+    mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,

@@ -87,7 +87,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     may_have_downstream: bool,
 
-    depended_subscription_ids: HashSet<u32>,
+    subscriber_ids: HashSet<u32>,
 
     metrics: MaterializeMetrics,
 
@@ -177,9 +177,9 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
 fn get_op_consistency_level(
     conflict_behavior: ConflictBehavior,
     may_have_downstream: bool,
-    depended_subscriptions: &HashSet<u32>,
+    subscriber_ids: &HashSet<u32>,
 ) -> StateTableOpConsistencyLevel {
-    if !depended_subscriptions.is_empty() {
+    if !subscriber_ids.is_empty() {
         StateTableOpConsistencyLevel::LogStoreEnabled
     } else if !may_have_downstream && matches!(conflict_behavior, ConflictBehavior::Overwrite) {
         // Table with overwrite conflict behavior could disable conflict check
@@ -256,16 +256,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
         let may_have_downstream = actor_context.initial_dispatch_num != 0;
-        let depended_subscription_ids = actor_context
-            .related_subscriptions
-            .get(&TableId::new(table_catalog.id))
-            .cloned()
-            .unwrap_or_default();
-        let op_consistency_level = get_op_consistency_level(
-            conflict_behavior,
-            may_have_downstream,
-            &depended_subscription_ids,
-        );
+        let subscriber_ids = actor_context.initial_subscriber_ids.clone();
+        let op_consistency_level =
+            get_op_consistency_level(conflict_behavior, may_have_downstream, &subscriber_ids);
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)
@@ -301,7 +294,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             version_column_indices,
             is_dummy_table,
             may_have_downstream,
-            depended_subscription_ids,
+            subscriber_ids,
             metrics: mv_metrics,
             toastable_column_indices,
             refresh_args,
@@ -805,14 +798,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         self.may_have_downstream = true;
                     }
                     Self::may_update_depended_subscriptions(
-                        &mut self.depended_subscription_ids,
+                        &mut self.subscriber_ids,
                         &barrier,
                         mv_table_id,
                     );
                     let op_consistency_level = get_op_consistency_level(
                         self.conflict_behavior,
                         self.may_have_downstream,
-                        &self.depended_subscription_ids,
+                        &self.subscriber_ids,
                     );
                     let post_commit = self
                         .state_table
@@ -1118,7 +1111,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             is_dummy_table: false,
             toastable_column_indices: None,
             may_have_downstream: true,
-            depended_subscription_ids: HashSet::new(),
+            subscriber_ids: HashSet::new(),
             metrics,
             refresh_args: None, // Test constructor doesn't support refresh functionality
             local_barrier_manager: LocalBarrierManager::for_test(),

@@ -89,6 +89,7 @@ impl CreatingStreamingJobControl {
                 .stream_job_fragments
                 .new_fragment_info(&info.init_split_assignment)
                 .collect(),
+            subscribers: Default::default(), // no subscriber for newly create job
         };
         let snapshot_backfill_actors = job_info.snapshot_backfill_actor_ids().collect();
         let backfill_nodes_to_pause =
@@ -109,7 +110,16 @@ impl CreatingStreamingJobControl {
         );
 
         let actors_to_create =
-            edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create());
+            edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create().map(
+                |(fragment_id, node, actors)| {
+                    (
+                        fragment_id,
+                        node,
+                        actors,
+                        [], // no subscribers for newly creating job
+                    )
+                },
+            ));
 
         let mut barrier_control =
             CreatingStreamingJobBarrierControl::new(job_id, backfill_epoch, false);
@@ -463,8 +473,6 @@ impl CreatingStreamingJobControl {
                 .into_iter()
                 .flatten(),
             new_actors,
-            vec![],
-            vec![],
         )?;
         barrier_control.enqueue_epoch(
             barrier_info.prev_epoch(),

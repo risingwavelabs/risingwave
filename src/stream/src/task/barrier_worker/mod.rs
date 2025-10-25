@@ -1190,7 +1190,6 @@ pub(crate) mod barrier_test_utils {
                         database_id: TEST_DATABASE_ID.database_id,
                         graphs: vec![PbInitialPartialGraph {
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
-                            subscriptions: vec![],
                         }],
                     }],
                     term_id: "for_test".into(),
@@ -1231,8 +1230,6 @@ pub(crate) mod barrier_test_utils {
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
                             actors_to_build: vec![],
-                            subscriptions_to_add: vec![],
-                            subscriptions_to_remove: vec![],
                         },
                     )),
                 }))

@@ -406,34 +406,13 @@ impl CreateMviewProgressTracker {
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
+        let mut finished_jobs = vec![];
         for (creating_table_id, (definition, job_info, backfill_order_state)) in jobs {
-            let mut states = HashMap::new();
-            let mut backfill_upstream_types = HashMap::new();
-            let actors = job_info.tracking_progress_actor_ids();
-            for (actor, backfill_upstream_type) in actors {
-                actor_map.insert(actor, creating_table_id);
-                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
-                backfill_upstream_types.insert(actor, backfill_upstream_type);
-            }
             let source_backfill_fragments = StreamJobFragments::source_backfill_fragments_impl(
                 job_info
                     .fragment_infos
                     .iter()
                     .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes)),
-            );
-
-            let progress = Self::recover_progress(
-                states,
-                backfill_upstream_types,
-                StreamJobFragments::upstream_table_counts_impl(
-                    job_info
-                        .fragment_infos
-                        .values()
-                        .map(|fragment| &fragment.nodes),
-                ),
-                definition,
-                version_stats,
-                backfill_order_state,
             );
             let source_change = if source_backfill_fragments.is_empty() {
                 None
@@ -444,13 +423,43 @@ impl CreateMviewProgressTracker {
             };
             let tracking_job =
                 TrackingJob::recovered(creating_table_id.table_id as _, source_change);
-            progress_map.insert(creating_table_id, (progress, tracking_job));
+            let actors = job_info.tracking_progress_actor_ids();
+            if actors.is_empty() {
+                finished_jobs.push(tracking_job);
+            } else {
+                let mut states = HashMap::new();
+                let mut backfill_upstream_types = HashMap::new();
+
+                for (actor, backfill_upstream_type) in actors {
+                    actor_map.insert(actor, creating_table_id);
+                    states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
+                    backfill_upstream_types.insert(actor, backfill_upstream_type);
+                }
+
+                let progress = Self::recover_progress(
+                    states,
+                    backfill_upstream_types,
+                    StreamJobFragments::upstream_table_counts_impl(
+                        job_info
+                            .fragment_infos
+                            .values()
+                            .map(|fragment| &fragment.nodes),
+                    ),
+                    definition,
+                    version_stats,
+                    backfill_order_state,
+                );
+                progress_map.insert(creating_table_id, (progress, tracking_job));
+            }
         }
         Self {
             progress_map,
             actor_map,
             pending_backfill_nodes: Vec::new(),
-            staging_commit_info: StagingCommitInfo::default(),
+            staging_commit_info: StagingCommitInfo {
+                finished_jobs,
+                table_ids_to_truncate: vec![],
+            },
         }
     }
 

@@ -39,7 +39,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::MetaResult;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::GlobalBarrierWorkerContext;
-use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::worker::GlobalBarrierWorker;
@@ -217,49 +216,46 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             database_id,
             HashMap::from_iter([(
                 job_id,
-                InflightStreamingJobInfo {
-                    job_id,
-                    fragment_infos: HashMap::from_iter([
-                        (
-                            actor1.fragment_id,
-                            InflightFragmentInfo {
-                                fragment_id: actor1.fragment_id,
-                                distribution_type: DistributionType::Single,
-                                fragment_type_mask: Default::default(),
-                                vnode_count: VirtualNode::COUNT_FOR_TEST,
-                                nodes: Default::default(),
-                                actors: HashMap::from_iter([(
-                                    actor1.actor_id as _,
-                                    InflightActorInfo {
-                                        worker_id: worker1.id as _,
-                                        vnode_bitmap: None,
-                                        splits: vec![],
-                                    },
-                                )]),
-                                state_table_ids: HashSet::from_iter([table1]),
-                            },
-                        ),
-                        (
-                            actor2.fragment_id,
-                            InflightFragmentInfo {
-                                fragment_id: actor2.fragment_id,
-                                distribution_type: DistributionType::Single,
-                                fragment_type_mask: Default::default(),
-                                vnode_count: VirtualNode::COUNT_FOR_TEST,
-                                nodes: Default::default(),
-                                actors: HashMap::from_iter([(
-                                    actor2.actor_id as _,
-                                    InflightActorInfo {
-                                        worker_id: worker2.id as _,
-                                        vnode_bitmap: None,
-                                        splits: vec![],
-                                    },
-                                )]),
-                                state_table_ids: HashSet::from_iter([table2]),
-                            },
-                        ),
-                    ]),
-                },
+                HashMap::from_iter([
+                    (
+                        actor1.fragment_id,
+                        InflightFragmentInfo {
+                            fragment_id: actor1.fragment_id,
+                            distribution_type: DistributionType::Single,
+                            fragment_type_mask: Default::default(),
+                            vnode_count: VirtualNode::COUNT_FOR_TEST,
+                            nodes: Default::default(),
+                            actors: HashMap::from_iter([(
+                                actor1.actor_id as _,
+                                InflightActorInfo {
+                                    worker_id: worker1.id as _,
+                                    vnode_bitmap: None,
+                                    splits: vec![],
+                                },
+                            )]),
+                            state_table_ids: HashSet::from_iter([table1]),
+                        },
+                    ),
+                    (
+                        actor2.fragment_id,
+                        InflightFragmentInfo {
+                            fragment_id: actor2.fragment_id,
+                            distribution_type: DistributionType::Single,
+                            fragment_type_mask: Default::default(),
+                            vnode_count: VirtualNode::COUNT_FOR_TEST,
+                            nodes: Default::default(),
+                            actors: HashMap::from_iter([(
+                                actor2.actor_id as _,
+                                InflightActorInfo {
+                                    worker_id: worker2.id as _,
+                                    vnode_bitmap: None,
+                                    splits: vec![],
+                                },
+                            )]),
+                            state_table_ids: HashSet::from_iter([table2]),
+                        },
+                    ),
+                ]),
             )]),
         )]),
         state_table_committed_epochs: HashMap::from_iter([
@@ -267,7 +263,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             (table2, initial_epoch),
         ]),
         state_table_log_epochs: Default::default(),
-        subscription_infos: Default::default(),
+        mv_depended_subscriptions: Default::default(),
         stream_actors: HashMap::from_iter([
             (actor1.actor_id as _, actor1.clone()),
             (actor2.actor_id as _, actor2.clone()),
