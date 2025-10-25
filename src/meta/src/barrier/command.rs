@@ -490,7 +490,9 @@ impl Command {
         Self::Resume
     }
 
-    pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
+    pub(crate) fn fragment_changes(
+        &self,
+    ) -> Option<(Option<TableId>, HashMap<FragmentId, CommandFragmentChanges>)> {
         match self {
             Command::Flush => None,
             Command::Pause => None,
@@ -513,7 +515,7 @@ impl Command {
                     ))
                     .collect();
 
-                Some(changes)
+                Some((None, changes))
             }
             Command::CreateStreamingJob { info, job_type, .. } => {
                 assert!(
@@ -547,9 +549,10 @@ impl Command {
                     );
                 }
 
-                Some(changes)
+                Some((Some(info.streaming_job.id().into()), changes))
             }
-            Command::RescheduleFragment { reschedules, .. } => Some(
+            Command::RescheduleFragment { reschedules, .. } => Some((
+                None,
                 reschedules
                     .iter()
                     .map(|(fragment_id, reschedule)| {
@@ -598,12 +601,13 @@ impl Command {
                         )
                     })
                     .collect(),
-            ),
-            Command::ReplaceStreamJob(plan) => Some(plan.fragment_changes()),
+            )),
+            Command::ReplaceStreamJob(plan) => Some((None, plan.fragment_changes())),
             Command::MergeSnapshotBackfillStreamingJobs(_) => None,
             Command::SourceChangeSplit(SplitState {
                 split_assignment, ..
-            }) => Some(
+            }) => Some((
+                None,
                 split_assignment
                     .iter()
                     .map(|(&fragment_id, splits)| {
@@ -615,7 +619,7 @@ impl Command {
                         )
                     })
                     .collect(),
-            ),
+            )),
             Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
