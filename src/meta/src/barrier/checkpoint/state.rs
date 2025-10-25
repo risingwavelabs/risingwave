@@ -129,7 +129,7 @@ impl BarrierWorkerState {
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
     ///
-    /// Return (`graph_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_is_paused`)
+    /// Return (`graph_info`, `mv_subscription_max_retention`, `table_ids_to_commit`, `jobs_to_wait`, `prev_is_paused`)
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
@@ -147,25 +147,43 @@ impl BarrierWorkerState {
         }) = command
         {
             None
-        } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
-            self.inflight_graph_info.pre_apply(&fragment_changes);
+        } else if let Some((new_job_id, fragment_changes)) = command.and_then(Command::fragment_changes) {
+            self.inflight_graph_info.pre_apply(new_job_id, &fragment_changes);
             Some(fragment_changes)
         } else {
             None
         };
 
-        if let Some(Command::CreateSubscription {
-            subscription_id,
-            upstream_mv_table_id,
-            retention_second,
-        }) = &command
-        {
-            self.inflight_graph_info.register_subscriber(
-                *upstream_mv_table_id,
-                *subscription_id,
-                SubscriberType::Subscription(*retention_second),
-            );
-        }
+        match &command {
+            Some(Command::CreateSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+                retention_second,
+            }) => {
+                self.inflight_graph_info.register_subscriber(
+                    *upstream_mv_table_id,
+                    *subscription_id,
+                    SubscriberType::Subscription(*retention_second),
+                );
+            }
+            Some(Command::CreateStreamingJob {
+                info,
+                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+                ..
+            }) => {
+                for upstream_mv_table_id in snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .keys()
+                {
+                    self.inflight_graph_info.register_subscriber(
+                        *upstream_mv_table_id,
+                        info.streaming_job.id(),
+                        SubscriberType::SnapshotBackfill,
+                    );
+                }
+            }
+            _ => {}
+        };
 
         let info = self.inflight_graph_info.clone();
 

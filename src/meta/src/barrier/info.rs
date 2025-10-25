@@ -538,6 +538,16 @@ impl InflightDatabaseInfo {
     }
 
     pub fn add_existing(&mut self, job: InflightStreamingJobInfo) {
+        self.jobs
+            .try_insert(
+                job.job_id,
+                InflightStreamingJobInfo {
+                    job_id: job.job_id,
+                    subscribers: job.subscribers,
+                    fragment_infos: Default::default(), // fill in later in apply_add
+                },
+            )
+            .expect("non-duplicate");
         self.apply_add(job.fragment_infos.into_iter().map(|(fragment_id, info)| {
             (
                 fragment_id,
@@ -554,8 +564,21 @@ impl InflightDatabaseInfo {
     /// the info correspondingly.
     pub(crate) fn pre_apply(
         &mut self,
+        new_job_id: Option<TableId>,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
     ) {
+        if let Some(job_id) = new_job_id {
+            self.jobs
+                .try_insert(
+                    job_id,
+                    InflightStreamingJobInfo {
+                        job_id,
+                        fragment_infos: Default::default(),
+                        subscribers: Default::default(), // no subscriber for newly create job
+                    },
+                )
+                .expect("non-duplicate");
+        }
         self.apply_add(
             fragment_changes
                 .iter()
@@ -577,14 +600,7 @@ impl InflightDatabaseInfo {
                         info,
                         is_existing,
                     } => {
-                        let fragment_infos =
-                            self.jobs
-                                .entry(job_id)
-                                .or_insert_with(|| InflightStreamingJobInfo {
-                                    job_id,
-                                    fragment_infos: Default::default(),
-                                    subscribers: Default::default(),
-                                });
+                        let fragment_infos = self.jobs.get_mut(&job_id).expect("should exist");
                         if !is_existing {
                             shared_actor_writer.upsert([(&info, job_id)]);
                         }
