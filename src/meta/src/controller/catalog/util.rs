@@ -511,11 +511,7 @@ impl CatalogController {
         Ok(infos
             .into_iter()
             .flat_map(|info| {
-                job_mapping.remove(&(
-                    info.database_id as _,
-                    info.schema_id as _,
-                    info.name.clone(),
-                ))
+                job_mapping.remove(&(info.database_id as _, info.schema_id as _, info.name))
             })
             .collect())
     }

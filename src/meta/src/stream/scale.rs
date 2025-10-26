@@ -81,7 +81,6 @@ pub struct CustomActorInfo {
 }
 
 use educe::Educe;
-use futures::future::try_join_all;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
@@ -2411,17 +2410,14 @@ impl GlobalStreamManager {
             })
             .collect();
 
-        let fragment_actors =
-            try_join_all(up_down_stream_fragment.iter().map(|fragment_id| async {
-                let actor_ids = self
-                    .metadata_manager
+        let fragment_actors = up_down_stream_fragment
+            .iter()
+            .map(|fragment_id| {
+                self.metadata_manager
                     .get_running_actors_of_fragment(*fragment_id)
-                    .await?;
-                Result::<_, MetaError>::Ok((*fragment_id, actor_ids))
-            }))
-            .await?
-            .into_iter()
-            .collect();
+                    .map(|actor_ids| (*fragment_id, actor_ids))
+            })
+            .collect::<Result<_, _>>()?;
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,

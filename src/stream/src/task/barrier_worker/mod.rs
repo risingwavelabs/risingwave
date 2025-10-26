@@ -84,6 +84,9 @@ pub struct BarrierCompleteResult {
     /// The updated creation progress of materialized view after this barrier.
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
 
+    /// The source IDs that have finished listing data for refreshable batch sources.
+    pub list_finished_source_ids: Vec<u32>,
+
     /// The source IDs that have finished loading data for refreshable batch sources.
     pub load_finished_source_ids: Vec<u32>,
 
@@ -643,6 +646,7 @@ mod await_epoch_completed_future {
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
         create_mview_progress: Vec<PbCreateMviewProgress>,
+        list_finished_source_ids: Vec<u32>,
         load_finished_source_ids: Vec<u32>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         truncate_tables: Vec<u32>,
@@ -664,6 +668,7 @@ mod await_epoch_completed_future {
                 result.map(|sync_result| BarrierCompleteResult {
                     sync_result,
                     create_mview_progress,
+                    list_finished_source_ids,
                     load_finished_source_ids,
                     cdc_table_backfill_progress,
                     truncate_tables,
@@ -743,6 +748,7 @@ impl LocalBarrierWorker {
                 barrier,
                 table_ids,
                 create_mview_progress,
+                list_finished_source_ids,
                 load_finished_source_ids,
                 cdc_table_backfill_progress,
                 truncate_tables,
@@ -778,6 +784,7 @@ impl LocalBarrierWorker {
                         barrier,
                         self.actor_manager.await_tree_reg.as_ref(),
                         create_mview_progress,
+                        list_finished_source_ids,
                         load_finished_source_ids,
                         cdc_table_backfill_progress,
                         truncate_tables,
@@ -797,6 +804,7 @@ impl LocalBarrierWorker {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
+            list_finished_source_ids,
             load_finished_source_ids,
             cdc_table_backfill_progress,
             truncate_tables,
@@ -847,6 +855,7 @@ impl LocalBarrierWorker {
                             .map(|sst| sst.sst_info.into())
                             .collect(),
                         database_id: database_id.database_id,
+                        list_finished_source_ids,
                         load_finished_source_ids,
                         vector_index_adds: vector_index_adds
                             .into_iter()
@@ -1094,7 +1103,7 @@ impl LocalBarrierWorker {
         };
 
         let actor_manager = Arc::new(StreamActorManager {
-            env: env.clone(),
+            env,
             streaming_metrics,
             watermark_epoch,
             await_tree_reg,

@@ -44,12 +44,12 @@ impl ObserverState for ComputeObserverNode {
                     Operation::Update => {
                         LocalSecretManager::global().update_secret(s.id, s.value);
                     }
-                    _ => {
-                        panic!("error type notification");
+                    operation => {
+                        panic!("invalid notification operation: {operation:?}");
                     }
                 },
-                Info::ComputeNodeTotalCpuCount(count) => {
-                    LicenseManager::get().update_cpu_core_count(count as _);
+                Info::ClusterResource(resource) => {
+                    LicenseManager::get().update_cluster_resource(resource);
                 }
                 Info::Recovery(_) => {
                     // Reset batch client pool on recovery is always unnecessary
@@ -58,8 +58,8 @@ impl ObserverState for ComputeObserverNode {
                     // TODO: invalidate a single batch client on any connection issue.
                     self.batch_client_pool.invalidate_all();
                 }
-                _ => {
-                    panic!("error type notification");
+                info => {
+                    panic!("invalid notification info: {info}");
                 }
             }
         };
@@ -70,7 +70,7 @@ impl ObserverState for ComputeObserverNode {
             unreachable!();
         };
         LocalSecretManager::global().init_secrets(snapshot.secrets);
-        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
+        LicenseManager::get().update_cluster_resource(snapshot.cluster_resource.unwrap());
     }
 }
 

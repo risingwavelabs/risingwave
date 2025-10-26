@@ -592,7 +592,7 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
         self.inner.next().await?;
         self.processed_key_num += 1;
 
-        if self.processed_key_num % PROGRESS_KEY_INTERVAL == 0 {
+        if self.processed_key_num.is_multiple_of(PROGRESS_KEY_INTERVAL) {
             self.task_progress
                 .inc_progress_key(PROGRESS_KEY_INTERVAL as _);
         }

@@ -235,7 +235,7 @@ where
             tls_context: tls_config
                 .as_ref()
                 .and_then(|e| build_ssl_ctx_from_config(e).ok()),
-            tls_config: tls_config.clone(),
+            tls_config,
             result_cache: Default::default(),
             unnamed_prepare_statement: Default::default(),
             prepare_statement_store: Default::default(),
@@ -1013,10 +1013,10 @@ where
             Some(mut result_cache) => {
                 assert!(self.portal_store.contains_key(&portal_name));
 
-                let is_cosume_completed =
+                let is_consume_completed =
                     result_cache.consume::<S>(row_max, &mut self.stream).await?;
 
-                if !is_cosume_completed {
+                if !is_consume_completed {
                     self.result_cache.insert(portal_name, result_cache);
                 }
             }

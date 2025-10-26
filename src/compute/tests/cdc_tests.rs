@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(coroutines)]
 
 use std::collections::{BTreeMap, HashMap};
@@ -113,7 +112,7 @@ impl MockOffsetGenExecutor {
             match msg {
                 Message::Chunk(chunk) => {
                     let mut offset_builder = Utf8ArrayBuilder::new(chunk.cardinality());
-                    assert!(chunk.is_compacted());
+                    assert!(chunk.is_vis_compacted());
                     let (ops, mut columns, vis) = chunk.into_inner();
 
                     for _ in 0..ops.len() {
@@ -383,7 +382,6 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_owned(),
-        None,
         None,
         None,
     ));
@@ -1062,7 +1060,6 @@ async fn assert_mv(
         test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_owned(),
-        None,
         None,
         None,
     ));

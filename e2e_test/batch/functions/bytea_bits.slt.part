@@ -126,4 +126,22 @@ select bit_count('0x80000000'::bytea);
 ----
 23
 
+query T
+SELECT reverse(''::bytea);
+----
+\x
 
+query T
+SELECT reverse('\xaa'::bytea);
+----
+\xaa
+
+query T
+SELECT reverse('\xabcd'::bytea);
+----
+\xcdab
+
+query T
+SELECT reverse('\x1234567890'::bytea);
+----
+\x9078563412

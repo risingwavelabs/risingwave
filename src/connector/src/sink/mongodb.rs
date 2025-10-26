@@ -235,7 +235,7 @@ impl EnforceSecret for MongodbSink {
 impl MongodbSink {
     pub fn new(param: SinkParam) -> Result<Self> {
         let config = MongodbConfig::from_btreemap(param.properties.clone())?;
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         let is_append_only = param.sink_type.is_append_only();
         let schema = param.schema();
         Ok(Self {

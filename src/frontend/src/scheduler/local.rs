@@ -41,12 +41,12 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PbPlanNode,
     TaskOutputId,
 };
-use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
+use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 
-use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
+use super::plan_fragmenter::{PartitionInfo, QueryStage};
 use crate::catalog::{FragmentId, TableId};
 use crate::error::RwError;
 use crate::optimizer::plan_node::BatchPlanNodeType;
@@ -60,7 +60,6 @@ pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
-    batch_query_epoch: BatchQueryEpoch,
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
     timeout: Option<Duration>,
@@ -71,7 +70,6 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         support_barrier_read: bool,
-        batch_query_epoch: BatchQueryEpoch,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
     ) -> Self {
@@ -81,7 +79,6 @@ impl LocalQueryExecution {
         Self {
             query,
             front_env,
-            batch_query_epoch,
             session,
             worker_node_manager,
             timeout,
@@ -108,13 +105,7 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        let executor = ExecutorBuilder::new(
-            &plan_node,
-            &task_id,
-            context,
-            self.batch_query_epoch,
-            self.shutdown_rx().clone(),
-        );
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.shutdown_rx());
         let executor = executor.build().await?;
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
@@ -128,22 +119,18 @@ impl LocalQueryExecution {
     }
 
     fn run(self) -> BoxStream<'static, Result<DataChunk, RwError>> {
-        let span = tracing::info_span!(
-            "local_execute",
-            query_id = self.query.query_id.id,
-            epoch = ?self.batch_query_epoch,
-        );
+        let span = tracing::info_span!("local_execute", query_id = self.query.query_id.id,);
         Box::pin(self.run_inner().instrument(span))
     }
 
     pub fn stream_rows(self) -> LocalQueryStream {
         let compute_runtime = self.front_env.compute_runtime();
         let (sender, receiver) = mpsc::channel(10);
-        let shutdown_rx = self.shutdown_rx().clone();
+        let shutdown_rx = self.shutdown_rx();
 
         let catalog_reader = self.front_env.catalog_reader().clone();
         let user_info_reader = self.front_env.user_info_reader().clone();
-        let auth_context = self.session.auth_context().clone();
+        let auth_context = self.session.auth_context();
         let db_name = self.session.database();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
@@ -243,7 +230,7 @@ impl LocalQueryExecution {
                     for second_stage_id in second_stage_ids {
                         let second_stage =
                             self.query.stage_graph.stages.get(second_stage_id).unwrap();
-                        second_stages.insert(*second_stage_id, second_stage.clone());
+                        second_stages.insert(*second_stage_id, second_stage);
                     }
                     let mut stage_id_to_plan = Some(second_stages);
                     let res = self.convert_plan_node(
@@ -270,10 +257,10 @@ impl LocalQueryExecution {
         })
     }
 
-    fn convert_plan_node(
-        &self,
+    fn convert_plan_node<'a>(
+        &'a self,
         execution_plan_node: &ExecutionPlanNode,
-        second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
+        second_stages: &mut Option<HashMap<StageId, &'a QueryStage>>,
         partition: Option<PartitionInfo>,
         next_executor_id: Arc<AtomicU32>,
     ) -> SchedulerResult<PbPlanNode> {
@@ -341,14 +328,13 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.batch_query_epoch),
                             tracing_context: tracing_context.clone(),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
                                     task_id: idx as u64,
-                                    stage_id: exchange_source_stage_id,
+                                    stage_id: exchange_source_stage_id.into(),
                                     query_id: self.query.query_id.id.clone(),
                                 }),
                                 output_id: 0,
@@ -385,7 +371,6 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.batch_query_epoch),
                             tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
@@ -394,7 +379,7 @@ impl LocalQueryExecution {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
                                     task_id: id as u64,
-                                    stage_id: exchange_source_stage_id,
+                                    stage_id: exchange_source_stage_id.into(),
                                     query_id: self.query.query_id.id.clone(),
                                 }),
                                 output_id: 0,
@@ -424,7 +409,6 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.batch_query_epoch),
                             tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
@@ -433,7 +417,7 @@ impl LocalQueryExecution {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
                                     task_id: id as u64,
-                                    stage_id: exchange_source_stage_id,
+                                    stage_id: exchange_source_stage_id.into(),
                                     query_id: self.query.query_id.id.clone(),
                                 }),
                                 output_id: 0,
@@ -460,11 +444,10 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        epoch: Some(self.batch_query_epoch),
                         tracing_context,
                     };
 
-                    let workers = self.choose_worker(&second_stage)?;
+                    let workers = self.choose_worker(second_stage)?;
                     *sources = workers
                         .iter()
                         .enumerate()
@@ -472,7 +455,7 @@ impl LocalQueryExecution {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
                                     task_id: idx as u64,
-                                    stage_id: exchange_source_stage_id,
+                                    stage_id: exchange_source_stage_id.into(),
                                     query_id: self.query.query_id.id.clone(),
                                 }),
                                 output_id: 0,
@@ -687,7 +670,7 @@ impl LocalQueryExecution {
             .map_err(|e| e.into())
     }
 
-    fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
+    fn choose_worker(&self, stage: &QueryStage) -> SchedulerResult<Vec<WorkerNode>> {
         if let Some(table_id) = stage.dml_table_id.as_ref() {
             // dml should use streaming vnode mapping
             let vnode_mapping = self.get_table_dml_vnode_mapping(table_id)?;

@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::{Bound, Deref, Index};
 
@@ -31,7 +30,6 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{CompactedRow, OwnedRow, RowExt};
 use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DataType, ScalarImpl};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
@@ -507,7 +505,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             )
                                             .await?;
 
-                                        match generate_output(change_buffer, data_types.clone())? {
+                                        match change_buffer.into_chunk(data_types.clone()) {
                                             Some(output_chunk) => {
                                                 self.state_table.write_chunk(output_chunk.clone());
                                                 self.state_table.try_flush().await?;
@@ -657,6 +655,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 .collect_vec(),
                             &self.schema.data_types(),
                         );
+
+                        tracing::debug!(table_id = %refresh_args.table_id, "yielding to delete chunk: {}", to_delete_chunk.to_pretty());
                         yield Message::Chunk(to_delete_chunk);
                     }
 
@@ -705,7 +705,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     refresh_args.table_id.into(),
                                     staging_table_id,
                                 );
-                                tracing::info!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
+                                tracing::debug!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
 
                                 *inner_state = MaterializeStreamState::CommitAndYieldBarrier {
                                     barrier,
@@ -738,6 +738,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             },
                         )
                         .await?;
+
+                    tracing::info!(table_id = %refresh_args.table_id, "RefreshEnd: Refresh completed");
 
                     if let Some(ref mut refresh_args) = self.refresh_args {
                         refresh_args.is_refreshing = false;
@@ -1195,134 +1197,8 @@ fn handle_toast_columns_for_postgres_cdc(
     OwnedRow::new(fixed_row_data)
 }
 
-/// Construct output `StreamChunk` from given buffer.
-fn generate_output(
-    change_buffer: ChangeBuffer,
-    data_types: Vec<DataType>,
-) -> StreamExecutorResult<Option<StreamChunk>> {
-    // construct output chunk
-    // TODO(st1page): when materialize partial columns(), we should construct some columns in the pk
-    let mut new_ops: Vec<Op> = vec![];
-    let mut new_rows: Vec<OwnedRow> = vec![];
-    for (_, row_op) in change_buffer.into_parts() {
-        match row_op {
-            ChangeBufferKeyOp::Insert(value) => {
-                new_ops.push(Op::Insert);
-                new_rows.push(value);
-            }
-            ChangeBufferKeyOp::Delete(old_value) => {
-                new_ops.push(Op::Delete);
-                new_rows.push(old_value);
-            }
-            ChangeBufferKeyOp::Update((old_value, new_value)) => {
-                // if old_value == new_value, we don't need to emit updates to downstream.
-                if old_value != new_value {
-                    new_ops.push(Op::UpdateDelete);
-                    new_ops.push(Op::UpdateInsert);
-                    new_rows.push(old_value);
-                    new_rows.push(new_value);
-                }
-            }
-        }
-    }
-    let mut data_chunk_builder = DataChunkBuilder::new(data_types, new_rows.len() + 1);
+type ChangeBuffer = crate::common::change_buffer::ChangeBuffer<Vec<u8>, OwnedRow>;
 
-    for row in new_rows {
-        let res = data_chunk_builder.append_one_row(row);
-        debug_assert!(res.is_none());
-    }
-
-    if let Some(new_data_chunk) = data_chunk_builder.consume_all() {
-        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec());
-        Ok(Some(new_stream_chunk))
-    } else {
-        Ok(None)
-    }
-}
-
-/// `ChangeBuffer` is a buffer to handle chunk into `KeyOp`.
-/// TODO(rc): merge with `TopNStaging`.
-pub struct ChangeBuffer {
-    buffer: HashMap<Vec<u8>, ChangeBufferKeyOp>,
-}
-
-/// `KeyOp` variant for `ChangeBuffer` that stores `OwnedRow` instead of Bytes
-enum ChangeBufferKeyOp {
-    Insert(OwnedRow),
-    Delete(OwnedRow),
-    /// (`old_value`, `new_value`)
-    Update((OwnedRow, OwnedRow)),
-}
-
-impl ChangeBuffer {
-    fn new() -> Self {
-        Self {
-            buffer: HashMap::new(),
-        }
-    }
-
-    fn insert(&mut self, pk: Vec<u8>, value: OwnedRow) {
-        let entry = self.buffer.entry(pk);
-        match entry {
-            Entry::Vacant(e) => {
-                e.insert(ChangeBufferKeyOp::Insert(value));
-            }
-            Entry::Occupied(mut e) => {
-                if let ChangeBufferKeyOp::Delete(old_value) = e.get_mut() {
-                    let old_val = std::mem::take(old_value);
-                    e.insert(ChangeBufferKeyOp::Update((old_val, value)));
-                } else {
-                    unreachable!();
-                }
-            }
-        }
-    }
-
-    fn delete(&mut self, pk: Vec<u8>, old_value: OwnedRow) {
-        let entry: Entry<'_, Vec<u8>, ChangeBufferKeyOp> = self.buffer.entry(pk);
-        match entry {
-            Entry::Vacant(e) => {
-                e.insert(ChangeBufferKeyOp::Delete(old_value));
-            }
-            Entry::Occupied(mut e) => match e.get_mut() {
-                ChangeBufferKeyOp::Insert(_) => {
-                    e.remove();
-                }
-                ChangeBufferKeyOp::Update((prev, _curr)) => {
-                    let prev = std::mem::take(prev);
-                    e.insert(ChangeBufferKeyOp::Delete(prev));
-                }
-                ChangeBufferKeyOp::Delete(_) => {
-                    unreachable!();
-                }
-            },
-        }
-    }
-
-    fn update(&mut self, pk: Vec<u8>, old_value: OwnedRow, new_value: OwnedRow) {
-        let entry = self.buffer.entry(pk);
-        match entry {
-            Entry::Vacant(e) => {
-                e.insert(ChangeBufferKeyOp::Update((old_value, new_value)));
-            }
-            Entry::Occupied(mut e) => match e.get_mut() {
-                ChangeBufferKeyOp::Insert(_) => {
-                    e.insert(ChangeBufferKeyOp::Insert(new_value));
-                }
-                ChangeBufferKeyOp::Update((_prev, curr)) => {
-                    *curr = new_value;
-                }
-                ChangeBufferKeyOp::Delete(_) => {
-                    unreachable!()
-                }
-            },
-        }
-    }
-
-    fn into_parts(self) -> HashMap<Vec<u8>, ChangeBufferKeyOp> {
-        self.buffer
-    }
-}
 impl<S: StateStore, SD: ValueRowSerde> Execute for MaterializeExecutor<S, SD> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
@@ -1355,7 +1231,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         version_column_indices: Vec<u32>,
     ) -> Self {
         let lru_cache: ManagedLruCache<Vec<u8>, CacheValue> =
-            ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
+            ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self {
             lru_cache,
             row_serde,

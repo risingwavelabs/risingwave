@@ -304,7 +304,7 @@ where
     fn from_iter<I: IntoIterator<Item = Option<L>>>(iter: I) -> Self {
         let iter = iter.into_iter();
         let mut builder =
-            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(T::DATA_TYPE.clone()));
+            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(T::DATA_TYPE));
         for v in iter {
             match v {
                 None => builder.append(None),

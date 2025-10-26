@@ -18,6 +18,7 @@ use bytes::{Bytes, BytesMut};
 use prost::Message;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use risingwave_common::array::VectorRef;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockObjectId;
@@ -30,7 +31,6 @@ use crate::hummock::vector::file::FileVectorStore;
 use crate::hummock::vector::writer::VectorObjectIdManagerRef;
 use crate::hummock::{HummockResult, SstableStoreRef};
 use crate::opts::StorageOpts;
-use crate::store::Vector;
 use crate::vector::hnsw::{
     HnswBuilderOptions, HnswGraphBuilder, VectorAccessor, insert_graph, new_node,
 };
@@ -90,13 +90,13 @@ impl HnswFlatIndexWriter {
         })
     }
 
-    pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
+    pub(crate) fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> HummockResult<()> {
         self.vector_store
             .building_vectors
             .as_mut()
             .expect("for write")
             .file_builder
-            .add(vec.to_ref(), &info);
+            .add(vec, &info);
         Ok(())
     }
 

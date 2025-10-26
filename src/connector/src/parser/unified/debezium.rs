@@ -575,7 +575,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
         DataType::Varchar => match id_field {
             serde_json::Value::String(s) => Some(ScalarImpl::Utf8(s.clone().into())),
             serde_json::Value::Object(obj) if obj.contains_key("$oid") => Some(ScalarImpl::Utf8(
-                obj["$oid"].as_str().to_owned().unwrap_or_default().into(),
+                obj["$oid"].as_str().unwrap_or_default().into(),
             )),
             _ => return Err(type_error()),
         },

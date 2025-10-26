@@ -348,7 +348,7 @@ mod common {
                 if let Some((relation_id, _schema_name)) = result? {
                     return Ok(relation_id);
                 }
-                Err(CatalogError::NotFound("table", rel_name.to_owned()).into())
+                Err(CatalogError::NotFound("table", rel_name.clone()).into())
             }
         }
     }
@@ -435,7 +435,6 @@ pub fn explain_backfill_order_in_dot_format(
     plan: StreamPlanRef,
 ) -> Result<String> {
     let order = plan_backfill_order(session, backfill_order_strategy, plan)?;
-    let dot_formatted_backfill_order =
-        display::print_backfill_order_in_dot_format(session, order.clone())?;
+    let dot_formatted_backfill_order = display::print_backfill_order_in_dot_format(session, order)?;
     Ok(dot_formatted_backfill_order)
 }
