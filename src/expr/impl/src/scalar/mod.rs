@@ -89,6 +89,7 @@ mod to_char;
 mod to_jsonb;
 mod vnode;
 pub use to_jsonb::*;
+mod crc32;
 mod encrypt;
 mod external;
 mod inet;

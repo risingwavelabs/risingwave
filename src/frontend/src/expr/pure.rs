@@ -238,6 +238,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::SetBit
             | Type::SetByte
             | Type::BitCount
+            | Type::Crc32
+            | Type::Crc32c
             | Type::Sha1
             | Type::Sha224
             | Type::Sha256

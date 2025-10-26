@@ -239,6 +239,8 @@ impl Strong {
             | ExprType::SetBit
             | ExprType::SetByte
             | ExprType::BitCount
+            | ExprType::Crc32
+            | ExprType::Crc32c
             | ExprType::Hmac
             | ExprType::SecureCompare
             | ExprType::Left
