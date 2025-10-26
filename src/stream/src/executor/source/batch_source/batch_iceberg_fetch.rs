@@ -327,7 +327,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             ) {
                 let chunk = chunk?;
                 chunks.push(StreamChunk::from_parts(
-                    itertools::repeat_n(Op::Insert, chunk.cardinality()).collect_vec(),
+                    itertools::repeat_n(Op::Insert, chunk.capacity()).collect_vec(),
                     chunk,
                 ));
             }
