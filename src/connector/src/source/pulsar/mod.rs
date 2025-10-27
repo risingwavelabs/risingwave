@@ -58,6 +58,14 @@ impl EnforceSecret for PulsarProperties {
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 #[serde_as]
+pub struct PulsarConsumerOptions {
+    #[serde(rename = "pulsar.read_compacted")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub read_compacted: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[serde_as]
 pub struct PulsarProperties {
     #[serde(rename = "scan.startup.mode", alias = "pulsar.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
@@ -94,6 +102,9 @@ pub struct PulsarProperties {
     ///   The subscription name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
     #[serde(rename = "subscription.name.prefix")]
     pub subscription_name_prefix: Option<String>,
+
+    #[serde(flatten)]
+    pub consumer_options: PulsarConsumerOptions,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
