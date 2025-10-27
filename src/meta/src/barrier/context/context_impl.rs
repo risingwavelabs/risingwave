@@ -423,11 +423,6 @@ impl CommandContext {
                     .await?;
             }
             Command::RescheduleFragment { reschedules, .. } => {
-                barrier_manager_context
-                    .scale_controller
-                    .post_apply_reschedule(reschedules)
-                    .await?;
-
                 let fragment_splits = reschedules
                     .iter()
                     .map(|(fragment_id, reschedule)| {
