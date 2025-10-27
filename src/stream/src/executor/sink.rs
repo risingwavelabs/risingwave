@@ -124,11 +124,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
 
         let stream_key = info.pk_indices.clone();
-        let stream_key_sink_pk_mismatch = {
-            stream_key
-                .iter()
-                .any(|i| !sink_param.downstream_pk.contains(i))
-        };
+        let downstream_pk = sink_param.downstream_pk_or_empty();
+        let stream_key_sink_pk_mismatch = stream_key.iter().any(|i| !downstream_pk.contains(i));
         // When stream key is different from the user defined primary key columns for sinks. The operations could be out of order
         // stream key: a,b
         // sink pk: a
@@ -167,7 +164,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
         let re_construct_with_sink_pk = need_advance_delete
             && sink_param.sink_type == SinkType::Upsert
-            && !sink_param.downstream_pk.is_empty();
+            && !downstream_pk.is_empty();
         let pk_matched = !stream_key_sink_pk_mismatch;
         // Don't compact chunk for blackhole sink for better benchmark performance.
         let compact_chunk = !sink.is_blackhole();
@@ -239,7 +236,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.chunk_size,
             self.input_data_types,
             input_compact_ib,
-            self.sink_param.downstream_pk.clone(),
+            self.sink_param.downstream_pk_or_empty(),
             metrics.sink_chunk_buffer_size,
             self.compact_chunk,
         );
@@ -597,7 +594,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             log_store_reader_wait_new_future_duration_ns,
         };
 
-        let downstream_pk = sink_param.downstream_pk.clone();
+        let downstream_pk = sink_param.downstream_pk_or_empty();
 
         let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
@@ -820,7 +817,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: pk_indices.clone(),
+            downstream_pk: Some(pk_indices.clone()),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
@@ -949,7 +946,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: vec![0],
+            downstream_pk: Some(vec![0]),
             sink_type: SinkType::Upsert,
             format_desc: None,
             db_name: "test".into(),
@@ -1051,7 +1048,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: pk_indices.clone(),
+            downstream_pk: Some(pk_indices.clone()),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),

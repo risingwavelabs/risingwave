@@ -60,20 +60,16 @@ curl -L https://risingwave.com/sh | sh
 
 To learn about other installation options, such as using a Docker image, see the [quick start guide](https://docs.risingwave.com/get-started/quickstart).
 
-## Stream, store, and query — all in one
+## Unified platform for streaming data
 
-RisingWave delivers a full **end-to-end streaming data platform** — combining real-time processing with built-in storage and open-format persistence.
+RisingWave delivers a unified streaming data platform that combines **ultra-low-latency stream processing** and **Iceberg-native data management**.
 
-It supports:
+### Streaming analytics
+RisingWave integrates real-time stream processing and low-latency serving in a single system. It continuously ingests data from streaming and batch sources, performs incremental computations across streams and tables with end-to-end freshness under 100 ms. Materialized views can be served directly within RisingWave with 10–20 ms p99 query latency, or delivered to downstream systems.
 
-* **Ingestion:** Ingest millions of events per second from streaming and batch sources.
-* **Stream processing:** Perform real-time incremental processing to join and analyze live data with historical tables.
-* **Delivery:** Deliver fresh, consistent results to data lakes (e.g., Apache Iceberg™) or any destination.
+### Iceberg-based lakehouse ingestion and management
+RisingWave treats Apache Iceberg™ as a first-class citizen. It directly hosts and manages the Iceberg REST catalog, allowing users to create and operate Iceberg tables through a PostgreSQL-compatible interface. RisingWave supports two write modes: Merge-on-Read (MoR) and Copy-on-Write (CoW), to suit different ingestion and query patterns. It also provides built-in table maintenance capabilities, including compaction, small-file optimization, vacuum, and snapshot cleanup, ensuring efficient and consistent data management without external tools or pipelines.
 
-What sets RisingWave apart is its integrated storage engine:
-
-* **Online serving:** Row-based storage optimized for point and range queries with single-digit millisecond latency.
-* **Offline persistence:** Built-in Apache Iceberg™ integration for low-cost, durable storage with open access for external query engines.
 
 With RisingWave, real-time data isn’t just processed — it’s stored, queried, and shared across your entire stack.
 

@@ -497,13 +497,6 @@ IcebergConfig:
     field_type: String
     comments: URI of iceberg catalog, only applicable in rest catalog.
     required: false
-  - name: database.name
-    field_type: String
-    required: false
-  - name: table.name
-    field_type: String
-    comments: Full name of table, must include schema name.
-    required: true
   - name: catalog.credential
     field_type: String
     comments: |-
@@ -565,6 +558,18 @@ IcebergConfig:
       - Each header is a key-value pair, separated by an '='.
       - Multiple headers can be specified, separated by a ';'.
     required: false
+  - name: vended_credentials
+    field_type: bool
+    comments: Enable vended credentials for iceberg REST catalog.
+    required: false
+    default: Default::default
+  - name: database.name
+    field_type: String
+    required: false
+  - name: table.name
+    field_type: String
+    comments: Full name of table, must include schema name when database is provided.
+    required: true
   - name: primary_key
     field_type: Vec<String>
     required: false

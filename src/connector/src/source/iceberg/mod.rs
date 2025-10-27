@@ -45,7 +45,7 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
 
 pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
-use crate::connector_common::IcebergCommon;
+use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
 use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
@@ -59,6 +59,9 @@ pub const ICEBERG_CONNECTOR: &str = "iceberg";
 pub struct IcebergProperties {
     #[serde(flatten)]
     pub common: IcebergCommon,
+
+    #[serde(flatten)]
+    pub table: IcebergTableIdentifier,
 
     // For jdbc catalog
     #[serde(rename = "catalog.jdbc.user")]
@@ -111,7 +114,9 @@ impl IcebergProperties {
             java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support java_catalog_props for iceberg source
-        self.common.load_table(&java_catalog_props).await
+        self.common
+            .load_table(&self.table, &java_catalog_props)
+            .await
     }
 }
 
