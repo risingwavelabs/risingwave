@@ -46,7 +46,6 @@ use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
-use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::secret::PbSecretRef;
@@ -405,7 +404,6 @@ impl CatalogController {
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id().table_id as _,
             || stream_job_fragments.fragments.values(),
-            &stream_job_fragments.actor_status,
             &stream_job_fragments.downstreams,
             for_replace,
             Some(streaming_job),
@@ -423,21 +421,12 @@ impl CatalogController {
         &self,
         job_id: ObjectId,
         get_fragments: impl Fn() -> I + 'a,
-        actor_status: &BTreeMap<crate::model::ActorId, PbActorStatus>,
         downstreams: &FragmentDownstreamRelation,
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
     ) -> MetaResult<()> {
-        // NOTE: we don't need to pass actor splits for now
-        // splits field will be updated during the post_collect_job_fragments stage
-        let empty_actor_splits = Default::default();
+        let fragments = Self::extract_fragment_models_from_fragments(job_id, get_fragments())?;
 
-        let fragment_actors = Self::extract_fragment_and_actors_from_fragments(
-            job_id,
-            get_fragments(),
-            actor_status,
-            &empty_actor_splits,
-        )?;
         let inner = self.inner.write().await;
 
         let need_notify = creating_streaming_job
@@ -451,8 +440,6 @@ impl CatalogController {
         // Ensure the job exists.
         ensure_job_not_canceled(job_id, &txn).await?;
 
-        // Add fragments.
-        let (fragments, _): (Vec<_>, Vec<_>) = fragment_actors.into_iter().unzip();
         for fragment in fragments {
             let fragment_id = fragment.fragment_id;
             let state_table_ids = fragment.state_table_ids.inner_ref().clone();
@@ -1569,7 +1556,8 @@ impl CatalogController {
             !fragments.is_empty(),
             "source id should be used by at least one fragment"
         );
-        let fragment_ids: HashSet<_> = fragments.iter().map(|(id, _, _)| *id as u32).collect();
+        let fragment_ids = fragments.iter().map(|(id, _, _)| *id as u32).collect_vec();
+
         for (id, fragment_type_mask, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
@@ -1583,7 +1571,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let fragment_actors = self.get_fragment_actors_from_running_info(&fragment_ids);
+        let fragment_actors = self.get_fragment_actors_from_running_info(fragment_ids.into_iter());
 
         let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
         let _version = self
@@ -1602,13 +1590,13 @@ impl CatalogController {
 
     fn get_fragment_actors_from_running_info(
         &self,
-        fragment_ids: &HashSet<u32>,
+        fragment_ids: impl Iterator<Item = u32>,
     ) -> HashMap<FragmentId, Vec<ActorId>> {
         let mut fragment_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
 
         let info = self.env.shared_actor_infos().read_guard();
 
-        for &fragment_id in fragment_ids {
+        for fragment_id in fragment_ids {
             let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id as _).unwrap();
             fragment_actors
                 .entry(fragment_id as _)
@@ -1668,7 +1656,7 @@ impl CatalogController {
             )));
         }
 
-        let fragment_ids: HashSet<_> = fragments.iter().map(|(id, _, _)| *id as _).collect();
+        let fragment_ids: HashSet<u32> = fragments.iter().map(|(id, _, _)| *id as u32).collect();
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
@@ -1681,7 +1669,8 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let fragment_actors = self.get_fragment_actors_from_running_info(&fragment_ids);
+        let fragment_actors =
+            self.get_fragment_actors_from_running_info(fragment_ids.iter().copied());
 
         Ok(fragment_actors)
     }
@@ -1725,7 +1714,7 @@ impl CatalogController {
         .await?;
 
         let fragment_actors =
-            self.get_fragment_actors_from_running_info(&HashSet::from([fragment_id as _]));
+            self.get_fragment_actors_from_running_info(std::iter::once(fragment_id as u32));
 
         txn.commit().await?;
 

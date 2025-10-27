@@ -1425,7 +1425,6 @@ impl DdlController {
                         .prepare_streaming_job(
                             sink.tmp_sink_id,
                             || [&sink.new_fragment].into_iter(),
-                            &sink.actor_status,
                             &empty_downstreams,
                             true,
                             None,

@@ -540,7 +540,7 @@ impl GlobalBarrierWorkerContextImpl {
                         })
                         .collect();
 
-                    let stream_actors = self.load_stream_actors(info.clone()).await?;
+                    let stream_actors = self.load_stream_actors(&info).await?;
 
                     let fragment_relations = self
                         .metadata_manager
@@ -755,12 +755,7 @@ impl GlobalBarrierWorkerContextImpl {
             )
             .await?;
 
-        // // update and build all actors.
-        // let stream_actors = self.load_all_actors().await.inspect_err(|err| {
-        //     warn!(error = %err.as_report(), "update actors failed");
-        // })?;
-
-        let stream_actors = self.load_stream_actors(all_info).await?;
+        let stream_actors = self.load_stream_actors(&all_info).await?;
 
         // get split assignments for all actors
         let mut source_splits = HashMap::new();
@@ -811,7 +806,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     async fn load_stream_actors(
         &self,
-        all_info: HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+        all_info: &HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
     ) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let job_ids = all_info
             .values()
@@ -833,7 +828,12 @@ impl GlobalBarrierWorkerContextImpl {
             } = job_extra_info
                 .get(&(streaming_info.job_id.table_id as i32))
                 .cloned()
-                .unwrap_or_default();
+                .ok_or_else(|| {
+                    anyhow!(
+                        "no streaming job info for {}",
+                        streaming_info.job_id.table_id
+                    )
+                })?;
 
             let expr_context = Some(StreamContext { timezone }.to_expr_context());
 
