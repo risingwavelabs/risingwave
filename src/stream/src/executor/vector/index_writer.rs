@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use anyhow::anyhow;
 use futures::TryStreamExt;
 use itertools::Itertools;
@@ -89,7 +87,7 @@ impl<S: StateStore> VectorIndexWriteExecutor<S> {
                                 "should be append-only for vector index writer but receive op {:?}",
                                 op
                             )
-                                .into());
+                            .into());
                         }
                         let vector_datum = row.datum_at(0);
                         let Some(vector_datum) = vector_datum else {

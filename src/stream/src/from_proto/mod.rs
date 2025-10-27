@@ -62,8 +62,8 @@ mod row_merge;
 mod approx_percentile;
 
 mod sync_log_store;
-mod vector_index_write;
 mod vector_index_lookup_join;
+mod vector_index_write;
 
 // import for submodules
 use itertools::Itertools;

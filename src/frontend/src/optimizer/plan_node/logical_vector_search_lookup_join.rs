@@ -306,7 +306,6 @@ impl ToStream for LogicalVectorSearchLookupJoin {
         if let Some(core) = self.to_vector_index_lookup_join(|plan| plan.to_stream(ctx))? {
             if !matches!(&core.as_of, Some(AsOf::ProcessTime)) {
                 bail!("streaming vector index lookup join must be proctime temporal join");
-
             }
             return Ok(StreamVectorIndexLookupJoin::new(core)?.into());
         }

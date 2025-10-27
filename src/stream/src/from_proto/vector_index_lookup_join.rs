@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType};
+use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::VectorIndexLookupJoinNode;
 use risingwave_storage::StateStore;
 use risingwave_storage::table::batch_table::VectorIndexReader;
