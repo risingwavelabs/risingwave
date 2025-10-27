@@ -23,6 +23,7 @@ use risingwave_pb::stream_plan::{
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, plan_node_name};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
+use crate::Explain as _;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{
     Distribution, DistributionDisplay, MonotonicityMap, RequiredDist,
@@ -45,6 +46,25 @@ impl StreamExchange {
             Distribution::HashShard(_) | Distribution::Single | Distribution::Broadcast,
             "exchange can not be used to enforce such distribution"
         );
+
+        // Check distribution key is a subset of stream key for input plan.
+        // Otherwise, the changes on the same stream key might already be on different parallelism, and
+        // merging them with this exchange could break the correct ordering, leading to inconsistent
+        // stream or data loss.
+        if let Some(input_dist_key) = input.distribution().dist_column_indices_opt()
+            && let Some(input_stream_key) = input.stream_key()
+        {
+            assert!(
+                input_dist_key
+                    .iter()
+                    .all(|idx| input_stream_key.contains(idx)),
+                "distribution key must be a subset of stream key before shuffle to a different distribution,\n\
+                 dist_key: {input_dist_key:?}\n\
+                 stream_key: {input_stream_key:?}\n\
+                 plan:\n{}",
+                input.explain_to_string()
+            );
+        }
 
         let columns_monotonicity = if input.distribution().satisfies(&RequiredDist::single()) {
             // If the input is a singleton, the monotonicity will be preserved during shuffle
