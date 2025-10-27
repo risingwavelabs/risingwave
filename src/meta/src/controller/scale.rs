@@ -410,6 +410,49 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
+    let context = RenderActorsContext {
+        fragment_source_ids: &fragment_source_ids,
+        fragment_splits: &fragment_splits,
+        streaming_job_databases: &streaming_job_databases,
+        database_map: &database_map,
+    };
+
+    render_actors(
+        id_gen,
+        ensembles,
+        fragment_map,
+        job_map,
+        worker_map,
+        adaptive_parallelism_strategy,
+        context,
+    )
+}
+
+// Only metadata resolved asynchronously lives here so the renderer stays synchronous
+// and the call site makes the runtime dependencies (`id_gen`, maps, strategy, etc.) explicit.
+struct RenderActorsContext<'a> {
+    fragment_source_ids: &'a HashMap<FragmentId, SourceId>,
+    fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
+    streaming_job_databases: &'a HashMap<ObjectId, DatabaseId>,
+    database_map: &'a HashMap<DatabaseId, database::Model>,
+}
+
+fn render_actors(
+    id_gen: &IdGeneratorManagerRef,
+    ensembles: &[NoShuffleEnsemble],
+    fragment_map: &HashMap<FragmentId, fragment::Model>,
+    job_map: &HashMap<ObjectId, streaming_job::Model>,
+    worker_map: &BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    context: RenderActorsContext<'_>,
+) -> MetaResult<FragmentRenderMap> {
+    let RenderActorsContext {
+        fragment_source_ids,
+        fragment_splits: fragment_splits_map,
+        streaming_job_databases,
+        database_map,
+    } = context;
+
     let mut all_fragments: FragmentRenderMap = HashMap::new();
 
     for NoShuffleEnsemble {
@@ -532,7 +575,7 @@ where
                     .map(|actor_id| (*actor_id as u32, vec![]))
                     .collect();
 
-                let splits = fragment_splits
+                let splits = fragment_splits_map
                     .get(&entry_fragment_id)
                     .cloned()
                     .unwrap_or_default();
