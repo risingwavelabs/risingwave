@@ -1,6 +1,6 @@
 # GAP_FILL function planner tests
 
-# Basic usage
+# Normal Streaming Mode Tests
 - name: basic with LOCF
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
@@ -8,6 +8,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
+    - eowc_stream_error
 
 - name: with INTERPOLATE
   sql: |
@@ -16,6 +17,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
+    - eowc_stream_error
 
 - name: with KEEPNULL strategy
   sql: |
@@ -24,6 +26,7 @@
   expected_outputs:
     - logical_plan
     - stream_plan
+    - eowc_stream_error
 
 - name: mixed strategies
   sql: |
@@ -31,6 +34,7 @@
     SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, INTERPOLATE(temp), KEEPNULL(status));
   expected_outputs:
     - stream_plan
+    - eowc_stream_error
 
 - name: with timestamptz
   sql: |
@@ -38,6 +42,7 @@
     SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' HOUR, LOCF(val));
   expected_outputs:
     - stream_plan
+    - eowc_stream_error
 
 - name: with projection and filter
   sql: |
@@ -45,6 +50,7 @@
     SELECT id, ts FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val)) WHERE id = 1;
   expected_outputs:
     - stream_plan
+    - eowc_stream_error
 
 - name: in materialized view
   sql: |
@@ -52,6 +58,62 @@
     CREATE MATERIALIZED VIEW mv AS SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val));
   expected_outputs:
     - stream_plan
+    - eowc_stream_error
+
+# EOWC Mode Tests
+- name: eowc basic with LOCF
+  sql: |
+    CREATE TABLE t (id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val));
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_plan
+    - eowc_stream_dist_plan
+
+- name: eowc with INTERPOLATE
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, INTERPOLATE(val));
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_plan
+    - eowc_stream_dist_plan
+
+- name: eowc with KEEPNULL strategy
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, name VARCHAR, PRIMARY KEY(ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, KEEPNULL(name));
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_plan
+    - eowc_stream_dist_plan
+
+- name: eowc mixed strategies
+  sql: |
+    CREATE TABLE t (ts TIMESTAMP, temp DOUBLE, status VARCHAR, PRIMARY KEY(ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, INTERPOLATE(temp), KEEPNULL(status));
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_plan
+    - eowc_stream_dist_plan
+
+- name: eowc with timestamptz
+  sql: |
+    CREATE TABLE t (ts TIMESTAMPTZ, val INT, PRIMARY KEY(ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' HOUR, LOCF(val));
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_plan
+    - eowc_stream_dist_plan
+
+- name: eowc with projection and filter
+  sql: |
+    CREATE TABLE t (id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT id, ts FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val)) WHERE id = 1;
+  expected_outputs:
+    - stream_plan
+    - eowc_stream_plan
+    - eowc_stream_dist_plan
 
 # Error cases
 - name: too few arguments

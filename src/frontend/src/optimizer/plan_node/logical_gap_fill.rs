@@ -14,6 +14,7 @@
 
 // Minimal imports for prototype
 
+use super::stream::StreamPlanNodeMetadata;
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, ExprVisitable, Logical, LogicalFilter,
     LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
@@ -130,6 +131,7 @@ impl ToBatch for LogicalGapFill {
 impl ToStream for LogicalGapFill {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<super::StreamPlanRef> {
         use super::{StreamEowcGapFill, StreamGapFill};
+        use crate::error::ErrorCode;
         use crate::optimizer::property::RequiredDist;
 
         let stream_input = self.input().to_stream(ctx)?;
@@ -138,14 +140,39 @@ impl ToStream for LogicalGapFill {
         // It needs to see complete time series data to identify and fill gaps properly.
         let new_input = RequiredDist::single().streaming_enforce_if_not_satisfies(stream_input)?;
 
+        // Common validation: time column must be the sole primary key for both modes
+        let time_col_idx = self.core.time_col.index();
+        let input_stream_key = new_input.expect_stream_key();
+        if !(input_stream_key.len() == 1 && input_stream_key[0] == time_col_idx) {
+            return Err(ErrorCode::NotSupported(
+                "GAP_FILL requires the time column to be the sole primary key.".to_owned(),
+                format!("The time column (index {}) must be the only primary key. Found stream key: {:?}", time_col_idx, input_stream_key),
+            )
+            .into());
+        }
+
         let core = generic::GapFill {
-            input: new_input,
+            input: new_input.clone(),
             time_col: self.core.time_col.clone(),
             interval: self.core.interval.clone(),
             fill_strategies: self.core.fill_strategies.clone(),
         };
 
         if ctx.emit_on_window_close() {
+            // EOWC mode requires watermark on time column
+            let input_watermark_cols = new_input.watermark_columns();
+            if !input_watermark_cols.contains(time_col_idx) {
+                return Err(ErrorCode::NotSupported(
+                    "GAP_FILL with EMIT ON WINDOW CLOSE requires a watermark on the time column."
+                        .to_owned(),
+                    format!(
+                        "Please define a watermark on the time column (column index {}).",
+                        time_col_idx
+                    ),
+                )
+                .into());
+            }
+
             Ok(StreamEowcGapFill::new(core).into())
         } else {
             Ok(StreamGapFill::new(core).into())

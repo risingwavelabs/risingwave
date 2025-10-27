@@ -42,17 +42,6 @@ impl StreamGapFill {
     pub fn new(core: generic::GapFill<PlanRef<Stream>>) -> Self {
         let input = &core.input;
 
-        // Verify that time_col is the ONLY stream key to ensure correctness.
-        // GAP_FILL requires the time column to uniquely identify rows.
-        let time_col_idx = core.time_col.index();
-        let input_stream_key = input.expect_stream_key();
-        assert!(
-            input_stream_key.len() == 1 && input_stream_key[0] == time_col_idx,
-            "GapFill requires the time column (index {}) to be the sole primary key. Found stream key: {:?}",
-            time_col_idx,
-            input_stream_key
-        );
-
         // Use singleton distribution for normal streaming GapFill.
         // Similar to EOWC version, gap filling requires seeing all data
         // to correctly identify and fill gaps across time series.
@@ -137,9 +126,9 @@ impl StreamNode for StreamGapFill {
             .fill_strategies()
             .iter()
             .map(|strategy| match strategy.strategy {
-                crate::binder::FillStrategy::Locf => "locf".to_string(),
-                crate::binder::FillStrategy::Interpolate => "interpolate".to_string(),
-                crate::binder::FillStrategy::Null => "null".to_string(),
+                crate::binder::FillStrategy::Locf => "locf".to_owned(),
+                crate::binder::FillStrategy::Interpolate => "interpolate".to_owned(),
+                crate::binder::FillStrategy::Null => "null".to_owned(),
             })
             .collect();
 

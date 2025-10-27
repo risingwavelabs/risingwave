@@ -105,10 +105,11 @@ impl<PlanRef> GapFill<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> DistillUnit for GapFill<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
-        let mut fields = Vec::new();
-        fields.push(("time_col", Pretty::debug(&self.time_col)));
-        fields.push(("interval", Pretty::debug(&self.interval)));
-        fields.push(("fill_strategies", Pretty::debug(&self.fill_strategies)));
+        let fields = vec![
+            ("time_col", Pretty::debug(&self.time_col)),
+            ("interval", Pretty::debug(&self.interval)),
+            ("fill_strategies", Pretty::debug(&self.fill_strategies)),
+        ];
         childless_record(name, fields)
     }
 }

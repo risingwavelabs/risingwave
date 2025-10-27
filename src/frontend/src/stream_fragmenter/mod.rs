@@ -379,14 +379,14 @@ fn build_fragment(
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
             NodeBody::EowcGapFill(node) => {
-                let table = Table::from(node.buffer_table.as_ref().unwrap().clone());
+                let table = node.buffer_table.as_ref().unwrap().clone();
                 state.tables.insert(TableId::new(table.id), table);
-                let table = Table::from(node.prev_row_table.as_ref().unwrap().clone());
+                let table = node.prev_row_table.as_ref().unwrap().clone();
                 state.tables.insert(TableId::new(table.id), table);
             }
 
             NodeBody::GapFill(node) => {
-                let table = Table::from(node.state_table.as_ref().unwrap().clone());
+                let table = node.state_table.as_ref().unwrap().clone();
                 state.tables.insert(TableId::new(table.id), table);
             }
 
@@ -422,7 +422,7 @@ fn build_fragment(
 
                 // Add state table if present
                 if let Some(state_table) = &node.state_table {
-                    let table = Table::from(state_table.clone());
+                    let table = state_table.clone();
                     state.tables.insert(TableId::new(table.id), table);
                 }
             }

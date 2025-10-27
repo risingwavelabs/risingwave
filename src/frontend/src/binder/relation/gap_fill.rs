@@ -39,7 +39,7 @@ impl Binder {
     ) -> RwResult<BoundGapFill> {
         if args.len() < 3 {
             return Err(ErrorCode::BindError(
-                "GAP_FILL requires at least 3 arguments: input, time_col, interval".to_string(),
+                "GAP_FILL requires at least 3 arguments: input, time_col, interval".to_owned(),
             )
             .into());
         }
@@ -64,7 +64,7 @@ impl Binder {
         ) {
             return Err(ErrorCode::BindError(
                 "The 2nd arg of GAP_FILL should be a column of type timestamp or timestamptz"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         }
@@ -72,32 +72,26 @@ impl Binder {
         let interval_arg = args_iter.next().unwrap();
         let interval_exprs = self.bind_function_arg(interval_arg)?;
         let interval = interval_exprs.into_iter().exactly_one().map_err(|_| {
-            ErrorCode::BindError(
-                "The 3rd arg of GAP_FILL should be a single expression".to_string(),
-            )
+            ErrorCode::BindError("The 3rd arg of GAP_FILL should be a single expression".to_owned())
         })?;
         if interval.return_type() != DataType::Interval {
             return Err(ErrorCode::BindError(
-                "The 3rd arg of GAP_FILL should be an interval".to_string(),
+                "The 3rd arg of GAP_FILL should be an interval".to_owned(),
             )
             .into());
         }
 
         // Validate that the interval is not zero (only works for constant intervals)
-        if let ExprImpl::Literal(literal) = &interval {
-            if let Some(value) = literal.get_data() {
-                if let risingwave_common::types::ScalarImpl::Interval(interval_value) = value {
-                    if interval_value.months() == 0
-                        && interval_value.days() == 0
-                        && interval_value.usecs() == 0
-                    {
-                        return Err(ErrorCode::BindError(
-                            "The gap fill interval cannot be zero".to_string(),
-                        )
-                        .into());
-                    }
-                }
-            }
+        if let ExprImpl::Literal(literal) = &interval
+            && let Some(risingwave_common::types::ScalarImpl::Interval(interval_value)) =
+                literal.get_data()
+            && interval_value.months() == 0
+            && interval_value.days() == 0
+            && interval_value.usecs() == 0
+        {
+            return Err(
+                ErrorCode::BindError("The gap fill interval cannot be zero".to_owned()).into(),
+            );
         }
 
         let mut fill_strategies = vec![];
@@ -130,7 +124,7 @@ impl Binder {
                     let arg_exprs = self.bind_function_arg(&func.arg_list.args[0])?;
                     let arg_expr = arg_exprs.into_iter().exactly_one().map_err(|_| {
                         ErrorCode::BindError(
-                            "Fill strategy argument should be a single expression".to_string(),
+                            "Fill strategy argument should be a single expression".to_owned(),
                         )
                     })?;
 
@@ -149,13 +143,13 @@ impl Binder {
                         (strategy, *input_ref)
                     } else {
                         return Err(ErrorCode::BindError(
-                            "Fill strategy argument must be a column reference".to_string(),
+                            "Fill strategy argument must be a column reference".to_owned(),
                         )
                         .into());
                     }
                 } else {
                     return Err(ErrorCode::BindError(
-                        "Fill strategy must be a function call like LOCF(col)".to_string(),
+                        "Fill strategy must be a function call like LOCF(col)".to_owned(),
                     )
                     .into());
                 };
