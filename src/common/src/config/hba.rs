@@ -128,7 +128,7 @@ pub enum AuthMethod {
     /// No authentication
     #[serde(rename = "trust")]
     Trust,
-    /// Clear-text password
+    /// Password with any authentication
     #[serde(rename = "password")]
     Password,
     /// MD5-hashed password

@@ -1642,7 +1642,6 @@ impl SessionManagerImpl {
             );
 
             // TODO: adding `FATAL` message support for no matching HBA entry.
-            // Question: should we make the pg_hba.conf required like Postgres?
             let Some(hba_entry_opt) = hba_entry_opt else {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
@@ -1691,6 +1690,7 @@ impl SessionManagerImpl {
 
             let user_authenticator = match (&hba_entry_opt.auth_method, &user.auth_info) {
                 (AuthMethod::Trust, _) => UserAuthenticator::None,
+                // For backward compatibility, we allow password auth method to work with any auth info.
                 (AuthMethod::Password, _) => authenticator_by_info()?,
                 (AuthMethod::Md5, Some(auth_info))
                     if auth_info.encryption_type() == EncryptionType::Md5 =>
