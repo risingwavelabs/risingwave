@@ -147,8 +147,11 @@ impl BarrierWorkerState {
         }) = command
         {
             None
-        } else if let Some((new_job_id, fragment_changes)) = command.and_then(Command::fragment_changes) {
-            self.inflight_graph_info.pre_apply(new_job_id, &fragment_changes);
+        } else if let Some((new_job_id, fragment_changes)) =
+            command.and_then(Command::fragment_changes)
+        {
+            self.inflight_graph_info
+                .pre_apply(new_job_id, &fragment_changes);
             Some(fragment_changes)
         } else {
             None
