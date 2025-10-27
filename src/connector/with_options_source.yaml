@@ -222,6 +222,11 @@ IcebergProperties:
       - Each header is a key-value pair, separated by an '='.
       - Multiple headers can be specified, separated by a ';'.
     required: false
+  - name: vended_credentials
+    field_type: bool
+    comments: Enable vended credentials for iceberg REST catalog.
+    required: false
+    default: Default::default
   - name: database.name
     field_type: String
     required: false
