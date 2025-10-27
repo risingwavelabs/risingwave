@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 
-use ldap3::{LdapConnAsync, Scope, SearchEntry};
+use ldap3::{dn_escape, ldap_escape, LdapConnAsync, Scope, SearchEntry};
 use risingwave_common::config::{AuthMethod, HbaEntry};
 use thiserror_ext::AsReport;
 use tracing::warn;
@@ -516,11 +516,15 @@ impl LdapAuthenticator {
         // Build search filter
         let search_filter = if let Some(filter_template) = &self.config.search_filter {
             // Use custom filter template with {username} placeholder
-            filter_template.replace("{username}", username)
+            // SECURITY: Escape username to prevent LDAP filter injection
+            let escaped_username = ldap_escape(username);
+            filter_template.replace("{username}", &escaped_username)
         } else {
             // Default filter using search_attribute (defaults to "uid" if not configured)
+            // SECURITY: Escape username to prevent LDAP filter injection
+            let escaped_username = ldap_escape(username);
             let attr = self.config.search_attribute.as_deref().unwrap_or("uid");
-            format!("({}={})", attr, username)
+            format!("({}={})", attr, escaped_username)
         };
 
         let rs = ldap
@@ -565,19 +569,23 @@ impl LdapAuthenticator {
         // 1. If prefix/suffix are configured, use them: prefix + username + suffix
         // 2. If only basedn is configured (legacy/fallback), use: uid=username,basedn
         // 3. Otherwise, use username directly as DN
+        //
+        // SECURITY: Escape username to prevent LDAP DN injection
+        let escaped_username = dn_escape(username);
+
         let dn = if self.config.prefix.is_some() || self.config.suffix.is_some() {
             // Use prefix/suffix to construct DN
             let prefix = self.config.prefix.as_deref().unwrap_or("");
             let suffix = self.config.suffix.as_deref().unwrap_or("");
-            format!("{}{}{}", prefix, username, suffix)
+            format!("{}{}{}", prefix, escaped_username, suffix)
         } else if let Some(base_dn) = &self.config.base_dn {
             // Fallback: construct DN as uid=username,basedn
             // Note: If basedn is present without prefix/suffix, this should normally
             // trigger search+bind mode, but we support this for backwards compatibility
-            format!("uid={},{}", username, base_dn)
+            format!("uid={},{}", escaped_username, base_dn)
         } else {
-            // Use username as-is as the DN
-            username.to_owned()
+            // Use username as-is as the DN (still escaped)
+            escaped_username.to_string()
         };
 
         // Attempt to bind
