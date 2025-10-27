@@ -265,8 +265,7 @@ mod tests {
         assert_eq!(config.entries.len(), 2);
 
         // Test local connection
-        let entry =
-            config.find_matching_entry(&ConnectionType::Local, "testdb", "testuser", None);
+        let entry = config.find_matching_entry(&ConnectionType::Local, "testdb", "testuser", None);
         assert!(entry.is_some());
         assert_eq!(entry.unwrap().auth_method, AuthMethod::Trust);
     }

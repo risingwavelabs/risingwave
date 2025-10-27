@@ -16,9 +16,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 
-use ldap3::{LdapConnAsync, LdapError, Scope, SearchEntry};
+use ldap3::{LdapConnAsync, Scope, SearchEntry};
 use risingwave_common::config::{AuthMethod, HbaEntry};
 use thiserror_ext::AsReport;
+use tracing::warn;
 
 use crate::error::{PsqlError, PsqlResult};
 
@@ -35,6 +36,155 @@ const LDAP_SUFFIX_KEY: &str = "ldapsuffix";
 const LDAP_URL_KEY: &str = "ldapurl";
 
 const LDAP_TLS: &str = "ldaptls";
+
+/// LDAP TLS environment configuration
+const RW_LDAPTLS_CACERT: &str = "LDAPTLS_CACERT";
+const RW_LDAPTLS_CERT: &str = "LDAPTLS_CERT";
+const RW_LDAPTLS_KEY: &str = "LDAPTLS_KEY";
+const RW_LDAPTLS_REQCERT: &str = "LDAPTLS_REQCERT";
+
+#[derive(Debug, Clone, Copy)]
+enum ReqCertPolicy {
+    Never,
+    Allow,
+    Try,
+    Demand,
+}
+pub struct LdapTLSConfig {
+    /// `LDAPTLS_CACERT` environment variable
+    ca_cert: Option<String>,
+    /// `LDAPTLS_CERT` environment variable
+    cert: Option<String>,
+    /// `LDAPTLS_KEY` environment variable
+    key: Option<String>,
+    /// `LDAPTLS_REQCERT` environment variable
+    req_cert: ReqCertPolicy,
+}
+
+impl LdapTLSConfig {
+    /// Create LDAP TLS configuration from environment variables
+    fn from_env() -> Self {
+        let ca_cert = std::env::var(RW_LDAPTLS_CACERT).ok();
+        let cert = std::env::var(RW_LDAPTLS_CERT).ok();
+        let key = std::env::var(RW_LDAPTLS_KEY).ok();
+        let req_cert = match std::env::var(RW_LDAPTLS_REQCERT).as_deref() {
+            Ok("never") => ReqCertPolicy::Never,
+            Ok("allow") => ReqCertPolicy::Allow,
+            Ok("try") => ReqCertPolicy::Try,
+            Ok("demand") => ReqCertPolicy::Demand,
+            _ => ReqCertPolicy::Demand, // Default to demand
+        };
+
+        Self {
+            ca_cert,
+            cert,
+            key,
+            req_cert,
+        }
+    }
+
+    /// Initialize rustls ClientConfig based on TLS configuration
+    fn init_client_config(&self) -> PsqlResult<rustls::ClientConfig> {
+        let tls_client_config = rustls::ClientConfig::builder().with_safe_defaults();
+
+        let mut root_cert_store = rustls::RootCertStore::empty();
+        if let Some(tls_config) = &self.ca_cert {
+            let ca_cert_bytes = fs::read(tls_config).map_err(|e| {
+                PsqlError::StartupError(
+                    format!("Failed to read CA certificate: {}", e.as_report()).into(),
+                )
+            })?;
+            let ca_certs = rustls_pemfile::certs(&mut ca_cert_bytes.as_slice()).map_err(|e| {
+                PsqlError::StartupError(
+                    format!("Failed to parse CA certificates: {}", e.as_report()).into(),
+                )
+            })?;
+            for cert in ca_certs {
+                root_cert_store
+                    .add(&rustls::Certificate(cert))
+                    .map_err(|err| {
+                        PsqlError::StartupError(
+                            format!(
+                                "Failed to add CA certificate to root store: {}",
+                                err.as_report()
+                            )
+                            .into(),
+                        )
+                    })?;
+            }
+        } else {
+            // If ca certs is not present, load system native certs.
+            for cert in
+                rustls_native_certs::load_native_certs().expect("could not load platform certs")
+            {
+                root_cert_store
+                    .add(&rustls::Certificate(cert.0))
+                    .map_err(|err| {
+                        PsqlError::StartupError(
+                            format!(
+                                "Failed to add native certificate to root store: {}",
+                                err.as_report()
+                            )
+                            .into(),
+                        )
+                    })?;
+            }
+        }
+        let tls_client_config = tls_client_config.with_root_certificates(root_cert_store);
+
+        if let Some(cert) = &self.cert {
+            let Some(key) = &self.key else {
+                return Err(PsqlError::StartupError(
+                    "Client certificate provided without private key".into(),
+                ));
+            };
+            let client_cert_bytes = fs::read(cert).map_err(|e| {
+                PsqlError::StartupError(
+                    format!("Failed to read client certificate: {}", e.as_report()).into(),
+                )
+            })?;
+            let client_key_bytes = fs::read(key).map_err(|e| {
+                PsqlError::StartupError(
+                    format!("Failed to read client private key: {}", e.as_report()).into(),
+                )
+            })?;
+            let client_certs =
+                rustls_pemfile::certs(&mut client_cert_bytes.as_slice()).map_err(|e| {
+                    PsqlError::StartupError(
+                        format!("Failed to parse client certificates: {}", e.as_report()).into(),
+                    )
+                })?;
+
+            let mut private_keys = rustls_pemfile::pkcs8_private_keys(
+                &mut client_key_bytes.as_slice(),
+            )
+            .map_err(|e| {
+                PsqlError::StartupError(
+                    format!("Failed to parse client private key: {}", e.as_report()).into(),
+                )
+            })?;
+            let client_private_key = private_keys.pop().ok_or_else(|| {
+                PsqlError::StartupError("No private key found in client key file".into())
+            })?;
+            let client_certs_rustls: Vec<rustls::Certificate> =
+                client_certs.into_iter().map(rustls::Certificate).collect();
+
+            tls_client_config
+                .with_client_auth_cert(client_certs_rustls, rustls::PrivateKey(client_private_key))
+                .map_err(|err| {
+                    PsqlError::StartupError(
+                        format!(
+                            "Failed to build TLS config with client certificate: {}",
+                            err.as_report()
+                        )
+                        .into(),
+                    )
+                })
+        } else {
+            Ok(tls_client_config.with_no_client_auth())
+        }
+    }
+}
 
 /// LDAP configuration extracted from HBA entry
 #[derive(Debug, Clone)]
@@ -65,7 +215,6 @@ pub struct LdapConfig {
 impl LdapConfig {
     /// Create LDAP configuration from HBA entry options
     pub fn from_hba_options(options: &HashMap<String, String>) -> PsqlResult<Self> {
-        // Check if ldapurl is provided - it takes precedence over individual parameters
         if let Some(ldap_url) = options.get(LDAP_URL_KEY) {
             return Self::from_ldap_url(ldap_url, options);
         }
@@ -94,6 +243,11 @@ impl LdapConfig {
             .get(LDAP_TLS)
             .map(|s| s.as_str().parse::<bool>().unwrap())
             .unwrap_or(false);
+        if server.starts_with("https://") {
+            return Err(PsqlError::StartupError(
+                "Cannot use STARTTLS with ldaps scheme".into(),
+            ));
+        }
 
         let server = format!("{}://{}:{}", scheme, server, port);
         let base_dn = options.get(LDAP_BASE_DN_KEY).cloned();
@@ -200,6 +354,11 @@ impl LdapConfig {
             .get(LDAP_TLS)
             .map(|s| s.as_str().parse::<bool>().unwrap())
             .unwrap_or(false);
+        if server.starts_with("https://") {
+            return Err(PsqlError::StartupError(
+                "Cannot use STARTTLS with ldaps scheme".into(),
+            ));
+        }
 
         let bind_dn = options.get(LDAP_BIND_DN_KEY).cloned();
         let bind_passwd = options.get(LDAP_BIND_PASSWD_KEY).cloned();
@@ -221,7 +380,7 @@ impl LdapConfig {
             options: options.clone(),
         })
     }
-    
+
     fn certs_required(&self) -> bool {
         self.server.starts_with("ldaps://") || self.start_tls
     }
@@ -255,12 +414,9 @@ impl LdapAuthenticator {
         }
 
         // Determine the authentication strategy based on configured parameters
-        // According to PostgreSQL documentation:
         // - Simple bind mode: Uses ldapprefix and/or ldapsuffix
-        // - Search+bind mode: Uses ldapbasedn with optional search parameters
-        // - It's an error to mix both modes
-
         let has_simple_bind_params = self.config.prefix.is_some() || self.config.suffix.is_some();
+        // - Search+bind mode: Uses ldapbasedn with optional search parameters
         let has_search_bind_params = self.config.search_filter.is_some()
             || self.config.bind_dn.is_some()
             || self.config.search_attribute != "uid";
@@ -285,132 +441,35 @@ impl LdapAuthenticator {
     }
 
     /// Establish an LDAP connection with configurable options
-    async fn establish_connection(&self) -> Result<ldap3::Ldap, LdapError> {
+    async fn establish_connection(&self) -> PsqlResult<ldap3::Ldap> {
         let config = &self.config;
         let mut settings = ldap3::LdapConnSettings::new();
 
         // Configure STARTTLS if specified
-        if config.start_tls {
-            if config.server.starts_with("ldaps://") {
-                return Err(LdapError::InvalidScopeString(
-                    "Cannot use STARTTLS with ldaps scheme".into(),
-                ));
-            }
-            settings = settings.set_starttls(true);
-        }
+        settings = settings.set_starttls(config.start_tls);
 
         if config.certs_required() {
-            // FIXME: add configuration for CA certificate.
-            // RisingWave does not have parameters like `ldap_ca_file`, `ldap_cert_file`, or `ldap_key_file`.
-            // PostgreSQL itself does not provide these options. Instead, it uses the libldap (OpenLDAP client library) for LDAP connections and authentication.
-            //     TLS certificate parameters such as `TLS_CACERT`, `TLS_CERT`, and `TLS_KEY` are configured in the libldap configuration file, not in PostgreSQL's configuration.
-            //     When PostgreSQL starts and performs LDAP authentication, its process follows this lookup order for certificate configuration:
-            //
-            // 1. Environment Variables (highest priority): PostgreSQL inherits the environment variables from its startup environment.
-            //     - `LDAPTLS_CACERT` → replaces `TLS_CACERT`
-            //     - `LDAPTLS_CERT` → replaces `TLS_CERT`
-            //     - `LDAPTLS_KEY` → replaces `TLS_KEY`
-            //     - `LDAPTLS_REQCERT` → replaces `TLS_REQCERT`
-            //    - Example:
-            //      ```
-            //      export LDAPTLS_CACERT=/etc/openldap/certs/ca.pem
-            //      export LDAPTLS_CERT=/etc/openldap/certs/postgres.crt
-            //      export LDAPTLS_KEY=/etc/openldap/certs/postgres.key
-            //      export LDAPTLS_REQCERT=demand
-            //      ```
-            //
-            // 2. Configuration File: `/etc/openldap/ldap.conf`
-            //
-            // 3. System Default Directories:
-            // - `/etc/ssl/certs/`
-            // - macOS system trust chain
+            let tls_config = LdapTLSConfig::from_env();
+            let client_config = tls_config.init_client_config()?;
+            settings = settings.set_config(Arc::new(client_config));
 
-            const CA_CERT_PATH: &str =
-                "/Users/august/Documents/codes/ldap-server/ldap/certs/ca.crt";
-            let ca_cert_bytes = fs::read(CA_CERT_PATH).map_err(|e| {
-                LdapError::InvalidScopeString(format!("Failed to read CA certificate: {}", e))
-            })?;
-            let ca_certs = rustls_pemfile::certs(&mut ca_cert_bytes.as_slice()).map_err(|e| {
-                LdapError::InvalidScopeString(format!("Failed to parse CA certificates: {}", e))
-            })?;
-
-            const CLIENT_CERT_PATH: &str =
-                "/Users/august/Documents/codes/ldap-server/ldap/certs/client.crt";
-            const CLIENT_KEY_PATH: &str =
-                "/Users/august/Documents/codes/ldap-server/ldap/certs/client.key";
-
-            let client_cert_bytes = fs::read(CLIENT_CERT_PATH).map_err(|e| {
-                LdapError::InvalidScopeString(format!("Failed to read client certificate: {}", e))
-            })?;
-
-            let client_key_bytes = fs::read(CLIENT_KEY_PATH).map_err(|e| {
-                LdapError::InvalidScopeString(format!("Failed to read client private key: {}", e))
-            })?;
-
-            let client_certs =
-                rustls_pemfile::certs(&mut client_cert_bytes.as_slice()).map_err(|e| {
-                    LdapError::InvalidScopeString(format!(
-                        "Failed to parse client certificates: {}",
-                        e
-                    ))
-                })?;
-
-            let mut private_keys = rustls_pemfile::pkcs8_private_keys(
-                &mut client_key_bytes.as_slice(),
-            )
-            .map_err(|e| {
-                LdapError::InvalidScopeString(format!(
-                    "Failed to parse client private key: {}",
-                    e.as_report()
-                ))
-            })?;
-
-            let client_private_key = private_keys.pop().ok_or_else(|| {
-                LdapError::InvalidScopeString("No private key found in client key file".into())
-            })?;
-
-            let mut root_cert_store = rustls::RootCertStore::empty();
-            for cert in ca_certs {
-                root_cert_store
-                    .add(&rustls::Certificate(cert))
-                    .map_err(|err| {
-                        LdapError::InvalidScopeString(format!(
-                            "Failed to add CA certificate to root store: {}",
-                            err.as_report()
-                        ))
-                    })?;
+            if matches!(tls_config.req_cert, ReqCertPolicy::Demand) {
+                settings = settings.set_no_tls_verify(false);
+            } else {
+                warn!(
+                    "LDAP client certificate verification is disabled due to LDAPTLS_REQCERT policy"
+                );
+                settings = settings.set_no_tls_verify(true);
             }
-            // If ca certs is not present, load system native certs.
-            for cert in
-                rustls_native_certs::load_native_certs().expect("could not load platform certs")
-            {
-                root_cert_store
-                    .add(&rustls::Certificate(cert.0))
-                    .map_err(|err| {
-                        LdapError::InvalidScopeString(format!(
-                            "Failed to add native certificate to root store: {}",
-                            err.as_report()
-                        ))
-                    })?;
-            }
-
-            let client_certs_rustls: Vec<rustls::Certificate> =
-                client_certs.into_iter().map(rustls::Certificate).collect();
-
-            let config = rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_root_certificates(root_cert_store)
-                .with_client_auth_cert(client_certs_rustls, rustls::PrivateKey(client_private_key))
-                .map_err(|err| {
-                    LdapError::InvalidScopeString(format!(
-                        "Failed to build TLS config: {}",
-                        err.as_report()
-                    ))
-                })?;
-            settings = settings.set_config(Arc::new(config));
         }
 
-        let (conn, ldap) = LdapConnAsync::with_settings(settings, &config.server).await?;
+        let (conn, ldap) = LdapConnAsync::with_settings(settings, &config.server)
+            .await
+            .map_err(|e| {
+                PsqlError::StartupError(
+                    format!("Failed to connect to LDAP server: {}", e.as_report()).into(),
+                )
+            })?;
         ldap3::drive!(conn);
 
         Ok(ldap)
@@ -419,9 +478,7 @@ impl LdapAuthenticator {
     /// Search for user in LDAP directory and then bind
     async fn search_and_bind(&self, username: &str, password: &str) -> PsqlResult<bool> {
         // Establish connection to LDAP server
-        let mut ldap = self.establish_connection().await.map_err(|e| {
-            PsqlError::StartupError(format!("LDAP connection failed: {}", e).into())
-        })?;
+        let mut ldap = self.establish_connection().await?;
 
         // Validate base_dn configuration
         let base_dn = self
@@ -437,13 +494,13 @@ impl LdapAuthenticator {
                 .await
                 .map_err(|e| {
                     PsqlError::StartupError(
-                        format!("LDAP bind as search user failed: {}", e).into(),
+                        format!("LDAP bind as search user failed: {}", e.as_report()).into(),
                     )
                 })?
                 .success()
                 .map_err(|e| {
                     PsqlError::StartupError(
-                        format!("LDAP bind as search user failed: {}", e).into(),
+                        format!("LDAP bind as search user failed: {}", e.as_report()).into(),
                     )
                 })?;
         }
@@ -460,7 +517,9 @@ impl LdapAuthenticator {
         let rs = ldap
             .search(base_dn, Scope::Subtree, &search_filter, vec!["dn"])
             .await
-            .map_err(|e| PsqlError::StartupError(format!("LDAP search failed: {}", e).into()))?;
+            .map_err(|e| {
+                PsqlError::StartupError(format!("LDAP search failed: {}", e.as_report()).into())
+            })?;
 
         // If no user found, authentication fails
         let search_entries: Vec<SearchEntry> =
@@ -472,10 +531,9 @@ impl LdapAuthenticator {
         // Attempt to bind with the user's DN and password
         let user_dn = &search_entries[0].dn;
 
-        let bind_result = ldap
-            .simple_bind(user_dn, password)
-            .await
-            .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()));
+        let bind_result = ldap.simple_bind(user_dn, password).await.map_err(|e| {
+            PsqlError::StartupError(format!("LDAP bind failed: {}", e.as_report()).into())
+        });
 
         // Explicitly unbind the connection
         let _ = ldap.unbind().await;
@@ -486,7 +544,7 @@ impl LdapAuthenticator {
             Err(e) => {
                 tracing::error!(%e, "LDAP bind unsuccessful");
                 Err(PsqlError::StartupError(
-                    format!("LDAP bind failed: {}", e).into(),
+                    format!("LDAP bind failed: {}", e.as_report()).into(),
                 ))
             }
         }
@@ -516,16 +574,13 @@ impl LdapAuthenticator {
         };
 
         // Attempt to bind
-        let mut ldap = self.establish_connection().await.map_err(|e| {
-            PsqlError::StartupError(format!("LDAP connection failed: {}", e).into())
-        })?;
+        let mut ldap = self.establish_connection().await?;
 
         tracing::info!(%self.config.server, %dn, "simple bind authentication with LDAP server");
 
-        let bind_result = ldap
-            .simple_bind(&dn, password)
-            .await
-            .map_err(|e| PsqlError::StartupError(format!("LDAP bind failed: {}", e).into()));
+        let bind_result = ldap.simple_bind(&dn, password).await.map_err(|e| {
+            PsqlError::StartupError(format!("LDAP bind failed: {}", e.as_report()).into())
+        });
 
         // Explicitly unbind the connection
         let _ = ldap.unbind().await;
@@ -536,7 +591,7 @@ impl LdapAuthenticator {
             Err(e) => {
                 tracing::error!(%e, "LDAP bind unsuccessful");
                 Err(PsqlError::StartupError(
-                    format!("LDAP bind failed: {}", e).into(),
+                    format!("LDAP bind failed: {}", e.as_report()).into(),
                 ))
             }
         }
