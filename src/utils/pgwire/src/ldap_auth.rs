@@ -50,7 +50,7 @@ enum ReqCertPolicy {
     Try,
     Demand,
 }
-pub struct LdapTLSConfig {
+pub struct LdapTlsConfig {
     /// `LDAPTLS_CACERT` environment variable
     ca_cert: Option<String>,
     /// `LDAPTLS_CERT` environment variable
@@ -61,7 +61,7 @@ pub struct LdapTLSConfig {
     req_cert: ReqCertPolicy,
 }
 
-impl LdapTLSConfig {
+impl LdapTlsConfig {
     /// Create LDAP TLS configuration from environment variables
     fn from_env() -> Self {
         let ca_cert = std::env::var(RW_LDAPTLS_CACERT).ok();
@@ -195,8 +195,8 @@ pub struct LdapConfig {
     pub base_dn: Option<String>,
     /// LDAP search filter template
     pub search_filter: Option<String>,
-    /// LDAP search attribute (defaults to "uid")
-    pub search_attribute: String,
+    /// LDAP search attribute (used in search+bind mode, defaults to "uid" if not specified)
+    pub search_attribute: Option<String>,
     /// DN to bind as when performing searches
     pub bind_dn: Option<String>,
     /// Password for bind DN
@@ -243,19 +243,18 @@ impl LdapConfig {
             .get(LDAP_TLS)
             .map(|s| s.as_str().parse::<bool>().unwrap())
             .unwrap_or(false);
-        if server.starts_with("https://") {
+
+        // Validate that StartTLS and ldaps are not used together
+        if start_tls && scheme == "ldaps" {
             return Err(PsqlError::StartupError(
-                "Cannot use STARTTLS with ldaps scheme".into(),
+                "Cannot use STARTTLS (ldaptls) with ldaps scheme".into(),
             ));
         }
 
         let server = format!("{}://{}:{}", scheme, server, port);
         let base_dn = options.get(LDAP_BASE_DN_KEY).cloned();
         let search_filter = options.get(LDAP_SEARCH_FILTER_KEY).cloned();
-        let search_attribute = options
-            .get(LDAP_SEARCH_ATTRIBUTE_KEY)
-            .cloned()
-            .unwrap_or_else(|| "uid".to_owned());
+        let search_attribute = options.get(LDAP_SEARCH_ATTRIBUTE_KEY).cloned();
         let bind_dn = options.get(LDAP_BIND_DN_KEY).cloned();
         let bind_passwd = options.get(LDAP_BIND_PASSWD_KEY).cloned();
         let prefix = options.get(LDAP_PREFIX_KEY).cloned();
@@ -330,7 +329,7 @@ impl LdapConfig {
 
         // Parse query parameters for attributes, scope, filter
         // Format: ?attributes?scope?filter
-        let mut search_attribute = "uid".to_owned();
+        let mut search_attribute = None;
         let mut search_filter = None;
 
         if let Some(query) = url.query() {
@@ -338,7 +337,7 @@ impl LdapConfig {
 
             // First part is attributes (comma-separated, we only care about the first one for search)
             if !parts.is_empty() && !parts[0].is_empty() {
-                search_attribute = parts[0].split(',').next().unwrap_or("uid").to_owned();
+                search_attribute = Some(parts[0].split(',').next().unwrap_or("uid").to_owned());
             }
 
             // Third part is filter (index 2)
@@ -354,9 +353,11 @@ impl LdapConfig {
             .get(LDAP_TLS)
             .map(|s| s.as_str().parse::<bool>().unwrap())
             .unwrap_or(false);
-        if server.starts_with("https://") {
+
+        // Validate that StartTLS and ldaps are not used together
+        if start_tls && scheme == "ldaps" {
             return Err(PsqlError::StartupError(
-                "Cannot use STARTTLS with ldaps scheme".into(),
+                "Cannot use STARTTLS (ldaptls) with ldaps scheme".into(),
             ));
         }
 
@@ -414,28 +415,35 @@ impl LdapAuthenticator {
         }
 
         // Determine the authentication strategy based on configured parameters
-        // - Simple bind mode: Uses ldapprefix and/or ldapsuffix
-        let has_simple_bind_params = self.config.prefix.is_some() || self.config.suffix.is_some();
-        // - Search+bind mode: Uses ldapbasedn with optional search parameters
-        let has_search_bind_params = self.config.search_filter.is_some()
-            || self.config.bind_dn.is_some()
-            || self.config.search_attribute != "uid";
+        // According to PostgreSQL documentation:
+        // - Simple bind mode: Triggered by ldapprefix and/or ldapsuffix
+        // - Search+bind mode: Triggered by ldapbasedn (when no prefix/suffix present)
+        // - It's an error to mix simple bind params with search+bind-only params
 
-        // Validate that we don't mix simple bind and search+bind parameters
-        if has_simple_bind_params && has_search_bind_params {
+        let has_simple_bind_params = self.config.prefix.is_some() || self.config.suffix.is_some();
+
+        // Search+bind-only parameters that shouldn't be mixed with simple bind
+        let has_search_only_params = self.config.search_filter.is_some()
+            || self.config.bind_dn.is_some()
+            || self.config.search_attribute.is_some();
+
+        // Validate that we don't mix simple bind params with search+bind-only params
+        if has_simple_bind_params && has_search_only_params {
             return Err(PsqlError::StartupError(
                 "Cannot mix simple bind parameters (ldapprefix/ldapsuffix) with search+bind parameters (ldapsearchfilter/ldapbinddn/ldapsearchattribute)".into()
             ));
         }
 
+        // Decision logic based on PostgreSQL behavior:
+        // The mode is determined by which parameters are present:
         if has_simple_bind_params {
-            // Simple bind mode: use prefix/suffix to construct DN
+            // Simple bind mode: prefix/suffix present
             self.simple_bind(username, password).await
         } else if self.config.base_dn.is_some() {
-            // Search+bind mode: search for user in directory then bind
+            // Search+bind mode: basedn present without prefix/suffix
             self.search_and_bind(username, password).await
         } else {
-            // No basedn, use username directly as DN
+            // Fallback: no basedn, no prefix/suffix - use username directly as DN
             self.simple_bind(username, password).await
         }
     }
@@ -449,7 +457,7 @@ impl LdapAuthenticator {
         settings = settings.set_starttls(config.start_tls);
 
         if config.certs_required() {
-            let tls_config = LdapTLSConfig::from_env();
+            let tls_config = LdapTlsConfig::from_env();
             let client_config = tls_config.init_client_config()?;
             settings = settings.set_config(Arc::new(client_config));
 
@@ -510,8 +518,9 @@ impl LdapAuthenticator {
             // Use custom filter template with {username} placeholder
             filter_template.replace("{username}", username)
         } else {
-            // Default filter using search_attribute
-            format!("({}={})", self.config.search_attribute, username)
+            // Default filter using search_attribute (defaults to "uid" if not configured)
+            let attr = self.config.search_attribute.as_deref().unwrap_or("uid");
+            format!("({}={})", attr, username)
         };
 
         let rs = ldap
@@ -552,24 +561,22 @@ impl LdapAuthenticator {
 
     /// Simple bind authentication
     async fn simple_bind(&self, username: &str, password: &str) -> PsqlResult<bool> {
-        // Construct DN from username with optional prefix and suffix
-        let dn = if let Some(base_dn) = &self.config.base_dn {
-            // Use base_dn with optional prefix/suffix
-            let prefix = self.config.prefix.as_deref().unwrap_or("uid=");
-            let suffix = self.config.suffix.as_deref().unwrap_or("");
-
-            if suffix.is_empty() {
-                format!("{}{},{}", prefix, username, base_dn)
-            } else {
-                format!("{}{}{}", prefix, username, suffix)
-            }
-        } else if self.config.prefix.is_some() || self.config.suffix.is_some() {
-            // Use only prefix and suffix without base_dn
+        // Construct DN from username according to PostgreSQL simple bind rules:
+        // 1. If prefix/suffix are configured, use them: prefix + username + suffix
+        // 2. If only basedn is configured (legacy/fallback), use: uid=username,basedn
+        // 3. Otherwise, use username directly as DN
+        let dn = if self.config.prefix.is_some() || self.config.suffix.is_some() {
+            // Use prefix/suffix to construct DN
             let prefix = self.config.prefix.as_deref().unwrap_or("");
             let suffix = self.config.suffix.as_deref().unwrap_or("");
             format!("{}{}{}", prefix, username, suffix)
+        } else if let Some(base_dn) = &self.config.base_dn {
+            // Fallback: construct DN as uid=username,basedn
+            // Note: If basedn is present without prefix/suffix, this should normally
+            // trigger search+bind mode, but we support this for backwards compatibility
+            format!("uid={},{}", username, base_dn)
         } else {
-            // Use username as-is
+            // Use username as-is as the DN
             username.to_owned()
         };
 
