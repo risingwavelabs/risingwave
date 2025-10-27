@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 
-use ldap3::{dn_escape, ldap_escape, LdapConnAsync, Scope, SearchEntry};
+use ldap3::{LdapConnAsync, Scope, SearchEntry, dn_escape, ldap_escape};
 use risingwave_common::config::{AuthMethod, HbaEntry};
 use thiserror_ext::AsReport;
 use tracing::warn;
@@ -207,9 +207,6 @@ pub struct LdapConfig {
     pub suffix: Option<String>,
     /// Whether to use STARTTLS
     pub start_tls: bool,
-    /// Additional LDAP configuration options
-    #[allow(dead_code)]
-    pub options: HashMap<String, String>,
 }
 
 impl LdapConfig {
@@ -270,7 +267,6 @@ impl LdapConfig {
             prefix,
             suffix,
             start_tls,
-            options: options.clone(),
         })
     }
 
@@ -378,7 +374,6 @@ impl LdapConfig {
             prefix,
             suffix,
             start_tls,
-            options: options.clone(),
         })
     }
 
