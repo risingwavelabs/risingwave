@@ -33,7 +33,6 @@ pub mod IdCategory {
     pub const Test: IdCategoryType = 0;
     pub const Table: IdCategoryType = 1;
     pub const Fragment: IdCategoryType = 2;
-    pub const Actor: IdCategoryType = 3;
 }
 pub struct IdGenerator<const TYPE: IdCategoryType>(AtomicU64);
 
@@ -55,8 +54,7 @@ impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {
                 .one(conn)
                 .await?
                 .unwrap_or_default(),
-            IdCategory::Actor => 0,
-            _ => unreachable!("IdGeneratorV2 only supports Table, Fragment, and Actor"),
+            _ => unreachable!("IdGeneratorV2 only supports Table and Fragment"),
         };
 
         Ok(Self(AtomicU64::new(id as u64)))
@@ -69,12 +67,11 @@ impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {
 
 pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
 
-/// `IdGeneratorManager` is a manager for three id generators: `tables`, `fragments`, and `actors`. Note that this is just a
+/// `IdGeneratorManager` is a manager for table and fragment ID generators. Note that this is just a
 /// workaround for the current implementation of `IdGenerator`. We should refactor it later.
 pub struct IdGeneratorManager {
     pub tables: Arc<IdGenerator<{ IdCategory::Table }>>,
     pub fragments: Arc<IdGenerator<{ IdCategory::Fragment }>>,
-    pub actors: Arc<IdGenerator<{ IdCategory::Actor }>>,
 }
 
 impl IdGeneratorManager {
@@ -82,7 +79,6 @@ impl IdGeneratorManager {
         Ok(Self {
             tables: Arc::new(IdGenerator::new(conn).await?),
             fragments: Arc::new(IdGenerator::new(conn).await?),
-            actors: Arc::new(IdGenerator::new(conn).await?),
         })
     }
 
@@ -90,8 +86,7 @@ impl IdGeneratorManager {
         match C {
             IdCategory::Table => self.tables.generate_interval(1),
             IdCategory::Fragment => self.fragments.generate_interval(1),
-            IdCategory::Actor => self.actors.generate_interval(1),
-            _ => unreachable!("IdGeneratorV2 only supports Table, Fragment, and Actor"),
+            _ => unreachable!("IdGeneratorV2 only supports Table and Fragment"),
         }
     }
 
@@ -99,8 +94,7 @@ impl IdGeneratorManager {
         match C {
             IdCategory::Table => self.tables.generate_interval(interval),
             IdCategory::Fragment => self.fragments.generate_interval(interval),
-            IdCategory::Actor => self.actors.generate_interval(interval),
-            _ => unreachable!("IdGeneratorV2 only supports Table, Fragment, and Actor"),
+            _ => unreachable!("IdGeneratorV2 only supports Table and Fragment"),
         }
     }
 }

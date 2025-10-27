@@ -1290,6 +1290,7 @@ impl DdlController {
                             table,
                             fragment_graph.table_fragment_id(),
                             self.env.id_gen_manager(),
+                            self.env.actor_id_generator(),
                         )?;
 
                     assert_eq!(
