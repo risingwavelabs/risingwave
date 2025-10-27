@@ -313,7 +313,7 @@ mod tests {
         let mut q = IcebergTaskQueue::new(8, 32); // max_parallelism=8, budget 32
         // Fabricating runner via minimal construction path is complex; we only test presence flag by pushing None and Some.
         let meta = mk_meta(1, "t1", 4);
-        let res = q.push(meta.clone(), None); // no runner
+        let res = q.push(meta, None); // no runner
         assert_eq!(res, PushResult::Added);
         let popped = q.pop().expect("should pop");
         assert_eq!(popped.meta.task_id, 1);
