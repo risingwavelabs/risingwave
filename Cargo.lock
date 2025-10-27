@@ -7695,9 +7695,18 @@ dependencies = [
 
 [[package]]
 name = "mach2"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b955cdeb2a02b9117f121ce63aa52d08ade45de53e48fe6a38b39c10f6f709"
+checksum = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mach2"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a1b95cd5421ec55b445b5ae102f5ea0e768de1f82bd3001e11f426c269c3aea"
 dependencies = [
  "libc",
 ]
@@ -11324,7 +11333,7 @@ dependencies = [
  "libc",
  "linkme",
  "lru",
- "mach2",
+ "mach2 0.5.0",
  "madsim-tokio",
  "memcomparable",
  "more-asserts",
@@ -11439,7 +11448,7 @@ dependencies = [
  "hytra",
  "itertools 0.14.0",
  "libc",
- "mach2",
+ "mach2 0.5.0",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -12731,7 +12740,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "lz4",
- "mach2",
+ "mach2 0.5.0",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -16448,7 +16457,7 @@ dependencies = [
  "libc",
  "libm",
  "log",
- "mach2",
+ "mach2 0.4.3",
  "memfd",
  "object 0.36.4",
  "once_cell",
