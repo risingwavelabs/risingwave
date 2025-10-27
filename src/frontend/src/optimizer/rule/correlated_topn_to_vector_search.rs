@@ -15,11 +15,17 @@
 use risingwave_common::types::ScalarImpl;
 use risingwave_expr::aggregate::AggType;
 use risingwave_pb::plan_common::JoinType;
+
 use crate::expr::{ExprImpl, ExprType};
 use crate::handler::create_index::IndexColumnExprValidator;
-use crate::optimizer::plan_node::{Logical, LogicalPlanNodeType, LogicalVectorSearchLookupJoin, PlanTreeNodeBinary, PlanTreeNodeUnary};
-use crate::optimizer::rule::{BoxedRule, PbAggKind, ProjectMergeRule, Rule, TopNToVectorSearchRule};
+use crate::optimizer::plan_node::{
+    Logical, LogicalPlanNodeType, LogicalVectorSearchLookupJoin, PlanTreeNodeBinary,
+    PlanTreeNodeUnary,
+};
 use crate::optimizer::rule::prelude::PlanRef;
+use crate::optimizer::rule::{
+    BoxedRule, PbAggKind, ProjectMergeRule, Rule, TopNToVectorSearchRule,
+};
 
 pub struct CorrelatedTopNToVectorSearchRule;
 
@@ -141,11 +147,11 @@ impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
         let (input_vector_idx, lookup_expr) = match (left, right) {
             (ExprImpl::CorrelatedInputRef(correlated), lookup_expr)
             | (lookup_expr, ExprImpl::CorrelatedInputRef(correlated))
-            if correlated.correlated_id() == correlated_id
-                && IndexColumnExprValidator::validate(&lookup_expr, true).is_ok() =>
-                {
-                    (correlated.index(), lookup_expr)
-                }
+                if correlated.correlated_id() == correlated_id
+                    && IndexColumnExprValidator::validate(&lookup_expr, true).is_ok() =>
+            {
+                (correlated.index(), lookup_expr)
+            }
             _ => {
                 return None;
             }
@@ -185,7 +191,7 @@ impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
                 row_input_indices,
                 include_distance,
             )
-                .into(),
+            .into(),
         )
     }
 }

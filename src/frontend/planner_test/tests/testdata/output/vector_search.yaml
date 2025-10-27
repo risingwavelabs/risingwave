@@ -369,7 +369,16 @@
 - id: correlated_read_without_embedding
   before:
   - create_correlated_tables
-  sql: "select \n  event_id, array(\n    select row(id, name)\n    from items\n    order by events.embedding <=> items.embedding\n    limit 3\n  ) as related_info, \n  time\nfrom events;\n"
+  sql: |
+    select
+      event_id, array(
+        select row(id, name)
+        from items
+        order by events.embedding <=> items.embedding
+        limit 3
+      ) as related_info,
+      time
+    from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
@@ -413,7 +422,15 @@
 - id: correlated_read_with_embedding
   before:
   - create_correlated_tables
-  sql: "select \n  event_id, time, embedding, array(\n    select row(id, name)\n    from items\n    order by items.embedding <=> events.embedding \n    limit 3\n  )\nas related_info from events;\n"
+  sql: |
+    select
+      event_id, time, embedding, array(
+        select row(id, name)
+        from items
+        order by items.embedding <=> events.embedding
+        limit 3
+      )
+    as related_info from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, events.time, events.embedding, $expr3] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
@@ -457,7 +474,14 @@
 - id: correlated_read_with_distance
   before:
   - create_correlated_tables
-  sql: "select \n  event_id, array(\n    select row(id, distance, name)\n    from (select id, name, events.embedding <=> items.embedding as distance from items order by distance limit 3)\n  ) as related_info, \n  time\nfrom events;\n"
+  sql: |
+    select
+      event_id, array(
+        select row(id, distance, name)
+        from (select id, name, events.embedding <=> items.embedding as distance from items order by distance limit 3)
+      ) as related_info,
+      time
+    from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
@@ -513,7 +537,14 @@
 - id: correlated_read_without_embedding
   before:
   - create_correlated_tables_with_column_value_index
-  sql: "select \n  event_id, array(\n    select row(name)\n    from (select name from items order by events.embedding <-> items.embedding limit 3)\n  ) as related_info, \n  time\nfrom events;\n"
+  sql: |
+    select
+      event_id, array(
+        select row(name)
+        from (select name from items order by events.embedding <-> items.embedding limit 3)
+      ) as related_info,
+      time
+    from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
@@ -538,7 +569,14 @@
 - id: correlated_read_without_embedding
   before:
   - create_correlated_tables_with_column_value_index
-  sql: "select \n  event_id, array(\n    select row(id, name, distance)\n    from (select id, name, events.embedding <-> items.embedding as distance from items order by distance limit 3)\n  ) as related_info, \n  time\nfrom events;\n"
+  sql: |
+    select
+      event_id, array(
+        select row(id, name, distance)
+        from (select id, name, events.embedding <-> items.embedding as distance from items order by distance limit 3)
+      ) as related_info,
+      time
+    from events;
   logical_plan: |-
     LogicalProject { exprs: [events.event_id, $expr3, events.time] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
