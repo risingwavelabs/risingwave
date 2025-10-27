@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
-use await_tree::{InstrumentAwait, span};
+use await_tree::InstrumentAwait;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -31,7 +31,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
-use risingwave_common::{bail, bail_not_implemented};
+use risingwave_common::{bail, bail_not_implemented, catalog};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::source::cdc::CdcScanOptions;
@@ -65,7 +65,7 @@ use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage}
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -1117,50 +1117,12 @@ impl DdlController {
             .await?;
 
         // create streaming jobs.
-        let stream_job_id = streaming_job.id();
-        match streaming_job.create_type() {
-            CreateType::Unspecified | CreateType::Foreground => {
-                let version = self
-                    .stream_manager
-                    .create_streaming_job(stream_job_fragments, ctx, None)
-                    .await?;
-                Ok(version)
-            }
-            CreateType::Background => {
-                let await_tree_key = format!("Background DDL Worker ({})", stream_job_id);
-                let await_tree_span =
-                    span!("{:?}({})", streaming_job.job_type(), streaming_job.name());
+        let version = self
+            .stream_manager
+            .create_streaming_job(stream_job_fragments, ctx, permit)
+            .await?;
 
-                let ctrl = self.clone();
-                let (tx, rx) = oneshot::channel();
-                let fut = async move {
-                    let _ = ctrl
-                        .stream_manager
-                        .create_streaming_job(stream_job_fragments, ctx, Some(tx))
-                        .await
-                        .inspect_err(|err| {
-                            tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
-                        });
-                    // drop the permit to release the semaphore
-                    drop(permit);
-                };
-
-                let fut = (self.env.await_tree_reg())
-                    .register(await_tree_key, await_tree_span)
-                    .instrument(fut);
-                tokio::spawn(fut);
-
-                rx.instrument_await("wait_background_streaming_job_creation_started")
-                    .await
-                    .map_err(|_| {
-                        anyhow!(
-                            "failed to receive create streaming job result of job: {}",
-                            stream_job_id
-                        )
-                    })??;
-                Ok(IGNORED_NOTIFICATION_VERSION)
-            }
-        }
+        Ok(version)
     }
 
     /// `target_replace_info`: when dropping a sink into table, we need to replace the table.
@@ -1191,7 +1153,7 @@ impl DdlController {
         let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
-                risingwave_common::catalog::DatabaseId::new(database_id as _),
+                catalog::DatabaseId::new(database_id as _),
                 removed_actors.iter().map(|id| *id as _).collect(),
                 removed_streaming_job_ids,
                 removed_state_table_ids,
@@ -1309,7 +1271,7 @@ impl DdlController {
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
                         .metadata_manager
-                        .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(sink.id))
+                        .get_job_fragments_by_id(&catalog::TableId::new(sink.id))
                         .await?;
                     if sink_job_fragments.fragments.len() != 1 {
                         return Err(anyhow!(
@@ -1677,6 +1639,9 @@ impl DdlController {
             cross_db_snapshot_backfill_info
         );
 
+        let locality_fragment_state_table_mapping =
+            fragment_graph.find_locality_provider_fragment_state_table_mapping();
+
         // check if log store exists for all cross-db upstreams
         self.metadata_manager
             .catalog_controller
@@ -1844,6 +1809,7 @@ impl DdlController {
             snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
+            locality_fragment_state_table_mapping,
         };
 
         Ok((
@@ -1967,7 +1933,11 @@ impl DdlController {
                         );
                     }
 
-                    *downstream_fragment = (&sink.new_fragment_info()).into();
+                    *downstream_fragment = (
+                        &sink.new_fragment_info(),
+                        catalog::TableId::from(stream_job.id()),
+                    )
+                        .into();
                 }
             }
             assert!(remaining_fragment.is_empty());
@@ -2348,7 +2318,7 @@ pub fn build_upstream_sink_info(
     Ok(UpstreamSinkInfo {
         sink_id: sink.id as _,
         sink_fragment_id: sink_fragment_id as _,
-        sink_output_fields: sink_output_fields.clone(),
+        sink_output_fields,
         sink_original_target_columns: sink.get_original_target_columns().clone(),
         project_exprs,
         new_sink_downstream: new_downstream_relation,

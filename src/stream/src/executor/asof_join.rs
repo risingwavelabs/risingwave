@@ -66,7 +66,7 @@ struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
-    /// The mapping from input indices of a side to output columes.
+    /// The mapping from input indices of a side to output columns.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
     /// Whether degree table is needed for this side.
@@ -231,10 +231,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         let state_join_key_indices_r = params_r.join_key_indices;
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l =
-            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r =
-            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
+        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
 
         let join_key_data_types_l = state_join_key_indices_l
             .iter()
@@ -1286,8 +1284,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I I I
-                + 3 8 1 . . .
-                - 3 8 1 . . ."
+                + 3 8 1 . . . D
+                - 3 8 1 . . . D"
             )
         );
 

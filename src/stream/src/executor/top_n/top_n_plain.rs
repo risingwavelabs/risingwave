@@ -170,8 +170,8 @@ where
         }
         let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(staging.len()));
         for res in staging.into_deserialized_changes(&deserializer) {
-            let (op, row) = res?;
-            let _none = chunk_builder.append_row(op, row);
+            let record = res?;
+            let _none = chunk_builder.append_record(record);
         }
         Ok(chunk_builder.take())
     }
@@ -632,7 +632,7 @@ mod tests {
         use crate::executor::test_utils::StreamExecutorTestExt;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         fn create_source_new() -> Executor {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     " I I I I
                 +  1 1 4 1001",
@@ -917,7 +917,7 @@ mod tests {
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
 
         fn create_source() -> Executor {
-            let mut chunks = vec![
+            let mut chunks = [
                 StreamChunk::from_pretty(
                     "  I I
                     +  1 0

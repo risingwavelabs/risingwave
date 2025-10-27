@@ -334,7 +334,7 @@ impl Sink for DeltaLakeSink {
         let inner = DeltaLakeSinkWriter::new(
             self.config.clone(),
             self.param.schema().clone(),
-            self.param.downstream_pk.clone(),
+            self.param.downstream_pk_or_empty(),
         )
         .await?;
 

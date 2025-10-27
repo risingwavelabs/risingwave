@@ -153,13 +153,11 @@ impl SnowflakeV2Config {
         let database = self
             .snowflake_database
             .clone()
-            .ok_or(SinkError::Config(anyhow!("database is required")))?
-            .to_owned();
+            .ok_or(SinkError::Config(anyhow!("database is required")))?;
         let schema_name = self
             .snowflake_schema
             .clone()
-            .ok_or(SinkError::Config(anyhow!("schema is required")))?
-            .to_owned();
+            .ok_or(SinkError::Config(anyhow!("schema is required")))?;
         let mut snowflake_task_ctx = SnowflakeTaskContext {
             target_table_name: target_table_name.clone(),
             database,
@@ -171,8 +169,7 @@ impl SnowflakeV2Config {
         let jdbc_url = self
             .jdbc_url
             .clone()
-            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?
-            .to_owned();
+            .ok_or(SinkError::Config(anyhow!("jdbc.url is required")))?;
         let username = self
             .username
             .clone()
@@ -269,7 +266,7 @@ impl TryFrom<SinkParam> for SnowflakeV2Sink {
         let schema = param.schema();
         let config = SnowflakeV2Config::from_btreemap(&param.properties)?;
         let is_append_only = param.sink_type.is_append_only();
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         Ok(Self {
             config,
             schema,

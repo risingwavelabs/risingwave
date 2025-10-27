@@ -17,8 +17,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(custom_test_frameworks)]
 #![feature(map_try_insert)]
-#![feature(btree_extract_if)]
-#![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(coverage_attribute)]
 

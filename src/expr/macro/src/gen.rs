@@ -538,7 +538,7 @@ impl FunctionAttr {
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
-                if input.is_compacted() {
+                if input.is_vis_compacted() {
                     for i in 0..input.capacity() {
                         #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
@@ -962,7 +962,7 @@ impl FunctionAttr {
                         assert!(range.end <= input.capacity());
                         #(#let_arrays)*
                         #downcast_state
-                        if input.is_compacted() {
+                        if input.is_vis_compacted() {
                             for row_id in range {
                                 let op = unsafe { *input.ops().get_unchecked(row_id) };
                                 #(#let_values)*

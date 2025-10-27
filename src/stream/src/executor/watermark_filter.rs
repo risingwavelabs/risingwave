@@ -133,7 +133,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
 
                     // Empty chunk should not be processed.
                     if chunk.cardinality() == 0 {
@@ -346,7 +346,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let handle_watermark_row = |watermark_row: Option<OwnedRow>| match watermark_row {
             Some(row) => {
                 if row.len() == 1 {
-                    Ok::<_, StreamExecutorError>(row[0].to_owned())
+                    Ok::<_, StreamExecutorError>(row[0].clone())
                 } else {
                     bail!("The watermark row should only contain 1 datum");
                 }
@@ -497,7 +497,7 @@ mod tests {
         );
         let eval_error_report = ActorEvalErrorReport {
             actor_context: ctx.clone(),
-            identity: info.identity.clone().into(),
+            identity: info.identity.into(),
         };
 
         (
@@ -555,7 +555,7 @@ mod tests {
         tx.push_chunk(chunk1);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 1 2022-11-07T00:00:00
@@ -579,7 +579,7 @@ mod tests {
         tx.push_chunk(chunk2);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 4 2022-11-07T00:00:00
@@ -622,7 +622,7 @@ mod tests {
         tx.push_chunk(chunk3);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 7 2022-11-14T00:00:00

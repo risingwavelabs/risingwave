@@ -43,6 +43,9 @@ SELECT COUNT(*) FROM test_struct;
 ----
 2
 
+statement error null value in column "info" of relation "test_struct" violates not-null constraint
+INSERT INTO test_struct (id) VALUES (2);
+
 statement ok
 DROP TABLE test_struct;
 
@@ -150,6 +153,9 @@ statement ok
 CREATE TABLE test_person_source (id INT PRIMARY KEY, name VARCHAR NULL, age INT, height FLOAT);
 
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 INSERT INTO test_person_source (id, name, age, height) VALUES
   (101, 'John', 28, 5.9),
   (102, 'Sarah', NULL, 5.5),
@@ -159,9 +165,6 @@ INSERT INTO test_person_source (id, name, age, height) VALUES
 
 statement ok
 CREATE SINK test_person_sink INTO test_person AS SELECT * FROM test_person_source;
-
-statement ok
-FLUSH;
 
 query TT
 SELECT * FROM test_person ORDER BY id;

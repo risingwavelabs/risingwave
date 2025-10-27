@@ -128,10 +128,10 @@ fn rewrite_table_definition(
         or_replace,
         temporary,
         if_not_exists,
-        name: name.clone(),
+        name,
         columns: columns.clone(),
         wildcard_idx,
-        constraints: constraints.clone(),
+        constraints,
         with_options: {
             with_options.retain(|item| {
                 TABLE_PROPS.contains(item.name.real_value().to_lowercase().as_str())

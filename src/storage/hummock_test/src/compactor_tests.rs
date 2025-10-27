@@ -378,8 +378,8 @@ pub(crate) mod tests {
 
             for _ in 0..keys_per_epoch {
                 let mut key = idx.to_be_bytes().to_vec();
-                let ramdom_key = rand::rng().random::<[u8; 32]>();
-                key.extend_from_slice(&ramdom_key);
+                let random_key = rand::rng().random::<[u8; 32]>();
+                key.extend_from_slice(&random_key);
                 local
                     .insert(TableKey(Bytes::from(key)), val.clone(), None)
                     .unwrap();
@@ -957,9 +957,9 @@ pub(crate) mod tests {
             storage.start_epoch(next_epoch, table_id_set.clone());
             epoch_set.insert(epoch);
 
-            let ramdom_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
+            let random_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
             local
-                .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
+                .insert(TableKey(Bytes::from(random_key)), val.clone(), None)
                 .unwrap();
             local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
@@ -1958,12 +1958,12 @@ pub(crate) mod tests {
                 let next_epoch = *epoch + millisec_interval_epoch;
                 storage.start_epoch(next_epoch, table_id_set.clone());
 
-                let ramdom_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
+                let random_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
 
                 if local_1.1 {
                     local_1
                         .0
-                        .insert(TableKey(Bytes::from(ramdom_key.clone())), val.clone(), None)
+                        .insert(TableKey(Bytes::from(random_key.clone())), val.clone(), None)
                         .unwrap();
                 }
                 local_1.0.flush().await.unwrap();
@@ -1974,7 +1974,7 @@ pub(crate) mod tests {
                 if local_2.1 {
                     local_2
                         .0
-                        .insert(TableKey(Bytes::from(ramdom_key.clone())), val.clone(), None)
+                        .insert(TableKey(Bytes::from(random_key.clone())), val.clone(), None)
                         .unwrap();
                 }
                 local_2.0.flush().await.unwrap();

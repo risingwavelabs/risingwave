@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockEpoch;
@@ -171,7 +172,7 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
 }
 
 impl StateStoreWriteVector for HummockVectorWriter {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
         Ok(self
             .state
             .as_mut()

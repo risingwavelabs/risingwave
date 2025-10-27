@@ -115,7 +115,7 @@ impl ToBatch for LogicalGetChannelDeltaStats {
     fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         use crate::optimizer::plan_node::BatchGetChannelDeltaStats;
         Ok(BatchGetChannelDeltaStats::new(
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.base.schema().clone(),
             self.at_time,
             self.time_offset,

@@ -16,10 +16,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use rand::prelude::SliceRandom;
-use rand::rng as thread_rng;
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
@@ -35,71 +32,24 @@ async fn test_singleton_migration_helper(configuration: Configuration) -> Result
     session.run(ROOT_MV).await?;
     session.run(CASCADE_MV).await?;
 
-    let fragment = cluster
-        .locate_one_fragment(vec![
-            identity_contains("materialize"),
-            identity_contains("simpleAgg"),
-        ])
-        .await?;
-
-    let mut all_worker_slots = fragment.all_worker_slots().into_iter().collect_vec();
-    let used_worker_slots = fragment.used_worker_slots();
-
-    assert_eq!(used_worker_slots.len(), 1);
-
-    all_worker_slots.shuffle(&mut thread_rng());
-
-    let mut target_worker_slots = all_worker_slots
-        .into_iter()
-        .filter(|work_slot| !used_worker_slots.contains(work_slot));
-
-    let source_slot = used_worker_slots.iter().exactly_one().cloned().unwrap();
-    let target_slot = target_worker_slots.next().unwrap();
-
-    assert_ne!(target_slot, source_slot);
-
-    cluster
-        .reschedule(fragment.reschedule([source_slot], [target_slot]))
-        .await?;
-
-    sleep(Duration::from_secs(3)).await;
-
-    session
-        .run(&format!(
-            "insert into t values {}",
-            (1..=10).map(|x| format!("({x})")).join(",")
-        ))
-        .await?;
-
-    session.run("flush").await?;
-
-    session
-        .run("select * from m2")
-        .await?
-        .assert_result_eq("10");
-
-    let source_slot = target_slot;
-    let target_slot = target_worker_slots.next().unwrap();
-
-    cluster
-        .reschedule(fragment.reschedule([source_slot], [target_slot]))
-        .await?;
-
-    sleep(Duration::from_secs(3)).await;
-
-    session
-        .run(&format!(
-            "insert into t values {}",
-            (11..=20).map(|x| format!("({x})")).join(",")
-        ))
-        .await?;
-
-    session.run("flush").await?;
-
-    session
-        .run("select * from m2")
-        .await?
-        .assert_result_eq("20");
+    for (idx, ids) in [[1, 2], [2, 3], [3, 1]].iter().enumerate() {
+        let nodes = ids.iter().map(|id| format!("compute-{}", id)).collect_vec();
+        cluster.simple_kill_nodes(nodes.clone()).await;
+        sleep(Duration::from_secs(100)).await;
+        session
+            .run(&format!(
+                "insert into t values {}",
+                (1..=10).map(|x| format!("({x})")).join(",")
+            ))
+            .await?;
+        session.run("flush").await?;
+        cluster.simple_restart_nodes(nodes).await;
+        sleep(Duration::from_secs(100)).await;
+        session
+            .run("select * from m2")
+            .await?
+            .assert_result_eq(format!("{}", (idx + 1) * 10));
+    }
 
     Ok(())
 }

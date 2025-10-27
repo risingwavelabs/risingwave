@@ -154,13 +154,9 @@ impl TryFrom<SinkParam> for SqlServerSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = SqlServerConfig::from_btreemap(param.properties)?;
-        SqlServerSink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        SqlServerSink::new(config, schema, pk_indices, param.sink_type.is_append_only())
     }
 }
 

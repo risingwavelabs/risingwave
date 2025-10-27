@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_depend` records the dependency relationships between database objects.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-depend.html`]
+/// Reference: `https://www.postgresql.org/docs/current/catalog-pg-depend.html`
 #[system_catalog(view, "pg_catalog.pg_depend")]
 #[derive(Fields)]
 struct PgDepend {

@@ -305,7 +305,7 @@ pub(crate) fn mark_chunk(
     pk_in_output_indices: PkIndicesRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamChunk {
-    let chunk = chunk.compact();
+    let chunk = chunk.compact_vis();
     mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
 }
 
@@ -317,7 +317,7 @@ pub(crate) fn mark_cdc_chunk(
     pk_order: &[OrderType],
     last_cdc_offset: Option<CdcOffset>,
 ) -> StreamExecutorResult<StreamChunk> {
-    let chunk = chunk.compact();
+    let chunk = chunk.compact_vis();
     mark_cdc_chunk_inner(
         offset_parse_func,
         chunk,

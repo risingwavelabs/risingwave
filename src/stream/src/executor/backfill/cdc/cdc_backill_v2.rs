@@ -23,7 +23,9 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
-use risingwave_connector::parser::{TimeHandling, TimestampHandling, TimestamptzHandling};
+use risingwave_connector::parser::{
+    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+};
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
@@ -153,6 +155,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimeHandling::Milli);
+        let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
+            .properties
+            .get("debezium.bigint.unsigned.handling.mode")
+            .map(|v| v == "precise")
+            .unwrap_or(false)
+            .then_some(BigintUnsignedHandlingMode::Precise);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
@@ -162,6 +170,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            bigint_unsigned_handling,
             handle_toast_columns,
         )
         .boxed();
@@ -495,7 +504,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     ) && filtered_chunk.cardinality() > 0
                                     {
                                         // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(filtered_chunk.compact());
+                                        upstream_chunk_buffer.push(filtered_chunk.compact_vis());
                                     }
                                 }
                                 Message::Watermark(_) => {
@@ -820,7 +829,7 @@ mod tests {
 
         let bound = Some((OwnedRow::new(vec![None]), OwnedRow::new(vec![None])));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
-        assert_eq!(c.unwrap().compact(), chunk);
+        assert_eq!(c.unwrap().compact_vis(), chunk);
 
         let bound = Some((
             OwnedRow::new(vec![None]),
@@ -828,7 +837,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              + 1 6
@@ -842,7 +851,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
             U- 3 7
@@ -856,7 +865,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              - 2 .
@@ -871,7 +880,7 @@ mod tests {
 
         let bound = Some((OwnedRow::new(vec![None]), OwnedRow::new(vec![None])));
         let c = filter_stream_chunk(chunk.clone(), &bound, 1);
-        assert_eq!(c.unwrap().compact(), chunk);
+        assert_eq!(c.unwrap().compact_vis(), chunk);
 
         let bound = Some((
             OwnedRow::new(vec![None]),
@@ -879,7 +888,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 1);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              + 1 6
@@ -892,9 +901,9 @@ mod tests {
             OwnedRow::new(vec![Some(ScalarImpl::Int64(7))]),
             OwnedRow::new(vec![None]),
         ));
-        let c = filter_stream_chunk(chunk.clone(), &bound, 1);
+        let c = filter_stream_chunk(chunk, &bound, 1);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
             U- 3 7",

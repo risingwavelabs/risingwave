@@ -33,7 +33,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
 iceberg = { workspace = true }
-iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "f2a6d873e281da5765fa7a039be73905c1b31921" }
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "6660e37a08b497806e44443da975a73dc8bc7efc" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
@@ -80,7 +80,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tonic = { workspace = true }
 tracing = "0.1"
-xorf = "0.11.0"
+xorf = "0.12.0"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 

@@ -102,8 +102,8 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         macro_rules! build {
-            ($excutor:ident, $with_ties:literal) => {
-                Ok($excutor::<K, S, $with_ties>::new(
+            ($executor:ident, $with_ties:literal) => {
+                Ok($executor::<K, S, $with_ties>::new(
                     self.input,
                     self.ctx,
                     self.schema,
