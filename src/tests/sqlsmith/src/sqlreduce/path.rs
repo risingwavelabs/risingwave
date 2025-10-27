@@ -992,8 +992,16 @@ fn explore_child_field(
     let relative_path = vec![field_component];
 
     if let Some(child_node) = get_node_at_path(node, &relative_path) {
-        paths.extend(enumerate_reduction_paths(&child_node, child_path));
+        // Collect child paths but don't add them yet (for outer-first ordering)
+        let child_paths = enumerate_reduction_paths(&child_node, child_path);
+        paths.extend(child_paths);
     }
+}
+
+/// Calculate the depth of a path (number of components).
+/// Used for outer-first ordering: shallower paths (outer queries) come first.
+fn path_depth(path: &AstPath) -> usize {
+    path.len()
 }
 
 /// Enumerate all interesting paths in the AST for reduction.
@@ -1164,6 +1172,11 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
 
         _ => {}
     }
+
+    // Sort paths by depth (outer-first): shallower paths come first
+    // This ensures outer queries are reduced before inner subqueries
+    // For example: SELECT (SELECT ...) will reduce the outer SELECT first
+    paths.sort_by_key(path_depth);
 
     paths
 }

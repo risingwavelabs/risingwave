@@ -19,23 +19,17 @@
 //! reduce SQL queries with better coverage and control.
 
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 
 use anyhow::{Result, anyhow};
 
 use crate::parse_sql;
 use crate::sqlreduce::checker::Checker;
 use crate::sqlreduce::path::{
-    AstNode, ast_node_to_statement, enumerate_reduction_paths, statement_to_ast_node,
+    ast_node_to_statement, enumerate_reduction_paths, statement_to_ast_node,
 };
 use crate::sqlreduce::rules::{
-    ReductionCandidate, ReductionRules, apply_reduction_operation, generate_reduction_candidates,
+    ReductionRules, apply_reduction_operation, generate_reduction_candidates,
 };
-
-type BatchReductionResult = Option<(AstNode, usize, String, usize)>;
-
-type BatchReductionFuture<'a> = Pin<Box<dyn Future<Output = BatchReductionResult> + 'a>>;
 
 pub struct Reducer {
     rules: ReductionRules,
@@ -114,16 +108,13 @@ impl Reducer {
         Ok(reduced_sqls)
     }
 
-    /// Path-based reduction approach using systematic AST traversal with batching optimization.
+    /// Path-based reduction approach using systematic AST traversal.
     ///
     /// This method:
     /// 1. Enumerates all reduction paths in the AST
     /// 2. Generates reduction candidates based on rules
-    /// 3. Applies candidates in batches (with binary search fallback) to reduce validation overhead
+    /// 3. Applies candidates one-by-one, validating after each successful application
     /// 4. Uses a seen-query cache to avoid redundant checks
-    ///
-    /// Optimization: Instead of validating after each single change, we try applying
-    /// multiple changes at once, and use binary search to find the largest valid batch.
     async fn reduce_path_based(&mut self, sql: &str) -> String {
         let sql_statements = parse_sql(sql);
         let mut ast_node = statement_to_ast_node(&sql_statements[0]);
@@ -153,49 +144,342 @@ impl Reducer {
             let candidates = generate_reduction_candidates(&ast_node, &self.rules, &paths);
             tracing::debug!("Generated {} reduction candidates", candidates.len());
 
-            // Try applying candidates in batches with binary search fallback
-            let mut candidate_offset = 0;
-            while candidate_offset < candidates.len() {
-                // Start with an adaptive batch size (increase as we succeed)
-                let initial_batch_size = if found_reduction { 16 } else { 8 };
-                let remaining = candidates.len() - candidate_offset;
-                let max_batch = remaining.min(32); // Cap at 32 to avoid too large batches
-
+            // Try applying each candidate in order, with scoped multi-step removal for lists
+            let mut i = 0usize;
+            while i < candidates.len() {
+                let candidate = &candidates[i];
+                candidate_index += 1;
                 tracing::debug!(
-                    "Attempting batch reduction starting at candidate {} (remaining: {})",
-                    candidate_offset,
-                    remaining
+                    "Trying candidate {} of {} (global #{}): {:?}",
+                    i + 1,
+                    candidates.len(),
+                    candidate_index,
+                    candidate
                 );
 
-                // Try to apply a batch of candidates
-                match self
-                    .try_batch_reduction(
-                        &ast_node,
-                        &candidates[candidate_offset..],
-                        initial_batch_size.min(max_batch),
-                        sql,
-                        &mut seen_queries,
-                        &mut candidate_index,
-                    )
-                    .await
+                // If this is a list element removal, try a small batch within the same list path
+                if let crate::sqlreduce::rules::ReductionOperation::RemoveListElement(_) =
+                    candidate.operation
                 {
-                    Some((new_ast, batch_size, _new_sql, new_len)) => {
-                        tracing::info!(
-                            "✓ Valid batch reduction found! Applied {} candidates, SQL len {} → {}",
-                            batch_size,
-                            sql_len,
-                            new_len
-                        );
-                        ast_node = new_ast;
-                        sql_len = new_len;
-                        found_reduction = true;
-                        candidate_offset += batch_size;
+                    // Collect subsequent removals on the same path (already generated in reverse order)
+                    let base_path = &candidate.path;
+                    let mut j = i;
+                    let mut group_indices = Vec::new();
+                    while j < candidates.len() {
+                        match &candidates[j].operation {
+                            crate::sqlreduce::rules::ReductionOperation::RemoveListElement(_)
+                                if candidates[j].path == *base_path =>
+                            {
+                                group_indices.push(j);
+                                j += 1;
+                            }
+                            _ => break,
+                        }
                     }
-                    None => {
-                        // This batch didn't work, skip to next candidate
-                        candidate_offset += 1;
+                    // If this is an attribute removal on the same node, try removing a few attributes together
+                    if let crate::sqlreduce::rules::ReductionOperation::Remove(_) =
+                        candidate.operation
+                    {
+                        let base_path = &candidate.path;
+                        let mut j = i;
+                        let mut group_indices = Vec::new();
+                        while j < candidates.len() {
+                            match &candidates[j].operation {
+                                crate::sqlreduce::rules::ReductionOperation::Remove(_)
+                                    if candidates[j].path == *base_path =>
+                                {
+                                    group_indices.push(j);
+                                    j += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+
+                        // Try to remove up to 3 attributes at once (conservative)
+                        let take_n = group_indices.len().min(3);
+                        if take_n > 1 {
+                            let mut tmp_ast = ast_node.clone();
+                            let mut applied = 0usize;
+                            for &idx in &group_indices[..take_n] {
+                                if let Some(next_ast) =
+                                    apply_reduction_operation(&tmp_ast, &candidates[idx])
+                                {
+                                    tmp_ast = next_ast;
+                                    applied += 1;
+                                }
+                            }
+
+                            if applied > 1
+                                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                            {
+                                let new_sql = new_stmt.to_string();
+                                let new_len = new_sql.len();
+
+                                if new_len < sql_len && !seen_queries.contains(&new_sql) {
+                                    tracing::debug!(
+                                        "Attr-batch: removed {} attributes at path {}, validating (len: {})",
+                                        applied,
+                                        crate::sqlreduce::path::display_ast_path(base_path),
+                                        new_len
+                                    );
+
+                                    if self.checker.is_failure_preserved(sql, &new_sql).await {
+                                        tracing::info!(
+                                            "✓ Valid attr-batch reduction! Removed {} attributes, SQL len {} → {}",
+                                            applied,
+                                            sql_len,
+                                            new_len
+                                        );
+                                        seen_queries.insert(new_sql.clone());
+                                        ast_node = tmp_ast;
+                                        sql_len = new_len;
+                                        found_reduction = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // If this is a Replace operation on the same node, try multiple replacements
+                    if let crate::sqlreduce::rules::ReductionOperation::Replace(_) =
+                        candidate.operation
+                    {
+                        let base_path = &candidate.path;
+                        let mut j = i;
+                        let mut group_indices = Vec::new();
+                        while j < candidates.len() {
+                            match &candidates[j].operation {
+                                crate::sqlreduce::rules::ReductionOperation::Replace(_)
+                                    if candidates[j].path == *base_path =>
+                                {
+                                    group_indices.push(j);
+                                    j += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+
+                        // Try up to 2 replace operations together (very conservative)
+                        let take_n = group_indices.len().min(2);
+                        if take_n > 1 {
+                            let mut tmp_ast = ast_node.clone();
+                            let mut applied = 0usize;
+                            for &idx in &group_indices[..take_n] {
+                                if let Some(next_ast) =
+                                    apply_reduction_operation(&tmp_ast, &candidates[idx])
+                                {
+                                    tmp_ast = next_ast;
+                                    applied += 1;
+                                }
+                            }
+
+                            if applied > 1
+                                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                            {
+                                let new_sql = new_stmt.to_string();
+                                let new_len = new_sql.len();
+
+                                if new_len < sql_len && !seen_queries.contains(&new_sql) {
+                                    tracing::debug!(
+                                        "Replace-batch: applied {} replacements at path {}, validating (len: {})",
+                                        applied,
+                                        crate::sqlreduce::path::display_ast_path(base_path),
+                                        new_len
+                                    );
+
+                                    if self.checker.is_failure_preserved(sql, &new_sql).await {
+                                        tracing::info!(
+                                            "✓ Valid replace-batch reduction! Applied {} replacements, SQL len {} → {}",
+                                            applied,
+                                            sql_len,
+                                            new_len
+                                        );
+                                        seen_queries.insert(new_sql.clone());
+                                        ast_node = tmp_ast;
+                                        sql_len = new_len;
+                                        found_reduction = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // If this is a Pullup operation on the same node, try multiple pullups
+                    if let crate::sqlreduce::rules::ReductionOperation::Pullup(_) =
+                        candidate.operation
+                    {
+                        let base_path = &candidate.path;
+                        let mut j = i;
+                        let mut group_indices = Vec::new();
+                        while j < candidates.len() {
+                            match &candidates[j].operation {
+                                crate::sqlreduce::rules::ReductionOperation::Pullup(_)
+                                    if candidates[j].path == *base_path =>
+                                {
+                                    group_indices.push(j);
+                                    j += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+
+                        // Try up to 2 pullup operations together
+                        let take_n = group_indices.len().min(2);
+                        if take_n > 1 {
+                            let mut tmp_ast = ast_node.clone();
+                            let mut applied = 0usize;
+                            for &idx in &group_indices[..take_n] {
+                                if let Some(next_ast) =
+                                    apply_reduction_operation(&tmp_ast, &candidates[idx])
+                                {
+                                    tmp_ast = next_ast;
+                                    applied += 1;
+                                }
+                            }
+
+                            if applied > 1
+                                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                            {
+                                let new_sql = new_stmt.to_string();
+                                let new_len = new_sql.len();
+
+                                if new_len < sql_len && !seen_queries.contains(&new_sql) {
+                                    tracing::debug!(
+                                        "Pullup-batch: applied {} pullups at path {}, validating (len: {})",
+                                        applied,
+                                        crate::sqlreduce::path::display_ast_path(base_path),
+                                        new_len
+                                    );
+
+                                    if self.checker.is_failure_preserved(sql, &new_sql).await {
+                                        tracing::info!(
+                                            "✓ Valid pullup-batch reduction! Applied {} pullups, SQL len {} → {}",
+                                            applied,
+                                            sql_len,
+                                            new_len
+                                        );
+                                        seen_queries.insert(new_sql.clone());
+                                        ast_node = tmp_ast;
+                                        sql_len = new_len;
+                                        found_reduction = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Try to remove up to 8 elements from this list in one go
+                    let take_n = group_indices.len().min(8);
+                    if take_n > 1 {
+                        let mut tmp_ast = ast_node.clone();
+                        let mut applied = 0usize;
+                        for &idx in &group_indices[..take_n] {
+                            if let Some(next_ast) =
+                                apply_reduction_operation(&tmp_ast, &candidates[idx])
+                            {
+                                tmp_ast = next_ast;
+                                applied += 1;
+                            }
+                        }
+
+                        if applied > 1
+                            && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                        {
+                            let new_sql = new_stmt.to_string();
+                            let new_len = new_sql.len();
+
+                            // Only consider if it's actually smaller and we haven't seen it
+                            if new_len < sql_len && !seen_queries.contains(&new_sql) {
+                                tracing::debug!(
+                                    "List-batch: applied {} removals at path {}, validating (len: {})",
+                                    applied,
+                                    crate::sqlreduce::path::display_ast_path(base_path),
+                                    new_len
+                                );
+
+                                if self.checker.is_failure_preserved(sql, &new_sql).await {
+                                    tracing::info!(
+                                        "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
+                                        applied,
+                                        sql_len,
+                                        new_len
+                                    );
+                                    seen_queries.insert(new_sql.clone());
+                                    ast_node = tmp_ast;
+                                    sql_len = new_len;
+                                    found_reduction = true;
+                                    break; // proceed to next outer iteration
+                                }
+                            }
+                        }
                     }
                 }
+
+                // Fallback: try single candidate
+                let Some(new_ast) = apply_reduction_operation(&ast_node, candidate) else {
+                    tracing::debug!("Failed to apply reduction operation");
+                    i += 1;
+                    continue;
+                };
+
+                let Some(new_stmt) = ast_node_to_statement(&new_ast) else {
+                    tracing::debug!("Failed to convert reduced AST back to statement");
+                    i += 1;
+                    continue;
+                };
+
+                let new_sql = new_stmt.to_string();
+                let new_len = new_sql.len();
+
+                tracing::debug!(
+                    "Generated candidate SQL with length: {} (reduction: {})",
+                    new_len,
+                    sql_len as i32 - new_len as i32
+                );
+
+                // Only consider if it's actually smaller and we haven't seen it
+                if new_len >= sql_len {
+                    tracing::debug!(
+                        "Candidate not smaller ({} >= {}), skipping",
+                        new_len,
+                        sql_len
+                    );
+                    i += 1;
+                    continue;
+                }
+
+                if seen_queries.contains(&new_sql) {
+                    tracing::debug!("Candidate already seen, skipping");
+                    i += 1;
+                    continue;
+                }
+
+                tracing::debug!(
+                    "SQL changes from:\n{}\nto:\n{}",
+                    ast_node_to_statement(&ast_node)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "<failed to convert AST to statement>".to_owned()),
+                    new_sql
+                );
+
+                seen_queries.insert(new_sql.clone());
+
+                // Check if the failure is preserved
+                tracing::debug!("Checking if failure is preserved");
+                if !self.checker.is_failure_preserved(sql, &new_sql).await {
+                    tracing::debug!("Reduction not valid; failure not preserved");
+                    i += 1;
+                    continue;
+                }
+
+                tracing::info!("✓ Valid reduction found! SQL len {} → {}", sql_len, new_len);
+                tracing::info!("Applying candidate and continuing to next iteration");
+                ast_node = new_ast;
+                sql_len = new_len;
+                found_reduction = true;
+                break;
             }
 
             if !found_reduction {
@@ -232,156 +516,5 @@ impl Reducer {
         );
 
         final_sql
-    }
-
-    /// Try to apply a batch of candidates with binary search fallback.
-    ///
-    /// Returns `Some((new_ast, batch_size, new_sql, new_len))` if successful, `None` otherwise.
-    fn try_batch_reduction<'a>(
-        &'a mut self,
-        ast_node: &'a AstNode,
-        candidates: &'a [ReductionCandidate],
-        batch_size: usize,
-        original_sql: &'a str,
-        seen_queries: &'a mut HashSet<String>,
-        candidate_index: &'a mut usize,
-    ) -> BatchReductionFuture<'a> {
-        Box::pin(async move {
-            if candidates.is_empty() || batch_size == 0 {
-                return None;
-            }
-
-            let actual_batch_size = batch_size.min(candidates.len());
-            tracing::debug!(
-                "Trying batch of {} candidates (priorities: {})",
-                actual_batch_size,
-                candidates[..actual_batch_size]
-                    .iter()
-                    .map(|c| c.operation.priority())
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-
-            // Try applying all candidates in the batch
-            let mut current_ast = ast_node.clone();
-            let mut applied_count = 0;
-
-            for candidate in &candidates[..actual_batch_size] {
-                *candidate_index += 1;
-
-                if let Some(new_ast) = apply_reduction_operation(&current_ast, candidate) {
-                    current_ast = new_ast;
-                    applied_count += 1;
-                    tracing::debug!(
-                        "Applied candidate #{} (priority: {}, op: {:?})",
-                        *candidate_index,
-                        candidate.operation.priority(),
-                        candidate.operation
-                    );
-                } else {
-                    tracing::debug!(
-                        "Skipping candidate #{} (priority: {}, failed to apply): {:?}",
-                        *candidate_index,
-                        candidate.operation.priority(),
-                        candidate
-                    );
-                }
-            }
-
-            if applied_count == 0 {
-                tracing::debug!("No candidates in batch could be applied");
-                return None;
-            }
-
-            // Convert to SQL
-            let Some(new_stmt) = ast_node_to_statement(&current_ast) else {
-                tracing::debug!("Failed to convert batch-reduced AST to statement");
-                return None;
-            };
-
-            let new_sql = new_stmt.to_string();
-            let new_len = new_sql.len();
-
-            // Check if smaller and not seen
-            let orig_stmt = ast_node_to_statement(ast_node)?;
-            let orig_len = orig_stmt.to_string().len();
-            if new_len >= orig_len {
-                tracing::debug!("Batch result not smaller, skipping");
-                return None;
-            }
-
-            if seen_queries.contains(&new_sql) {
-                tracing::debug!("Batch result already seen, skipping");
-                return None;
-            }
-
-            tracing::debug!(
-                "Batch applied {} operations, validating result (len: {})",
-                applied_count,
-                new_len
-            );
-
-            // Validate the batch result
-            if self
-                .checker
-                .is_failure_preserved(original_sql, &new_sql)
-                .await
-            {
-                seen_queries.insert(new_sql.clone());
-                return Some((current_ast, actual_batch_size, new_sql, new_len));
-            }
-
-            // Validation failed - try binary search if batch size > 1
-            if actual_batch_size > 1 {
-                tracing::debug!(
-                    "Batch validation failed, trying binary search (left half: {})",
-                    actual_batch_size / 2
-                );
-
-                // Try left half
-                if let Some(result) = self
-                    .try_batch_reduction(
-                        ast_node,
-                        candidates,
-                        actual_batch_size / 2,
-                        original_sql,
-                        seen_queries,
-                        candidate_index,
-                    )
-                    .await
-                {
-                    return Some(result);
-                }
-
-                // Try right half
-                let right_start = actual_batch_size / 2;
-                if right_start < actual_batch_size {
-                    tracing::debug!(
-                        "Left half failed, trying right half starting at candidate {}",
-                        right_start
-                    );
-
-                    if let Some(result) = self
-                        .try_batch_reduction(
-                            ast_node,
-                            &candidates[right_start..],
-                            actual_batch_size - right_start,
-                            original_sql,
-                            seen_queries,
-                            candidate_index,
-                        )
-                        .await
-                    {
-                        return Some(result);
-                    }
-                }
-            }
-
-            tracing::debug!("Batch and binary search all failed");
-            None
-        })
     }
 }

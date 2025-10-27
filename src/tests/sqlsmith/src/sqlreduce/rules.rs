@@ -49,6 +49,12 @@ impl Default for ReductionRules {
         let mut rules = HashMap::new();
 
         // SelectStmt rules (most important for SQL reduction)
+        // Dependency order (independent first, dependent later):
+        // 1. Selection (WHERE) - independent, doesn't affect other clauses
+        // 2. Having - semi-independent, requires GROUP BY but rarely referenced
+        // 3. GroupBy - dependent, SELECT may reference GROUP BY columns
+        // 4. Projection (SELECT list) - dependent, may reference GROUP BY
+        // 5. From - fundamental, almost everything depends on it
         rules.insert(
             "Select".to_owned(),
             ReductionRule {
@@ -61,11 +67,11 @@ impl Default for ReductionRules {
                     AstField::Having,
                 ],
                 remove: vec![
-                    AstField::Selection,
-                    AstField::Having,
-                    AstField::Projection,
-                    AstField::From,
-                    AstField::GroupBy,
+                    AstField::Selection,  // Try removing WHERE first (most independent)
+                    AstField::Having,     // Then HAVING
+                    AstField::Projection, // Then SELECT list
+                    AstField::From,       // Then FROM
+                    AstField::GroupBy,    // Then GROUP BY
                 ],
                 pullup: vec![],
                 replace: vec![],
@@ -328,20 +334,50 @@ pub enum ReductionOperation {
 
 impl ReductionOperation {
     /// Get the priority score for this operation (higher = tried first).
-    /// Operations with higher success rates and lower risk get higher priority.
+    /// Uses dependency-aware priority: independent components removed first,
+    /// then dependent components to minimize validation failures.
     pub fn priority(&self) -> i32 {
         match self {
             // List element removal: Very safe, high success rate
             // Removing a single item rarely breaks the query structure
             ReductionOperation::RemoveListElement(_) => 100,
 
-            // Remove optional attributes: Safe, commonly succeeds
-            // Removing WHERE, HAVING, ORDER BY etc. often preserves semantics
-            ReductionOperation::Remove(_) => 80,
+            // Remove operations: Priority based on SQL dependencies
+            // Independent clauses get higher priority, dependent ones lower
+            ReductionOperation::Remove(field) => {
+                use AstField::*;
+                match field {
+                    // Tier 1: Fully independent clauses (no other clause depends on them)
+                    // WHERE is independent - can be removed without affecting structure
+                    Selection => 95,
+                    // ORDER BY is independent - only affects result ordering
+                    OrderBy => 94,
+                    // LIMIT/OFFSET are independent
+                    Limit | Offset => 93,
+                    // WITH/CTE can be removed if not referenced
+                    With => 92,
+
+                    // Tier 2: Semi-independent clauses
+                    // HAVING depends on aggregations, but often removable
+                    Having => 85,
+
+                    // Tier 3: Core dependent clauses (have circular dependencies)
+                    // GROUP BY and Projection (SELECT list) depend on each other
+                    // Removing these is riskier as they form the core query structure
+                    GroupBy => 70,
+                    Projection => 65,
+
+                    // FROM is most fundamental - almost everything depends on it
+                    From => 60,
+
+                    // Other fields get default priority
+                    _ => 80,
+                }
+            }
 
             // Replace with subtree: Medium risk, good success rate
             // Simplifies structure while preserving a valid subtree
-            ReductionOperation::Replace(_) => 60,
+            ReductionOperation::Replace(_) => 55,
 
             // Pullup: Medium-low risk, variable success rate
             // Depends heavily on context compatibility
@@ -493,16 +529,22 @@ pub fn generate_reduction_candidates(
         paths.len()
     );
 
-    // Sort candidates by priority (higher priority first)
-    // This ensures we try low-risk, high-success-rate operations first
+    // Sort candidates by dependency-aware priority (higher priority first)
+    // Independent clauses (WHERE, ORDER BY) tried first, then dependent ones (SELECT, GROUP BY)
     candidates.sort_by(|a, b| b.operation.priority().cmp(&a.operation.priority()));
 
     tracing::debug!(
-        "Sorted candidates by priority - first 5: {:?}",
+        "Sorted candidates by dependency-aware priority - first 10: {:?}",
         candidates
             .iter()
-            .take(5)
-            .map(|c| (c.operation.priority(), format!("{:?}", c.operation)))
+            .take(10)
+            .map(|c| {
+                let op_desc = match &c.operation {
+                    ReductionOperation::Remove(field) => format!("Remove({:?})", field),
+                    op => format!("{:?}", op),
+                };
+                (c.operation.priority(), op_desc)
+            })
             .collect::<Vec<_>>()
     );
 
