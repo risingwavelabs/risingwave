@@ -221,6 +221,10 @@ impl LdapConfig {
             options: options.clone(),
         })
     }
+    
+    fn certs_required(&self) -> bool {
+        self.server.starts_with("ldaps://") || self.start_tls
+    }
 }
 
 /// LDAP authenticator that validates user credentials against an LDAP server
@@ -295,7 +299,7 @@ impl LdapAuthenticator {
             settings = settings.set_starttls(true);
         }
 
-        if config.server.starts_with("ldaps://") || config.start_tls {
+        if config.certs_required() {
             // FIXME: add configuration for CA certificate.
             // RisingWave does not have parameters like `ldap_ca_file`, `ldap_cert_file`, or `ldap_key_file`.
             // PostgreSQL itself does not provide these options. Instead, it uses the libldap (OpenLDAP client library) for LDAP connections and authentication.

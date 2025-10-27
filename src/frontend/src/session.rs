@@ -1637,8 +1637,7 @@ impl SessionManagerImpl {
                 &connection_type,
                 database_name,
                 user_name,
-                client_addr,
-                false,
+                client_addr, 
             );
 
             // TODO: adding `FATAL` message support for no matching HBA entry.

@@ -150,7 +150,6 @@ impl HbaConfig {
         database: &str,
         user: &str,
         client_addr: Option<&IpAddr>,
-        _is_ssl: bool, // TODO: implement SSL detection
     ) -> Option<&HbaEntry> {
         self.entries
             .iter()
@@ -267,7 +266,7 @@ mod tests {
 
         // Test local connection
         let entry =
-            config.find_matching_entry(&ConnectionType::Local, "testdb", "testuser", None, false);
+            config.find_matching_entry(&ConnectionType::Local, "testdb", "testuser", None);
         assert!(entry.is_some());
         assert_eq!(entry.unwrap().auth_method, AuthMethod::Trust);
     }
