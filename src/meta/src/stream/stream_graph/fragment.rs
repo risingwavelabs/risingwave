@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
+use std::sync::atomic::AtomicU32;
 
 use anyhow::{Context, anyhow};
 use enum_as_inner::EnumAsInner;
@@ -349,11 +350,15 @@ impl StreamFragmentEdge {
     }
 }
 
-fn clone_fragment(fragment: &Fragment, id_generator_manager: &IdGeneratorManager) -> Fragment {
+fn clone_fragment(
+    fragment: &Fragment,
+    id_generator_manager: &IdGeneratorManager,
+    actor_id_counter: &AtomicU32,
+) -> Fragment {
     let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
         .to_global_id(0)
         .as_global_id();
-    let actor_id_gen = GlobalActorIdGen::new(id_generator_manager, fragment.actors.len() as _);
+    let actor_id_gen = GlobalActorIdGen::new(actor_id_counter, fragment.actors.len() as _);
     Fragment {
         fragment_id,
         fragment_type_mask: fragment.fragment_type_mask,
@@ -432,6 +437,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
     upstream_table: &PbTable,
     upstream_table_fragment_id: FragmentId,
     id_generator_manager: &IdGeneratorManager,
+    actor_id_counter: &AtomicU32,
 ) -> MetaResult<(Fragment, Vec<PbColumnCatalog>, Option<PbTable>)> {
     let mut new_sink_columns = sink.columns.clone();
     fn extend_sink_columns(
@@ -456,7 +462,11 @@ pub fn rewrite_refresh_schema_sink_fragment(
         name.clone()
     });
 
-    let mut new_sink_fragment = clone_fragment(original_sink_fragment, id_generator_manager);
+    let mut new_sink_fragment = clone_fragment(
+        original_sink_fragment,
+        id_generator_manager,
+        actor_id_counter,
+    );
     let sink_node = &mut new_sink_fragment.nodes;
     let PbNodeBody::Sink(sink_node_body) = sink_node.node_body.as_mut().unwrap() else {
         return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());

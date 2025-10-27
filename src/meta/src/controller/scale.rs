@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -40,7 +41,6 @@ use sea_orm::{
 
 use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::controller::id::{IdCategory, IdGeneratorManagerRef};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamActor};
 use crate::stream::{AssignerBuilder, SplitDiffOptions};
@@ -108,7 +108,7 @@ where
 
 pub async fn load_fragment_info<C>(
     txn: &C,
-    id_gen: &IdGeneratorManagerRef,
+    actor_id_counter: &AtomicU32,
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -151,7 +151,7 @@ where
 
     let RenderedGraph { fragments, .. } = render_jobs(
         txn,
-        id_gen,
+        actor_id_counter,
         jobs,
         available_workers,
         adaptive_parallelism_strategy,
@@ -194,7 +194,7 @@ impl RenderedGraph {
 /// rendering pipeline to materialize actor assignments.
 pub async fn render_fragments<C>(
     txn: &C,
-    id_gen: &IdGeneratorManagerRef,
+    actor_id_counter: &AtomicU32,
     ensembles: Vec<NoShuffleEnsemble>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -259,7 +259,7 @@ where
 
     let fragments = render_no_shuffle_ensembles(
         txn,
-        id_gen,
+        actor_id_counter,
         &ensembles,
         &fragment_map,
         &jobs,
@@ -278,7 +278,7 @@ where
 /// provided streaming jobs before delegating to the shared rendering backend.
 pub async fn render_jobs<C>(
     txn: &C,
-    id_gen: &IdGeneratorManagerRef,
+    actor_id_counter: &AtomicU32,
     job_ids: HashSet<ObjectId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -341,7 +341,7 @@ where
 
     let fragments = render_no_shuffle_ensembles(
         txn,
-        id_gen,
+        actor_id_counter,
         &ensembles,
         &fragment_map,
         &jobs,
@@ -363,7 +363,7 @@ where
 ///   * grouping the rendered fragments by database and streaming job.
 async fn render_no_shuffle_ensembles<C>(
     txn: &C,
-    id_gen: &IdGeneratorManagerRef,
+    actor_id_counter: &AtomicU32,
     ensembles: &[NoShuffleEnsemble],
     fragment_map: &HashMap<FragmentId, fragment::Model>,
     job_map: &HashMap<ObjectId, streaming_job::Model>,
@@ -418,7 +418,7 @@ where
     };
 
     render_actors(
-        id_gen,
+        actor_id_counter,
         ensembles,
         fragment_map,
         job_map,
@@ -429,7 +429,7 @@ where
 }
 
 // Only metadata resolved asynchronously lives here so the renderer stays synchronous
-// and the call site makes the runtime dependencies (`id_gen`, maps, strategy, etc.) explicit.
+// and the call site keeps the runtime dependencies (maps, strategy, actor counter, etc.) explicit.
 struct RenderActorsContext<'a> {
     fragment_source_ids: &'a HashMap<FragmentId, SourceId>,
     fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
@@ -438,7 +438,7 @@ struct RenderActorsContext<'a> {
 }
 
 fn render_actors(
-    id_gen: &IdGeneratorManagerRef,
+    actor_id_counter: &AtomicU32,
     ensembles: &[NoShuffleEnsemble],
     fragment_map: &HashMap<FragmentId, fragment::Model>,
     job_map: &HashMap<ObjectId, streaming_job::Model>,
@@ -605,8 +605,9 @@ fn render_actors(
                 ..
             } = fragment_map.get(component_fragment_id).unwrap();
 
-            let actor_id_base =
-                id_gen.generate_interval::<{ IdCategory::Actor }>(actors.len() as u64) as u32;
+            let actor_count =
+                u32::try_from(actors.len()).expect("actor parallelism exceeds u32::MAX");
+            let actor_id_base = actor_id_counter.fetch_add(actor_count, Ordering::Relaxed);
 
             let actors: HashMap<ActorId, InflightActorInfo> = assignment
                 .iter()
@@ -928,6 +929,10 @@ fn find_no_shuffle_graphs(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
+    use risingwave_connector::source::SplitImpl;
+    use risingwave_meta_model::{CreateType, I32Array, JobStatus, StreamNode};
+    use risingwave_pb::stream_plan::PbStreamNode;
+
     use super::*;
 
     // Helper type aliases for cleaner test code
@@ -1115,5 +1120,88 @@ mod tests {
         // Graph 2
         assert_eq!(graphs[1].entries, to_hashset(&[6]));
         assert_eq!(graphs[1].components, to_hashset(&[6, 7]));
+    }
+
+    #[test]
+    fn render_actors_increments_actor_counter() {
+        let actor_id_counter = AtomicU32::new(100);
+        let fragment_id: FragmentId = 1;
+        let job_id: ObjectId = 10;
+        let database_id: DatabaseId = 3;
+
+        let fragment_model = fragment::Model {
+            fragment_id,
+            job_id,
+            fragment_type_mask: 0,
+            distribution_type: DistributionType::Hash,
+            stream_node: StreamNode::from(&PbStreamNode::default()),
+            state_table_ids: I32Array::default(),
+            upstream_fragment_id: I32Array::default(),
+            vnode_count: 4,
+            parallelism: Some(StreamingParallelism::Fixed(2)),
+        };
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Foreground,
+            timezone: None,
+            parallelism: StreamingParallelism::Fixed(4),
+            max_parallelism: 256,
+            specific_resource_group: None,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db".into(),
+            resource_group: "rg-a".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([fragment_id]),
+            components: HashSet::from([fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map = BTreeMap::from([(
+            1,
+            WorkerInfo {
+                weight: NonZeroUsize::new(2).unwrap(),
+                resource_group: Some("rg-a".into()),
+            },
+        )]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Auto,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let fragment_info = &result[&database_id][&job_id][&fragment_id];
+        let mut actor_ids: Vec<_> = fragment_info.actors.keys().copied().collect();
+        actor_ids.sort_unstable();
+        assert_eq!(actor_ids, vec![100, 101]);
+        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 102);
     }
 }
