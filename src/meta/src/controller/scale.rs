@@ -927,11 +927,13 @@ fn find_no_shuffle_graphs(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeSet, HashMap, HashSet};
+    use std::sync::Arc;
 
     use risingwave_connector::source::SplitImpl;
+    use risingwave_connector::source::test_source::TestSourceSplit;
     use risingwave_meta_model::{CreateType, I32Array, JobStatus, StreamNode};
-    use risingwave_pb::stream_plan::PbStreamNode;
+    use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
 
     use super::*;
 
@@ -957,6 +959,58 @@ mod tests {
     /// Helper function to create a `HashSet` from a slice easily.
     fn to_hashset(ids: &[FragmentId]) -> HashSet<FragmentId> {
         ids.iter().cloned().collect()
+    }
+
+    #[allow(deprecated)]
+    fn build_fragment(
+        fragment_id: FragmentId,
+        job_id: ObjectId,
+        fragment_type_mask: i32,
+        distribution_type: DistributionType,
+        vnode_count: i32,
+        parallelism: StreamingParallelism,
+    ) -> fragment::Model {
+        fragment::Model {
+            fragment_id,
+            job_id,
+            fragment_type_mask,
+            distribution_type,
+            stream_node: StreamNode::from(&PbStreamNode::default()),
+            state_table_ids: I32Array::default(),
+            upstream_fragment_id: I32Array::default(),
+            vnode_count,
+            parallelism: Some(parallelism),
+        }
+    }
+
+    type ActorState = (u32, WorkerId, Option<Vec<usize>>, Vec<String>);
+
+    fn collect_actor_state(fragment: &InflightFragmentInfo) -> Vec<ActorState> {
+        let base = fragment.actors.keys().copied().min().unwrap_or_default();
+
+        let mut entries: Vec<_> = fragment
+            .actors
+            .iter()
+            .map(|(&actor_id, info)| {
+                let idx = actor_id - base;
+                let vnode_indices = info.vnode_bitmap.as_ref().map(|bitmap| {
+                    bitmap
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(pos, is_set)| is_set.then_some(pos))
+                        .collect::<Vec<_>>()
+                });
+                let splits = info
+                    .splits
+                    .iter()
+                    .map(|split| split.id().to_string())
+                    .collect::<Vec<_>>();
+                (idx, info.worker_id, vnode_indices, splits)
+            })
+            .collect();
+
+        entries.sort_by_key(|(idx, _, _, _)| *idx);
+        entries
     }
 
     #[test]
@@ -1129,25 +1183,22 @@ mod tests {
         let job_id: ObjectId = 10;
         let database_id: DatabaseId = 3;
 
-        let fragment_model = fragment::Model {
+        let fragment_model = build_fragment(
             fragment_id,
             job_id,
-            fragment_type_mask: 0,
-            distribution_type: DistributionType::Hash,
-            stream_node: StreamNode::from(&PbStreamNode::default()),
-            state_table_ids: I32Array::default(),
-            upstream_fragment_id: I32Array::default(),
-            vnode_count: 4,
-            parallelism: Some(StreamingParallelism::Fixed(2)),
-        };
+            0,
+            DistributionType::Single,
+            1,
+            StreamingParallelism::Fixed(1),
+        );
 
         let job_model = streaming_job::Model {
             job_id,
             job_status: JobStatus::Created,
             create_type: CreateType::Foreground,
             timezone: None,
-            parallelism: StreamingParallelism::Fixed(4),
-            max_parallelism: 256,
+            parallelism: StreamingParallelism::Fixed(1),
+            max_parallelism: 1,
             specific_resource_group: None,
         };
 
@@ -1170,7 +1221,7 @@ mod tests {
         let worker_map = BTreeMap::from([(
             1,
             WorkerInfo {
-                weight: NonZeroUsize::new(2).unwrap(),
+                weight: NonZeroUsize::new(1).unwrap(),
                 resource_group: Some("rg-a".into()),
             },
         )]);
@@ -1198,10 +1249,259 @@ mod tests {
         )
         .expect("actor rendering succeeds");
 
-        let fragment_info = &result[&database_id][&job_id][&fragment_id];
-        let mut actor_ids: Vec<_> = fragment_info.actors.keys().copied().collect();
-        actor_ids.sort_unstable();
-        assert_eq!(actor_ids, vec![100, 101]);
-        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 102);
+        let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
+        assert_eq!(state.len(), 1);
+        assert!(
+            state[0].2.is_none(),
+            "single distribution should not assign vnode bitmaps"
+        );
+        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 101);
+    }
+
+    #[test]
+    fn render_actors_aligns_hash_vnode_bitmaps() {
+        let actor_id_counter = AtomicU32::new(0);
+        let entry_fragment_id: FragmentId = 1;
+        let downstream_fragment_id: FragmentId = 2;
+        let job_id: ObjectId = 20;
+        let database_id: DatabaseId = 5;
+
+        let entry_fragment = build_fragment(
+            entry_fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let downstream_fragment = build_fragment(
+            downstream_fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Background,
+            timezone: None,
+            parallelism: StreamingParallelism::Fixed(2),
+            max_parallelism: 2,
+            specific_resource_group: None,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db_hash".into(),
+            resource_group: "rg-hash".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([entry_fragment_id]),
+            components: HashSet::from([entry_fragment_id, downstream_fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([
+            (entry_fragment_id, entry_fragment),
+            (downstream_fragment_id, downstream_fragment),
+        ]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map = BTreeMap::from([
+            (
+                1,
+                WorkerInfo {
+                    weight: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("rg-hash".into()),
+                },
+            ),
+            (
+                2,
+                WorkerInfo {
+                    weight: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("rg-hash".into()),
+                },
+            ),
+        ]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Auto,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let entry_state = collect_actor_state(&result[&database_id][&job_id][&entry_fragment_id]);
+        let downstream_state =
+            collect_actor_state(&result[&database_id][&job_id][&downstream_fragment_id]);
+
+        assert_eq!(entry_state.len(), 2);
+        assert_eq!(entry_state, downstream_state);
+
+        let assigned_vnodes: BTreeSet<_> = entry_state
+            .iter()
+            .flat_map(|(_, _, vnodes, _)| {
+                vnodes
+                    .as_ref()
+                    .expect("hash distribution should populate vnode bitmap")
+                    .iter()
+                    .copied()
+            })
+            .collect();
+        assert_eq!(assigned_vnodes, BTreeSet::from([0, 1, 2, 3]));
+        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 4);
+    }
+
+    #[test]
+    fn render_actors_propagates_source_splits() {
+        let actor_id_counter = AtomicU32::new(0);
+        let entry_fragment_id: FragmentId = 11;
+        let downstream_fragment_id: FragmentId = 12;
+        let job_id: ObjectId = 30;
+        let database_id: DatabaseId = 7;
+        let source_id: SourceId = 99;
+
+        let source_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::Source]) as i32;
+        let source_scan_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::SourceScan]) as i32;
+
+        let entry_fragment = build_fragment(
+            entry_fragment_id,
+            job_id,
+            source_mask,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let downstream_fragment = build_fragment(
+            downstream_fragment_id,
+            job_id,
+            source_scan_mask,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Background,
+            timezone: None,
+            parallelism: StreamingParallelism::Fixed(2),
+            max_parallelism: 2,
+            specific_resource_group: None,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "split_db".into(),
+            resource_group: "rg-source".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([entry_fragment_id]),
+            components: HashSet::from([entry_fragment_id, downstream_fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([
+            (entry_fragment_id, entry_fragment),
+            (downstream_fragment_id, downstream_fragment),
+        ]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map = BTreeMap::from([
+            (
+                1,
+                WorkerInfo {
+                    weight: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("rg-source".into()),
+                },
+            ),
+            (
+                2,
+                WorkerInfo {
+                    weight: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("rg-source".into()),
+                },
+            ),
+        ]);
+
+        let split_a = SplitImpl::Test(TestSourceSplit {
+            id: Arc::<str>::from("split-a"),
+            properties: HashMap::new(),
+            offset: "0".into(),
+        });
+        let split_b = SplitImpl::Test(TestSourceSplit {
+            id: Arc::<str>::from("split-b"),
+            properties: HashMap::new(),
+            offset: "0".into(),
+        });
+
+        let fragment_source_ids = HashMap::from([
+            (entry_fragment_id, source_id),
+            (downstream_fragment_id, source_id),
+        ]);
+        let fragment_splits =
+            HashMap::from([(entry_fragment_id, vec![split_a.clone(), split_b.clone()])]);
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Auto,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let entry_state = collect_actor_state(&result[&database_id][&job_id][&entry_fragment_id]);
+        let downstream_state =
+            collect_actor_state(&result[&database_id][&job_id][&downstream_fragment_id]);
+
+        assert_eq!(entry_state, downstream_state);
+
+        let split_ids: BTreeSet<_> = entry_state
+            .iter()
+            .flat_map(|(_, _, _, splits)| splits.iter().cloned())
+            .collect();
+        assert_eq!(
+            split_ids,
+            BTreeSet::from([split_a.id().to_string(), split_b.id().to_string()])
+        );
+        assert_eq!(actor_id_counter.load(Ordering::Relaxed), 4);
     }
 }
