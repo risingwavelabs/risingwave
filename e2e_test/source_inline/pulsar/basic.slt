@@ -75,6 +75,7 @@ with (
   connector = 'pulsar',
   service.url = '${PULSAR_BROKER_URL}',
   topic = 'persistent://public/default/topic',
+  pulsar.read_compacted = 'true',
 ) format plain encode json;
 
 
@@ -86,6 +87,7 @@ with (
   connector = 'pulsar',
   service.url = '${PULSAR_BROKER_URL}',
   topic = 'persistent://public/default/unpartitioned',
+  pulsar.read_compacted = 'false',
 ) format plain encode json;
 
 
