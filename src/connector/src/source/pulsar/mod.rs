@@ -56,6 +56,8 @@ impl EnforceSecret for PulsarProperties {
     }
 }
 
+impl EnforceSecret for PulsarConsumerOptions {}
+
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 #[serde_as]
 pub struct PulsarConsumerOptions {
