@@ -4137,3 +4137,26 @@ fn parse_window_clause() {
     let ast = parse_sql_statements(sql).unwrap();
     assert_eq!(ast.len(), 1);
 }
+
+#[test]
+fn parse_create_materialized_view_with_backfill_order() {
+    // Test FIXED backfill order
+    let sql = "CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(t1 -> t2, t2 -> t3)) AS SELECT * FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t2.id = t3.id";
+    let stmt = verified_stmt(sql);
+    let output = stmt.to_string();
+    assert!(
+        output.contains("FIXED(t1 -> t2, t2 -> t3)"),
+        "Expected output to contain 'FIXED(t1 -> t2, t2 -> t3)', got: {}",
+        output
+    );
+
+    // Test FIXED backfill order with schema-qualified table names
+    let sql = "CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(schema1.t1 -> schema2.t2)) AS SELECT * FROM schema1.t1 JOIN schema2.t2 ON t1.id = t2.id";
+    let stmt = verified_stmt(sql);
+    let output = stmt.to_string();
+    assert!(
+        output.contains("FIXED(schema1.t1 -> schema2.t2)"),
+        "Expected output to contain 'FIXED(schema1.t1 -> schema2.t2)', got: {}",
+        output
+    );
+}

@@ -3946,7 +3946,7 @@ impl fmt::Display for BackfillOrderStrategy {
                 for (start, end) in map {
                     parts.push(format!("{} -> {}", start, end));
                 }
-                write!(f, "{}", display_comma_separated(&parts))
+                write!(f, "FIXED({})", display_comma_separated(&parts))
             }
         }
     }
