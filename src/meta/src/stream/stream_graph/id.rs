@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use crate::controller::id::{
     IdCategory, IdCategoryType, IdGeneratorManager as SqlIdGeneratorManager,
 };
@@ -66,11 +68,6 @@ impl<const TYPE: IdCategoryType> GlobalIdGen<TYPE> {
         );
         GlobalId(local_id + self.offset)
     }
-
-    /// Returns the length of this ID generator.
-    pub fn len(&self) -> u32 {
-        self.len
-    }
 }
 
 pub(super) type GlobalFragmentId = GlobalId<{ IdCategory::Fragment }>;
@@ -78,5 +75,71 @@ pub(super) type GlobalFragmentIdGen = GlobalIdGen<{ IdCategory::Fragment }>;
 
 pub(super) type GlobalTableIdGen = GlobalIdGen<{ IdCategory::Table }>;
 
-pub(super) type GlobalActorId = GlobalId<{ IdCategory::Actor }>;
-pub(super) type GlobalActorIdGen = GlobalIdGen<{ IdCategory::Actor }>;
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub(super) struct GlobalActorId(u32);
+
+impl GlobalActorId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub fn as_global_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for GlobalActorId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct GlobalActorIdGen {
+    offset: u32,
+    len: u32,
+}
+
+impl GlobalActorIdGen {
+    pub fn new(counter: &AtomicU32, len: u64) -> Self {
+        let len_u32 = u32::try_from(len).expect("actor count exceeds u32::MAX");
+        let offset = counter.fetch_add(len_u32, Ordering::Relaxed);
+        Self {
+            offset,
+            len: len_u32,
+        }
+    }
+
+    pub fn to_global_id(self, local_id: u32) -> GlobalActorId {
+        assert!(
+            local_id < self.len,
+            "id {} is out of range (len: {})",
+            local_id,
+            self.len
+        );
+        GlobalActorId(local_id + self.offset)
+    }
+
+    pub fn len(&self) -> u32 {
+        self.len
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_actor_id_gen_reserves_unique_ranges() {
+        let counter = AtomicU32::new(10);
+        let first = GlobalActorIdGen::new(&counter, 3);
+        assert_eq!(first.len(), 3);
+        let second = GlobalActorIdGen::new(&counter, 2);
+        assert_eq!(second.len(), 2);
+
+        assert_eq!(first.to_global_id(0).as_global_id(), 10);
+        assert_eq!(first.to_global_id(2).as_global_id(), 12);
+        assert_eq!(second.to_global_id(1).as_global_id(), 14);
+        assert_eq!(counter.load(Ordering::Relaxed), 15);
+    }
+}

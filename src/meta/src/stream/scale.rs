@@ -548,11 +548,9 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
-        let id_gen = self.env.id_gen_manager();
-
         let RenderedGraph { fragments, .. } = render_fragments(
             txn,
-            id_gen,
+            self.env.actor_id_generator(),
             ensembles,
             workers,
             adaptive_parallelism_strategy,
@@ -573,10 +571,14 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
-        let id_gen = self.env.id_gen_manager();
-
-        let RenderedGraph { fragments, .. } =
-            render_jobs(txn, id_gen, jobs, workers, adaptive_parallelism_strategy).await?;
+        let RenderedGraph { fragments, .. } = render_jobs(
+            txn,
+            self.env.actor_id_generator(),
+            jobs,
+            workers,
+            adaptive_parallelism_strategy,
+        )
+        .await?;
 
         self.build_reschedule_commands(txn, fragments).await
     }
