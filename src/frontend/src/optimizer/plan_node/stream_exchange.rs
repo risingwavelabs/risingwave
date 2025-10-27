@@ -58,10 +58,10 @@ impl StreamExchange {
                 input_dist_key
                     .iter()
                     .all(|idx| input_stream_key.contains(idx)),
-                "distribution key must be a subset of stream key before shuffle to a different distribution,\n\
-                 dist_key: {input_dist_key:?}\n\
-                 stream_key: {input_stream_key:?}\n\
-                 plan:\n{}",
+                "distribution key must be a subset of stream key before shuffle to a different distribution\n\
+                 - dist_key: {input_dist_key:?}\n\
+                 - stream_key: {input_stream_key:?}\n\
+                 - plan:\n{}",
                 input.explain_to_string()
             );
         }
