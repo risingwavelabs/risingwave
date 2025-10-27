@@ -8,7 +8,7 @@ create table t(v1 int, v2 int) with (
     fields.v2.kind = 'random',
     fields.v2.seed = '1',
     fields.v2.min = 1,
-    fields.v2.max = 100,
+    fields.v2.max = 300,
     datagen.rows.per.second = 100
 );
 
@@ -25,7 +25,7 @@ create table t2(v1 int, v2 int) with (
     fields.v2.kind = 'random',
     fields.v2.seed = '2',
     fields.v2.min = 1,
-    fields.v2.max = 100,
+    fields.v2.max = 300,
     datagen.rows.per.second = 100
 );
 
@@ -42,7 +42,7 @@ create table t3(v1 int, v2 int) with (
     fields.v2.kind = 'random',
     fields.v2.seed = '3',
     fields.v2.min = 1,
-    fields.v2.max = 100,
+    fields.v2.max = 300,
     datagen.rows.per.second = 100
 );
 
@@ -59,7 +59,7 @@ create table t4(v1 int, v2 int) with (
     fields.v2.kind = 'random',
     fields.v2.seed = '4',
     fields.v2.min = 1,
-    fields.v2.max = 100,
+    fields.v2.max = 300,
     datagen.rows.per.second = 100
 );
 
@@ -76,7 +76,7 @@ create table t5(v1 int, v2 int) with (
     fields.v2.kind = 'random',
     fields.v2.seed = '5',
     fields.v2.min = 1,
-    fields.v2.max = 100,
+    fields.v2.max = 300,
     datagen.rows.per.second = 100
 );
 
@@ -122,3 +122,9 @@ statement ok
 create materialized view mv8 as
 select mv4.v1, mv4.t4_v1, mv5.v1 as mv5_v1, mv5.mv4_v1
 from mv4 join mv5 on mv4.v1 = mv5.mv4_v1;
+
+statement ok
+create table t_dest(v1 int primary key, v2 int);
+
+statement ok
+create sink s1 into t_dest from t;

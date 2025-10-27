@@ -26,7 +26,7 @@ use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use strum_macros::{Display, EnumString};
 use thiserror_ext::AsReport;
@@ -331,11 +331,12 @@ impl TryFrom<SinkParam> for KafkaSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = KafkaConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,

@@ -38,7 +38,7 @@ use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::{GLOBAL_META_METRICS, MetaMetrics};
 use crate::{MetaError, MetaResult};
 
 pub(super) struct NewBarrier {
@@ -385,8 +385,9 @@ impl PeriodicBarriers {
             } else {
                 sys_barrier_interval
             };
+
             // Create an `IntervalStream` for the database with the specified interval.
-            let interval_stream = Self::new_interval_stream(duration);
+            let interval_stream = Self::new_interval_stream(duration, &database_id);
             timer_streams.insert(database_id, interval_stream);
         });
         Self {
@@ -398,7 +399,11 @@ impl PeriodicBarriers {
     }
 
     // Create a new interval stream with the specified duration.
-    fn new_interval_stream(duration: Duration) -> IntervalStream {
+    fn new_interval_stream(duration: Duration, database_id: &DatabaseId) -> IntervalStream {
+        GLOBAL_META_METRICS
+            .barrier_interval_by_database
+            .with_label_values(&[&database_id.to_string()])
+            .set(duration.as_millis_f64());
         let mut interval = tokio::time::interval(duration);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         IntervalStream::new(interval)
@@ -413,7 +418,7 @@ impl PeriodicBarriers {
         // Reset the `IntervalStream` for all databases that use default param.
         for (db_id, db_state) in &mut self.databases {
             if db_state.barrier_interval.is_none() {
-                let interval_stream = Self::new_interval_stream(duration);
+                let interval_stream = Self::new_interval_stream(duration, db_id);
                 self.timer_streams.insert(*db_id, interval_stream);
             }
         }
@@ -464,7 +469,8 @@ impl PeriodicBarriers {
         } else {
             self.sys_barrier_interval
         };
-        let interval_stream = Self::new_interval_stream(duration);
+
+        let interval_stream = Self::new_interval_stream(duration, &database_id);
         self.timer_streams.insert(database_id, interval_stream);
     }
 
@@ -582,8 +588,8 @@ pub(super) enum MarkReadyOptions {
 }
 
 impl ScheduledBarriers {
-    /// Pre buffered drop and cancel command, return true if any.
-    pub(super) fn pre_apply_drop_cancel(&self, database_id: Option<DatabaseId>) -> bool {
+    /// Pre buffered drop and cancel command, return all dropped state tables if any.
+    pub(super) fn pre_apply_drop_cancel(&self, database_id: Option<DatabaseId>) -> Vec<TableId> {
         self.pre_apply_drop_cancel_scheduled(database_id)
     }
 
@@ -719,11 +725,14 @@ impl ScheduledBarriers {
         }
     }
 
-    /// Try to pre apply drop and cancel scheduled command and return them if any.
+    /// Try to pre apply drop and cancel scheduled command and return all dropped state tables if any.
     /// It should only be called in recovery.
-    pub(super) fn pre_apply_drop_cancel_scheduled(&self, database_id: Option<DatabaseId>) -> bool {
+    pub(super) fn pre_apply_drop_cancel_scheduled(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> Vec<TableId> {
         let mut queue = self.inner.queue.lock();
-        let mut applied = false;
+        let mut dropped_tables = vec![];
 
         let mut pre_apply_drop_cancel = |queue: &mut DatabaseScheduledQueue| {
             while let Some(ScheduledQueueItem {
@@ -731,8 +740,11 @@ impl ScheduledBarriers {
             }) = queue.queue.inner.pop_front()
             {
                 match command {
-                    Command::DropStreamingJobs { .. } => {
-                        applied = true;
+                    Command::DropStreamingJobs {
+                        unregistered_state_table_ids,
+                        ..
+                    } => {
+                        dropped_tables.extend(unregistered_state_table_ids);
                     }
                     Command::DropSubscription { .. } => {}
                     _ => {
@@ -758,7 +770,7 @@ impl ScheduledBarriers {
             }
         }
 
-        applied
+        dropped_tables
     }
 }
 
@@ -860,9 +872,27 @@ mod tests {
             unimplemented!()
         }
 
+        async fn handle_list_finished_source_ids(
+            &self,
+            _list_finished_source_ids: Vec<u32>,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
         async fn handle_load_finished_source_ids(
             &self,
             _load_finished_source_ids: Vec<u32>,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn handle_refresh_finished_table_ids(
+            &self,
+            _refresh_finished_table_ids: Vec<u32>,
         ) -> MetaResult<()> {
             unimplemented!()
         }

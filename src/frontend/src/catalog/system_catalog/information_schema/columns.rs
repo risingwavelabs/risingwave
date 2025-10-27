@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 /// The view `columns` contains information about all table columns (or view columns) in the
 /// database. System columns (ctid, etc.) are not included. Only those columns are shown that the
 /// current user has access to (by way of being the owner or having some privilege).
-/// Ref: [`https://www.postgresql.org/docs/current/infoschema-columns.html`]
+/// Ref: `https://www.postgresql.org/docs/current/infoschema-columns.html`
 ///
 /// In RisingWave, `columns` also contains all materialized views' columns.
 #[system_catalog(

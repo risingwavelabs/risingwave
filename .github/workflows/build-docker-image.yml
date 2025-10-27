@@ -8,10 +8,11 @@ on:
         required: true
         type: string
         default: 'unlabeled'
-      branch:
-        description: 'Branch to build the image from (defaults to current branch if not provided)'
+      fast_build:
+        description: 'Fast Build (ARM-only, LTO-disabled)'
         required: false
-        type: string
+        type: boolean
+        default: false
       push_dockerhub:
         description: 'Whether to push to DockerHub'
         required: false
@@ -23,8 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.branch }}
       - name: 'Generate image tag'
         id: get_release_branch
         run: |
@@ -58,6 +57,18 @@ jobs:
           echo "IMAGE_TAG=$IMAGE_TAG"
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
+          SKIP_TARGET_AMD64="${{ inputs.fast_build }}"
+          echo "SKIP_TARGET_AMD64=$SKIP_TARGET_AMD64"
+          echo "SKIP_TARGET_AMD64=$SKIP_TARGET_AMD64" >> $GITHUB_ENV
+
+          # Only set CARGO_PROFILE for fast build
+          # Regular build uses the default
+          if [[ "${{ github.event.inputs.fast_build }}" == "true" ]]; then
+            CARGO_PROFILE="patch-production"
+            echo "CARGO_PROFILE=$CARGO_PROFILE"
+            echo "CARGO_PROFILE=$CARGO_PROFILE" >> $GITHUB_ENV
+          fi
+
           # Always set PUSH_DOCKERHUB based on input
           if [[ "${{ github.event.inputs.push_dockerhub }}" == "true" ]]; then
             PUSH_DOCKERHUB="true"
@@ -74,4 +85,4 @@ jobs:
           branch: ${{ env.BRANCH_NAME }}
           commit: HEAD
           message: ':github: Triggering Docker build with image tag: ${{ env.IMAGE_TAG }}'
-          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}", "PUSH_DOCKERHUB": "${{ env.PUSH_DOCKERHUB }}" }'
+          build_env_vars: '{ "IMAGE_TAG": "${{ env.IMAGE_TAG }}", "PUSH_DOCKERHUB": "${{ env.PUSH_DOCKERHUB }}", "SKIP_TARGET_AMD64": "${{ env.SKIP_TARGET_AMD64 }}", "CARGO_PROFILE": "${{ env.CARGO_PROFILE }}" }'

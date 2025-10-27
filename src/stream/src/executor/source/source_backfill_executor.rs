@@ -140,8 +140,7 @@ impl BackfillStage {
 
     fn debug_assert_consistent(&self) {
         if cfg!(debug_assertions) {
-            let all_splits: HashSet<_> =
-                self.splits.iter().map(|split| split.id().clone()).collect();
+            let all_splits: HashSet<_> = self.splits.iter().map(|split| split.id()).collect();
             assert_eq!(
                 self.states.keys().cloned().collect::<HashSet<_>>(),
                 all_splits
@@ -497,7 +496,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     Either::Left(msg) => {
                         let Ok(msg) = msg else {
                             let e = msg.unwrap_err();
-                            tracing::warn!(
+                            tracing::error!(
                                 error = ?e.as_report(),
                                 source_id = %self.source_id,
                                 "stream source reader error",
@@ -505,7 +504,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             GLOBAL_ERROR_METRICS.user_source_error.report([
                                 "SourceReaderError".to_owned(),
                                 self.source_id.to_string(),
-                                self.source_name.to_owned(),
+                                self.source_name.clone(),
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
@@ -1058,10 +1057,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
-        let target_splits: HashSet<SplitId> = target_splits
-            .into_iter()
-            .map(|split| (split.id()))
-            .collect();
+        let target_splits: HashSet<SplitId> =
+            target_splits.into_iter().map(|split| split.id()).collect();
 
         let mut split_changed = false;
         let mut newly_added_splits = vec![];

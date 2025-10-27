@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -55,6 +55,8 @@ pub struct SchemaCatalog {
     source_by_id: HashMap<SourceId, Arc<SourceCatalog>>,
     sink_by_name: HashMap<String, Arc<SinkCatalog>>,
     sink_by_id: HashMap<SinkId, Arc<SinkCatalog>>,
+    /// reverted index of (`sink.target_table` -> `sink_id`s)
+    table_incoming_sinks: HashMap<TableId, HashSet<SinkId>>,
     subscription_by_name: HashMap<String, Arc<SubscriptionCatalog>>,
     subscription_by_id: HashMap<SubscriptionId, Arc<SubscriptionCatalog>>,
     index_by_name: HashMap<String, Arc<IndexCatalog>>,
@@ -286,6 +288,15 @@ impl SchemaCatalog {
                 .or_insert(vec![id]);
         }
 
+        if let Some(target_table) = sink_ref.target_table {
+            assert!(
+                self.table_incoming_sinks
+                    .entry(target_table)
+                    .or_default()
+                    .insert(sink_ref.id.sink_id)
+            );
+        }
+
         self.sink_by_name
             .try_insert(name, sink_ref.clone())
             .unwrap();
@@ -304,6 +315,16 @@ impl SchemaCatalog {
                     e.remove_entry();
                 }
             }
+            if let Some(target_table) = sink_ref.target_table {
+                let incoming_sinks = self
+                    .table_incoming_sinks
+                    .get_mut(&target_table)
+                    .expect("should exists");
+                assert!(incoming_sinks.remove(&sink_ref.id.sink_id));
+                if incoming_sinks.is_empty() {
+                    self.table_incoming_sinks.remove(&target_table);
+                }
+            }
         } else {
             tracing::warn!(
                 id,
@@ -319,6 +340,7 @@ impl SchemaCatalog {
         let sink_ref = Arc::new(sink);
 
         let old_sink = self.sink_by_id.get(&id).unwrap();
+        assert_eq!(sink_ref.target_table, old_sink.target_table);
         // check if the sink name gets updated.
         if old_sink.name != name
             && let Some(s) = self.sink_by_name.get(&old_sink.name)
@@ -329,6 +351,10 @@ impl SchemaCatalog {
 
         self.sink_by_name.insert(name, sink_ref.clone());
         self.sink_by_id.insert(id, sink_ref);
+    }
+
+    pub fn table_incoming_sinks(&self, table_id: TableId) -> Option<&HashSet<SinkId>> {
+        self.table_incoming_sinks.get(&table_id)
     }
 
     pub fn create_subscription(&mut self, prost: &PbSubscription) {
@@ -541,9 +567,7 @@ impl SchemaCatalog {
         self.secret_by_id
             .try_insert(id, secret_ref.clone())
             .unwrap();
-        self.secret_by_name
-            .try_insert(name, secret_ref.clone())
-            .unwrap();
+        self.secret_by_name.try_insert(name, secret_ref).unwrap();
     }
 
     pub fn update_secret(&mut self, prost: &PbSecret) {
@@ -587,9 +611,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name.values().filter(|v| {
-            v.is_user_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
-        })
+        self.table_by_name
+            .values()
+            .filter(|v| v.is_user_table() && has_access_to_object(user, v.id.table_id, v.owner))
     }
 
     pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
@@ -602,9 +626,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name.values().filter(|v| {
-            v.is_internal_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
-        })
+        self.table_by_name
+            .values()
+            .filter(|v| v.is_internal_table() && has_access_to_object(user, v.id.table_id, v.owner))
     }
 
     /// Iterate all non-internal tables, including user tables, materialized views and indices.
@@ -619,7 +643,7 @@ impl SchemaCatalog {
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name.values().filter(|v| {
-            !v.is_internal_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+            !v.is_internal_table() && has_access_to_object(user, v.id.table_id, v.owner)
         })
     }
 
@@ -632,9 +656,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name.values().filter(|v| {
-            v.is_mview() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
-        })
+        self.table_by_name
+            .values()
+            .filter(|v| v.is_mview() && has_access_to_object(user, v.id.table_id, v.owner))
     }
 
     /// Iterate created materialized views, excluding the indices.
@@ -649,9 +673,7 @@ impl SchemaCatalog {
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name.values().filter(|v| {
-            v.is_mview()
-                && v.is_created()
-                && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+            v.is_mview() && v.is_created() && has_access_to_object(user, v.id.table_id, v.owner)
         })
     }
 
@@ -666,7 +688,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<IndexCatalog>> {
         self.index_by_name
             .values()
-            .filter(|idx| has_access_to_object(user, &self.name, idx.id.index_id, idx.owner()))
+            .filter(|idx| has_access_to_object(user, idx.id.index_id, idx.owner()))
     }
 
     /// Iterate all sources
@@ -680,7 +702,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SourceCatalog>> {
         self.source_by_name
             .values()
-            .filter(|s| has_access_to_object(user, &self.name, s.id, s.owner))
+            .filter(|s| has_access_to_object(user, s.id, s.owner))
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
@@ -693,7 +715,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SinkCatalog>> {
         self.sink_by_name
             .values()
-            .filter(|s| has_access_to_object(user, &self.name, s.id.sink_id, s.owner.user_id))
+            .filter(|s| has_access_to_object(user, s.id.sink_id, s.owner.user_id))
     }
 
     pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
@@ -704,9 +726,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<SubscriptionCatalog>> {
-        self.subscription_by_name.values().filter(|s| {
-            has_access_to_object(user, &self.name, s.id.subscription_id, s.owner.user_id)
-        })
+        self.subscription_by_name
+            .values()
+            .filter(|s| has_access_to_object(user, s.id.subscription_id, s.owner.user_id))
     }
 
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
@@ -719,19 +741,47 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<ViewCatalog>> {
         self.view_by_name
             .values()
-            .filter(|v| v.is_system_view() || has_access_to_object(user, &self.name, v.id, v.owner))
+            .filter(|v| v.is_system_view() || has_access_to_object(user, v.id, v.owner))
     }
 
     pub fn iter_function(&self) -> impl Iterator<Item = &Arc<FunctionCatalog>> {
         self.function_by_name.values().flat_map(|v| v.values())
     }
 
+    pub fn iter_function_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<FunctionCatalog>> {
+        self.function_by_name
+            .values()
+            .flat_map(|v| v.values())
+            .filter(|f| has_access_to_object(user, f.id.function_id(), f.owner))
+    }
+
     pub fn iter_connections(&self) -> impl Iterator<Item = &Arc<ConnectionCatalog>> {
         self.connection_by_name.values()
     }
 
+    pub fn iter_connections_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<ConnectionCatalog>> {
+        self.connection_by_name
+            .values()
+            .filter(|c| has_access_to_object(user, c.id, c.owner))
+    }
+
     pub fn iter_secret(&self) -> impl Iterator<Item = &Arc<SecretCatalog>> {
         self.secret_by_name.values()
+    }
+
+    pub fn iter_secret_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<SecretCatalog>> {
+        self.secret_by_name
+            .values()
+            .filter(|s| has_access_to_object(user, s.id.secret_id(), s.owner))
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &Arc<SystemTableCatalog>> {
@@ -818,20 +868,48 @@ impl SchemaCatalog {
         self.subscription_by_id.get(subscription_id)
     }
 
-    pub fn get_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
-        self.index_by_name.get(index_name)
+    pub fn get_index_by_name(
+        &self,
+        index_name: &str,
+        bind_creating: bool,
+    ) -> Option<&Arc<IndexCatalog>> {
+        self.index_by_name
+            .get(index_name)
+            .filter(|i| bind_creating || i.is_created())
+    }
+
+    pub fn get_any_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
+        self.get_index_by_name(index_name, true)
+    }
+
+    pub fn get_created_index_by_name(&self, index_name: &str) -> Option<&Arc<IndexCatalog>> {
+        self.get_index_by_name(index_name, false)
     }
 
     pub fn get_index_by_id(&self, index_id: &IndexId) -> Option<&Arc<IndexCatalog>> {
         self.index_by_id.get(index_id)
     }
 
-    /// Returns all indexes on the given table. Will not check if the table exists.
-    pub fn get_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+    pub fn get_indexes_by_table_id(
+        &self,
+        table_id: &TableId,
+        include_creating: bool,
+    ) -> Vec<Arc<IndexCatalog>> {
         self.indexes_by_table_id
             .get(table_id)
             .cloned()
             .unwrap_or_default()
+            .into_iter()
+            .filter(|i| include_creating || i.is_created())
+            .collect()
+    }
+
+    pub fn get_any_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+        self.get_indexes_by_table_id(table_id, true)
+    }
+
+    pub fn get_created_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+        self.get_indexes_by_table_id(table_id, false)
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&Arc<SystemTableCatalog>> {
@@ -1030,6 +1108,7 @@ impl From<&PbSchema> for SchemaCatalog {
             source_by_id: HashMap::new(),
             sink_by_name: HashMap::new(),
             sink_by_id: HashMap::new(),
+            table_incoming_sinks: HashMap::new(),
             index_by_name: HashMap::new(),
             index_by_id: HashMap::new(),
             indexes_by_table_id: HashMap::new(),

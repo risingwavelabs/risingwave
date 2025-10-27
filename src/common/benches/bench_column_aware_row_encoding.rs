@@ -173,7 +173,7 @@ fn bench_column_aware_encoding_struct(c: &mut Criterion) {
             [outer_struct].into(),
             std::iter::empty(),
         );
-        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value))]);
 
         (serializer, deserializer, row)
     };
@@ -214,7 +214,7 @@ fn bench_column_aware_encoding_composite(c: &mut Criterion) {
             inner_struct = inner_struct.with_ids([ColumnId::new(11), ColumnId::new(12)]);
         }
         let inner_struct: DataType = inner_struct.into();
-        let list = DataType::List(Box::new(inner_struct.clone()));
+        let list = DataType::list(inner_struct.clone());
         let map = MapType::from_kv(DataType::Varchar, list.clone()).into();
         let mut outer_struct = StructType::new([("f1", DataType::Int32), ("map", map)]);
         if alterable {
@@ -238,7 +238,7 @@ fn bench_column_aware_encoding_composite(c: &mut Criterion) {
             [outer_struct].into(),
             std::iter::empty(),
         );
-        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value))]);
 
         (serializer, deserializer, row)
     };

@@ -132,7 +132,7 @@ mod bind {
                 match target_relation {
                     AnalyzeTarget::Index(_) => {
                         let (catalog, _schema_name) =
-                            catalog.get_index_by_name(&db_name, schema_path, &name)?;
+                            catalog.get_any_index_by_name(&db_name, schema_path, &name)?;
                         catalog.id.index_id
                     }
                     AnalyzeTarget::Table(_) => {

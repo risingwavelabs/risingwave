@@ -56,7 +56,7 @@ where
     Fut: Future,
 {
     TIME_ZONE::scope(
-        expr_context.time_zone.to_owned(),
+        expr_context.time_zone.clone(),
         STRICT_MODE::scope(expr_context.strict_mode, future),
     )
     .await

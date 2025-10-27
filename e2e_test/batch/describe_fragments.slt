@@ -83,7 +83,8 @@ StreamMaterialize { columns: [id, name, age, created_at, data], stream_key: [id]
 ├── stream key: [ id ]
 └── StreamFilter { predicate: IsNotNull(name) } { output: [ id, name, age, created_at, data ], stream key: [] }
     └── StreamUnion { all: true } { output: [ id, name, age, created_at, data ], stream key: [] }
-        └── MergeExecutor { output: [ id, name, age, created_at, data ], stream key: [] }
+        ├── MergeExecutor { output: [ id, name, age, created_at, data ], stream key: [] }
+        └── StreamUpstreamSinkUnion { output: [ id, name, age, created_at, data ], stream key: [] }
 (empty)
 Fragment % (Actor %)
 StreamDml { columns: [id, name, age, created_at, data] } { output: [ id, name, age, created_at, data ], stream key: [] }
@@ -166,7 +167,7 @@ skipif madsim
 system ok
 psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.snk" \
 --expected 'Fragment % (Actor %)
-StreamSink { type: upsert, columns: [id, name, age, created_at, type], downstream_pk: [] }
+StreamSink { type: upsert, columns: [id, name, age, created_at, type] }
 ├── output: [ tbl.id, tbl.name, tbl.age, tbl.created_at, $expr1 ]
 ├── stream key: [ tbl.id ]
 └── StreamProject { exprs: [tbl.id, tbl.name, tbl.age, tbl.created_at, JsonbAccessStr(tbl.data, '\''type'\'':Varchar) as $expr1] }

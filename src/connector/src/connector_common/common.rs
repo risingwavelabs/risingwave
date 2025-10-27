@@ -28,7 +28,7 @@ use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::bail;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::json::JsonString;
 use serde_with::{DisplayFromStr, serde_as};
 use tempfile::NamedTempFile;

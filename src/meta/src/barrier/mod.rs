@@ -26,10 +26,11 @@ use tokio::sync::oneshot::Sender;
 use self::notifier::Notifier;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor, StreamJobFragments};
+use crate::model::{ActorId, FragmentDownstreamRelation, StreamActor};
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
+pub mod cdc_progress;
 mod checkpoint;
 mod command;
 mod complete_task;
@@ -48,7 +49,7 @@ mod utils;
 mod worker;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignment;
+use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -122,10 +123,10 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
+    background_jobs: HashMap<TableId, String>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
@@ -223,8 +224,8 @@ struct DatabaseRuntimeInfoSnapshot {
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
+    background_jobs: HashMap<TableId, String>,
+    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
 }
 
 impl DatabaseRuntimeInfoSnapshot {

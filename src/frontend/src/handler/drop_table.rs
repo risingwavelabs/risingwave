@@ -130,8 +130,8 @@ pub async fn handle_drop_table(
                     Either::Left(iceberg_properties) => {
                         let catalog = iceberg_properties.create_catalog().await?;
                         let table_id = iceberg_properties
-                            .common
-                            .full_table_name()
+                            .table
+                            .to_table_ident()
                             .context("Unable to parse table name")?;
                         (catalog, table_id)
                     }

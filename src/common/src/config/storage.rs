@@ -231,6 +231,13 @@ pub struct StorageConfig {
     /// The maximum total size of tasks in small file compaction in MB.
     #[serde(default = "default::storage::iceberg_compaction_max_task_total_size_mb")]
     pub iceberg_compaction_max_task_total_size_mb: u32,
+    /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
+    /// Effective pending budget = `ceil(max_task_parallelism * multiplier)`. Default 4.0.
+    /// Set < 1.0 to reduce buffering (may increase `PullTask` RPC frequency); set higher to batch more tasks.
+    #[serde(
+        default = "default::storage::iceberg_compaction_pending_parallelism_budget_multiplier"
+    )]
+    pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
@@ -400,6 +407,20 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::fifo_probation_ratio")]
     pub fifo_probation_ratio: f64,
+
+    /// Set the blob index size for each blob.
+    ///
+    /// A larger blob index size can hold more blob entries, but it will also increase the io size of each blob part
+    /// write.
+    ///
+    /// NOTE:
+    ///
+    /// - The size will be aligned up to a multiplier of 4K.
+    /// - Modifying this configuration will invalidate all existing file cache data.
+    ///
+    /// Default: 16 `KiB`
+    #[serde(default = "default::file_cache::blob_index_size_kb")]
+    pub blob_index_size_kb: usize,
 
     /// Recover mode.
     ///
@@ -1059,6 +1080,10 @@ pub mod default {
         pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
             50 * 1024 // 50GB
         }
+
+        pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {
+            4.0
+        }
     }
 
     pub mod file_cache {
@@ -1108,6 +1133,10 @@ pub mod default {
 
         pub fn fifo_probation_ratio() -> f64 {
             0.1
+        }
+
+        pub fn blob_index_size_kb() -> usize {
+            16
         }
 
         pub fn recover_mode() -> RecoverMode {

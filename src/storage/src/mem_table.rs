@@ -18,11 +18,11 @@ use std::ops::Bound::{Included, Unbounded};
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_hummock_sdk::key::TableKey;
 use thiserror::Error;
 use thiserror_ext::AsReport;
-use tracing::error;
 
 use crate::hummock::iterator::{Backward, Forward, FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
@@ -45,6 +45,7 @@ pub enum KeyOp {
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
 pub struct MemTable {
+    table_id: TableId,
     pub(crate) buffer: MemTableStore,
     pub(crate) op_consistency_level: OpConsistencyLevel,
     pub(crate) kv_size: KvSize,
@@ -52,8 +53,9 @@ pub struct MemTable {
 
 #[derive(Error, Debug)]
 pub enum MemTableError {
-    #[error("Inconsistent operation {key:?}, prev: {prev:?}, new: {new:?}")]
+    #[error("Inconsistent operation on table {table_id} {key:?}, prev: {prev:?}, new: {new:?}")]
     InconsistentOperation {
+        table_id: TableId,
         key: TableKey<Bytes>,
         prev: KeyOp,
         new: KeyOp,
@@ -123,8 +125,9 @@ pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuil
 pub type MemTableHummockRevIterator<'a> = FromRustIterator<'a, MemTableRevIteratorBuilder>;
 
 impl MemTable {
-    pub fn new(op_consistency_level: OpConsistencyLevel) -> Self {
+    pub fn new(table_id: TableId, op_consistency_level: OpConsistencyLevel) -> Self {
         Self {
+            table_id,
             buffer: BTreeMap::new(),
             op_consistency_level,
             kv_size: KvSize::new(),
@@ -133,7 +136,10 @@ impl MemTable {
 
     pub fn drain(&mut self) -> Self {
         self.kv_size.set(0);
-        std::mem::replace(self, Self::new(self.op_consistency_level.clone()))
+        std::mem::replace(
+            self,
+            Self::new(self.table_id, self.op_consistency_level.clone()),
+        )
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -172,6 +178,7 @@ impl MemTable {
                     KeyOp::Insert(_) | KeyOp::Update(_) => {
                         let new_op = KeyOp::Insert(value);
                         let err = MemTableError::InconsistentOperation {
+                            table_id: self.table_id,
                             key: e.key().clone(),
                             prev: e.get().clone(),
                             new: new_op.clone(),
@@ -223,6 +230,7 @@ impl MemTable {
                     KeyOp::Insert(old_op_new_value) => {
                         if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
+                                table_id: self.table_id,
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Delete(old_value),
@@ -236,6 +244,7 @@ impl MemTable {
                     KeyOp::Delete(_) => {
                         let new_op = KeyOp::Delete(old_value);
                         let err = MemTableError::InconsistentOperation {
+                            table_id: self.table_id,
                             key: e.key().clone(),
                             prev: e.get().clone(),
                             new: new_op.clone(),
@@ -256,6 +265,7 @@ impl MemTable {
                     KeyOp::Update((old_op_old_value, old_op_new_value)) => {
                         if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
+                                table_id: self.table_id,
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Delete(old_value),
@@ -306,6 +316,7 @@ impl MemTable {
                     KeyOp::Insert(old_op_new_value) => {
                         if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
+                                table_id: self.table_id,
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Update((old_value, new_value)),
@@ -320,6 +331,7 @@ impl MemTable {
                     KeyOp::Update((old_op_old_value, old_op_new_value)) => {
                         if sanity_check_enabled() && !value_checker(old_op_new_value, &old_value) {
                             return Err(Box::new(MemTableError::InconsistentOperation {
+                                table_id: self.table_id,
                                 key: e.key().clone(),
                                 prev: e.get().clone(),
                                 new: KeyOp::Update((old_value, new_value)),
@@ -334,6 +346,7 @@ impl MemTable {
                     KeyOp::Delete(_) => {
                         let new_op = KeyOp::Update((old_value, new_value));
                         let err = MemTableError::InconsistentOperation {
+                            table_id: self.table_id,
                             key: e.key().clone(),
                             prev: e.get().clone(),
                             new: new_op.clone(),
@@ -432,10 +445,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {
-        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue {
-            check_old_value: CHECK_BYTES_EQUAL.clone(),
-            is_log_store: false,
-        });
+        let mut mem_table = MemTable::new(
+            233.into(),
+            OpConsistencyLevel::ConsistentOldValue {
+                check_old_value: CHECK_BYTES_EQUAL.clone(),
+                is_log_store: false,
+            },
+        );
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -545,7 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mem_table_memory_size_not_consistent_op() {
-        let mut mem_table = MemTable::new(OpConsistencyLevel::Inconsistent);
+        let mut mem_table = MemTable::new(233.into(), OpConsistencyLevel::Inconsistent);
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
@@ -628,10 +644,13 @@ mod tests {
         let mut test_data = ordered_test_data.clone();
 
         test_data.shuffle(&mut rng);
-        let mut mem_table = MemTable::new(OpConsistencyLevel::ConsistentOldValue {
-            check_old_value: CHECK_BYTES_EQUAL.clone(),
-            is_log_store: false,
-        });
+        let mut mem_table = MemTable::new(
+            233.into(),
+            OpConsistencyLevel::ConsistentOldValue {
+                check_old_value: CHECK_BYTES_EQUAL.clone(),
+                is_log_store: false,
+            },
+        );
         for (key, op) in test_data {
             match op {
                 KeyOp::Insert(value) => {

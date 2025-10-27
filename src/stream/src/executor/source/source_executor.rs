@@ -34,6 +34,7 @@ use risingwave_connector::source::{
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
+use serde_json;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
@@ -51,6 +52,29 @@ use crate::task::LocalBarrierManager;
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
 pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+
+/// Extract offset value from CDC split
+///
+/// This function extracts the offset value from CDC split.
+/// For Postgres CDC, the offset is LSN.
+fn extract_split_offset(split: &SplitImpl) -> Option<u64> {
+    match split {
+        SplitImpl::PostgresCdc(pg_split) => {
+            let offset_str = pg_split.start_offset().as_ref()?;
+            extract_pg_cdc_lsn_from_offset(offset_str)
+        }
+        _ => None,
+    }
+}
+
+/// This function parses the offset JSON and extracts the LSN value from the sourceOffset.lsn field.
+/// Returns Some(lsn) if the LSN is found and can be parsed as u64, None otherwise.
+fn extract_pg_cdc_lsn_from_offset(offset_str: &str) -> Option<u64> {
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let lsn = source_offset.get("lsn")?;
+    lsn.as_u64()
+}
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -73,7 +97,7 @@ pub struct SourceExecutor<S: StateStore> {
     is_shared_non_cdc: bool,
 
     /// Local barrier manager for reporting source load finished events
-    barrier_manager: LocalBarrierManager,
+    _barrier_manager: LocalBarrierManager,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -96,7 +120,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
-            barrier_manager,
+            _barrier_manager: barrier_manager,
         }
     }
 
@@ -115,6 +139,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn spawn_wait_checkpoint_worker(
         core: &StreamSourceCore<S>,
         source_reader: SourceReader,
+        metrics: Arc<StreamingMetrics>,
     ) -> StreamExecutorResult<Option<WaitCheckpointTaskBuilder>> {
         let Some(initial_task) = source_reader.create_wait_checkpoint_task().await? else {
             return Ok(None);
@@ -124,6 +149,7 @@ impl<S: StateStore> SourceExecutor<S> {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table().state_store().clone(),
             table_id: core.split_state_store.state_table().table_id().into(),
+            metrics,
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
@@ -182,7 +208,6 @@ impl<S: StateStore> SourceExecutor<S> {
             info!("auto schema change is disabled in config");
             None
         };
-
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.source_id,
@@ -198,20 +223,6 @@ impl<S: StateStore> SourceExecutor<S> {
         );
 
         (column_ids, source_ctx)
-    }
-
-    /// Check if this is a batch refreshable source.
-    fn is_batch_source(&self) -> bool {
-        self.stream_source_core.is_batch_source
-    }
-
-    /// Refresh splits
-    fn refresh_batch_splits(&mut self) -> StreamExecutorResult<Vec<SplitImpl>> {
-        debug_assert!(self.is_batch_source());
-        let core = &self.stream_source_core;
-        let mut split = core.get_batch_split();
-        split.refresh();
-        Ok(vec![split.into()])
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
@@ -262,12 +273,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     {
                         should_rebuild_stream = true;
                     }
-                }
-                ApplyMutationAfterBarrier::RefreshBatchSplits(splits) => {
-                    // Just override the latest split info with the refreshed splits. No need to check.
-                    self.stream_source_core.latest_split_info =
-                        splits.into_iter().map(|s| (s.id(), s)).collect();
-                    should_rebuild_stream = true;
                 }
                 ApplyMutationAfterBarrier::ConnectorPropsChange => {
                     should_rebuild_stream = true;
@@ -376,7 +381,7 @@ impl<S: StateStore> SourceExecutor<S> {
         e: StreamExecutorError,
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
-        tracing::warn!(
+        tracing::error!(
             error = ?e.as_report(),
             actor_id = self.actor_ctx.id,
             source_id = %core.source_id,
@@ -385,7 +390,7 @@ impl<S: StateStore> SourceExecutor<S> {
         GLOBAL_ERROR_METRICS.user_source_error.report([
             e.variant_name().to_owned(),
             core.source_id.to_string(),
-            core.source_name.to_owned(),
+            core.source_name.clone(),
             self.actor_ctx.fragment_id.to_string(),
         ]);
 
@@ -408,8 +413,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let reader_stream_builder = self.stream_reader_builder(source_desc.clone());
-        let reader_stream =
-            reader_stream_builder.into_retry_stream(Some(target_state.clone()), false);
+        let reader_stream = reader_stream_builder.into_retry_stream(Some(target_state), false);
 
         stream.replace_data_stream(reader_stream);
 
@@ -430,6 +434,19 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if !cache.is_empty() {
             tracing::debug!(state = ?cache, "take snapshot");
+
+            // Record LSN metrics for PostgreSQL CDC sources before moving cache
+            let source_id = core.source_id.to_string();
+            for split_impl in &cache {
+                // Extract offset for CDC using type-safe matching
+                if let Some(state_table_lsn_value) = extract_split_offset(split_impl) {
+                    self.metrics
+                        .pg_cdc_state_table_lsn
+                        .with_guarded_label_values(&[&source_id])
+                        .set(state_table_lsn_value as i64);
+                }
+            }
+
             core.split_state_store.set_states(cache).await?;
         }
 
@@ -491,8 +508,12 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let mut wait_checkpoint_task_builder =
-            Self::spawn_wait_checkpoint_worker(&core, source_desc.source.clone()).await?;
+        let mut wait_checkpoint_task_builder = Self::spawn_wait_checkpoint_worker(
+            &core,
+            source_desc.source.clone(),
+            self.metrics.clone(),
+        )
+        .await?;
 
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
@@ -581,8 +602,6 @@ impl<S: StateStore> SourceExecutor<S> {
             .source_split_change_count
             .with_guarded_label_values(&self.get_metric_labels());
 
-        let mut is_refreshing = false;
-
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -604,23 +623,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let epoch = barrier.epoch;
-
-                    // NOTE: We rely on CompleteBarrierTask, which is only for checkpoint barrier,
-                    // so we wait for a checkpoint barrier here.
-                    if barrier.is_checkpoint() && self.is_batch_source() && is_refreshing {
-                        let batch_split = self.stream_source_core.get_batch_split();
-                        if batch_split.finished() {
-                            tracing::info!(?epoch, "emitting load finish");
-                            self.barrier_manager.report_source_load_finished(
-                                epoch,
-                                self.actor_ctx.id,
-                                source_id.table_id(),
-                                source_id.table_id(),
-                            );
-                            is_refreshing = false;
-                        }
-                    }
-
                     let mut split_change = None;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
@@ -700,36 +702,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
-                                }
-                            }
-                            Mutation::RefreshStart {
-                                table_id: _,
-                                associated_source_id,
-                            } if *associated_source_id == source_id => {
-                                debug_assert!(self.is_batch_source());
-                                is_refreshing = true;
-
-                                // Similar to split_change, we need to update the split info, and rebuild source reader.
-
-                                // For batch sources, trigger re-enumeration of splits to detect file changes
-                                if let Ok(new_splits) = self.refresh_batch_splits() {
-                                    tracing::info!(
-                                        actor_id = self.actor_ctx.id,
-                                         %associated_source_id,
-                                        new_splits_count = new_splits.len(),
-                                        "RefreshStart triggered split re-enumeration"
-                                    );
-                                    split_change = Some((
-                                        &source_desc,
-                                        &mut stream,
-                                        ApplyMutationAfterBarrier::RefreshBatchSplits(new_splits),
-                                    ));
-                                } else {
-                                    tracing::warn!(
-                                        actor_id = self.actor_ctx.id,
-                                        %associated_source_id,
-                                        "Failed to refresh splits during RefreshStart"
-                                    );
                                 }
                             }
                             _ => {}
@@ -830,7 +802,6 @@ enum ApplyMutationAfterBarrier<'a> {
         should_trim_state: bool,
         split_change_count: &'a LabelGuardedMetric<GenericCounter<AtomicU64>>,
     },
-    RefreshBatchSplits(Vec<SplitImpl>),
     ConnectorPropsChange,
 }
 
@@ -931,6 +902,7 @@ struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
     table_id: TableId,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> WaitCheckpointWorker<S> {
@@ -954,7 +926,17 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
-                            task.run().await;
+
+                            // Run task with callback to record LSN after successful commit
+                            task.run_with_on_commit_success(|source_id: u64, offset| {
+                                if let Some(lsn_value) = extract_pg_cdc_lsn_from_offset(offset) {
+                                    self.metrics
+                                        .pg_cdc_jni_commit_offset_lsn
+                                        .with_guarded_label_values(&[&source_id.to_string()])
+                                        .set(lsn_value as i64);
+                                }
+                            })
+                            .await;
                         }
                         Err(e) => {
                             tracing::error!(
@@ -1032,7 +1014,6 @@ mod tests {
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_owned(),
-            is_batch_source: false,
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();
@@ -1121,7 +1102,6 @@ mod tests {
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_owned(),
-            is_batch_source: false,
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();

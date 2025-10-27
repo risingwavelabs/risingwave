@@ -32,8 +32,7 @@ mod plan_rewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
-    SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
 
 pub mod backfill_order_strategy;
@@ -83,8 +82,8 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker, PlanTreeNode, Stream,
-    StreamExchange, StreamPlanRef, StreamUnion, StreamVectorIndexWrite, ToStream,
-    VisitExprsRecursive,
+    StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion, StreamVectorIndexWrite,
+    ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
@@ -265,7 +264,7 @@ impl LogicalPlanRoot {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
-        let return_type = DataType::List(input_column_type.clone().into());
+        let return_type = DataType::list(input_column_type.clone());
         let agg = Agg::new(
             vec![PlanAggCall {
                 agg_type: PbAggKind::ArrayAgg.into(),
@@ -362,8 +361,9 @@ impl BatchOptimizedLogicalPlanRoot {
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
-        assert!(
-            *plan.distribution() == Distribution::Single,
+        assert_eq!(
+            *plan.distribution(),
+            Distribution::Single,
             "{}",
             plan.explain_to_string()
         );
@@ -392,12 +392,6 @@ impl BatchPlanRoot {
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
 
-        // Add Project if the any position of `self.out_fields` is set to zero.
-        if self.out_fields.count_ones(..) != self.out_fields.len() {
-            plan =
-                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
-        }
-
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:");
@@ -406,6 +400,12 @@ impl BatchPlanRoot {
         if require_additional_exchange_on_root_in_distributed_mode(plan.clone()) {
             plan =
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
+        }
+
+        // Add Project if the any position of `self.out_fields` is set to zero.
+        if self.out_fields.count_ones(..) != self.out_fields.len() {
+            plan =
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
@@ -537,7 +537,9 @@ impl LogicalPlanRoot {
             ))?;
         }
 
-        if ctx.session_ctx().config().streaming_enable_delta_join() {
+        if ctx.session_ctx().config().streaming_enable_delta_join()
+            && ctx.session_ctx().config().enable_index_selection()
+        {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
             plan = plan.optimize_by_rules(&OptimizationStage::new(
@@ -695,7 +697,7 @@ impl LogicalPlanRoot {
             definition,
             append_only,
             on_conflict,
-            with_version_column,
+            with_version_columns,
             webhook_info,
             engine,
         }: CreateTableProps,
@@ -789,14 +791,23 @@ impl LogicalPlanRoot {
             }
         }
 
-        let version_column_index = if let Some(version_column) = with_version_column {
-            find_version_column_index(&columns, version_column)?
+        let version_column_indices = if !with_version_columns.is_empty() {
+            find_version_column_indices(&columns, with_version_columns)?
         } else {
-            None
+            vec![]
         };
 
         let with_external_source = source_catalog.is_some();
-        let union_inputs = if with_external_source {
+        let (dml_source_node, external_source_node) = if with_external_source {
+            let dummy_source_node = LogicalSource::new(
+                None,
+                columns.clone(),
+                row_id_index,
+                SourceNodeKind::CreateTable,
+                context.clone(),
+                None,
+            )
+            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
             let mut external_source_node = stream_plan.plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
@@ -810,43 +821,24 @@ impl LogicalPlanRoot {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
-
-            let dummy_source_node = LogicalSource::new(
-                None,
-                columns.clone(),
-                row_id_index,
-                SourceNodeKind::CreateTable,
-                context.clone(),
-                None,
-            )
-            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
-
-            let dml_node = inject_dml_node(
-                &columns,
-                append_only,
-                dummy_source_node,
-                &pk_column_indices,
-                kind,
-                column_descs,
-            )?;
-
-            vec![external_source_node, dml_node]
+            (dummy_source_node, Some(external_source_node))
         } else {
-            let dml_node = inject_dml_node(
-                &columns,
-                append_only,
-                stream_plan.plan,
-                &pk_column_indices,
-                kind,
-                column_descs,
-            )?;
-
-            vec![dml_node]
+            (stream_plan.plan, None)
         };
 
-        let dists = union_inputs
+        let dml_node = inject_dml_node(
+            &columns,
+            append_only,
+            dml_source_node,
+            &pk_column_indices,
+            kind,
+            column_descs,
+        )?;
+
+        let dists = external_source_node
             .iter()
             .map(|input| input.distribution())
+            .chain([dml_node.distribution()])
             .unique()
             .collect_vec();
 
@@ -861,13 +853,30 @@ impl LogicalPlanRoot {
             }
         };
 
+        let generated_column_exprs =
+            LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
+        let upstream_sink_union = StreamUpstreamSinkUnion::new(
+            context.clone(),
+            dml_node.schema(),
+            dml_node.stream_key(),
+            dist.clone(), // should always be the same as dist of `Union`
+            append_only,
+            row_id_index.is_none(),
+            generated_column_exprs,
+        );
+
+        let union_inputs = external_source_node
+            .into_iter()
+            .chain([dml_node, upstream_sink_union.into()])
+            .collect_vec();
+
         let mut stream_plan = StreamUnion::new_with_dist(
             Union {
                 all: true,
                 inputs: union_inputs,
                 source_col: None,
             },
-            dist.clone(),
+            dist,
         )
         .into();
 
@@ -896,7 +905,7 @@ impl LogicalPlanRoot {
         let conflict_behavior = on_conflict.to_behavior(append_only, row_id_index.is_some())?;
 
         if let ConflictBehavior::IgnoreConflict = conflict_behavior
-            && version_column_index.is_some()
+            && !version_column_indices.is_empty()
         {
             Err(ErrorCode::InvalidParameterValue(
                 "The with version column syntax cannot be used with the ignore behavior of on conflict".to_owned(),
@@ -945,7 +954,7 @@ impl LogicalPlanRoot {
             columns,
             definition,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             pk_column_indices,
             row_id_index,
             version,
@@ -1140,28 +1149,41 @@ impl<P: PlanPhase> PlanRoot<P> {
     }
 }
 
-fn find_version_column_index(
+fn find_version_column_indices(
     column_catalog: &Vec<ColumnCatalog>,
-    version_column_name: String,
-) -> Result<Option<usize>> {
-    for (index, column) in column_catalog.iter().enumerate() {
-        if column.column_desc.name == version_column_name {
-            if let &DataType::Jsonb
-            | &DataType::List(_)
-            | &DataType::Struct(_)
-            | &DataType::Bytea
-            | &DataType::Boolean = column.data_type()
-            {
-                Err(ErrorCode::InvalidParameterValue(
-                    "The specified version column data type is invalid.".to_owned(),
-                ))?
+    version_column_names: Vec<String>,
+) -> Result<Vec<usize>> {
+    let mut indices = Vec::new();
+    for version_column_name in version_column_names {
+        let mut found = false;
+        for (index, column) in column_catalog.iter().enumerate() {
+            if column.column_desc.name == version_column_name {
+                if let &DataType::Jsonb
+                | &DataType::List(_)
+                | &DataType::Struct(_)
+                | &DataType::Bytea
+                | &DataType::Boolean = column.data_type()
+                {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Version column {} must be of a comparable data type",
+                        version_column_name
+                    ))
+                    .into());
+                }
+                indices.push(index);
+                found = true;
+                break;
             }
-            return Ok(Some(index));
+        }
+        if !found {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Version column {} not found",
+                version_column_name
+            ))
+            .into());
         }
     }
-    Err(ErrorCode::InvalidParameterValue(
-        "The specified version column name is not in the current columns.".to_owned(),
-    ))?
+    Ok(indices)
 }
 
 fn const_eval_exprs<C: ConventionMarker>(plan: PlanRef<C>) -> Result<PlanRef<C>> {
@@ -1201,68 +1223,55 @@ fn exist_and_no_exchange_before(
             .any(|input| exist_and_no_exchange_before(input, is_candidate))
 }
 
+impl BatchPlanRef {
+    fn is_user_table_scan(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchSeqScan
+            || self.node_type() == BatchPlanNodeType::BatchLogSeqScan
+            || self.node_type() == BatchPlanNodeType::BatchVectorSearch
+    }
+
+    fn is_source_scan(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchSource
+            || self.node_type() == BatchPlanNodeType::BatchKafkaScan
+            || self.node_type() == BatchPlanNodeType::BatchIcebergScan
+    }
+
+    fn is_insert(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchInsert
+    }
+
+    fn is_update(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchUpdate
+    }
+
+    fn is_delete(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchDelete
+    }
+}
+
 /// As we always run the root stage locally, for some plan in root stage which need to execute in
 /// compute node we insert an additional exhchange before it to avoid to include it in the root
 /// stage.
 ///
 /// Returns `true` if we must insert an additional exchange to ensure this.
 fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -> bool {
-    fn is_user_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSeqScan
-    }
-
-    fn is_log_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchLogSeqScan
-    }
-
-    fn is_source(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSource
-            || plan.node_type() == BatchPlanNodeType::BatchKafkaScan
-            || plan.node_type() == BatchPlanNodeType::BatchIcebergScan
-    }
-
-    fn is_insert(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchInsert
-    }
-
-    fn is_update(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchUpdate
-    }
-
-    fn is_delete(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchDelete
-    }
-
     assert_eq!(plan.distribution(), &Distribution::Single);
-    exist_and_no_exchange_before(&plan, is_user_table)
-        || exist_and_no_exchange_before(&plan, is_source)
-        || exist_and_no_exchange_before(&plan, is_insert)
-        || exist_and_no_exchange_before(&plan, is_update)
-        || exist_and_no_exchange_before(&plan, is_delete)
-        || exist_and_no_exchange_before(&plan, is_log_table)
+    exist_and_no_exchange_before(&plan, |plan| {
+        plan.is_user_table_scan()
+            || plan.is_source_scan()
+            || plan.is_insert()
+            || plan.is_update()
+            || plan.is_delete()
+    })
 }
 
 /// The purpose is same as `require_additional_exchange_on_root_in_distributed_mode`. We separate
 /// them for the different requirement of plan node in different execute mode.
 fn require_additional_exchange_on_root_in_local_mode(plan: BatchPlanRef) -> bool {
-    fn is_user_table(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSeqScan
-    }
-
-    fn is_source(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchSource
-            || plan.node_type() == BatchPlanNodeType::BatchKafkaScan
-            || plan.node_type() == BatchPlanNodeType::BatchIcebergScan
-    }
-
-    fn is_insert(plan: &BatchPlanRef) -> bool {
-        plan.node_type() == BatchPlanNodeType::BatchInsert
-    }
-
     assert_eq!(plan.distribution(), &Distribution::Single);
-    exist_and_no_exchange_before(&plan, is_user_table)
-        || exist_and_no_exchange_before(&plan, is_source)
-        || exist_and_no_exchange_before(&plan, is_insert)
+    exist_and_no_exchange_before(&plan, |plan| {
+        plan.is_user_table_scan() || plan.is_source_scan() || plan.is_insert()
+    })
 }
 
 #[cfg(test)]

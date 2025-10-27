@@ -54,7 +54,7 @@ impl FilterExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?.compact();
+            let data_chunk = data_chunk?.compact_vis();
             let vis_array = self.expr.eval(&data_chunk).await?;
 
             if let Bool(vis) = vis_array.as_ref() {
@@ -134,7 +134,7 @@ mod tests {
         use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListValue};
         use risingwave_common::types::Scalar;
 
-        let mut builder = ListArrayBuilder::with_type(4, DataType::List(Box::new(DataType::Int32)));
+        let mut builder = ListArrayBuilder::with_type(4, DataType::Int32.list());
 
         // Add 4 ListValues to ArrayBuilder
         for i in 1..=4 {
@@ -146,7 +146,7 @@ mod tests {
 
         // Initialize mock executor
         let mut mock_executor = MockExecutor::new(Schema {
-            fields: vec![Field::unnamed(DataType::List(Box::new(DataType::Int32)))],
+            fields: vec![Field::unnamed(DataType::Int32.list())],
         });
         mock_executor.add(chunk);
 
@@ -160,11 +160,7 @@ mod tests {
 
         let fields = &filter_executor.schema().fields;
 
-        assert!(
-            fields
-                .iter()
-                .all(|f| f.data_type == DataType::List(Box::new(DataType::Int32)))
-        );
+        assert!(fields.iter().all(|f| f.data_type == DataType::Int32.list()));
 
         let mut stream = filter_executor.execute();
 

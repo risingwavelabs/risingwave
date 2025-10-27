@@ -108,6 +108,8 @@
   formatted_sql: CREATE TABLE T ("FULL" INT)
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("FULL")
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("FULL")
+- input: CREATE TABLE T ("FULL" INT, MORE INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("MORE", "FULL")
+  formatted_sql: CREATE TABLE T ("FULL" INT, MORE INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN("MORE", "FULL")
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO NOTHING
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO NOTHING
 - input: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE FULL WITH VERSION COLUMN
@@ -129,6 +131,11 @@
   formatted_sql: CREATE TABLE T ("FULL" INT) ON CONFLICT DO UPDATE IF NOT NULL
 - input: CREATE TABLE t (a int, b int, ts timestamptz as proctime(), primary key (a)) ON CONFLICT DO UPDATE IF NOT NULL INCLUDE timestamp AS ts_col WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') FORMAT PLAIN ENCODE JSON
   formatted_sql: CREATE TABLE t (a INT, b INT, ts timestamptz AS proctime(), PRIMARY KEY (a)) ON CONFLICT DO UPDATE IF NOT NULL INCLUDE timestamp AS ts_col WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') FORMAT PLAIN ENCODE JSON
+- input: create table t_error5 (id int, v1 int, primary key(id)) on conflict do update if not null with version column();
+  error_msg: |-
+    sql parser error: expected identifier, found: )
+    LINE 1: create table t_error5 (id int, v1 int, primary key(id)) on conflict do update if not null with version column();
+                                                                                                                          ^
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 - input: CREATE USER admin_user WITH ADMIN
@@ -231,3 +238,7 @@
 - input: CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test USING hnsw (name, age DESC) INCLUDE(other) DISTRIBUTED BY(name) WITH (m = 16)
   formatted_sql: CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test USING hnsw (name, age DESC) INCLUDE(other) DISTRIBUTED BY(name) WITH (m = 16)
   formatted_ast: 'CreateIndex { name: ObjectName([Ident { value: "idx_name", quote_style: None }]), table_name: ObjectName([Ident { value: "test", quote_style: None }]), columns: [OrderByExpr { expr: Identifier(Ident { value: "name", quote_style: None }), asc: None, nulls_first: None }, OrderByExpr { expr: Identifier(Ident { value: "age", quote_style: None }), asc: Some(false), nulls_first: None }], method: Some(Ident { value: "hnsw", quote_style: None }), include: [Ident { value: "other", quote_style: None }], distributed_by: [Identifier(Ident { value: "name", quote_style: None })], unique: true, if_not_exists: true, with_properties: WithProperties([SqlOption { name: ObjectName([Ident { value: "m", quote_style: None }]), value: Value(Number("16")) }]) }'
+- input: CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(t1 -> t2, t2 -> t3)) AS SELECT * FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t2.id = t3.id
+  formatted_sql: CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(t1 -> t2, t2 -> t3)) AS SELECT * FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t2.id = t3.id
+- input: CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(schema1.t1 -> schema2.t2)) AS SELECT * FROM schema1.t1 JOIN schema2.t2 ON t1.id = t2.id
+  formatted_sql: CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(schema1.t1 -> schema2.t2)) AS SELECT * FROM schema1.t1 JOIN schema2.t2 ON t1.id = t2.id

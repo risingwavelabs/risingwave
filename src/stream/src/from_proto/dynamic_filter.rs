@@ -20,7 +20,7 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::*;
-use crate::common::table::state_table::{StateTable, WatermarkCacheStateTable};
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
@@ -50,18 +50,21 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        let state_table_r =
-            StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
+        let state_table_r = StateTableBuilder::new(node.get_right_table()?, store.clone(), None)
+            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .build()
+            .await;
 
         let left_table = node.get_left_table()?;
         let cleaned_by_watermark = left_table.get_cleaned_by_watermark();
 
         let exec = if cleaned_by_watermark {
-            let state_table_l =
-                WatermarkCacheStateTable::from_table_catalog(node.get_left_table()?, store, vnodes)
-                    .await;
+            let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
+                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .build()
+                .await;
 
-            DynamicFilterExecutor::new(
+            DynamicFilterExecutor::<_, true>::new(
                 params.actor_context,
                 params.eval_error_report,
                 params.info.schema.clone(),
@@ -77,10 +80,12 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             )
             .boxed()
         } else {
-            let state_table_l =
-                StateTable::from_table_catalog(node.get_left_table()?, store, vnodes).await;
+            let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
+                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .build()
+                .await;
 
-            DynamicFilterExecutor::new(
+            DynamicFilterExecutor::<_, false>::new(
                 params.actor_context,
                 params.eval_error_report,
                 params.info.schema.clone(),

@@ -13,15 +13,19 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::pin::pin;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
+use futures::future::select;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::types::DataType;
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_meta::MetaResult;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
@@ -31,13 +35,17 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use thiserror_ext::AsReport;
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -118,6 +126,89 @@ impl DdlServiceImpl {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
         }
+    }
+
+    pub fn start_migrate_table_fragments(&self) -> (JoinHandle<()>, Sender<()>) {
+        tracing::info!("start migrate legacy table fragments task");
+        let env = self.env.clone();
+        let metadata_manager = self.metadata_manager.clone();
+        let ddl_controller = self.ddl_controller.clone();
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            async fn migrate_inner(
+                env: &MetaSrvEnv,
+                metadata_manager: &MetadataManager,
+                ddl_controller: &DdlController,
+            ) -> MetaResult<()> {
+                let tables = metadata_manager
+                    .catalog_controller
+                    .list_unmigrated_tables()
+                    .await?;
+
+                if tables.is_empty() {
+                    tracing::info!("no legacy table fragments need migration");
+                    return Ok(());
+                }
+
+                let client = {
+                    let workers = metadata_manager
+                        .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
+                        .await?;
+                    if workers.is_empty() {
+                        return Err(anyhow::anyhow!("no active frontend nodes found").into());
+                    }
+                    let worker = workers.choose(&mut thread_rng()).unwrap();
+                    env.frontend_client_pool().get(worker).await?
+                };
+
+                for table in tables {
+                    let start = tokio::time::Instant::now();
+                    let req = GetTableReplacePlanRequest {
+                        database_id: table.database_id,
+                        owner: table.owner,
+                        table_name: table.name.clone(),
+                        cdc_table_change: None,
+                    };
+                    let resp = client
+                        .get_table_replace_plan(req)
+                        .await
+                        .context("failed to get table replace plan from frontend")?;
+
+                    let plan = resp.into_inner().replace_plan.unwrap();
+                    let replace_info = DdlServiceImpl::extract_replace_table_info(plan);
+                    ddl_controller
+                        .run_command(DdlCommand::ReplaceStreamJob(replace_info))
+                        .await?;
+                    tracing::info!(elapsed=?start.elapsed(), table_id=table.id, "migrated table fragments");
+                }
+                tracing::info!("successfully migrated all legacy table fragments");
+
+                Ok(())
+            }
+
+            let migrate_future = async move {
+                let mut attempt = 0;
+                loop {
+                    match migrate_inner(&env, &metadata_manager, &ddl_controller).await {
+                        Ok(_) => break,
+                        Err(e) => {
+                            attempt += 1;
+                            tracing::error!(
+                                "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
+                                e.as_report(),
+                                attempt
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
+                    }
+                }
+            };
+
+            select(pin!(migrate_future), shutdown_rx).await;
+        });
+
+        (join_handle, shutdown_tx)
     }
 }
 
@@ -274,7 +365,6 @@ impl DdlService for DdlServiceImpl {
                     .run_command(DdlCommand::CreateStreamingJob {
                         stream_job,
                         fragment_graph,
-                        affected_table_replace_info: None,
                         dependencies: HashSet::new(),
                         specific_resource_group: None,
                         if_not_exists: req.if_not_exists,
@@ -316,33 +406,17 @@ impl DdlService for DdlServiceImpl {
 
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
-        let affected_table_change = req
-            .get_affected_table_change()
-            .cloned()
-            .ok()
-            .map(Self::extract_replace_table_info);
         let dependencies = req
             .get_dependencies()
             .iter()
             .map(|id| *id as ObjectId)
             .collect();
 
-        let stream_job = match &affected_table_change {
-            None => StreamingJob::Sink(sink, None),
-            Some(change) => {
-                let (source, table, _) = change
-                    .streaming_job
-                    .clone()
-                    .try_as_table()
-                    .expect("must be replace table");
-                StreamingJob::Sink(sink, Some((table, source)))
-            }
-        };
+        let stream_job = StreamingJob::Sink(sink);
 
         let command = DdlCommand::CreateStreamingJob {
             stream_job,
             fragment_graph,
-            affected_table_replace_info: affected_table_change,
             dependencies,
             specific_resource_group: None,
             if_not_exists: req.if_not_exists,
@@ -367,9 +441,6 @@ impl DdlService for DdlServiceImpl {
         let command = DdlCommand::DropStreamingJob {
             job_id: StreamingJobId::Sink(sink_id as _),
             drop_mode,
-            target_replace_info: request
-                .affected_table_change
-                .map(Self::extract_replace_table_info),
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -443,7 +514,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies,
                 specific_resource_group,
                 if_not_exists: req.if_not_exists,
@@ -471,7 +541,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::MaterializedView(table_id as _),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -498,7 +567,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies: HashSet::new(),
                 specific_resource_group: None,
                 if_not_exists: req.if_not_exists,
@@ -525,7 +593,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Index(index_id as _),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -561,7 +628,10 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropFunction(request.function_id as _))
+            .run_command(DdlCommand::DropFunction(
+                request.function_id as _,
+                DropMode::from_request_setting(request.cascade),
+            ))
             .await?;
 
         Ok(Response::new(DropFunctionResponse {
@@ -591,7 +661,6 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
                 fragment_graph,
-                affected_table_replace_info: None,
                 dependencies,
                 specific_resource_group: None,
                 if_not_exists: request.if_not_exists,
@@ -621,7 +690,6 @@ impl DdlService for DdlServiceImpl {
                     table_id as _,
                 ),
                 drop_mode,
-                target_replace_info: None,
             })
             .await?;
 
@@ -1060,6 +1128,18 @@ impl DdlService for DdlServiceImpl {
                                     original_columns = ?original_columns,
                                     new_columns = ?new_columns,
                                     "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported");
+
+                    let fail_info = "New columns should be a subset or superset of the original columns (including hidden columns), since only `ADD COLUMN` and `DROP COLUMN` is supported".to_owned();
+                    add_auto_schema_change_fail_event_log(
+                        &self.meta_metrics,
+                        table.id,
+                        table.name.clone(),
+                        table_change.cdc_table_id.clone(),
+                        table_change.upstream_ddl.clone(),
+                        &self.env.event_log_manager_ref(),
+                        fail_info,
+                    );
+
                     return Err(Status::invalid_argument(
                         "New columns should be a subset or superset of the original columns (including hidden columns)",
                     ));
@@ -1088,7 +1168,7 @@ impl DdlService for DdlServiceImpl {
                         database_id: table.database_id,
                         owner: table.owner,
                         table_name: table.name.clone(),
-                        table_change: Some(table_change.clone()),
+                        cdc_table_change: Some(table_change.clone()),
                     })
                     .await;
 
@@ -1137,6 +1217,8 @@ impl DdlService for DdlServiceImpl {
                                         upstraem_ddl = table_change.upstream_ddl,
                                         "failed to replace the table",
                                     );
+                                    let fail_info =
+                                        format!("failed to replace the table: {}", e.as_report());
                                     add_auto_schema_change_fail_event_log(
                                         &self.meta_metrics,
                                         table.id,
@@ -1144,6 +1226,7 @@ impl DdlService for DdlServiceImpl {
                                         table_change.cdc_table_id.clone(),
                                         table_change.upstream_ddl.clone(),
                                         &self.env.event_log_manager_ref(),
+                                        fail_info,
                                     );
                                 }
                             };
@@ -1157,6 +1240,8 @@ impl DdlService for DdlServiceImpl {
                             cdc_table_id = table.cdc_table_id,
                             "failed to get replace table plan",
                         );
+                        let fail_info =
+                            format!("failed to get replace table plan: {}", e.as_report());
                         add_auto_schema_change_fail_event_log(
                             &self.meta_metrics,
                             table.id,
@@ -1164,6 +1249,7 @@ impl DdlService for DdlServiceImpl {
                             table_change.cdc_table_id.clone(),
                             table_change.upstream_ddl.clone(),
                             &self.env.event_log_manager_ref(),
+                            fail_info,
                         );
                     }
                 };
@@ -1281,6 +1367,155 @@ impl DdlService for DdlServiceImpl {
             status: None,
         }))
     }
+
+    async fn create_iceberg_table(
+        &self,
+        request: Request<CreateIcebergTableRequest>,
+    ) -> Result<Response<CreateIcebergTableResponse>, Status> {
+        let req = request.into_inner();
+        let CreateIcebergTableRequest {
+            table_info,
+            sink_info,
+            iceberg_source,
+            if_not_exists,
+        } = req;
+
+        // 1. create table job
+        let PbTableJobInfo {
+            source,
+            table,
+            fragment_graph,
+            job_type,
+        } = table_info.unwrap();
+        let table = table.unwrap();
+        let database_id = table.get_database_id();
+        let schema_id = table.get_schema_id();
+        let table_name = table.get_name().to_owned();
+
+        let stream_job =
+            StreamingJob::Table(source, table, PbTableJobType::try_from(job_type).unwrap());
+        let _ = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob {
+                stream_job,
+                fragment_graph: fragment_graph.unwrap(),
+                dependencies: HashSet::new(),
+                specific_resource_group: None,
+                if_not_exists,
+            })
+            .await?;
+
+        let table_catalog = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_catalog_by_name(database_id as _, schema_id as _, &table_name)
+            .await?
+            .ok_or(Status::not_found("Internal error: table not found"))?;
+
+        // 2. create iceberg sink job
+        let PbSinkJobInfo {
+            sink,
+            fragment_graph,
+        } = sink_info.unwrap();
+        let sink = sink.unwrap();
+        let mut fragment_graph = fragment_graph.unwrap();
+
+        assert_eq!(fragment_graph.dependent_table_ids.len(), 1);
+        assert!(
+            risingwave_common::catalog::TableId::from(fragment_graph.dependent_table_ids[0])
+                .is_placeholder()
+        );
+        fragment_graph.dependent_table_ids[0] = table_catalog.id;
+        for fragment in fragment_graph.fragments.values_mut() {
+            stream_graph_visitor::visit_fragment_mut(fragment, |node| match node {
+                NodeBody::StreamScan(scan) => {
+                    scan.table_id = table_catalog.id;
+                    if let Some(table_desc) = &mut scan.table_desc {
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table_desc.table_id)
+                                .is_placeholder()
+                        );
+                        table_desc.table_id = table_catalog.id;
+                        table_desc.maybe_vnode_count = table_catalog.maybe_vnode_count;
+                    }
+                    if let Some(table) = &mut scan.arrangement_table {
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table.id).is_placeholder()
+                        );
+                        *table = table_catalog.clone();
+                    }
+                }
+                NodeBody::BatchPlan(plan) => {
+                    if let Some(table_desc) = &mut plan.table_desc {
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table_desc.table_id)
+                                .is_placeholder()
+                        );
+                        table_desc.table_id = table_catalog.id;
+                        table_desc.maybe_vnode_count = table_catalog.maybe_vnode_count;
+                    }
+                }
+                _ => {}
+            });
+        }
+
+        let table_id = table_catalog.id as ObjectId;
+        let dependencies = HashSet::from_iter([table_id]);
+        let stream_job = StreamingJob::Sink(sink);
+        let res = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob {
+                stream_job,
+                fragment_graph,
+                dependencies,
+                specific_resource_group: None,
+                if_not_exists,
+            })
+            .await;
+
+        if res.is_err() {
+            let _ = self
+                .ddl_controller
+                .run_command(DdlCommand::DropStreamingJob {
+                    job_id: StreamingJobId::Table(None, table_id as _),
+                    drop_mode: DropMode::Cascade,
+                })
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(error = %err.as_report(),
+                        "Failed to clean up table after iceberg sink creation failure",
+                    );
+                });
+            res?;
+        }
+
+        // 3. create iceberg source
+        let iceberg_source = iceberg_source.unwrap();
+        let res = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateNonSharedSource(iceberg_source))
+            .await;
+        if res.is_err() {
+            let _ = self
+                .ddl_controller
+                .run_command(DdlCommand::DropStreamingJob {
+                    job_id: StreamingJobId::Table(None, table_id as _),
+                    drop_mode: DropMode::Cascade,
+                })
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "Failed to clean up table after iceberg source creation failure",
+                    );
+                });
+        }
+
+        Ok(Response::new(CreateIcebergTableResponse {
+            status: None,
+            version: res?,
+        }))
+    }
 }
 
 fn add_auto_schema_change_fail_event_log(
@@ -1290,6 +1525,7 @@ fn add_auto_schema_change_fail_event_log(
     cdc_table_id: String,
     upstream_ddl: String,
     event_log_manager: &EventLogManagerRef,
+    fail_info: String,
 ) {
     meta_metrics
         .auto_schema_change_failure_cnt
@@ -1300,6 +1536,7 @@ fn add_auto_schema_change_fail_event_log(
         table_name,
         cdc_table_id,
         upstream_ddl,
+        fail_info,
     };
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
 }

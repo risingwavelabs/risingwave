@@ -170,7 +170,7 @@ impl StreamVectorIndexWrite {
             value_indices,
             definition,
             conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint,
             version: None,
             watermark_columns,
@@ -182,7 +182,6 @@ impl StreamVectorIndexWrite {
             create_type,
             stream_job_status: StreamJobStatus::Creating,
             description: None,
-            incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
@@ -194,6 +193,7 @@ impl StreamVectorIndexWrite {
             clean_watermark_index_in_pk: None,
             refreshable: false,
             vector_index_info: Some(vector_index_info),
+            cdc_table_type: None,
         })
     }
 

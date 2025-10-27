@@ -18,46 +18,12 @@ use itertools::Itertools;
 use super::*;
 use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments};
 
+#[derive(Debug, Clone)]
+pub struct SplitState {
+    pub split_assignment: SplitAssignment,
+}
+
 impl SourceManager {
-    /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
-    ///
-    /// Very occasionally split removal may happen during scaling, in which case we need to
-    /// use the old splits for reallocation instead of the latest splits (which may be missing),
-    /// so that we can resolve the split removal in the next command.
-    pub async fn migrate_splits_for_source_actors(
-        &self,
-        fragment_id: FragmentId,
-        prev_actor_ids: &[ActorId],
-        curr_actor_ids: &[ActorId],
-    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
-        let core = self.core.lock().await;
-
-        let prev_splits = prev_actor_ids
-            .iter()
-            .flat_map(|actor_id| {
-                // Note: File Source / Iceberg Source doesn't have splits assigned by meta.
-                core.actor_splits.get(actor_id).cloned().unwrap_or_default()
-            })
-            .map(|split| (split.id(), split))
-            .collect();
-
-        let empty_actor_splits = curr_actor_ids
-            .iter()
-            .map(|actor_id| (*actor_id, vec![]))
-            .collect();
-
-        let diff = reassign_splits(
-            fragment_id,
-            empty_actor_splits,
-            &prev_splits,
-            // pre-allocate splits is the first time getting splits and it does not have scale-in scene
-            SplitDiffOptions::default(),
-        )
-        .unwrap_or_default();
-
-        Ok(diff)
-    }
-
     /// Migrates splits from previous actors to the new actors for a rescheduled fragment.
     pub fn migrate_splits_for_backfill_actors(
         &self,
@@ -90,7 +56,7 @@ impl SourceManager {
         );
         Ok(align_splits(
             actors,
-            upstream_assignment,
+            SplitAlignmentContext::Pending(upstream_assignment),
             fragment_id,
             upstream_source_fragment_id,
         )?)
@@ -129,8 +95,8 @@ impl SourceManager {
                     .iter()
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
-                let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
-                let splits = handle.discovered_splits(source_id, &actor_hashset).await?;
+                let actor_count = empty_actor_splits.keys().len();
+                let splits = handle.discovered_splits(source_id, actor_count).await?;
                 if splits.is_empty() {
                     tracing::warn!(?stream_job_id, source_id, "no splits detected");
                     continue 'loop_source;
@@ -227,7 +193,7 @@ impl SourceManager {
             .collect();
         let assignment = align_splits(
             aligned_actors.into_iter(),
-            &core.actor_splits,
+            SplitAlignmentContext::Stored(core.env.shared_actor_infos()),
             fragment_id,
             prev_fragment_id,
         )?;
@@ -293,7 +259,7 @@ impl SourceManager {
                     fragment_id,
                     align_splits(
                         backfill_actors,
-                        &core.actor_splits,
+                        SplitAlignmentContext::Stored(core.env.shared_actor_infos()),
                         fragment_id,
                         upstream_source_fragment_id,
                     )?,
@@ -311,7 +277,7 @@ impl SourceManagerCore {
     ///
     /// `self.actor_splits` will not be updated. It will be updated by `Self::apply_source_change`,
     /// after the mutation barrier has been collected.
-    pub async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitAssignment>> {
+    pub async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitState>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
 
         'loop_source: for (source_id, handle) in &self.managed_sources {
@@ -327,7 +293,6 @@ impl SourceManagerCore {
                 let actors = match self
                     .metadata_manager
                     .get_running_actors_of_fragment(fragment_id)
-                    .await
                 {
                     Ok(actors) => {
                         if actors.is_empty() {
@@ -342,24 +307,28 @@ impl SourceManagerCore {
                     }
                 };
 
-                let discovered_splits = handle.discovered_splits(*source_id, &actors).await?;
+                let discovered_splits = handle.discovered_splits(*source_id, actors.len()).await?;
                 if discovered_splits.is_empty() {
                     // The discover loop for this source is not ready yet; we'll wait for the next run
                     continue 'loop_source;
                 }
 
-                let prev_actor_splits: HashMap<_, _> = actors
-                    .into_iter()
-                    .map(|actor_id| {
-                        (
-                            actor_id,
-                            self.actor_splits
-                                .get(&actor_id)
-                                .cloned()
-                                .unwrap_or_default(),
-                        )
-                    })
-                    .collect();
+                let prev_actor_splits = {
+                    let guard = self.env.shared_actor_infos().read_guard();
+
+                    guard
+                        .get_fragment(fragment_id)
+                        .and_then(|info| {
+                            info.actors
+                                .iter()
+                                .map(|(actor_id, actor_info)| {
+                                    (*actor_id, actor_info.splits.clone())
+                                })
+                                .collect::<HashMap<_, _>>()
+                                .into()
+                        })
+                        .unwrap_or_default()
+                };
 
                 if let Some(new_assignment) = reassign_splits(
                     fragment_id,
@@ -377,7 +346,8 @@ impl SourceManagerCore {
             if let Some(backfill_fragment_ids) = backfill_fragment_ids {
                 // align splits for backfill fragments with its upstream source fragment
                 for (fragment_id, upstream_fragment_id) in backfill_fragment_ids {
-                    let Some(upstream_assignment) = split_assignment.get(upstream_fragment_id)
+                    let Some(upstream_assignment): Option<&HashMap<ActorId, Vec<SplitImpl>>> =
+                        split_assignment.get(upstream_fragment_id)
                     else {
                         // upstream fragment unchanged, do not update backfill fragment too
                         continue;
@@ -403,7 +373,7 @@ impl SourceManagerCore {
                         *fragment_id,
                         align_splits(
                             actors,
-                            upstream_assignment,
+                            SplitAlignmentContext::Pending(upstream_assignment),
                             *fragment_id,
                             *upstream_fragment_id,
                         )?,
@@ -412,9 +382,22 @@ impl SourceManagerCore {
             }
         }
 
-        self.metadata_manager
+        let assignments = self
+            .metadata_manager
             .split_fragment_map_by_database(split_assignment)
-            .await
+            .await?;
+
+        let mut result = HashMap::new();
+        for (database_id, assignment) in assignments {
+            result.insert(
+                database_id,
+                SplitState {
+                    split_assignment: assignment,
+                },
+            );
+        }
+
+        Ok(result)
     }
 }
 
@@ -446,7 +429,7 @@ impl SourceManagerCore {
 /// See also:
 /// - [Kinesis resharding doc](https://docs.aws.amazon.com/streams/latest/dev/kinesis-using-sdk-java-after-resharding.html#kinesis-using-sdk-java-resharding-data-routing)
 /// - An example of how the shards can be like: <https://stackoverflow.com/questions/72272034/list-shard-show-more-shards-than-provisioned>
-fn reassign_splits<T>(
+pub fn reassign_splits<T>(
     fragment_id: FragmentId,
     actor_splits: HashMap<ActorId, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
@@ -539,6 +522,11 @@ where
     )
 }
 
+pub enum SplitAlignmentContext<'a> {
+    Stored(&'a SharedActorInfos),
+    Pending(&'a HashMap<ActorId, Vec<SplitImpl>>),
+}
+
 /// Assign splits to a new set of actors, according to existing assignment.
 ///
 /// illustration:
@@ -551,19 +539,29 @@ where
 fn align_splits(
     // (actor_id, upstream_actor_id)
     aligned_actors: impl IntoIterator<Item = (ActorId, ActorId)>,
-    existing_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+    alignment_context: SplitAlignmentContext<'_>,
     fragment_id: FragmentId,
     upstream_source_fragment_id: FragmentId,
 ) -> anyhow::Result<HashMap<ActorId, Vec<SplitImpl>>> {
     aligned_actors
         .into_iter()
         .map(|(actor_id, upstream_actor_id)| {
-            let Some(splits) = existing_assignment.get(&upstream_actor_id) else {
-                return Err(anyhow::anyhow!("upstream assignment not found, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, actor_id: {actor_id}, upstream_assignment: {existing_assignment:?}, upstream_actor_id: {upstream_actor_id:?}"));
+            let Some(splits) = (match alignment_context {
+                SplitAlignmentContext::Stored(info) => {
+                    let guard = info.read_guard();
+                    let actor_info = guard.iter_over_fragments().find_map(|(_, fragment_info)| fragment_info.actors.get(&upstream_actor_id));
+                    actor_info.map(|info| info.splits.clone())
+                }
+                SplitAlignmentContext::Pending(existing_assignment) => {
+                    existing_assignment.get(&upstream_actor_id).cloned()
+                }
+            }) else {
+                return Err(anyhow::anyhow!("upstream assignment not found, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, actor_id: {actor_id}, upstream_actor_id: {upstream_actor_id:?}"));
             };
+
             Ok((
                 actor_id,
-                splits.clone(),
+                splits,
             ))
         })
         .collect()
@@ -593,7 +591,11 @@ impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
 impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
     fn cmp(&self, other: &Self) -> Ordering {
         // Note: this is reversed order, to make BinaryHeap a min heap.
-        other.splits.len().cmp(&self.splits.len())
+        other
+            .splits
+            .len()
+            .cmp(&self.splits.len())
+            .then(self.actor_id.cmp(&other.actor_id))
     }
 }
 

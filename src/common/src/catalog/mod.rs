@@ -253,6 +253,10 @@ impl TableId {
     pub fn table_id(&self) -> u32 {
         self.table_id
     }
+
+    pub fn is_placeholder(&self) -> bool {
+        self.table_id == OBJECT_ID_PLACEHOLDER
+    }
 }
 
 impl From<u32> for TableId {
@@ -581,16 +585,11 @@ impl StreamJobStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[derive(Clone, Copy, Debug, Display, Hash, PartialOrd, PartialEq, Eq, Ord, Default)]
 pub enum CreateType {
+    #[default]
     Foreground,
     Background,
-}
-
-impl Default for CreateType {
-    fn default() -> Self {
-        Self::Foreground
-    }
 }
 
 impl CreateType {
@@ -636,7 +635,9 @@ macro_rules! for_all_fragment_type_flags {
                 FsFetch,
                 CrossDbSnapshotBackfillStreamScan,
                 StreamCdcScan,
-                VectorIndexWrite
+                VectorIndexWrite,
+                UpstreamSinkUnion,
+                LocalityProvider
             },
             {},
             0
@@ -885,6 +886,16 @@ mod tests {
                     VectorIndexWrite,
                     32768,
                     "VECTOR_INDEX_WRITE",
+                ),
+                (
+                    UpstreamSinkUnion,
+                    65536,
+                    "UPSTREAM_SINK_UNION",
+                ),
+                (
+                    LocalityProvider,
+                    131072,
+                    "LOCALITY_PROVIDER",
                 ),
             ]
         "#]]

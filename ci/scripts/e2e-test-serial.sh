@@ -72,6 +72,10 @@ cluster_stop() {
   fi
 }
 
+run_sql() {
+  psql -h localhost -p 4566 -d dev -U root -c "$@"
+}
+
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
@@ -93,15 +97,6 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}" --label "serial"
-risedev slt -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
-
-if [[ "$profile" == "ci-release" ]]; then
-  echo "--- e2e, $mode, backfill"
-  # only run in release-mode. It's too slow for dev-mode.
-  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control.slt'
-  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_order_control_recovery.slt'
-  risedev slt -p 4566 -d dev './e2e_test/backfill/backfill_progress/test.slt'
-fi
 
 echo "--- Kill cluster"
 cluster_stop
@@ -119,6 +114,10 @@ fi
 risedev slt -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 risedev slt -p 4566 -d dev './e2e_test/dml/*.slt'
 
+risedev slt -p 4566 -d dev './e2e_test/copy/gen_data.slt'
+diff e2e_test/copy/expected.txt <(run_sql 'copy (select name, id from t order by id) to stdout')
+run_sql 'drop table t'
+
 echo "--- e2e, $mode, misc"
 risedev slt -p 4566 -d dev './e2e_test/misc/**/*.slt'
 
@@ -131,6 +130,16 @@ python3 ./e2e_test/subscription/main.py
 
 echo "--- e2e, $mode, Apache Superset"
 risedev slt -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
+
+echo "--- e2e, $mode, embedding"
+cargo build -p openai_embedding_service --bin mocked_service
+cargo run -p openai_embedding_service --bin mocked_service &
+MOCKED_EMBEDDING_SERVICE_PID=$!
+# wait for embedding service up
+sleep 3
+risedev slt -p 4566 -d dev './e2e_test/vector_search/**/*.slt'
+kill $MOCKED_EMBEDDING_SERVICE_PID
+
 
 echo "--- Kill cluster"
 cluster_stop
@@ -159,9 +168,6 @@ echo "--- Kill cluster"
 cluster_stop
 
 if [[ "$mode" == "standalone" ]]; then
-  run_sql() {
-    psql -h localhost -p 4566 -d dev -U root -c "$@"
-  }
   compactor_is_online() {
     set +e
     grep -q "risingwave_cmd_all::standalone: starting compactor-node thread" "${PREFIX_LOG}/standalone.log"

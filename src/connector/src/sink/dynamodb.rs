@@ -26,7 +26,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 use write_chunk_future::{DynamoDbPayloadWriter, WriteChunkFuture};
@@ -190,12 +190,13 @@ impl TryFrom<SinkParam> for DynamoDbSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = DynamoDbConfig::from_btreemap(param.properties)?;
 
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
         })
     }
 }
@@ -340,11 +341,11 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         | DataType::Jsonb => AttributeValue::S(scalar_ref.to_text_with_type(data_type)),
         DataType::Boolean => AttributeValue::Bool(scalar_ref.into_bool()),
         DataType::Bytea => AttributeValue::B(Blob::new(scalar_ref.into_bytea())),
-        DataType::List(datatype) => {
+        DataType::List(lt) => {
             let list_attr = scalar_ref
                 .into_list()
                 .iter()
-                .map(|x| map_data(x, datatype))
+                .map(|x| map_data(x, lt.elem()))
                 .collect::<Result<Vec<_>>>()?;
             AttributeValue::L(list_attr)
         }

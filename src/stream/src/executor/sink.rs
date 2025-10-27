@@ -36,12 +36,15 @@ use risingwave_connector::sink::log_store::{
 use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
+use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 
-use crate::common::compact_chunk::{StreamChunkCompactor, merge_chunk_row};
+use crate::common::compact_chunk::{
+    InconsistencyBehavior, StreamChunkCompactor, compact_chunk_inline,
+};
 use crate::executor::prelude::*;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -121,11 +124,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
 
         let stream_key = info.pk_indices.clone();
-        let stream_key_sink_pk_mismatch = {
-            stream_key
-                .iter()
-                .any(|i| !sink_param.downstream_pk.contains(i))
-        };
+        let downstream_pk = sink_param.downstream_pk_or_empty();
+        let stream_key_sink_pk_mismatch = stream_key.iter().any(|i| !downstream_pk.contains(i));
         // When stream key is different from the user defined primary key columns for sinks. The operations could be out of order
         // stream key: a,b
         // sink pk: a
@@ -164,7 +164,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // NOTE(st1page): reconstruct with sink pk need extra cost to buffer a barrier's data, so currently we bind it with mismatch case.
         let re_construct_with_sink_pk = need_advance_delete
             && sink_param.sink_type == SinkType::Upsert
-            && !sink_param.downstream_pk.is_empty();
+            && !downstream_pk.is_empty();
         let pk_matched = !stream_key_sink_pk_mismatch;
         // Don't compact chunk for blackhole sink for better benchmark performance.
         let compact_chunk = !sink.is_blackhole();
@@ -210,6 +210,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             fragment_id,
         );
 
+        // When processing upsert stream, we need to tolerate the inconsistency (mismatched `DELETE`
+        // and `INSERT` pairs) when compacting input chunks with derived stream key.
+        let input_compact_ib = if self.input.stream_kind() == StreamKind::Upsert {
+            InconsistencyBehavior::Tolerate
+        } else {
+            InconsistencyBehavior::Panic
+        };
+
         let input = self.input.execute();
 
         let input = input.inspect_ok(move |msg| {
@@ -227,7 +235,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.re_construct_with_sink_pk,
             self.chunk_size,
             self.input_data_types,
-            self.sink_param.downstream_pk.clone(),
+            input_compact_ib,
+            self.sink_param.downstream_pk_or_empty(),
             metrics.sink_chunk_buffer_size,
             self.compact_chunk,
         );
@@ -282,6 +291,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_param,
                             self.sink_writer_param,
                             self.pk_matched,
+                            input_compact_ib,
                             self.actor_context,
                             rate_limit_rx,
                             rebuild_sink_rx,
@@ -335,6 +345,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 Message::Barrier(barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    let add_columns = barrier.as_sink_add_columns(sink_id);
+                    if let Some(add_columns) = &add_columns {
+                        info!(?add_columns, %sink_id, "sink receive add columns");
+                    }
                     let post_flush = log_writer
                         .flush_current_epoch(
                             barrier.epoch.curr,
@@ -342,6 +356,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 is_checkpoint: barrier.kind.is_checkpoint(),
                                 new_vnode_bitmap: update_vnode_bitmap.clone(),
                                 is_stop: barrier.is_stop(actor_id),
+                                add_columns,
                             },
                         )
                         .await?;
@@ -417,6 +432,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         re_construct_with_sink_pk: bool,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
+        input_compact_ib: InconsistencyBehavior,
         down_stream_pk: Vec<usize>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
         compact_chunk: bool,
@@ -441,7 +457,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             let mut insert_chunks = vec![];
 
                             for c in StreamChunkCompactor::new(stream_key.clone(), chunks)
-                                .into_compacted_chunks()
+                                .into_compacted_chunks_inline(input_compact_ib)
                             {
                                 // We only enter the branch if need_advance_delete, in which case `sink_type` is not ForceAppendOnly or AppendOnly.
                                 {
@@ -467,10 +483,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         };
                         if re_construct_with_sink_pk {
                             let chunks = StreamChunkCompactor::new(down_stream_pk.clone(), chunks)
-                                .reconstructed_compacted_chunks(
+                                .into_compacted_chunks_reconstructed(
                                     chunk_size,
                                     input_data_types.clone(),
-                                    sink_type != SinkType::ForceAppendOnly,
+                                    // When compacting based on user provided primary key, we should never panic
+                                    // on inconsistency in case the user provided primary key is not unique.
+                                    if sink_type == SinkType::ForceAppendOnly {
+                                        InconsistencyBehavior::Tolerate
+                                    } else {
+                                        InconsistencyBehavior::Warn
+                                    },
                                 );
                             for c in chunks {
                                 yield Message::Chunk(c);
@@ -507,7 +529,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
                         // V->V).
                         if compact_chunk {
-                            chunk = merge_chunk_row(chunk, &stream_key);
+                            chunk = compact_chunk_inline(chunk, &stream_key, input_compact_ib);
                         }
                         match sink_type {
                             SinkType::AppendOnly => yield Message::Chunk(chunk),
@@ -536,6 +558,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         mut sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         pk_matched: bool,
+        input_compact_ib: InconsistencyBehavior,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
         mut rebuild_sink_rx: UnboundedReceiver<RebuildSinkMessage>,
@@ -571,7 +594,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             log_store_reader_wait_new_future_duration_ns,
         };
 
-        let downstream_pk = sink_param.downstream_pk.clone();
+        let downstream_pk = sink_param.downstream_pk_or_empty();
 
         let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
@@ -592,7 +615,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 // `append_only`, we should only append to downstream, so there should not be any
                 // overlapping keys.
                 let chunk = if pk_matched && matches!(sink_param.sink_type, SinkType::Upsert) {
-                    merge_chunk_row(chunk, &downstream_pk)
+                    compact_chunk_inline(chunk, &downstream_pk, input_compact_ib)
                 } else {
                     chunk
                 };
@@ -636,7 +659,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if F::ALLOW_REWIND {
                         match log_reader.rewind().await {
                             Ok(()) => {
-                                warn!(
+                                error!(
                                     error = %e.as_report(),
                                     executor_id = sink_writer_param.executor_id,
                                     sink_id = sink_param.sink_id.sink_id,
@@ -676,7 +699,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             if F::ALLOW_REWIND {
                                 match log_reader.rewind().await {
                                     Ok(()) => {
-                                        sink_param.properties = config.into_iter().collect();
+                                        sink_param.properties.extend(config.into_iter());
                                         sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                                         info!(
                                             executor_id = sink_writer_param.executor_id,
@@ -694,7 +717,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     }
                                 }
                             } else {
-                                sink_param.properties = config.into_iter().collect();
+                                sink_param.properties.extend(config.into_iter());
                                 sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
                                 Err(anyhow!("This is not an actual error condition. The system is intentionally triggering recovery procedures to ensure ALTER SINK CONFIG are fully applied.").into())
                             }
@@ -794,7 +817,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: pk_indices.clone(),
+            downstream_pk: Some(pk_indices.clone()),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
@@ -813,7 +836,7 @@ mod test {
             sink,
             sink_param,
             columns.clone(),
-            BoundedInMemLogStoreFactory::new(1),
+            BoundedInMemLogStoreFactory::for_test(1),
             1024,
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
             None,
@@ -828,7 +851,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 3 2 1",
@@ -840,7 +863,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 3 4 1
@@ -923,7 +946,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: vec![0],
+            downstream_pk: Some(vec![0]),
             sink_type: SinkType::Upsert,
             format_desc: None,
             db_name: "test".into(),
@@ -942,7 +965,7 @@ mod test {
             sink,
             sink_param,
             columns.clone(),
-            BoundedInMemLogStoreFactory::new(1),
+            BoundedInMemLogStoreFactory::for_test(1),
             1024,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             None,
@@ -957,7 +980,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 + 1 1 10",
@@ -969,7 +992,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact(),
+            chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 " I I I
                 U- 1 1 10
@@ -1025,7 +1048,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: pk_indices.clone(),
+            downstream_pk: Some(pk_indices.clone()),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
@@ -1044,7 +1067,7 @@ mod test {
             sink,
             sink_param,
             columns,
-            BoundedInMemLogStoreFactory::new(1),
+            BoundedInMemLogStoreFactory::for_test(1),
             1024,
             vec![DataType::Int64, DataType::Int64],
             None,

@@ -29,7 +29,7 @@ use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
 use risingwave_pb::secret::PbSecretRef;
-use serde_derive::Serialize;
+use serde::Serialize;
 
 use super::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -336,8 +336,8 @@ pub struct SinkCatalog {
     /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
-    /// User-defined primary key indices for upsert sink.
-    pub downstream_pk: Vec<usize>,
+    /// User-defined primary key indices for upsert sink, if any.
+    pub downstream_pk: Option<Vec<usize>>,
 
     /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
@@ -398,11 +398,8 @@ impl SinkCatalog {
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
             plan_pk: self.plan_pk.iter().map(|o| o.to_protobuf()).collect(),
-            downstream_pk: self
-                .downstream_pk
-                .iter()
-                .map(|idx| *idx as i32)
-                .collect_vec(),
+            downstream_pk: (self.downstream_pk.as_ref())
+                .map_or_else(Vec::new, |pk| pk.iter().map(|idx| *idx as _).collect_vec()),
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -464,10 +461,6 @@ impl SinkCatalog {
         Schema { fields }
     }
 
-    pub fn downstream_pk_indices(&self) -> Vec<usize> {
-        self.downstream_pk.clone()
-    }
-
     pub fn unique_identity(&self) -> String {
         // We need to align with meta here, so we've utilized the proto method.
         self.to_proto().unique_identity()
@@ -512,7 +505,15 @@ impl From<PbSink> for SinkCatalog {
                 .iter()
                 .map(ColumnOrder::from_protobuf)
                 .collect_vec(),
-            downstream_pk: pb.downstream_pk.into_iter().map(|k| k as _).collect_vec(),
+            downstream_pk: if pb.downstream_pk.is_empty() {
+                None
+            } else {
+                Some(
+                    (pb.downstream_pk.into_iter())
+                        .map(|idx| idx as usize)
+                        .collect_vec(),
+                )
+            },
             distribution_key: pb
                 .distribution_key
                 .into_iter()

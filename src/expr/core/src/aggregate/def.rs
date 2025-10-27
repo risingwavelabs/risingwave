@@ -323,17 +323,6 @@ impl AggType {
 /// IMPORTANT: These macros must be carefully maintained especially when adding new
 /// `AggType`/`PbAggKind` variants.
 pub mod agg_types {
-    /// [`AggType`](super::AggType)s that are currently not supported in streaming mode.
-    #[macro_export]
-    macro_rules! unimplemented_in_stream {
-        () => {
-            AggType::Builtin(
-                PbAggKind::PercentileCont | PbAggKind::PercentileDisc | PbAggKind::Mode,
-            )
-        };
-    }
-    pub use unimplemented_in_stream;
-
     /// [`AggType`](super::AggType)s that should've been rewritten to other kinds. These kinds
     /// should not appear when generating physical plan nodes.
     #[macro_export]
@@ -349,6 +338,8 @@ pub mod agg_types {
                     // ApproxPercentile always uses custom agg executors,
                     // rather than an aggregation operator
                     | PbAggKind::ApproxPercentile
+                    | PbAggKind::ArgMin
+                    | PbAggKind::ArgMax
             )
         };
     }
@@ -486,7 +477,10 @@ pub mod agg_types {
                     | PbAggKind::StringAgg
                     | PbAggKind::ArrayAgg
                     | PbAggKind::JsonbAgg
-                    | PbAggKind::JsonbObjectAgg,
+                    | PbAggKind::JsonbObjectAgg
+                    | PbAggKind::PercentileCont
+                    | PbAggKind::PercentileDisc
+                    | PbAggKind::Mode,
             ) | AggType::WrapScalar(_)
         };
     }

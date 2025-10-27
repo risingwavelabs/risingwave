@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use risingwave_connector::WithPropertiesExt;
 #[cfg(not(debug_assertions))]
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::AnySplitEnumerator;
+use risingwave_connector::source::base::ConnectorProperties;
 
 use super::*;
 
@@ -357,6 +359,14 @@ impl ConnectorSourceWorker {
                 .map(|split| (split.id(), split))
                 .collect(),
         );
+        // Call enumerator's `on_tick` method for monitoring tasks
+        if let Err(e) = self.enumerator.on_tick().await {
+            tracing::error!(
+                "Failed to execute enumerator `on_tick` for source {}: {}",
+                self.source_id,
+                e.as_report()
+            );
+        }
 
         Ok(())
     }
@@ -390,7 +400,7 @@ impl ConnectorSourceWorkerHandle {
     pub async fn discovered_splits(
         &self,
         source_id: SourceId,
-        actors: &HashSet<ActorId>,
+        actor_count: usize,
     ) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
         // XXX: when is this None? Can we remove the Option?
         let Some(mut discovered_splits) = self.splits.lock().await.splits.clone() else {
@@ -412,7 +422,7 @@ impl ConnectorSourceWorkerHandle {
             debug_assert!(self.enable_drop_split);
             debug_assert!(discovered_splits.len() == 1);
             discovered_splits =
-                fill_adaptive_split(discovered_splits.values().next().unwrap(), actors)?;
+                fill_adaptive_split(discovered_splits.values().next().unwrap(), actor_count)?;
         }
 
         Ok(discovered_splits)

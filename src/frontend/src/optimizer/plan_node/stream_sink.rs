@@ -21,7 +21,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, CreateType, FieldLike};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
@@ -31,6 +30,7 @@ use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
+use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::stream_plan::SinkLogStoreType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -45,7 +45,7 @@ use super::{
     StreamSyncLogStore, generic,
 };
 use crate::TableCatalog;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result, RwError, bail_bind_error, bail_invalid_input_syntax};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::StreamOptimizedLogicalPlanRoot;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
@@ -56,6 +56,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::WithOptionsSecResolved;
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
+const CREATE_TABLE_IF_NOT_EXISTS: &str = "create_table_if_not_exists";
 
 /// ## Why we need `PartitionComputeInfo`?
 ///
@@ -255,9 +256,15 @@ impl StreamSink {
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
-        let mut downstream_pk = {
-            let from_properties =
-                Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
+        let derived_pk = pk.iter().map(|k| k.column_index).collect_vec();
+
+        // Get downstream pk from user input, override and perform some checks if applicable.
+        let downstream_pk = {
+            let downstream_pk = properties
+                .get(DOWNSTREAM_PK_KEY)
+                .map(|v| Self::parse_downstream_pk(v, &columns))
+                .transpose()?;
+
             if let Some(t) = &target_table {
                 let user_defined_primary_key_table = t.row_id_index.is_none();
                 let sink_is_append_only =
@@ -276,24 +283,62 @@ impl StreamSink {
                 }
 
                 if sink_type != SinkType::Upsert {
-                    vec![]
+                    None
                 } else {
                     let target_table_mapping = target_table_mapping.unwrap();
 
-                    t.pk()
+                    Some(t.pk()
                         .iter()
                         .map(|c| {
                             target_table_mapping[c.column_index].ok_or_else(
                                 || ErrorCode::InvalidInputSyntax("When using non append only sink into table, the primary key of the table must be included in the sink result.".to_owned()).into())
                         })
-                        .try_collect::<_, _, RwError>()?
+                        .try_collect::<_, _, RwError>()?)
                 }
+            } else if properties.get(CREATE_TABLE_IF_NOT_EXISTS) == Some(&"true".to_owned())
+                && sink_type == SinkType::Upsert
+                && downstream_pk.is_none()
+            {
+                Some(derived_pk.clone())
+            } else if properties.is_iceberg_connector()
+                && sink_type == SinkType::Upsert
+                && downstream_pk.is_none()
+            {
+                // If user doesn't specify the downstream primary key, we use the stream key as the pk.
+                Some(derived_pk.clone())
             } else {
-                from_properties
+                downstream_pk
             }
         };
+
+        // Since we've already rejected empty pk in `parse_downstream_pk`, if we still get an empty pk here,
+        // it's likely that the derived stream key is used and it's empty, which is possible in cases of
+        // operators outputting at most one row (like `SimpleAgg`). This is legitimate. However, currently
+        // the sink implementation may confuse empty pk with not specifying pk, so we still reject this case
+        // for correctness.
+        if let Some(pk) = &downstream_pk
+            && pk.is_empty()
+        {
+            bail_invalid_input_syntax!(
+                "Empty primary key is not supported. \
+                 Please specify the primary key in WITH options."
+            )
+        }
+
+        // The "upsert" property is defined based on a specific stream key: columns other than the stream key
+        // might not be valid. We should reject the cases referencing such columns in primary key.
+        if let StreamKind::Upsert = input.stream_kind()
+            && let Some(downstream_pk) = &downstream_pk
+            && !downstream_pk.iter().all(|i| derived_pk.contains(i))
+        {
+            bail_bind_error!(
+                "When sinking from an upsert stream, \
+                 the downstream primary key must be the same as or a subset of the one derived from the stream."
+            )
+        }
+
         if let Some(upstream_table) = &auto_refresh_schema_from_table
-            && !downstream_pk.is_empty()
+            && let Some(downstream_pk) = &downstream_pk
         {
             let upstream_table_pk_col_names = upstream_table
                 .pk
@@ -319,21 +364,17 @@ impl StreamSink {
             _ => {
                 match properties.get("connector") {
                     Some(s) if s == "jdbc" && sink_type == SinkType::Upsert => {
-                        if sink_type == SinkType::Upsert && downstream_pk.is_empty() {
+                        let Some(downstream_pk) = &downstream_pk else {
                             return Err(ErrorCode::InvalidInputSyntax(format!(
                                 "Primary key must be defined for upsert JDBC sink. Please specify the \"{key}='pk1,pk2,...'\" in WITH options.",
                                 key = DOWNSTREAM_PK_KEY
                             )).into());
-                        }
+                        };
                         // for upsert jdbc sink we align distribution to downstream to avoid
                         // lock contentions
-                        RequiredDist::hash_shard(downstream_pk.as_slice())
+                        RequiredDist::hash_shard(downstream_pk)
                     }
                     Some(s) if s == ICEBERG_SINK => {
-                        // If user doesn't specify the downstream primary key, we use the stream key as the pk.
-                        if sink_type.is_upsert() && downstream_pk.is_empty() {
-                            downstream_pk = pk.iter().map(|k| k.column_index).collect_vec();
-                        }
                         let (required_dist, new_input, partition_col_idx) =
                             Self::derive_iceberg_sink_distribution(
                                 input,
@@ -346,17 +387,14 @@ impl StreamSink {
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
-                        if downstream_pk.is_empty() {
+                        if let Some(downstream_pk) = &downstream_pk {
+                            // force the same primary key be written into the same sink shard to make sure the sink pk mismatch compaction effective
+                            // https://github.com/risingwavelabs/risingwave/blob/6d88344c286f250ea8a7e7ef6b9d74dea838269e/src/stream/src/executor/sink.rs#L169-L198
+                            RequiredDist::shard_by_key(input.schema().len(), downstream_pk)
+                        } else {
                             RequiredDist::shard_by_key(
                                 input.schema().len(),
                                 input.expect_stream_key(),
-                            )
-                        } else {
-                            // force the same primary key be written into the same sink shard to make sure the sink pk mismatch compaction effective
-                            // https://github.com/risingwavelabs/risingwave/blob/6d88344c286f250ea8a7e7ef6b9d74dea838269e/src/stream/src/executor/sink.rs#L169-L198
-                            RequiredDist::shard_by_key(
-                                input.schema().len(),
-                                downstream_pk.as_slice(),
                             )
                         }
                     }
@@ -383,7 +421,8 @@ impl StreamSink {
         let (properties, secret_refs) = properties.into_parts();
         let is_exactly_once = properties
             .get("is_exactly_once")
-            .is_some_and(|v| v.to_lowercase() == "true");
+            .map(|v| v.to_lowercase() == "true");
+
         let mut sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -462,7 +501,25 @@ impl StreamSink {
                 )
                 .into());
             }
-            if sink_desc.is_exactly_once {
+
+            let is_exactly_once = match sink_desc.is_exactly_once {
+                Some(v) => v,
+                None => {
+                    if let Some(connector) = sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
+                        let connector_type = connector.to_lowercase();
+                        if connector_type == ICEBERG_SINK {
+                            // iceberg sink defaults to exactly once
+                            // However, when sink_decouple is disabled, we enforce it to false.
+                            sink_desc
+                                .properties
+                                .insert("is_exactly_once".to_owned(), "false".to_owned());
+                        }
+                    }
+                    false
+                }
+            };
+
+            if is_exactly_once {
                 return Err(ErrorCode::NotSupported(
                     "Exactly once sink can only be created with sink_decouple enabled.".to_owned(),
                     hint_string(true),
@@ -604,34 +661,31 @@ impl StreamSink {
     }
 
     /// Extract user-defined downstream pk columns from with options. Return the indices of the pk
-    /// columns.
+    /// columns. An empty list of columns is not allowed.
     ///
     /// The format of `downstream_pk_str` should be 'col1,col2,...' (delimited by `,`) in order to
     /// get parsed.
     fn parse_downstream_pk(
+        downstream_pk_str: &str,
         columns: &[ColumnCatalog],
-        downstream_pk_str: Option<&String>,
     ) -> Result<Vec<usize>> {
-        match downstream_pk_str {
-            Some(downstream_pk_str) => {
-                // If the user defines the downstream primary key, we find out their indices.
-                let downstream_pk = downstream_pk_str.split(',').collect_vec();
-                let mut downstream_pk_indices = Vec::with_capacity(downstream_pk.len());
-                for key in downstream_pk {
-                    let trimmed_key = key.trim();
-                    if trimmed_key.is_empty() {
-                        continue;
-                    }
-                    downstream_pk_indices.push(find_column_idx_by_name(columns, trimmed_key)?);
-                }
-                Ok(downstream_pk_indices)
+        // If the user defines the downstream primary key, we find out their indices.
+        let downstream_pk = downstream_pk_str.split(',').collect_vec();
+        let mut downstream_pk_indices = Vec::with_capacity(downstream_pk.len());
+        for key in downstream_pk {
+            let trimmed_key = key.trim();
+            if trimmed_key.is_empty() {
+                continue;
             }
-            None => {
-                // The user doesn't define the downstream primary key and we simply return an empty
-                // vector.
-                Ok(Vec::new())
-            }
+            downstream_pk_indices.push(find_column_idx_by_name(columns, trimmed_key)?);
         }
+        if downstream_pk_indices.is_empty() {
+            bail_invalid_input_syntax!(
+                "Specified primary key should not be empty. \
+                To use derived primary key, remove {DOWNSTREAM_PK_KEY} from WITH options instead."
+            );
+        }
+        Ok(downstream_pk_indices)
     }
 
     /// The table schema is: | epoch | seq id | row op | sink columns |
@@ -672,9 +726,9 @@ impl Distill for StreamSink {
         let mut vec = Vec::with_capacity(3);
         vec.push(("type", Pretty::from(sink_type)));
         vec.push(("columns", column_names));
-        if self.sink_desc.sink_type.is_upsert() {
+        if let Some(pk) = &self.sink_desc.downstream_pk {
             let sink_pk = IndicesDisplay {
-                indices: &self.sink_desc.downstream_pk.clone(),
+                indices: pk,
                 schema: self.base.schema(),
             };
             vec.push(("downstream_pk", sink_pk.distill()));

@@ -94,6 +94,7 @@ pub struct StorageOpts {
     pub data_file_cache_compression: foyer::Compression,
     pub data_file_cache_flush_buffer_threshold_mb: usize,
     pub data_file_cache_fifo_probation_ratio: f64,
+    pub data_file_cache_blob_index_size_kb: usize,
     pub data_file_cache_runtime_config: foyer::RuntimeOptions,
     pub data_file_cache_throttle: foyer::Throttle,
 
@@ -118,6 +119,7 @@ pub struct StorageOpts {
     pub meta_file_cache_compression: foyer::Compression,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
     pub meta_file_cache_fifo_probation_ratio: f64,
+    pub meta_file_cache_blob_index_size_kb: usize,
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
 
@@ -177,6 +179,8 @@ pub struct StorageOpts {
     pub iceberg_compaction_enable_dynamic_size_estimation: bool,
     /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
+    /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
+    pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
 }
 
 impl Default for StorageOpts {
@@ -245,6 +249,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_compression: c.storage.data_file_cache.compression,
             data_file_cache_flush_buffer_threshold_mb: s.block_file_cache_flush_buffer_threshold_mb,
             data_file_cache_fifo_probation_ratio: c.storage.data_file_cache.fifo_probation_ratio,
+            data_file_cache_blob_index_size_kb: c.storage.data_file_cache.blob_index_size_kb,
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
             data_file_cache_throttle,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
@@ -258,6 +263,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_compression: c.storage.meta_file_cache.compression,
             meta_file_cache_flush_buffer_threshold_mb: s.meta_file_cache_flush_buffer_threshold_mb,
             meta_file_cache_fifo_probation_ratio: c.storage.meta_file_cache.fifo_probation_ratio,
+            meta_file_cache_blob_index_size_kb: c.storage.meta_file_cache.blob_index_size_kb,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             meta_file_cache_throttle,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
@@ -334,6 +340,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_size_estimation_smoothing_factor: c
                 .storage
                 .iceberg_compaction_size_estimation_smoothing_factor,
+            iceberg_compaction_pending_parallelism_budget_multiplier: c
+                .storage
+                .iceberg_compaction_pending_parallelism_budget_multiplier,
             vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
             vector_block_cache_capacity_mb: s.vector_block_cache_capacity_mb,
             vector_block_cache_shard_num: s.vector_block_cache_shard_num,

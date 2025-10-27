@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Display;
 use std::hash::BuildHasher;
@@ -146,6 +145,11 @@ impl DataChunk {
         self.visibility.count_ones()
     }
 
+    // Compute the required permits of this chunk for rate limiting.
+    pub fn rate_limit_permits(&self) -> u64 {
+        self.cardinality() as _
+    }
+
     // TODO(rc): shall we rename this to `size`?
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
@@ -178,7 +182,9 @@ impl DataChunk {
         self.visibility = visibility;
     }
 
-    pub fn is_compacted(&self) -> bool {
+    /// Returns whether all rows in the chunk are visible, i.e., the chunk is compacted
+    /// in terms of row visibility.
+    pub fn is_vis_compacted(&self) -> bool {
         self.visibility.all()
     }
 
@@ -220,11 +226,10 @@ impl DataChunk {
         proto
     }
 
-    /// `compact` will convert the chunk to compact format.
-    /// Compacting removes the hidden rows, and returns a new visibility
-    /// mask which indicates this.
+    /// Removes the invisible rows based on `visibility`. Returns a new compacted chunk
+    /// with all rows visible.
     ///
-    /// `compact` has trade-offs:
+    /// `compact_vis` has trade-offs:
     ///
     /// Cost:
     /// It has to rebuild the each column, meaning it will incur cost
@@ -233,7 +238,7 @@ impl DataChunk {
     /// Benefit:
     /// The main benefit is that the data chunk is smaller, taking up less memory.
     /// We can also save the cost of iterating over many hidden rows.
-    pub fn compact(self) -> Self {
+    pub fn compact_vis(self) -> Self {
         if self.visibility.all() {
             return self;
         }
@@ -243,14 +248,14 @@ impl DataChunk {
             .iter()
             .map(|col| {
                 let array = col;
-                array.compact(&self.visibility, cardinality).into()
+                array.compact_vis(&self.visibility, cardinality).into()
             })
             .collect::<Vec<_>>();
         Self::new(columns, Bitmap::ones(cardinality))
     }
 
     /// Scatter a compacted chunk to a new chunk with the given visibility.
-    pub fn uncompact(self, vis: Bitmap) -> Self {
+    pub fn expand_vis(self, vis: Bitmap) -> Self {
         let mut uncompact_builders: Vec<_> = self
             .columns
             .iter()
@@ -292,25 +297,6 @@ impl DataChunk {
             .collect();
 
         Self::new(array, vis)
-    }
-
-    /// Convert the chunk to compact format.
-    ///
-    /// If the chunk is not compacted, return a new compacted chunk, otherwise return a reference to self.
-    pub fn compact_cow(&self) -> Cow<'_, Self> {
-        if self.visibility.all() {
-            return Cow::Borrowed(self);
-        }
-        let cardinality = self.visibility.count_ones();
-        let columns = self
-            .columns
-            .iter()
-            .map(|col| {
-                let array = col;
-                array.compact(&self.visibility, cardinality).into()
-            })
-            .collect::<Vec<_>>();
-        Cow::Owned(Self::new(columns, Bitmap::ones(cardinality)))
     }
 
     pub fn from_protobuf(proto: &PbDataChunk) -> ArrayResult<Self> {
@@ -723,7 +709,7 @@ impl DataChunkTestExt for DataChunk {
         use crate::types::ScalarImpl;
         fn parse_type(s: &str) -> DataType {
             if let Some(s) = s.strip_suffix("[]") {
-                return DataType::List(Box::new(parse_type(s)));
+                return DataType::list(parse_type(s));
             }
 
             // Special logic to support Map type in `DataChunk::from_pretty`.

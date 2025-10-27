@@ -244,6 +244,15 @@ seed_old_cluster() {
   echo "--- KAFKA TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_original.slt"
 
+  # Test version columns backwards compatibility, if OLD_VERSION <= 2.6.0
+  if version_le "$OLD_VERSION" "2.6.0"; then
+    echo "--- VERSION COLUMNS TEST: Seeding old cluster with data"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/version-columns/seed.slt"
+
+    echo "--- VERSION COLUMNS TEST: Validating old cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/version-columns/validate_original.slt"
+  fi
+
   # Test invalid WITH options, if OLD_VERSION <= 1.5.0
   if version_le "$OLD_VERSION" "1.5.0"; then
     echo "--- KAFKA TEST (invalid options): Seeding old cluster with data"
@@ -255,6 +264,12 @@ seed_old_cluster() {
     echo "--- KAFKA TEST (invalid options): Validating old cluster"
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_original.slt"
   fi
+
+  echo "--- SINK INTO TABLE TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/seed.slt"
+
+  echo "--- SINK INTO TABLE TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_original.slt"
 
   # work around https://github.com/risingwavelabs/risingwave/issues/18650
   echo "--- wait for a version checkpoint"
@@ -289,11 +304,20 @@ validate_new_cluster() {
   echo "--- KAFKA TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/validate_restart.slt"
 
+  # Test version columns backwards compatibility, if OLD_VERSION <= 2.6.0
+  if version_le "$OLD_VERSION" "2.6.0"; then
+    echo "--- VERSION COLUMNS TEST: Validating new cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/version-columns/validate_restart.slt"
+  fi
+
   # Test invalid WITH options, if OLD_VERSION <= 1.5.0
   if version_le "$OLD_VERSION" "1.5.0"; then
     echo "--- KAFKA TEST (invalid options): Validating new cluster"
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/kafka/invalid_options/validate_restart.slt"
   fi
+
+  echo "--- SINK INTO TABLE TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_restart.slt"
 
   kill_cluster
 }

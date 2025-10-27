@@ -1010,6 +1010,7 @@ where
         match HummockObjectId::Sstable(0.into()) {
             HummockObjectId::Sstable(_) => {}
             HummockObjectId::VectorFile(_) => {}
+            HummockObjectId::HnswGraphFile(_) => {}
         };
         self.get_sst_infos(exclude_change_log)
             .map(|s| HummockObjectId::Sstable(s.object_id()))
@@ -1493,6 +1494,7 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64
     match HummockObjectId::Sstable(0.into()) {
         HummockObjectId::Sstable(_) => {}
         HummockObjectId::VectorFile(_) => {}
+        HummockObjectId::HnswGraphFile(_) => {}
     };
     version
         .levels
@@ -2346,8 +2348,7 @@ mod tests {
 
         {
             let split_key = group_split::build_split_key(6, VirtualNode::ZERO);
-            let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key);
+            let split_type = group_split::need_to_split(&sst, split_key);
             assert_eq!(SstSplitType::Left, split_type);
         }
 
@@ -2358,7 +2359,7 @@ mod tests {
             assert_eq!(SstSplitType::Both, split_type);
 
             let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
-            let origin_sst = sst.clone();
+            let origin_sst = sst;
             let split_type = group_split::need_to_split(&origin_sst, split_key);
             assert_eq!(SstSplitType::Right, split_type);
         }
@@ -2369,7 +2370,7 @@ mod tests {
             sst.key_range.right = sst.key_range.left.clone();
             let sst: SstableInfo = sst.into();
             let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
-            let origin_sst = sst.clone();
+            let origin_sst = sst;
             let sst_size = origin_sst.sst_size;
 
             let mut new_sst_id = 10.into();

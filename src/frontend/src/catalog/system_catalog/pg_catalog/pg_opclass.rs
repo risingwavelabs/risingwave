@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_opclass` defines index access method operator classes.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-opclass.html`].
+/// Reference: `https://www.postgresql.org/docs/current/catalog-pg-opclass.html`.
 #[system_catalog(view, "pg_catalog.pg_opclass")]
 #[derive(Fields)]
 struct PgOpclass {

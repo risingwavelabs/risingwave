@@ -18,10 +18,10 @@ use std::sync::Arc;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, IndexId, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, IndexId, Schema};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties};
+use risingwave_pb::catalog::{PbIndex, PbIndexColumnProperties, PbVectorIndexInfo};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{OwnedByUserCatalog, TableCatalog};
@@ -56,9 +56,25 @@ pub struct TableIndex {
     pub index_columns_len: u32,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Educe)]
+#[educe(Hash)]
 pub struct VectorIndex {
     pub index_table: Arc<TableCatalog>,
+    pub vector_expr: ExprImpl,
+    #[educe(Hash(ignore))]
+    pub primary_to_included_info_column_mapping: HashMap<usize, usize>,
+    pub primary_key_idx_in_info_columns: Vec<usize>,
+    pub included_info_columns: Vec<usize>,
+    pub vector_index_info: PbVectorIndexInfo,
+}
+
+impl VectorIndex {
+    pub fn info_column_desc(&self) -> Vec<ColumnDesc> {
+        self.index_table.columns[1..=self.included_info_columns.len()]
+            .iter()
+            .map(|col| col.column_desc.clone())
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -146,8 +162,33 @@ impl IndexCatalog {
             }
             TableType::VectorIndex => {
                 assert_eq!(index_prost.index_columns_len, 1);
+                let included_info_columns = index_item[1..].iter().map(|item| {
+                    let ExprImpl::InputRef(input) = item else {
+                        panic!("vector index included columns must be from direct input column, but got: {:?}", item);
+                    };
+                    input.index
+                }).collect_vec();
+                let primary_to_included_info_column_mapping: HashMap<_, _> = included_info_columns
+                    .iter()
+                    .enumerate()
+                    .map(|(included_info_column_idx, primary_column_idx)| {
+                        (*primary_column_idx, included_info_column_idx)
+                    })
+                    .collect();
+                let primary_key_idx_in_info_columns = primary_table
+                    .pk()
+                    .iter()
+                    .map(|order| primary_to_included_info_column_mapping[&order.column_index])
+                    .collect();
                 IndexType::Vector(Arc::new(VectorIndex {
                     index_table: index_table.clone(),
+                    vector_expr: index_item[0].clone(),
+                    primary_to_included_info_column_mapping,
+                    primary_key_idx_in_info_columns,
+                    included_info_columns,
+                    vector_index_info: index_table
+                        .vector_index_info
+                        .expect("should exist for vector index"),
                 }))
             }
             TableType::Table | TableType::MaterializedView | TableType::Internal => {
@@ -299,6 +340,10 @@ impl IndexCatalog {
             include_columns,
             distributed_by_columns,
         }
+    }
+
+    pub fn is_created(&self) -> bool {
+        self.index_table().is_created()
     }
 }
 

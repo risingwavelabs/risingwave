@@ -27,13 +27,13 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-faiss = { version = "0.12.2-alpha.0", features = ["static"] }
+faiss = { workspace = true }
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
 iceberg = { workspace = true }
-iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "287a7527531fbd39da2ec44f57f339c1a05f3a4a" }
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "6660e37a08b497806e44443da975a73dc8bc7efc" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
@@ -59,7 +59,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 scopeguard = "1"
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_bytes = "0.11"
 sled = "0.34.7"
 spin = "0.10"
@@ -80,7 +80,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tonic = { workspace = true }
 tracing = "0.1"
-xorf = "0.11.0"
+xorf = "0.12.0"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
@@ -90,7 +90,7 @@ workspace-hack = { path = "../workspace-hack" }
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 nix = { version = "0.30", features = ["fs", "mman"] }
-procfs = { version = "0.17", default-features = false }
+procfs = { version = "0.18", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }

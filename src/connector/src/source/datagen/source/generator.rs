@@ -279,6 +279,8 @@ mod tests {
                     timestamptz_handling: None,
                     timestamp_handling: None,
                     time_handling: None,
+                    bigint_unsigned_handling: None,
+                    handle_toast_columns: false,
                 }),
             },
             data_types,

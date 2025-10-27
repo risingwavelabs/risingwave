@@ -26,11 +26,11 @@ services:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
   subject1:
-    image: bitnami/natscli:0.1.4
+    image: bitnamilegacy/natscli:0.2.4
     depends_on: [nats-server]
     command: sub subject1 -s nats://nats-server:4222
   subject2:
-    image: bitnami/natscli:0.1.4
+    image: bitnamilegacy/natscli:0.2.4
     depends_on: [nats-server]
     command: sub subject2 -s nats://nats-server:4222
   message_queue:

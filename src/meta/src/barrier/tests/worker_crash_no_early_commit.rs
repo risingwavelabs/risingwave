@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::catalog::Database;
@@ -124,9 +125,27 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unreachable!()
     }
 
+    async fn handle_list_finished_source_ids(
+        &self,
+        _list_finished_source_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
+
     async fn handle_load_finished_source_ids(
         &self,
         _load_finished_source_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
+
+    async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+        unimplemented!()
+    }
+
+    async fn handle_refresh_finished_table_ids(
+        &self,
+        _refresh_finished_table_ids: Vec<u32>,
     ) -> MetaResult<()> {
         unimplemented!()
     }
@@ -206,12 +225,15 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             InflightFragmentInfo {
                                 fragment_id: actor1.fragment_id,
                                 distribution_type: DistributionType::Single,
+                                fragment_type_mask: Default::default(),
+                                vnode_count: VirtualNode::COUNT_FOR_TEST,
                                 nodes: Default::default(),
                                 actors: HashMap::from_iter([(
                                     actor1.actor_id as _,
                                     InflightActorInfo {
                                         worker_id: worker1.id as _,
                                         vnode_bitmap: None,
+                                        splits: vec![],
                                     },
                                 )]),
                                 state_table_ids: HashSet::from_iter([table1]),
@@ -222,12 +244,15 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             InflightFragmentInfo {
                                 fragment_id: actor2.fragment_id,
                                 distribution_type: DistributionType::Single,
+                                fragment_type_mask: Default::default(),
+                                vnode_count: VirtualNode::COUNT_FOR_TEST,
                                 nodes: Default::default(),
                                 actors: HashMap::from_iter([(
                                     actor2.actor_id as _,
                                     InflightActorInfo {
                                         worker_id: worker2.id as _,
                                         vnode_bitmap: None,
+                                        splits: vec![],
                                     },
                                 )]),
                                 state_table_ids: HashSet::from_iter([table2]),

@@ -52,6 +52,17 @@ message BarrierCompleteResponse {
     // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
     uint64 pending_epoch_lag = 5;
+    // Buffered rows that are yet to be consumed (used by locality backfill to report precise progress)
+    uint64 buffered_rows = 6;
+  }
+  message CdcTableBackfillProgress {
+    uint32 actor_id = 1;
+    uint64 epoch = 2;
+    bool done = 3;
+    int64 split_id_start_inclusive = 4;
+    int64 split_id_end_inclusive = 5;
+    uint64 generation = 6;
+    uint32 fragment_id = 7;
   }
   string request_id = 1;
   common.Status status = 2;
@@ -73,9 +84,21 @@ message BarrierCompleteResponse {
   uint32 database_id = 10;
   // Used for refreshable batch source.
   // SourceExecutor reports the source load is finished, and then
-  // meta will issue a LoadFinished barrier to notify MaterializeExecutor to start diff calculation.
+  // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
   repeated uint32 load_finished_source_ids = 11;
   map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
+  repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
+  // Used for truncating tables in storage layer.
+  // MaterializeExecutor reports the tables to truncate, and then
+  // meta will apply truncate operation in next commit epoch.
+  repeated uint32 truncate_tables = 14;
+  // Used for reporting materialized view refresh completion.
+  // MaterializeExecutor reports when refresh has finished, and then
+  // meta will update the table's refresh state to Finished.
+  repeated uint32 refresh_finished_tables = 15;
+  // SourceExecutor reports the source list is finished, and then
+  // meta will issue a ListFinish barrier to notify the source to start loading.
+  repeated uint32 list_finished_source_ids = 16;
 }
 
 message StreamingControlStreamRequest {

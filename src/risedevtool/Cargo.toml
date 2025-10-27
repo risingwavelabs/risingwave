@@ -13,11 +13,11 @@ chrono = { workspace = true, features = [
     "clock",
     "std",
 ] }
-console = "0.15"
+console = "0.16"
 fs-err = "3.1.0"
 glob = "0.3"
 google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
-indicatif = "0.17"
+indicatif = "0.18"
 itertools = { workspace = true }
 log = "0.4"
 panic-message = "0.3"
@@ -25,7 +25,7 @@ rdkafka = { workspace = true }
 redis = { workspace = true }
 regex = { workspace = true }
 reqwest = { version = "0.12.2", features = ["blocking"] }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_json = "1"
 serde_yaml = "0.9"
 sqlx = { workspace = true, features = ["any"] }
@@ -44,7 +44,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 workspace-hack = { path = "../workspace-hack" }
-yaml-rust = "0.4.5"
+yaml-rust = { version = "0.10.3", package = "yaml-rust2" }
 
 [lints]
 workspace = true

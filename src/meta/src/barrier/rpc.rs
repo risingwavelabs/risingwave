@@ -31,7 +31,8 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::{
-    CdcTableSnapshotSplitAssignment, build_pb_actor_cdc_table_snapshot_splits,
+    CdcTableSnapshotSplitAssignmentWithGeneration,
+    build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
@@ -58,6 +59,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
+use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
 };
@@ -68,7 +70,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
-use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate, StreamJobFragments};
+use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate};
 use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
@@ -98,7 +100,7 @@ struct ControlStreamNode {
 pub(super) struct ControlStreamManager {
     connected_nodes: HashMap<WorkerId, ControlStreamNode>,
     workers: HashMap<WorkerId, WorkerNode>,
-    env: MetaSrvEnv,
+    pub env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
@@ -387,6 +389,7 @@ pub(super) struct DatabaseInitialBarrierCollector {
     create_mview_tracker: CreateMviewProgressTracker,
     creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
     committed_epoch: u64,
+    cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
 }
 
 impl Debug for DatabaseInitialBarrierCollector {
@@ -441,6 +444,7 @@ impl DatabaseInitialBarrierCollector {
             self.database_state,
             self.committed_epoch,
             self.creating_streaming_job_controls,
+            self.cdc_table_backfill_tracker,
         )
     }
 
@@ -465,11 +469,11 @@ impl ControlStreamManager {
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
-        background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
+        background_jobs: &mut HashMap<TableId, String>,
         mut subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
-        cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignment,
+        cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignmentWithGeneration,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
         let source_split_assignments = jobs
@@ -490,18 +494,26 @@ impl ControlStreamManager {
             .filter_map(|actor_id| {
                 let actor_id = *actor_id as ActorId;
                 cdc_table_snapshot_split_assignment
+                    .splits
                     .remove(&actor_id)
                     .map(|splits| (actor_id, splits))
             })
             .collect();
+        let database_cdc_table_snapshot_split_assignment =
+            CdcTableSnapshotSplitAssignmentWithGeneration::new(
+                database_cdc_table_snapshot_split_assignment,
+                cdc_table_snapshot_split_assignment.generation,
+            );
         let mutation = Mutation::Add(AddMutation {
             // Actors built during recovery is not treated as newly added actors.
             actor_dispatchers: Default::default(),
             added_actors: Default::default(),
             actor_splits: build_actor_connector_splits(&source_split_assignments),
-            actor_cdc_table_snapshot_splits: build_pb_actor_cdc_table_snapshot_splits(
-                database_cdc_table_snapshot_split_assignment,
-            ),
+            actor_cdc_table_snapshot_splits:
+                build_pb_actor_cdc_table_snapshot_splits_with_generation(
+                    database_cdc_table_snapshot_split_assignment,
+                )
+                .into(),
             pause: is_paused,
             subscriptions_to_add: Default::default(),
             // TODO(kwannoel): recover using backfill order plan
@@ -540,17 +552,17 @@ impl ControlStreamManager {
         let mut background_mviews = HashMap::new();
 
         for (job_id, job) in jobs {
-            if let Some((definition, stream_job_fragments)) = background_jobs.remove(&job_id) {
-                if stream_job_fragments.fragments().any(|fragment| {
+            if let Some(definition) = background_jobs.remove(&job_id) {
+                if job.fragment_infos().any(|fragment| {
                     fragment
                         .fragment_type_mask
                         .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
                 }) {
                     debug!(%job_id, definition, "recovered snapshot backfill job");
-                    snapshot_backfill_jobs.insert(job_id, (job, definition, stream_job_fragments));
+                    snapshot_backfill_jobs.insert(job_id, (job, definition));
                 } else {
                     database_jobs.insert(job_id, job);
-                    background_mviews.insert(job_id, (definition, stream_job_fragments));
+                    background_mviews.insert(job_id, definition);
                 }
             } else {
                 database_jobs.insert(job_id, job);
@@ -578,7 +590,7 @@ impl ControlStreamManager {
         };
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<TableId, _> = HashMap::new();
-        for (job_id, (info, definition, stream_job_fragments)) in snapshot_backfill_jobs {
+        for (job_id, (info, definition)) in snapshot_backfill_jobs {
             let committed_epoch =
                 resolve_jobs_committed_epoch(state_table_committed_epochs, [&info]);
             if committed_epoch == barrier_info.prev_epoch() {
@@ -587,7 +599,7 @@ impl ControlStreamManager {
                     job_id
                 );
                 background_mviews
-                    .try_insert(job_id, (definition, stream_job_fragments))
+                    .try_insert(job_id, definition)
                     .expect("non-duplicate");
                 database_jobs
                     .try_insert(job_id, info)
@@ -595,8 +607,7 @@ impl ControlStreamManager {
                 continue;
             }
             let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
-                stream_job_fragments
-                    .fragments()
+                info.fragment_infos()
                     .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
             )?
             .0
@@ -641,7 +652,6 @@ impl ControlStreamManager {
                     (
                         info,
                         definition,
-                        stream_job_fragments,
                         upstream_table_ids,
                         committed_epoch,
                         snapshot_epoch,
@@ -686,30 +696,23 @@ impl ControlStreamManager {
         };
 
         let tracker = CreateMviewProgressTracker::recover(
-            background_mviews
-                .iter()
-                .map(|(table_id, (definition, stream_job_fragments))| {
+            background_mviews.iter().map(|(table_id, definition)| {
+                (
+                    *table_id,
                     (
-                        *table_id,
-                        (definition.clone(), stream_job_fragments, Default::default()),
-                    )
-                }),
+                        definition.clone(),
+                        &database_jobs[table_id],
+                        Default::default(),
+                    ),
+                )
+            }),
             hummock_version_stats,
         );
 
         let mut creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl> =
             HashMap::new();
-        for (
-            job_id,
-            (
-                info,
-                definition,
-                stream_job_fragments,
-                upstream_table_ids,
-                committed_epoch,
-                snapshot_epoch,
-            ),
-        ) in ongoing_snapshot_backfill_jobs
+        for (job_id, (info, definition, upstream_table_ids, committed_epoch, snapshot_epoch)) in
+            ongoing_snapshot_backfill_jobs
         {
             let node_actors =
                 edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
@@ -737,7 +740,6 @@ impl ControlStreamManager {
                     committed_epoch,
                     barrier_info.curr_epoch.value().0,
                     info,
-                    stream_job_fragments,
                     hummock_version_stats,
                     node_actors,
                     mutation.clone(),
@@ -748,11 +750,17 @@ impl ControlStreamManager {
 
         self.env.shared_actor_infos().recover_database(
             database_id,
-            database_jobs.values().flatten().chain(
-                creating_streaming_job_controls
-                    .values()
-                    .flat_map(|job| job.graph_info().fragment_infos()),
-            ),
+            database_jobs
+                .values()
+                .chain(
+                    creating_streaming_job_controls
+                        .values()
+                        .map(|job| job.graph_info()),
+                )
+                .flat_map(|info| {
+                    info.fragment_infos()
+                        .map(move |fragment| (fragment, info.job_id))
+                }),
         );
 
         let committed_epoch = barrier_info.prev_epoch();
@@ -765,6 +773,7 @@ impl ControlStreamManager {
             subscription_info,
             is_paused,
         );
+        let cdc_table_backfill_tracker = self.env.cdc_table_backfill_tracker();
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,
@@ -772,6 +781,7 @@ impl ControlStreamManager {
             create_mview_tracker: tracker,
             creating_streaming_job_controls,
             committed_epoch,
+            cdc_table_backfill_tracker,
         })
     }
 

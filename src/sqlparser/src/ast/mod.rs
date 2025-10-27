@@ -1155,7 +1155,7 @@ impl fmt::Display for CommentObject {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ExplainType {
     Logical,
@@ -1173,7 +1173,7 @@ impl fmt::Display for ExplainType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ExplainFormat {
     Text,
@@ -1195,7 +1195,7 @@ impl fmt::Display for ExplainFormat {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExplainOptions {
     /// Display additional information regarding the plan.
@@ -1256,6 +1256,28 @@ pub struct CdcTableInfo {
     pub external_table_name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CopyEntity {
+    Query(Box<Query>),
+    Table {
+        /// TABLE
+        table_name: ObjectName,
+        /// COLUMNS
+        columns: Vec<Ident>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CopyTarget {
+    Stdin {
+        /// VALUES a vector of values to be copied
+        values: Vec<Option<String>>,
+    },
+    Stdout,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1287,12 +1309,8 @@ pub enum Statement {
         returning: Vec<SelectItem>,
     },
     Copy {
-        /// TABLE
-        table_name: ObjectName,
-        /// COLUMNS
-        columns: Vec<Ident>,
-        /// VALUES a vector of values to be copied
-        values: Vec<Option<String>>,
+        entity: CopyEntity,
+        target: CopyTarget,
     },
     /// UPDATE
     Update {
@@ -1349,8 +1367,8 @@ pub enum Statement {
         append_only: bool,
         /// On conflict behavior
         on_conflict: Option<OnConflict>,
-        /// with_version_column behind on conflict
-        with_version_column: Option<Ident>,
+        /// with_version_columns behind on conflict - supports multiple version columns
+        with_version_columns: Vec<Ident>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
@@ -1867,30 +1885,45 @@ impl Statement {
                 }
                 Ok(())
             }
-            Statement::Copy {
-                table_name,
-                columns,
-                values,
-            } => {
-                write!(f, "COPY {}", table_name)?;
-                if !columns.is_empty() {
-                    write!(f, " ({})", display_comma_separated(columns))?;
-                }
-                write!(f, " FROM stdin; ")?;
-                if !values.is_empty() {
-                    writeln!(f)?;
-                    let mut delim = "";
-                    for v in values {
-                        write!(f, "{}", delim)?;
-                        delim = "\t";
-                        if let Some(v) = v {
-                            write!(f, "{}", v)?;
-                        } else {
-                            write!(f, "\\N")?;
+            Statement::Copy { entity, target } => {
+                write!(f, "COPY ",)?;
+                match entity {
+                    CopyEntity::Query(query) => {
+                        write!(f, "({})", query)?;
+                    }
+                    CopyEntity::Table {
+                        table_name,
+                        columns,
+                    } => {
+                        write!(f, "{}", table_name)?;
+                        if !columns.is_empty() {
+                            write!(f, " ({})", display_comma_separated(columns))?;
                         }
                     }
                 }
-                write!(f, "\n\\.")
+
+                match target {
+                    CopyTarget::Stdin { values } => {
+                        write!(f, " FROM STDIN; ")?;
+                        if !values.is_empty() {
+                            writeln!(f)?;
+                            let mut delim = "";
+                            for v in values {
+                                write!(f, "{}", delim)?;
+                                delim = "\t";
+                                if let Some(v) = v {
+                                    write!(f, "{}", v)?;
+                                } else {
+                                    write!(f, "\\N")?;
+                                }
+                            }
+                        }
+                        write!(f, "\n\\.")
+                    }
+                    CopyTarget::Stdout => {
+                        write!(f, " TO STDOUT")
+                    }
+                }
             }
             Statement::Update {
                 table_name,
@@ -2045,7 +2078,7 @@ impl Statement {
                 source_watermarks,
                 append_only,
                 on_conflict,
-                with_version_column,
+                with_version_columns,
                 query,
                 cdc_table_info,
                 include_column_options,
@@ -2084,8 +2117,12 @@ impl Statement {
                 if let Some(on_conflict_behavior) = on_conflict {
                     write!(f, " ON CONFLICT {}", on_conflict_behavior)?;
                 }
-                if let Some(version_column) = with_version_column {
-                    write!(f, " WITH VERSION COLUMN({})", version_column)?;
+                if !with_version_columns.is_empty() {
+                    write!(
+                        f,
+                        " WITH VERSION COLUMN({})",
+                        display_comma_separated(with_version_columns)
+                    )?;
                 }
                 if !include_column_options.is_empty() {
                     write!(f, " {}", display_separated(include_column_options, " "))?;
@@ -3859,7 +3896,7 @@ impl fmt::Display for AsOf {
             ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
             ProcessTimeWithInterval((value, leading_field)) => write!(
                 f,
-                " FOR SYSTEM_TIME AS OF NOW() - {} {}",
+                " FOR SYSTEM_TIME AS OF NOW() - '{}' {}",
                 value, leading_field
             ),
             TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
@@ -3909,7 +3946,7 @@ impl fmt::Display for BackfillOrderStrategy {
                 for (start, end) in map {
                     parts.push(format!("{} -> {}", start, end));
                 }
-                write!(f, "{}", display_comma_separated(&parts))
+                write!(f, "FIXED({})", display_comma_separated(&parts))
             }
         }
     }
@@ -3935,7 +3972,7 @@ impl Statement {
             source_watermarks: Vec::new(),
             append_only: false,
             on_conflict: None,
-            with_version_column: None,
+            with_version_columns: Vec::new(),
             query: None,
             cdc_table_info: None,
             include_column_options: Vec::new(),

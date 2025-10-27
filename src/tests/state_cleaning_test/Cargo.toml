@@ -13,7 +13,7 @@ clap = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 regex = { workspace = true }
 risingwave_rt = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_with = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"

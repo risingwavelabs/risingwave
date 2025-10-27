@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::{Context, anyhow};
-use itertools::Itertools;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_meta::MetaResult;
@@ -22,7 +21,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -157,17 +156,13 @@ impl NotificationServiceImpl {
     async fn get_worker_slot_mapping_snapshot(
         &self,
     ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
-        let fragment_guard = self
+        let mappings = self
             .metadata_manager
             .catalog_controller
-            .get_inner_read_guard()
-            .await;
-        let worker_slot_mappings = fragment_guard
-            .all_running_fragment_mappings()
-            .await?
-            .collect_vec();
+            .get_worker_slot_mappings();
+
         let notification_version = self.env.notification_manager().current_version().await;
-        Ok((worker_slot_mappings, notification_version))
+        Ok((mappings, notification_version))
     }
 
     fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
@@ -213,16 +208,17 @@ impl NotificationServiceImpl {
         Ok((tables, notification_version))
     }
 
-    async fn get_compute_node_total_cpu_count(&self) -> usize {
+    /// Get the total resource of the cluster.
+    async fn get_cluster_resource(&self) -> ClusterResource {
         self.metadata_manager
             .cluster_controller
-            .compute_node_total_cpu_count()
+            .cluster_resource()
             .await
     }
 
     async fn compactor_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (tables, catalog_version) = self.get_tables_snapshot().await?;
-        let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             tables,
@@ -230,7 +226,7 @@ impl NotificationServiceImpl {
                 catalog_version,
                 ..Default::default()
             }),
-            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
@@ -281,7 +277,7 @@ impl NotificationServiceImpl {
                 .context("failed to encode session params")?,
         });
 
-        let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             databases,
@@ -306,7 +302,7 @@ impl NotificationServiceImpl {
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,
             session_params,
-            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
@@ -319,7 +315,7 @@ impl NotificationServiceImpl {
             .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
-        let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             tables,
@@ -334,14 +330,14 @@ impl NotificationServiceImpl {
             hummock_write_limits: Some(WriteLimits {
                 write_limits: hummock_write_limits,
             }),
-            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
 
     async fn compute_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (secrets, catalog_version) = self.get_decrypted_secret_snapshot().await?;
-        let compute_node_total_cpu_count = self.get_compute_node_total_cpu_count().await;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             secrets,
@@ -349,7 +345,7 @@ impl NotificationServiceImpl {
                 catalog_version,
                 ..Default::default()
             }),
-            compute_node_total_cpu_count: compute_node_total_cpu_count as _,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }

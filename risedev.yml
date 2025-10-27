@@ -537,6 +537,30 @@ profile:
       - use: frontend
       - use: compactor
 
+  # Used for e2e monitoring tests in CI
+  ci-3cn-1fe-with-monitoring:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+
   ci-backfill-3cn-1fe:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
@@ -959,6 +983,18 @@ profile:
         # Add 100ms latency to any network call to the pg service
         latency-ms: 100
 
+  moat-1cn-1fe:
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: moat
+
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:
@@ -1040,6 +1076,9 @@ template:
     # AWS s3 bucket used by this compute node
     provide-aws-s3: "aws-s3*"
 
+    # Moat used by this compute node
+    provide-moat: "moat*"
+
     # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
@@ -1112,6 +1151,9 @@ template:
     # AWS s3 bucket used by the cluster
     provide-aws-s3: "aws-s3*"
 
+    # Moat used by this compute node
+    provide-moat: "moat*"
+
     # Tempo used by this meta node
     provide-tempo: "tempo*"
 
@@ -1179,6 +1221,9 @@ template:
 
     # Tempo used by this frontend instance
     provide-tempo: "tempo*"
+
+    # Prometheus nodes used by frontend for metrics queries
+    provide-prometheus: "prometheus*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -1371,7 +1416,7 @@ template:
     application: "connector"
 
     # The docker image. Can be overridden to use a different version.
-    image: "mysql:8.0"
+    image: "mysql:8.4"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
@@ -1470,6 +1515,18 @@ template:
 
     # PostgreSQL backend config for Lakekeeper catalog
     provide-postgres-backend: "postgres*"
+
+    # Storage backend - MinIO for S3-compatible storage
+    provide-minio: "minio*"
+  moat:
+    # Id to be picked-up by services
+    id: moat-${port}
+
+    # Address of Moat
+    address: "127.0.0.1"
+
+    # Listen port of Moat
+    port: 8182
 
     # Storage backend - MinIO for S3-compatible storage
     provide-minio: "minio*"
