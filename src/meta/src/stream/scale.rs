@@ -29,8 +29,6 @@ use risingwave_meta_model::{
     ObjectId, StreamingParallelism, WorkerId, fragment, fragment_relation,
 };
 use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
-use risingwave_pb::meta::FragmentWorkerSlotMappings;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::stream_plan::{Dispatcher, PbDispatchOutputMapping, PbDispatcher, StreamNode};
 use sea_orm::{ActiveModelTrait, ConnectionTrait, QuerySelect};
@@ -48,9 +46,6 @@ use crate::controller::scale::{
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
     ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, StreamContext,
-};
-use crate::serving::{
-    ServingVnodeMapping, to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping,
 };
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
@@ -294,66 +289,6 @@ impl ScaleController {
         };
 
         Ok(reschedule)
-    }
-
-    #[await_tree::instrument]
-    pub async fn post_apply_reschedule(
-        &self,
-        reschedules: &HashMap<FragmentId, Reschedule>,
-    ) -> MetaResult<()> {
-        // Update serving fragment info after rescheduling in meta store.
-        if !reschedules.is_empty() {
-            let workers = self
-                .metadata_manager
-                .list_active_serving_compute_nodes()
-                .await?;
-            let streaming_parallelisms = self
-                .metadata_manager
-                .running_fragment_parallelisms(Some(reschedules.keys().cloned().collect()))?;
-            let serving_worker_slot_mapping = Arc::new(ServingVnodeMapping::default());
-            let max_serving_parallelism = self
-                .env
-                .session_params_manager_impl_ref()
-                .get_params()
-                .await
-                .batch_parallelism()
-                .map(|p| p.get());
-            let (upserted, failed) = serving_worker_slot_mapping.upsert(
-                streaming_parallelisms,
-                &workers,
-                max_serving_parallelism,
-            );
-            if !upserted.is_empty() {
-                tracing::debug!(
-                    "Update serving vnode mapping for fragments {:?}.",
-                    upserted.keys()
-                );
-                self.env
-                    .notification_manager()
-                    .notify_frontend_without_version(
-                        Operation::Update,
-                        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
-                            mappings: to_fragment_worker_slot_mapping(&upserted),
-                        }),
-                    );
-            }
-            if !failed.is_empty() {
-                tracing::debug!(
-                    "Fail to update serving vnode mapping for fragments {:?}.",
-                    failed
-                );
-                self.env
-                    .notification_manager()
-                    .notify_frontend_without_version(
-                        Operation::Delete,
-                        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
-                            mappings: to_deleted_fragment_worker_slot_mapping(&failed),
-                        }),
-                    );
-            }
-        }
-
-        Ok(())
     }
 
     pub async fn reschedule_inplace(
