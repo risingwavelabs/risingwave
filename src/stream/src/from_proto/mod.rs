@@ -62,7 +62,8 @@ mod row_merge;
 mod approx_percentile;
 
 mod sync_log_store;
-mod vector_index;
+mod vector_index_lookup_join;
+mod vector_index_write;
 
 // import for submodules
 use itertools::Itertools;
@@ -117,7 +118,8 @@ use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};
 use crate::from_proto::changelog::ChangeLogExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
-use crate::from_proto::vector_index::VectorIndexWriteExecutorBuilder;
+use crate::from_proto::vector_index_lookup_join::VectorIndexLookupJoinBuilder;
+use crate::from_proto::vector_index_write::VectorIndexWriteExecutorBuilder;
 use crate::task::ExecutorParams;
 
 trait ExecutorBuilder {
@@ -204,5 +206,6 @@ pub async fn create_executor(
         NodeBody::VectorIndexWrite => VectorIndexWriteExecutorBuilder,
         NodeBody::UpstreamSinkUnion => UpstreamSinkUnionExecutorBuilder,
         NodeBody::LocalityProvider => LocalityProviderBuilder,
+        NodeBody::VectorIndexLookupJoin => VectorIndexLookupJoinBuilder,
     }
 }
