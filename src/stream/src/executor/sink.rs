@@ -220,7 +220,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             assert_eq!(sink_input_schema.data_types(), info.schema.data_types());
         }
 
-        let upsert_behavior = if let SinkType::Upsert = sink_param.sink_type {
+        let upsert_behavior = if sink_param.sink_type == SinkType::Upsert {
             let stream_key = &info.pk_indices;
             let pk_specified_and_matched = (sink_param.downstream_pk.as_ref())
                 .is_some_and(|downstream_pk| stream_key.iter().all(|i| downstream_pk.contains(i)));
