@@ -62,6 +62,7 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
     /// Asserts that the executor is pending (not ready) now.
     ///
     /// Panics if it is ready.
+    #[track_caller]
     fn next_unwrap_pending(&mut self) {
         if let Some(r) = self.try_next().now_or_never() {
             panic!("expect pending stream, but got `{:?}`", r);
@@ -71,6 +72,7 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
     /// Asserts that the executor is ready now, returning the next message.
     ///
     /// Panics if it is pending.
+    #[track_caller]
     fn next_unwrap_ready(&mut self) -> StreamExecutorResult<Message> {
         match self.next().now_or_never() {
             Some(Some(r)) => r,
