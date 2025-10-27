@@ -776,7 +776,6 @@ impl DatabaseCheckpointControl {
                         CompleteJobType::First => true,
                         CompleteJobType::Normal => false,
                         CompleteJobType::Finished => {
-                            // unsubscribe on upstream mv
                             finished_jobs.push((*table_id, epoch, resps));
                             continue;
                         }
