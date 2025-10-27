@@ -41,6 +41,7 @@ use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
 
 use crate::cache::ManagedLruCache;
+use crate::common::change_buffer::kind as cb_kind;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
     StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
@@ -509,7 +510,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             )
                                             .await?;
 
-                                        match change_buffer.into_chunk(data_types.clone()) {
+                                        match change_buffer
+                                            .into_chunk::<{ cb_kind::RETRACT }>(data_types.clone())
+                                        {
                                             Some(output_chunk) => {
                                                 self.state_table.write_chunk(output_chunk.clone());
                                                 self.state_table.try_flush().await?;

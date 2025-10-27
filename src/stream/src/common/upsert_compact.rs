@@ -13,22 +13,22 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
-use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::RowExt;
 use risingwave_common::types::DataType;
 
 pub use super::change_buffer::InconsistencyBehavior;
 use crate::common::change_buffer::ChangeBuffer;
+use crate::common::change_buffer::kind::UPSERT;
 
-/// A helper to remove unnecessary changes in the stream chunks based on the key.
-pub struct StreamChunkCompactor {
+/// A helper to remove unnecessary changes to convert into upsert format.
+pub struct StreamChunkUpsertCompactor {
     chunks: Vec<StreamChunk>,
     key: Vec<usize>,
 }
 
-impl StreamChunkCompactor {
+impl StreamChunkUpsertCompactor {
     pub fn new(key: Vec<usize>, chunks: Vec<StreamChunk>) -> Self {
         Self { chunks, key }
     }
@@ -37,7 +37,12 @@ impl StreamChunkCompactor {
         (self.chunks, self.key)
     }
 
-    /// Remove unnecessary changes in the given chunks, by modifying the visibility and ops in place.
+    /// Remove unnecessary changes to convert into upsert format for given chunks, by modifying
+    /// the visibility and ops in place.
+    ///
+    /// Refer to `StreamKind::Upsert` for the definition of upsert format. Basically, we only
+    /// keep the new row for updates, and there won't be any `UpdateDelete` or `UpdateInsert`
+    /// operations.
     pub fn into_compacted_chunks_inline(
         self,
         ib: InconsistencyBehavior,
@@ -61,29 +66,15 @@ impl StreamChunkCompactor {
 
         // For the rows that survive compaction, make them visible.
         for record in cb.into_records() {
-            match record {
-                Record::Insert { mut new_row } => new_row.set_vis(true),
-                Record::Delete { mut old_row } => old_row.set_vis(true),
-                Record::Update {
-                    mut old_row,
-                    mut new_row,
-                } => {
-                    old_row.set_vis(true);
-                    new_row.set_vis(true);
-                    // Ops of adjacent updates can be set to `U-` and `U+`.
-                    if old_row.same_chunk(&new_row) && old_row.index() + 1 == new_row.index() {
-                        old_row.set_op(Op::UpdateDelete);
-                        new_row.set_op(Op::UpdateInsert);
-                    }
-                }
-            }
+            // Rewrite `Update` to `Insert` by calling `into_upsert`.
+            record.into_upsert().map(|mut row| row.set_vis(true));
         }
 
         chunks.into_iter().map(|c| c.into())
     }
 
-    /// Remove unnecessary changes in the given chunks, by filtering them out and constructing new
-    /// chunks, with the given chunk size.
+    /// Remove unnecessary changes to convert into upsert format for given chunks, by filtering
+    /// them out and constructing new chunks, with the given chunk size.
     pub fn into_compacted_chunks_reconstructed(
         self,
         chunk_size: usize,
@@ -101,19 +92,23 @@ impl StreamChunkCompactor {
             }
         }
 
-        cb.into_chunks(data_types, chunk_size)
+        cb.into_chunks::<UPSERT>(data_types, chunk_size)
     }
 }
 
-/// Remove unnecessary changes in the given chunk, by modifying the visibility and ops in place.
-/// This is the same as [`StreamChunkCompactor::into_compacted_chunks_inline`] with only one chunk.
-pub fn compact_chunk_inline(
+/// Remove unnecessary changes to convert into upsert format for given chunk, by modifying the
+/// visibility and ops in place.
+///
+/// This is the same as [`StreamChunkUpsertCompactor::into_compacted_chunks_inline`] with only one chunk.
+pub fn into_upsert_compacted_chunk(
     stream_chunk: StreamChunk,
     key_indices: &[usize],
     ib: InconsistencyBehavior,
 ) -> StreamChunk {
-    let compactor = StreamChunkCompactor::new(key_indices.to_vec(), vec![stream_chunk]);
-    compactor.into_compacted_chunks_inline(ib).next().unwrap()
+    StreamChunkUpsertCompactor::new(key_indices.to_vec(), vec![stream_chunk])
+        .into_compacted_chunks_inline(ib)
+        .exactly_one()
+        .unwrap_or_else(|_| unreachable!("should have exactly one chunk in the output"))
 }
 
 #[cfg(test)]
@@ -147,7 +142,7 @@ mod tests {
                 + 9 9 1",
             ),
         ];
-        let compactor = StreamChunkCompactor::new(key.to_vec(), chunks);
+        let compactor = StreamChunkUpsertCompactor::new(key.to_vec(), chunks);
         let mut iter = compactor.into_compacted_chunks_inline(InconsistencyBehavior::Panic);
 
         let chunk = iter.next().unwrap().compact_vis();
@@ -155,8 +150,7 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I
-                U- 1 1 1
-                U+ 1 1 2
+                + 1 1 2
                 + 4 9 2
                 + 2 5 5
                 - 6 6 9",
@@ -204,7 +198,7 @@ mod tests {
             + 9 9 1",
             ),
         ];
-        let compactor = StreamChunkCompactor::new(key.to_vec(), chunks);
+        let compactor = StreamChunkUpsertCompactor::new(key.to_vec(), chunks);
 
         let chunks = compactor.into_compacted_chunks_reconstructed(
             100,
@@ -216,8 +210,7 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I I
-                U- 1 1 1
-                U+ 1 1 2
+                 + 1 1 2
                  + 4 9 2
                  + 2 5 5
                  - 6 6 9

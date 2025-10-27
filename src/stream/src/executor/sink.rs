@@ -43,8 +43,8 @@ use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
 
-use crate::common::compact_chunk::{
-    InconsistencyBehavior, StreamChunkCompactor, compact_chunk_inline,
+use crate::common::upsert_compact::{
+    InconsistencyBehavior, StreamChunkUpsertCompactor, into_upsert_compacted_chunk,
 };
 use crate::executor::prelude::*;
 pub struct SinkExecutor<F: LogStoreFactory> {
@@ -515,7 +515,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         //    stream key. Then, move all delete records to the front.
                         let mut delete_chunks = vec![];
                         let mut insert_chunks = vec![];
-                        for c in StreamChunkCompactor::new(stream_key.clone(), chunks)
+                        for c in StreamChunkUpsertCompactor::new(stream_key.clone(), chunks)
                             .into_compacted_chunks_inline(input_compact_ib)
                         {
                             let chunk = force_delete_only(c.clone());
@@ -537,14 +537,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         //    `DELETE` and `INSERT` operations on the same key into `UPDATE` operations, which
                         //    usually have more efficient implementation.
                         if let Some(downstream_pk) = &downstream_pk {
-                            let chunks = StreamChunkCompactor::new(downstream_pk.clone(), chunks)
-                                .into_compacted_chunks_reconstructed(
-                                    chunk_size,
-                                    input_data_types.clone(),
-                                    // When compacting based on user provided primary key, we should never panic
-                                    // on inconsistency in case the user provided primary key is not unique.
-                                    InconsistencyBehavior::Warn,
-                                );
+                            let chunks =
+                                StreamChunkUpsertCompactor::new(downstream_pk.clone(), chunks)
+                                    .into_compacted_chunks_reconstructed(
+                                        chunk_size,
+                                        input_data_types.clone(),
+                                        // When compacting based on user provided primary key, we should never panic
+                                        // on inconsistency in case the user provided primary key is not unique.
+                                        InconsistencyBehavior::Warn,
+                                    );
                             for c in chunks {
                                 yield Message::Chunk(c);
                             }
@@ -580,7 +581,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     Message::Chunk(mut chunk) => {
                         // Compact the chunk to eliminate any unnecessary updates to external systems.
                         if !skip_compact {
-                            chunk = compact_chunk_inline(chunk, &stream_key, input_compact_ib);
+                            chunk =
+                                into_upsert_compacted_chunk(chunk, &stream_key, input_compact_ib);
                         }
                         match sink_type {
                             SinkType::AppendOnly => yield Message::Chunk(chunk),
@@ -654,7 +656,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 {
                     // This guarantees that user has specified a `downstream_pk`.
                     let downstream_pk = downstream_pk.as_ref().unwrap();
-                    compact_chunk_inline(chunk, downstream_pk, input_compact_ib)
+                    into_upsert_compacted_chunk(chunk, downstream_pk, input_compact_ib)
                 } else {
                     chunk
                 };
@@ -1031,11 +1033,10 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap().compact_vis(),
+            chunk_msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I I
-                U- 1 1 10
-                U+ 1 1 40",
+                + 1 1 40", // For upsert format, there won't be `U- 1 1 10`.
             )
         );
 
