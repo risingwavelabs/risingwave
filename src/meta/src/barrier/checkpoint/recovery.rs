@@ -401,10 +401,6 @@ impl CheckpointControl {
 pub(crate) struct EnterInitializing(pub(crate) HashMap<WorkerId, ResetDatabaseResponse>);
 
 impl DatabaseStatusAction<'_, EnterInitializing> {
-    pub(crate) fn control(&self) -> &CheckpointControl {
-        &*self.control
-    }
-
     pub(crate) fn enter(
         self,
         runtime_info: DatabaseRuntimeInfoSnapshot,
