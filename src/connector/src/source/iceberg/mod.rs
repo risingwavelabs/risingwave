@@ -693,14 +693,14 @@ pub async fn scan_task_to_chunk_with_deletes(
             .cloned()
             .collect();
 
-        tracing::info!(
+        tracing::debug!(
             "Processing position deletes for data file: {}, found {} position delete tasks",
             data_file_path,
             position_delete_tasks.len()
         );
 
         for (task_idx, delete_task) in position_delete_tasks.iter().enumerate() {
-            tracing::info!(
+            tracing::debug!(
                 "Reading position delete file {}/{}: {}",
                 task_idx + 1,
                 position_delete_tasks.len(),
@@ -721,61 +721,61 @@ pub async fn scan_task_to_chunk_with_deletes(
                 total_rows_read += record_batch.num_rows();
 
                 // Position delete files have schema: file_path (string), pos (long)
-                if let Some(file_path_col) = record_batch.column_by_name("file_path") {
-                    if let Some(pos_col) = record_batch.column_by_name("pos") {
-                        let file_paths = file_path_col
+                if let Some(file_path_col) = record_batch.column_by_name("file_path")
+                    && let Some(pos_col) = record_batch.column_by_name("pos")
+                {
+                    let file_paths = file_path_col
                             .as_any()
                             .downcast_ref::<risingwave_common::array::arrow::arrow_array_iceberg::StringArray>()
                             .with_context(|| "file_path column is not StringArray")?;
-                        let positions = pos_col
+                    let positions = pos_col
                             .as_any()
                             .downcast_ref::<risingwave_common::array::arrow::arrow_array_iceberg::Int64Array>()
                             .with_context(|| "pos column is not Int64Array")?;
 
-                        // Only include positions that match the current data file
-                        for idx in 0..record_batch.num_rows() {
-                            if !file_paths.is_null(idx) && !positions.is_null(idx) {
-                                let file_path = file_paths.value(idx);
-                                let pos = positions.value(idx);
+                    // Only include positions that match the current data file
+                    for idx in 0..record_batch.num_rows() {
+                        if !file_paths.is_null(idx) && !positions.is_null(idx) {
+                            let file_path = file_paths.value(idx);
+                            let pos = positions.value(idx);
 
-                                // Match file path - handle both full paths and basenames
-                                let matched = file_path == data_file_path
-                                    || data_file_path.ends_with(file_path)
-                                    || file_path.ends_with(&data_file_path);
+                            // Match file path - handle both full paths and basenames
+                            let matched = file_path == data_file_path
+                                || data_file_path.ends_with(file_path)
+                                || file_path.ends_with(&data_file_path);
 
-                                if matched {
-                                    deletes.insert(pos);
-                                    matched_positions += 1;
-                                    if matched_positions <= 5 {
-                                        tracing::info!(
-                                            "Position delete match: file_path='{}' matches data_file='{}', pos={}",
-                                            file_path,
-                                            data_file_path,
-                                            pos
-                                        );
-                                    }
-                                } else if idx < 3 {
-                                    tracing::info!(
-                                        "Position delete NO match [row {}]: file_path='{}' vs data_file='{}'",
-                                        idx,
+                            if matched {
+                                deletes.insert(pos);
+                                matched_positions += 1;
+                                if matched_positions <= 5 {
+                                    tracing::debug!(
+                                        "Position delete match: file_path='{}' matches data_file='{}', pos={}",
                                         file_path,
-                                        data_file_path
+                                        data_file_path,
+                                        pos
                                     );
                                 }
+                            } else if idx < 3 {
+                                tracing::debug!(
+                                    "Position delete NO match [row {}]: file_path='{}' vs data_file='{}'",
+                                    idx,
+                                    file_path,
+                                    data_file_path
+                                );
                             }
                         }
                     }
                 }
             }
 
-            tracing::info!(
+            tracing::debug!(
                 "Processed position delete file: {} total rows, {} matched positions",
                 total_rows_read,
                 matched_positions
             );
         }
 
-        tracing::info!(
+        tracing::debug!(
             "Built position delete set with {} unique positions",
             deletes.len()
         );
@@ -794,7 +794,7 @@ pub async fn scan_task_to_chunk_with_deletes(
             .cloned()
             .collect();
 
-        tracing::info!(
+        tracing::debug!(
             "Processing equality deletes for data file: {}, found {} equality delete tasks",
             data_file_path,
             equality_delete_tasks.len()
@@ -811,7 +811,7 @@ pub async fn scan_task_to_chunk_with_deletes(
                 .filter_map(|id| schema.name_by_field_id(*id).map(|s| s.to_owned()))
                 .collect();
 
-            tracing::info!(
+            tracing::debug!(
                 "Equality delete configuration: equality_ids={:?}, field_names={:?}",
                 equality_ids,
                 equality_field_names
@@ -822,7 +822,7 @@ pub async fn scan_task_to_chunk_with_deletes(
 
                 // Read all equality delete files and build the delete key set
                 for (task_idx, delete_task) in equality_delete_tasks.iter().enumerate() {
-                    tracing::info!(
+                    tracing::debug!(
                         "Reading equality delete file {}/{}: {}",
                         task_idx + 1,
                         equality_delete_tasks.len(),
@@ -844,7 +844,7 @@ pub async fn scan_task_to_chunk_with_deletes(
                         batch_count += 1;
                         total_delete_rows += record_batch.num_rows();
 
-                        tracing::info!(
+                        tracing::debug!(
                             "Equality delete batch {}: {} rows, schema fields: {:?}",
                             batch_count,
                             record_batch.num_rows(),
@@ -880,20 +880,20 @@ pub async fn scan_task_to_chunk_with_deletes(
                             }
                             if row_idx < 3 {
                                 // Log first 3 keys for debugging
-                                tracing::info!("Delete key example [row {}]: {:?}", row_idx, key);
+                                tracing::debug!("Delete key example [row {}]: {:?}", row_idx, key);
                             }
                             delete_key_set.insert(key);
                         }
                     }
 
-                    tracing::info!(
+                    tracing::debug!(
                         "Processed equality delete file: {} batches, {} total rows",
                         batch_count,
                         total_delete_rows
                     );
                 }
 
-                tracing::info!(
+                tracing::debug!(
                     "Built equality delete set with {} unique keys",
                     delete_key_set.len()
                 );
@@ -931,7 +931,7 @@ pub async fn scan_task_to_chunk_with_deletes(
         if !position_delete_set.is_empty() {
             let batch_end_pos = batch_start_pos + batch_num_rows as i64;
 
-            tracing::info!(
+            tracing::debug!(
                 "Applying position deletes to batch {}: range [{}, {}), total delete set size: {}",
                 batch_index,
                 batch_start_pos,
@@ -949,7 +949,7 @@ pub async fn scan_task_to_chunk_with_deletes(
                     visibility[local_idx] = false;
                     position_deleted_count += 1;
                     if position_deleted_count <= 5 {
-                        tracing::info!(
+                        tracing::debug!(
                             "Position delete applied: global_pos={}, local_idx={}",
                             deleted_pos,
                             local_idx
@@ -958,7 +958,7 @@ pub async fn scan_task_to_chunk_with_deletes(
                 }
             }
 
-            tracing::info!(
+            tracing::debug!(
                 "Position delete results for batch {}: deleted {} rows",
                 batch_index,
                 position_deleted_count
@@ -969,7 +969,7 @@ pub async fn scan_task_to_chunk_with_deletes(
         if let Some((ref equality_field_names, ref delete_key_set)) = equality_deletes {
             let data_schema = record_batch.schema();
 
-            tracing::info!(
+            tracing::debug!(
                 "Applying equality deletes to batch {}: {} rows, data schema fields: {:?}",
                 batch_index,
                 batch_num_rows,
@@ -992,7 +992,7 @@ pub async fn scan_task_to_chunk_with_deletes(
                 })
                 .collect();
 
-            tracing::info!(
+            tracing::debug!(
                 "Mapped equality fields to column indices: {:?} -> {:?}",
                 equality_field_names,
                 equality_col_indices
@@ -1006,8 +1006,8 @@ pub async fn scan_task_to_chunk_with_deletes(
                 let mut checked_count = 0;
 
                 // Check each row against the delete set
-                for row_idx in 0..batch_num_rows {
-                    if visibility[row_idx] {
+                for (row_idx, item) in visibility.iter_mut().enumerate().take(batch_num_rows) {
+                    if *item {
                         checked_count += 1;
                         let mut row_key = Vec::with_capacity(equality_field_names.len());
 
@@ -1018,21 +1018,29 @@ pub async fn scan_task_to_chunk_with_deletes(
 
                         if row_idx < 3 {
                             // Log first 3 data row keys for comparison
-                            tracing::info!("Data row key example [row {}]: {:?}", row_idx, row_key);
+                            tracing::debug!(
+                                "Data row key example [row {}]: {:?}",
+                                row_idx,
+                                row_key
+                            );
                         }
 
                         if delete_key_set.contains(&row_key) {
-                            visibility[row_idx] = false;
+                            *item = false;
                             deleted_count += 1;
                             if deleted_count <= 5 {
                                 // Log first 5 matched deletions
-                                tracing::info!("Row {} matched delete key: {:?}", row_idx, row_key);
+                                tracing::debug!(
+                                    "Row {} matched delete key: {:?}",
+                                    row_idx,
+                                    row_key
+                                );
                             }
                         }
                     }
                 }
 
-                tracing::info!(
+                tracing::debug!(
                     "Equality delete results for batch {}: checked {} rows, deleted {} rows",
                     batch_index,
                     checked_count,
@@ -1088,7 +1096,7 @@ pub async fn scan_task_to_chunk_with_deletes(
 }
 
 /// Legacy scan function that doesn't process delete files.
-/// Kept for backward compatibility. Delegates to scan_task_to_chunk_with_deletes.
+/// Kept for backward compatibility. Delegates to `scan_task_to_chunk_with_deletes`.
 #[try_stream(ok = DataChunk, error = ConnectorError)]
 pub async fn scan_task_to_chunk(
     table: Table,

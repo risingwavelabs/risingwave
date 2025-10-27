@@ -218,7 +218,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                 .context("failed to plan iceberg files")?
             {
                 let scan_task = scan_task.context("failed to get scan task")?;
-                tracing::info!(
+                tracing::debug!(
                     "list_iceberg_scan_task: data_file_path={}, scan_task={:?}",
                     scan_task.data_file_path,
                     scan_task

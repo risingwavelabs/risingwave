@@ -14,7 +14,6 @@
 
 use std::rc::Rc;
 
-use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
 use risingwave_common::catalog::{

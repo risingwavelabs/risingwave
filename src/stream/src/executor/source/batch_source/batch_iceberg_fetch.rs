@@ -14,24 +14,17 @@
 
 use std::collections::VecDeque;
 
-use anyhow::{Context, anyhow};
 use either::Either;
 use futures::stream;
 use iceberg::scan::FileScanTask;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::array::{DataChunk, Op, SerialArray};
-use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{
-    ColumnCatalog, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
-};
+use risingwave_common::array::Op;
+use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME};
 use risingwave_common::config::StreamingConfig;
-use risingwave_common::types::{JsonbVal, Scalar, ScalarRef, Serial, ToOwnedDatum};
-use risingwave_connector::source::ConnectorProperties;
-use risingwave_connector::source::iceberg::{
-    IcebergProperties, IcebergScanOpts, scan_task_to_chunk,
-};
-use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
+use risingwave_common::types::{JsonbVal, Scalar, ScalarRef, ToOwnedDatum};
+use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
+use risingwave_connector::source::reader::desc::SourceDesc;
 use thiserror_ext::AsReport;
 
 use crate::executor::prelude::*;
@@ -204,8 +197,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                             &mut splits_on_fetch,
                                             source_desc.clone(),
                                             is_load_finished.clone(),
-                                        )
-                                        .await?;
+                                        )?;
                                     }
                                 }
                                 Message::Chunk(chunk) => {
@@ -218,7 +210,10 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                             (file_name.to_owned(), split.to_owned_scalar())
                                         })
                                         .collect();
-                                    tracing::info!("received file assignments: {:?}", jsonb_values);
+                                    tracing::debug!(
+                                        "received file assignments: {:?}",
+                                        jsonb_values
+                                    );
                                     file_queue.extend(jsonb_values);
                                 }
                                 Message::Watermark(_) => unreachable!(),
@@ -229,7 +224,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             data_file_path,
                             ..
                         }) => {
-                            tracing::info!("received chunks from file: {}", data_file_path);
+                            tracing::debug!("received chunks from file: {}", data_file_path);
                             splits_on_fetch -= 1;
 
                             for chunk in &chunks {
@@ -249,7 +244,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         }
     }
 
-    async fn replace_with_new_batch_reader<const BIASED: bool>(
+    fn replace_with_new_batch_reader<const BIASED: bool>(
         file_queue: &mut VecDeque<(String, JsonbVal)>,
         stream: &mut StreamReaderWithPause<BIASED, ChunksWithState>,
         streaming_config: Arc<StreamingConfig>,
@@ -270,7 +265,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         if batch.is_empty() {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
-            tracing::info!("building batch reader with {} files", batch.len());
+            tracing::debug!("building batch reader with {} files", batch.len());
             *splits_on_fetch += batch.len();
             *read_finished.write() = false;
             let batch_reader = Self::build_batched_stream_reader(

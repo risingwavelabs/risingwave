@@ -46,9 +46,8 @@ use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::source_refresh_mode::{RefreshMode, SourceRefreshModeStreaming};
 use risingwave_pb::plan_common::{
-    AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc, SourceRefreshMode,
+    AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
