@@ -27,6 +27,7 @@ use with_options::WithOptions;
 
 use self::source::reader::PulsarSplitReader;
 use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
+use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorError;
 use crate::source::SourceProperties;
@@ -61,8 +62,10 @@ impl EnforceSecret for PulsarConsumerOptions {}
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 #[serde_as]
 pub struct PulsarConsumerOptions {
-    #[serde(rename = "pulsar.read_compacted")]
-    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(
+        rename = "pulsar.read_compacted",
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
     pub read_compacted: Option<bool>,
 }
 
