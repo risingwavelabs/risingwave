@@ -144,7 +144,7 @@ impl Reducer {
             let candidates = generate_reduction_candidates(&ast_node, &self.rules, &paths);
             tracing::debug!("Generated {} reduction candidates", candidates.len());
 
-            // Try applying each candidate in order, with scoped multi-step removal for lists
+            // Try applying each candidate in order, with scoped multi-step removal for same-path operations
             let mut i = 0usize;
             while i < candidates.len() {
                 let candidate = &candidates[i];
@@ -157,41 +157,94 @@ impl Reducer {
                     candidate
                 );
 
-                // If this is a list element removal, try a small batch within the same list path
-                if let crate::sqlreduce::rules::ReductionOperation::RemoveListElement(_) =
-                    candidate.operation
-                {
-                    // Collect subsequent removals on the same path (already generated in reverse order)
-                    let base_path = &candidate.path;
-                    let mut j = i;
-                    let mut group_indices = Vec::new();
-                    while j < candidates.len() {
-                        match &candidates[j].operation {
-                            crate::sqlreduce::rules::ReductionOperation::RemoveListElement(_)
-                                if candidates[j].path == *base_path =>
-                            {
-                                group_indices.push(j);
-                                j += 1;
-                            }
-                            _ => break,
-                        }
-                    }
-                    // If this is an attribute removal on the same node, try removing a few attributes together
-                    if let crate::sqlreduce::rules::ReductionOperation::Remove(_) =
-                        candidate.operation
-                    {
-                        let base_path = &candidate.path;
+                // Check if we can batch multiple operations of the same type at the same path
+                let base_path = &candidate.path;
+                let mut batch_applied = false;
+
+                // Try batching based on operation type
+                match &candidate.operation {
+                    crate::sqlreduce::rules::ReductionOperation::RemoveListElement(_) => {
+                        // Collect consecutive RemoveListElement operations on the same list path
                         let mut j = i;
                         let mut group_indices = Vec::new();
                         while j < candidates.len() {
-                            match &candidates[j].operation {
-                                crate::sqlreduce::rules::ReductionOperation::Remove(_)
-                                    if candidates[j].path == *base_path =>
-                                {
+                            if let crate::sqlreduce::rules::ReductionOperation::RemoveListElement(
+                                _,
+                            ) = &candidates[j].operation
+                            {
+                                if candidates[j].path == *base_path {
                                     group_indices.push(j);
                                     j += 1;
+                                } else {
+                                    break; // Different path
                                 }
-                                _ => break,
+                            } else {
+                                break; // Different operation type
+                            }
+                        }
+
+                        // Try to remove up to 8 elements from this list in one go
+                        let take_n = group_indices.len().min(8);
+                        if take_n > 1 {
+                            let mut tmp_ast = ast_node.clone();
+                            let mut applied = 0usize;
+                            for &idx in &group_indices[..take_n] {
+                                if let Some(next_ast) =
+                                    apply_reduction_operation(&tmp_ast, &candidates[idx])
+                                {
+                                    tmp_ast = next_ast;
+                                    applied += 1;
+                                }
+                            }
+
+                            if applied > 1
+                                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                            {
+                                let new_sql = new_stmt.to_string();
+                                let new_len = new_sql.len();
+
+                                if new_len < sql_len && !seen_queries.contains(&new_sql) {
+                                    tracing::debug!(
+                                        "List-batch: removed {} elements at path {}, validating (len: {})",
+                                        applied,
+                                        crate::sqlreduce::path::display_ast_path(base_path),
+                                        new_len
+                                    );
+
+                                    if self.checker.is_failure_preserved(sql, &new_sql).await {
+                                        tracing::info!(
+                                            "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
+                                            applied,
+                                            sql_len,
+                                            new_len
+                                        );
+                                        seen_queries.insert(new_sql.clone());
+                                        ast_node = tmp_ast;
+                                        sql_len = new_len;
+                                        found_reduction = true;
+                                        batch_applied = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    crate::sqlreduce::rules::ReductionOperation::Remove(_) => {
+                        // Collect consecutive Remove operations on the same node path
+                        let mut j = i;
+                        let mut group_indices = Vec::new();
+                        while j < candidates.len() {
+                            if let crate::sqlreduce::rules::ReductionOperation::Remove(_) =
+                                &candidates[j].operation
+                            {
+                                if candidates[j].path == *base_path {
+                                    group_indices.push(j);
+                                    j += 1;
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
                             }
                         }
 
@@ -234,29 +287,29 @@ impl Reducer {
                                         ast_node = tmp_ast;
                                         sql_len = new_len;
                                         found_reduction = true;
-                                        break;
+                                        batch_applied = true;
                                     }
                                 }
                             }
                         }
                     }
 
-                    // If this is a Replace operation on the same node, try multiple replacements
-                    if let crate::sqlreduce::rules::ReductionOperation::Replace(_) =
-                        candidate.operation
-                    {
-                        let base_path = &candidate.path;
+                    crate::sqlreduce::rules::ReductionOperation::Replace(_) => {
+                        // Collect consecutive Replace operations on the same node path
                         let mut j = i;
                         let mut group_indices = Vec::new();
                         while j < candidates.len() {
-                            match &candidates[j].operation {
-                                crate::sqlreduce::rules::ReductionOperation::Replace(_)
-                                    if candidates[j].path == *base_path =>
-                                {
+                            if let crate::sqlreduce::rules::ReductionOperation::Replace(_) =
+                                &candidates[j].operation
+                            {
+                                if candidates[j].path == *base_path {
                                     group_indices.push(j);
                                     j += 1;
+                                } else {
+                                    break;
                                 }
-                                _ => break,
+                            } else {
+                                break;
                             }
                         }
 
@@ -299,29 +352,29 @@ impl Reducer {
                                         ast_node = tmp_ast;
                                         sql_len = new_len;
                                         found_reduction = true;
-                                        break;
+                                        batch_applied = true;
                                     }
                                 }
                             }
                         }
                     }
 
-                    // If this is a Pullup operation on the same node, try multiple pullups
-                    if let crate::sqlreduce::rules::ReductionOperation::Pullup(_) =
-                        candidate.operation
-                    {
-                        let base_path = &candidate.path;
+                    crate::sqlreduce::rules::ReductionOperation::Pullup(_) => {
+                        // Collect consecutive Pullup operations on the same node path
                         let mut j = i;
                         let mut group_indices = Vec::new();
                         while j < candidates.len() {
-                            match &candidates[j].operation {
-                                crate::sqlreduce::rules::ReductionOperation::Pullup(_)
-                                    if candidates[j].path == *base_path =>
-                                {
+                            if let crate::sqlreduce::rules::ReductionOperation::Pullup(_) =
+                                &candidates[j].operation
+                            {
+                                if candidates[j].path == *base_path {
                                     group_indices.push(j);
                                     j += 1;
+                                } else {
+                                    break;
                                 }
-                                _ => break,
+                            } else {
+                                break;
                             }
                         }
 
@@ -364,57 +417,21 @@ impl Reducer {
                                         ast_node = tmp_ast;
                                         sql_len = new_len;
                                         found_reduction = true;
-                                        break;
+                                        batch_applied = true;
                                     }
                                 }
                             }
                         }
                     }
-                    // Try to remove up to 8 elements from this list in one go
-                    let take_n = group_indices.len().min(8);
-                    if take_n > 1 {
-                        let mut tmp_ast = ast_node.clone();
-                        let mut applied = 0usize;
-                        for &idx in &group_indices[..take_n] {
-                            if let Some(next_ast) =
-                                apply_reduction_operation(&tmp_ast, &candidates[idx])
-                            {
-                                tmp_ast = next_ast;
-                                applied += 1;
-                            }
-                        }
 
-                        if applied > 1
-                            && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
-                        {
-                            let new_sql = new_stmt.to_string();
-                            let new_len = new_sql.len();
-
-                            // Only consider if it's actually smaller and we haven't seen it
-                            if new_len < sql_len && !seen_queries.contains(&new_sql) {
-                                tracing::debug!(
-                                    "List-batch: applied {} removals at path {}, validating (len: {})",
-                                    applied,
-                                    crate::sqlreduce::path::display_ast_path(base_path),
-                                    new_len
-                                );
-
-                                if self.checker.is_failure_preserved(sql, &new_sql).await {
-                                    tracing::info!(
-                                        "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
-                                        applied,
-                                        sql_len,
-                                        new_len
-                                    );
-                                    seen_queries.insert(new_sql.clone());
-                                    ast_node = tmp_ast;
-                                    sql_len = new_len;
-                                    found_reduction = true;
-                                    break; // proceed to next outer iteration
-                                }
-                            }
-                        }
+                    _ => {
+                        // TryNull and other operations: no batching
                     }
+                }
+
+                // If batch was applied successfully, restart iteration with new AST
+                if batch_applied {
+                    break;
                 }
 
                 // Fallback: try single candidate
