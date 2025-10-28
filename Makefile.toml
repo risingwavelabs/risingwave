@@ -1484,3 +1484,54 @@ echo "Node ${NODE_NAME} restarted."
 category = "RiseDev - Benchmark"
 description = "Run a local or remote sql benchmark on a RisingWave instance"
 script = "./develop/sql_bench/main.py $@"
+
+[tasks.build-sqlsmith-reducer]
+category = "RiseDev - Build"
+description = "Build Rust components"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+script = '''
+#!/usr/bin/env bash
+
+set -e
+echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)sqlsmith-reducer$(tput sgr0)"
+
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
+echo + cargo build -p risedev
+cargo build -p risedev
+
+set -xe
+cargo build --bin sqlsmith-reducer \
+  --profile "${RISINGWAVE_BUILD_PROFILE}" \
+  ${RISINGWAVE_FEATURE_FLAGS} \
+  ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
+'''
+
+[tasks.sr]
+alias = "sql-reduce"
+
+[tasks.sql-reduce]
+category = "Risedev - Reduce"
+description = "Reduce a failing SQL query while preserving error"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
+script = '''
+#!/usr/bin/env bash
+INPUT_FILE="$1"
+OUTPUT_FILE=".sqlsmith/reduced.sql"
+LOG_FILE=".sqlsmith/sqlsmith.log"
+
+if [[ -z "${INPUT_FILE:-}" ]]; then
+  echo "Please pass in the query file path for shrinking."
+  exit 1
+fi
+
+
+mkdir -p '.sqlsmith'
+echo "Shrinking: $INPUT_FILE"
+
+RUST_LOG=info target/debug/sqlsmith-reducer --input-file "$INPUT_FILE" --output-file "$OUTPUT_FILE" --run-rw-cmd "./risedev k && ./risedev d" 1>"$LOG_FILE" 2>&1
+
+echo "Shrunk file: $OUTPUT_FILE"
+echo "Log file: $LOG_FILE"
+'''
