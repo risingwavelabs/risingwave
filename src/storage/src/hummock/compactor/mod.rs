@@ -333,6 +333,10 @@ pub fn start_iceberg_compactor(
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
 
+        // Track last logged state to avoid duplicate logs
+        let mut last_logged_state: Option<(u32, u32, u32, bool, u32)> = None;
+        let mut last_heartbeat_log = Instant::now();
+
         // This outer loop is to recreate stream.
         'start_stream: loop {
             // reset state
@@ -410,6 +414,8 @@ pub fn start_iceberg_compactor(
                             max_task_parallelism,
                             max_pull_task_count,
                             &request_sender,
+                            &mut last_logged_state,
+                            &mut last_heartbeat_log,
                         );
 
                         if should_restart_stream {
@@ -1196,7 +1202,11 @@ fn handle_meta_task_pulling(
     max_task_parallelism: u32,
     max_pull_task_count: u32,
     request_sender: &mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+    last_logged_state: &mut Option<(u32, u32, u32, bool, u32)>,
+    last_heartbeat_log: &mut Instant,
 ) -> bool {
+    const HEARTBEAT_LOG_INTERVAL: Duration = Duration::from_secs(60);
+
     let mut pending_pull_task_count = 0;
     if *pull_task_ack {
         // Use queue's running parallelism for pull decision
@@ -1224,13 +1234,32 @@ fn handle_meta_task_pulling(
         }
     }
 
-    tracing::info!(
-        running_parallelism_count = %task_queue.running_parallelism_sum(),
-        waiting_parallelism_count = %task_queue.waiting_parallelism_sum(),
-        available_parallelism = %(max_task_parallelism.saturating_sub(task_queue.running_parallelism_sum())),
-        pull_task_ack = %*pull_task_ack,
-        pending_pull_task_count = %pending_pull_task_count
+    let running_count = task_queue.running_parallelism_sum();
+    let waiting_count = task_queue.waiting_parallelism_sum();
+    let available_count = max_task_parallelism.saturating_sub(running_count);
+    let current_state = (
+        running_count,
+        waiting_count,
+        available_count,
+        *pull_task_ack,
+        pending_pull_task_count,
     );
+
+    // Log only when state changes or periodically as heartbeat
+    let should_log = last_logged_state.as_ref() != Some(&current_state)
+        || last_heartbeat_log.elapsed() >= HEARTBEAT_LOG_INTERVAL;
+
+    if should_log {
+        tracing::info!(
+            running_parallelism_count = %running_count,
+            waiting_parallelism_count = %waiting_count,
+            available_parallelism = %available_count,
+            pull_task_ack = %*pull_task_ack,
+            pending_pull_task_count = %pending_pull_task_count
+        );
+        *last_logged_state = Some(current_state);
+        *last_heartbeat_log = Instant::now();
+    }
 
     false // No need to restart stream
 }
