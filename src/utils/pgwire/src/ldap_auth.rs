@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use ldap3::{LdapConnAsync, Scope, SearchEntry, dn_escape, ldap_escape};
 use risingwave_common::config::{AuthMethod, HbaEntry};
 use thiserror_ext::AsReport;
@@ -90,25 +91,17 @@ impl LdapTlsConfig {
         let mut root_cert_store = rustls::RootCertStore::empty();
         if let Some(tls_config) = &self.ca_cert {
             let ca_cert_bytes = fs::read(tls_config).map_err(|e| {
-                PsqlError::StartupError(
-                    format!("Failed to read CA certificate: {}", e.as_report()).into(),
-                )
+                PsqlError::StartupError(anyhow!(e).context("Failed to read CA certificate").into())
             })?;
             let ca_certs = rustls_pemfile::certs(&mut ca_cert_bytes.as_slice()).map_err(|e| {
-                PsqlError::StartupError(
-                    format!("Failed to parse CA certificates: {}", e.as_report()).into(),
-                )
+                PsqlError::StartupError(anyhow!(e).context("Failed to parse CA certificate").into())
             })?;
             for cert in ca_certs {
                 root_cert_store
                     .add(&rustls::Certificate(cert))
                     .map_err(|err| {
                         PsqlError::StartupError(
-                            format!(
-                                "Failed to add CA certificate to root store: {}",
-                                err.as_report()
-                            )
-                            .into(),
+                            anyhow!(err).context("Failed to add CA certificate").into(),
                         )
                     })?;
             }
@@ -121,11 +114,9 @@ impl LdapTlsConfig {
                     .add(&rustls::Certificate(cert.0))
                     .map_err(|err| {
                         PsqlError::StartupError(
-                            format!(
-                                "Failed to add native certificate to root store: {}",
-                                err.as_report()
-                            )
-                            .into(),
+                            anyhow!(err)
+                                .context("Failed to add native CA certificate")
+                                .into(),
                         )
                     })?;
             }
@@ -140,18 +131,20 @@ impl LdapTlsConfig {
             };
             let client_cert_bytes = fs::read(cert).map_err(|e| {
                 PsqlError::StartupError(
-                    format!("Failed to read client certificate: {}", e.as_report()).into(),
+                    anyhow!(e)
+                        .context("Failed to read client certificate")
+                        .into(),
                 )
             })?;
             let client_key_bytes = fs::read(key).map_err(|e| {
-                PsqlError::StartupError(
-                    format!("Failed to read client private key: {}", e.as_report()).into(),
-                )
+                PsqlError::StartupError(anyhow!(e).context("Failed to read client key").into())
             })?;
             let client_certs =
                 rustls_pemfile::certs(&mut client_cert_bytes.as_slice()).map_err(|e| {
                     PsqlError::StartupError(
-                        format!("Failed to parse client certificates: {}", e.as_report()).into(),
+                        anyhow!(e)
+                            .context("Failed to parse client certificate")
+                            .into(),
                     )
                 })?;
 
@@ -159,9 +152,7 @@ impl LdapTlsConfig {
                 &mut client_key_bytes.as_slice(),
             )
             .map_err(|e| {
-                PsqlError::StartupError(
-                    format!("Failed to parse client private key: {}", e.as_report()).into(),
-                )
+                PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
             })?;
             let client_private_key = private_keys.pop().ok_or_else(|| {
                 PsqlError::StartupError("No private key found in client key file".into())
@@ -173,11 +164,9 @@ impl LdapTlsConfig {
                 .with_client_auth_cert(client_certs_rustls, rustls::PrivateKey(client_private_key))
                 .map_err(|err| {
                     PsqlError::StartupError(
-                        format!(
-                            "Failed to build TLS config with client certificate: {}",
-                            err.as_report()
-                        )
-                        .into(),
+                        anyhow!(err)
+                            .context("Failed to set client certificate")
+                            .into(),
                     )
                 })
         } else {
@@ -296,7 +285,7 @@ impl LdapConfig {
 
         // Parse the URL using standard URL parsing
         let url = url::Url::parse(ldap_url).map_err(|e| {
-            PsqlError::StartupError(format!("Invalid LDAP URL: {}", e.as_report()).into())
+            PsqlError::StartupError(anyhow!(e).context("Failed to parse ldap url").into())
         })?;
 
         // Validate scheme
@@ -470,9 +459,11 @@ impl LdapAuthenticator {
 
         let (conn, ldap) = LdapConnAsync::with_settings(settings, &config.server)
             .await
-            .map_err(|e| {
+            .map_err(|err| {
                 PsqlError::StartupError(
-                    format!("Failed to connect to LDAP server: {}", e.as_report()).into(),
+                    anyhow!(err)
+                        .context("Failed to connect to LDAP server")
+                        .into(),
                 )
             })?;
         ldap3::drive!(conn);
@@ -499,13 +490,13 @@ impl LdapAuthenticator {
                 .await
                 .map_err(|e| {
                     PsqlError::StartupError(
-                        format!("LDAP bind as search user failed: {}", e.as_report()).into(),
+                        anyhow!(e).context("LDAP bind as search user failed").into(),
                     )
                 })?
                 .success()
                 .map_err(|e| {
                     PsqlError::StartupError(
-                        format!("LDAP bind as search user failed: {}", e.as_report()).into(),
+                        anyhow!(e).context("LDAP bind as search user failed").into(),
                     )
                 })?;
         }
@@ -528,7 +519,7 @@ impl LdapAuthenticator {
             .search(base_dn, Scope::Subtree, &search_filter, vec!["dn"])
             .await
             .map_err(|e| {
-                PsqlError::StartupError(format!("LDAP search failed: {}", e.as_report()).into())
+                PsqlError::StartupError(anyhow!(e).context("LDAP search failed").into())
             })?;
 
         // If no user found, authentication fails
@@ -541,9 +532,10 @@ impl LdapAuthenticator {
         // Attempt to bind with the user's DN and password
         let user_dn = &search_entries[0].dn;
 
-        let bind_result = ldap.simple_bind(user_dn, password).await.map_err(|e| {
-            PsqlError::StartupError(format!("LDAP bind failed: {}", e.as_report()).into())
-        });
+        let bind_result = ldap
+            .simple_bind(user_dn, password)
+            .await
+            .map_err(|e| PsqlError::StartupError(anyhow!(e).context("LDAP bind failed").into()));
 
         // Explicitly unbind the connection
         let _ = ldap.unbind().await;
@@ -554,7 +546,7 @@ impl LdapAuthenticator {
             Err(e) => {
                 tracing::error!(error = %e.as_report(), "LDAP bind unsuccessful");
                 Err(PsqlError::StartupError(
-                    format!("LDAP bind failed: {}", e.as_report()).into(),
+                    anyhow!(e).context("LDAP bind failed").into(),
                 ))
             }
         }
@@ -590,9 +582,10 @@ impl LdapAuthenticator {
 
         tracing::info!(%self.config.server, %dn, "simple bind authentication with LDAP server");
 
-        let bind_result = ldap.simple_bind(&dn, password).await.map_err(|e| {
-            PsqlError::StartupError(format!("LDAP bind failed: {}", e.as_report()).into())
-        });
+        let bind_result = ldap
+            .simple_bind(&dn, password)
+            .await
+            .map_err(|e| PsqlError::StartupError(anyhow!(e).context("LDAP bind failed").into()));
 
         // Explicitly unbind the connection
         let _ = ldap.unbind().await;
