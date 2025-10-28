@@ -7,7 +7,7 @@ create sink s1 from t with (connector = 'blackhole');
 statement ok
 create sink s2 as select avg(v1), v2 from t group by v2 with (connector = 'blackhole');
 
-statement error sink cannot be append-only
+statement error cannot be append-only
 create sink s3 from t with (connector = 'blackhole', type = 'append-only');
 
 statement ok
