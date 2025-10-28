@@ -41,7 +41,7 @@ use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
 
 use crate::cache::ManagedLruCache;
-use crate::common::change_buffer::kind as cb_kind;
+use crate::common::change_buffer::output_kind as cb_kind;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
     StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
