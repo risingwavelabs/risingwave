@@ -92,6 +92,7 @@ pub struct StreamingMetrics {
     // Backpressure
     pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
     actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec,
+    pub actor_execution_duration: RelabeledGuardedIntCounterVec,
 
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec,
@@ -350,6 +351,15 @@ impl StreamingMetrics {
                 registry
             )
             .unwrap();
+
+        let actor_execution_duration = register_guarded_int_counter_vec_with_registry!(
+            "stream_actor_execution_duration",
+            "Total execution duration (ns) of an actor",
+            &["actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
 
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
@@ -1236,6 +1246,7 @@ impl StreamingMetrics {
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
+            actor_execution_duration,
             join_lookup_miss_count,
             join_lookup_total_count,
             join_insert_cache_miss_count,

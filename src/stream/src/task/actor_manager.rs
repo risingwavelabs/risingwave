@@ -497,6 +497,24 @@ impl StreamActorManager {
                 self.runtime.spawn(may_track_hummock)
             };
 
+            self.runtime.spawn(async move {
+                let metrics = self.streaming_metrics.clone();
+                let task_metrics = monitor.cumulative();
+                let label_list: &[&str; 2] = &[&actor_id.to_string(), &fragment_id.to_string()];
+                let execution_duration = metrics
+                    .actor_execution_duration
+                    .with_guarded_label_values(label_list);
+                let mut previous_total_poll_duration = task_metrics.total_poll_duration.as_nanos();
+                loop {
+                    let current_total_poll_duration = task_metrics.total_poll_duration.as_nanos();
+                    let duration_diff =
+                        current_total_poll_duration.saturating_sub(previous_total_poll_duration);
+                    previous_total_poll_duration = current_total_poll_duration;
+                    execution_duration.inc_by(duration_diff as u64);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            });
+
             let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
                 || self.env.config().developer.enable_actor_tokio_metrics
             {
