@@ -26,7 +26,7 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::BackfillOrderState;
-use crate::barrier::info::BarrierInfo;
+use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, CreateStreamingJobType};
 use crate::manager::MetadataManager;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
@@ -396,26 +396,41 @@ impl CreateMviewProgressTracker {
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
     pub fn recover(
-        jobs: impl IntoIterator<Item = (TableId, (String, &StreamJobFragments, BackfillOrderState))>,
+        jobs: impl IntoIterator<
+            Item = (
+                TableId,
+                (String, &InflightStreamingJobInfo, BackfillOrderState),
+            ),
+        >,
         version_stats: &HummockVersionStats,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        for (creating_table_id, (definition, table_fragments, backfill_order_state)) in jobs {
+        for (creating_table_id, (definition, job_info, backfill_order_state)) in jobs {
             let mut states = HashMap::new();
             let mut backfill_upstream_types = HashMap::new();
-            let actors = table_fragments.tracking_progress_actor_ids();
+            let actors = job_info.tracking_progress_actor_ids();
             for (actor, backfill_upstream_type) in actors {
                 actor_map.insert(actor, creating_table_id);
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
                 backfill_upstream_types.insert(actor, backfill_upstream_type);
             }
-            let source_backfill_fragments = table_fragments.source_backfill_fragments();
+            let source_backfill_fragments = StreamJobFragments::source_backfill_fragments_impl(
+                job_info
+                    .fragment_infos
+                    .iter()
+                    .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes)),
+            );
 
             let progress = Self::recover_progress(
                 states,
                 backfill_upstream_types,
-                table_fragments.upstream_table_counts(),
+                StreamJobFragments::upstream_table_counts_impl(
+                    job_info
+                        .fragment_infos
+                        .values()
+                        .map(|fragment| &fragment.nodes),
+                ),
                 definition,
                 version_stats,
                 backfill_order_state,

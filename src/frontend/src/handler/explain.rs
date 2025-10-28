@@ -132,7 +132,9 @@ pub async fn do_handle_explain(
             _ => {
                 let context: OptimizerContextRef =
                     OptimizerContext::new(handler_args, explain_options).into();
-                let (plan, table) = match stmt {
+                let context_clone = context.clone();
+
+                let res = match stmt {
                     // -- Streaming DDLs --
                     Statement::CreateView {
                         or_replace: false,
@@ -197,14 +199,12 @@ pub async fn do_handle_explain(
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
-                }?;
-
-                let context = match &plan {
-                    PhysicalPlanRef::Stream(plan) => plan.ctx(),
-                    PhysicalPlanRef::Batch(plan) => plan.ctx(),
                 };
 
-                (Ok(plan) as Result<_>, table, context)
+                match res {
+                    Ok((plan, table)) => (Ok(plan), table, context_clone),
+                    Err(e) => (Err(e), None, context_clone),
+                }
             }
         };
 

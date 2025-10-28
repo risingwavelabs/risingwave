@@ -34,7 +34,7 @@ struct RwIcebergFiles {
     source_name: String,
     /// Type of content stored by the data file: data, equality deletes,
     /// or position deletes (all v1 files are data files)
-    pub content: i32,
+    pub content: String,
     /// Full URI for the file with FS scheme
     pub file_path: String,
     /// String file format name, avro, orc or parquet
@@ -100,7 +100,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
                             source_id: source.id as i32,
                             schema_name: schema_name.clone(),
                             source_name: source.name.clone(),
-                            content: file.content_type() as i32,
+                            content: format!("{:?}", file.content_type()),
                             file_path: file.file_path().to_owned(),
                             file_format: file.file_format().to_string(),
                             record_count: file.record_count() as i64,

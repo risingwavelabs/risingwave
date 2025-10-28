@@ -70,7 +70,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
-use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate, StreamJobFragments};
+use crate::model::{ActorId, StreamActor, StreamJobActorsToCreate};
 use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
@@ -469,7 +469,7 @@ impl ControlStreamManager {
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
-        background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
+        background_jobs: &mut HashMap<TableId, String>,
         mut subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
@@ -552,17 +552,17 @@ impl ControlStreamManager {
         let mut background_mviews = HashMap::new();
 
         for (job_id, job) in jobs {
-            if let Some((definition, stream_job_fragments)) = background_jobs.remove(&job_id) {
-                if stream_job_fragments.fragments().any(|fragment| {
+            if let Some(definition) = background_jobs.remove(&job_id) {
+                if job.fragment_infos().any(|fragment| {
                     fragment
                         .fragment_type_mask
                         .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
                 }) {
                     debug!(%job_id, definition, "recovered snapshot backfill job");
-                    snapshot_backfill_jobs.insert(job_id, (job, definition, stream_job_fragments));
+                    snapshot_backfill_jobs.insert(job_id, (job, definition));
                 } else {
                     database_jobs.insert(job_id, job);
-                    background_mviews.insert(job_id, (definition, stream_job_fragments));
+                    background_mviews.insert(job_id, definition);
                 }
             } else {
                 database_jobs.insert(job_id, job);
@@ -590,7 +590,7 @@ impl ControlStreamManager {
         };
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<TableId, _> = HashMap::new();
-        for (job_id, (info, definition, stream_job_fragments)) in snapshot_backfill_jobs {
+        for (job_id, (info, definition)) in snapshot_backfill_jobs {
             let committed_epoch =
                 resolve_jobs_committed_epoch(state_table_committed_epochs, [&info]);
             if committed_epoch == barrier_info.prev_epoch() {
@@ -599,7 +599,7 @@ impl ControlStreamManager {
                     job_id
                 );
                 background_mviews
-                    .try_insert(job_id, (definition, stream_job_fragments))
+                    .try_insert(job_id, definition)
                     .expect("non-duplicate");
                 database_jobs
                     .try_insert(job_id, info)
@@ -607,8 +607,7 @@ impl ControlStreamManager {
                 continue;
             }
             let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
-                stream_job_fragments
-                    .fragments()
+                info.fragment_infos()
                     .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
             )?
             .0
@@ -653,7 +652,6 @@ impl ControlStreamManager {
                     (
                         info,
                         definition,
-                        stream_job_fragments,
                         upstream_table_ids,
                         committed_epoch,
                         snapshot_epoch,
@@ -698,30 +696,23 @@ impl ControlStreamManager {
         };
 
         let tracker = CreateMviewProgressTracker::recover(
-            background_mviews
-                .iter()
-                .map(|(table_id, (definition, stream_job_fragments))| {
+            background_mviews.iter().map(|(table_id, definition)| {
+                (
+                    *table_id,
                     (
-                        *table_id,
-                        (definition.clone(), stream_job_fragments, Default::default()),
-                    )
-                }),
+                        definition.clone(),
+                        &database_jobs[table_id],
+                        Default::default(),
+                    ),
+                )
+            }),
             hummock_version_stats,
         );
 
         let mut creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl> =
             HashMap::new();
-        for (
-            job_id,
-            (
-                info,
-                definition,
-                stream_job_fragments,
-                upstream_table_ids,
-                committed_epoch,
-                snapshot_epoch,
-            ),
-        ) in ongoing_snapshot_backfill_jobs
+        for (job_id, (info, definition, upstream_table_ids, committed_epoch, snapshot_epoch)) in
+            ongoing_snapshot_backfill_jobs
         {
             let node_actors =
                 edges.collect_actors_to_create(info.fragment_infos().map(move |fragment_info| {
@@ -749,7 +740,6 @@ impl ControlStreamManager {
                     committed_epoch,
                     barrier_info.curr_epoch.value().0,
                     info,
-                    stream_job_fragments,
                     hummock_version_stats,
                     node_actors,
                     mutation.clone(),

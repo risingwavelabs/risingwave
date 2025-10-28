@@ -15,7 +15,9 @@
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
 
-use super::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
+use super::unified::json::{
+    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+};
 use super::unified::kv_event::KvEvent;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
@@ -74,6 +76,7 @@ impl PlainParser {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                BigintUnsignedHandlingMode::Long,
                 false,
             )?,
         ));

@@ -156,7 +156,9 @@ impl Binder {
                     } else if let Ok((table_catalog, schema_name)) = self
                         .catalog
                         .get_any_table_by_name(&db_name, schema_path, table_name)
-                        && (bind_creating_relations || table_catalog.is_created())
+                        && (bind_creating_relations
+                            || table_catalog.is_internal_table()
+                            || table_catalog.is_created())
                     {
                         self.resolve_table_relation(
                             table_catalog.clone(),

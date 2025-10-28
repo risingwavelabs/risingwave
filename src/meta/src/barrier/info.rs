@@ -20,7 +20,7 @@ use itertools::Itertools;
 use parking_lot::RawRwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeMask, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::fragment::DistributionType;
@@ -38,7 +38,7 @@ use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
-use crate::model::{ActorId, FragmentId, SubscriptionId};
+use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments, SubscriptionId};
 
 #[derive(Debug, Clone)]
 pub struct SharedFragmentInfo {
@@ -383,6 +383,25 @@ impl InflightStreamingJobInfo {
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+
+    pub fn snapshot_backfill_actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
+        self.fragment_infos
+            .values()
+            .filter(|fragment| {
+                fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
+            })
+            .flat_map(|fragment| fragment.actors.keys().copied())
+    }
+
+    pub fn tracking_progress_actor_ids(&self) -> Vec<(ActorId, BackfillUpstreamType)> {
+        StreamJobFragments::tracking_progress_actor_ids_impl(
+            self.fragment_infos
+                .values()
+                .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
+        )
     }
 }
 

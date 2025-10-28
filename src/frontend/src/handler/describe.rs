@@ -141,9 +141,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
             let columns = sink.sink_catalog.full_columns().to_vec();
-            let pk_columns = sink
-                .sink_catalog
-                .downstream_pk_indices()
+            let pk_columns = (sink.sink_catalog.downstream_pk.clone().unwrap_or_default())
                 .into_iter()
                 .map(|idx| columns[idx].column_desc.clone())
                 .collect_vec();

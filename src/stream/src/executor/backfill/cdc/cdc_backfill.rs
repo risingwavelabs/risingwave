@@ -24,9 +24,9 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_connector::parser::{
-    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
-    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig, TimeHandling,
-    TimestampHandling, TimestamptzHandling,
+    BigintUnsignedHandlingMode, ByteStreamSourceParser, DebeziumParser, DebeziumProps,
+    EncodingProperties, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
+    SpecificParserConfig, TimeHandling, TimestampHandling, TimestamptzHandling,
 };
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
@@ -226,6 +226,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimeHandling::Milli);
+        let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
+            .properties
+            .get("debezium.bigint.unsigned.handling.mode")
+            .map(|v| v == "precise")
+            .unwrap_or(false)
+            .then_some(BigintUnsignedHandlingMode::Precise);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
@@ -236,6 +242,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            bigint_unsigned_handling,
             handle_toast_columns,
         )
         .boxed();
@@ -829,6 +836,7 @@ pub async fn transform_upstream(
     timestamp_handling: Option<TimestampHandling>,
     timestamptz_handling: Option<TimestamptzHandling>,
     time_handling: Option<TimeHandling>,
+    bigint_unsigned_handling: Option<BigintUnsignedHandlingMode>,
     handle_toast_columns: bool,
 ) {
     let props = SpecificParserConfig {
@@ -837,6 +845,7 @@ pub async fn transform_upstream(
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            bigint_unsigned_handling,
             handle_toast_columns,
         }),
         // the cdc message is generated internally so the key must exist.
@@ -1003,7 +1012,7 @@ mod tests {
             ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
         ];
 
-        let parsed_stream = transform_upstream(upstream, columns, None, None, None, false);
+        let parsed_stream = transform_upstream(upstream, columns, None, None, None, None, false);
         pin_mut!(parsed_stream);
         // the output chunk must contain the offset column
         if let Some(message) = parsed_stream.next().await {
