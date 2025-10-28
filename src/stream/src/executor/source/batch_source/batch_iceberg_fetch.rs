@@ -22,7 +22,7 @@ use parking_lot::RwLock;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME};
 use risingwave_common::config::StreamingConfig;
-use risingwave_common::types::{JsonbVal, Scalar, ScalarRef, ToOwnedDatum};
+use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use thiserror_ext::AsReport;
@@ -219,12 +219,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                 Message::Watermark(_) => unreachable!(),
                             }
                         }
-                        Either::Right(ChunksWithState {
-                            chunks,
-                            data_file_path,
-                            ..
-                        }) => {
-                            tracing::debug!("received chunks from file: {}", data_file_path);
+                        Either::Right(ChunksWithState { chunks, .. }) => {
                             splits_on_fetch -= 1;
 
                             for chunk in &chunks {
@@ -287,16 +282,6 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         streaming_config: Arc<StreamingConfig>,
         read_finished: Arc<RwLock<bool>>,
     ) {
-        let file_path_idx = source_desc
-            .columns
-            .iter()
-            .position(|c| c.name == ICEBERG_FILE_PATH_COLUMN_NAME)
-            .unwrap();
-        let file_pos_idx = source_desc
-            .columns
-            .iter()
-            .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
-            .unwrap();
         let properties = source_desc.source.config.clone();
         let properties = match properties {
             risingwave_connector::source::ConnectorProperties::Iceberg(iceberg_properties) => {
@@ -321,24 +306,16 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 None,
             ) {
                 let chunk = chunk?;
+
                 chunks.push(StreamChunk::from_parts(
                     itertools::repeat_n(Op::Insert, chunk.capacity()).collect_vec(),
                     chunk,
                 ));
             }
-            // We yield once for each file now, because iceberg-rs doesn't support read part of a file now.
-            let last_chunk = chunks.last().unwrap();
-            let last_row = last_chunk.row_at(last_chunk.cardinality() - 1).1;
-            let data_file_path = last_row
-                .datum_at(file_path_idx)
-                .unwrap()
-                .into_utf8()
-                .to_owned();
-            let last_read_pos = last_row.datum_at(file_pos_idx).unwrap().to_owned_datum();
             yield ChunksWithState {
                 chunks,
-                data_file_path,
-                last_read_pos,
+                data_file_path: "".to_owned(), /* we do not need data file path for refreshable iceberg fetch, as no state persisted */
+                last_read_pos: None,
             };
         }
 
