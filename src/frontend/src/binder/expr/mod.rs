@@ -286,19 +286,19 @@ impl Binder {
         };
         // Non-const exprs are not part of IN-expr in backend and rewritten into OR-Equal-exprs.
         for expr in non_const_exprs {
-            if ret.is_none() {
-                ret = Some(FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into());
-            } else {
+            if let Some(inner_ret) = ret {
                 ret = Some(
                     FunctionCall::new(
                         ExprType::Or,
                         vec![
-                            ret.unwrap(),
+                            inner_ret,
                             FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into(),
                         ],
                     )?
                     .into(),
                 );
+            } else {
+                ret = Some(FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into());
             }
         }
         if negated {
