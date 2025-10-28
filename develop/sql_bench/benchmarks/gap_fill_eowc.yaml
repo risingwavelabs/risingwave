@@ -1,0 +1,61 @@
+# Benchmark configuration for GAP_FILL in EOWC (Emit On Window Close) mode
+# This benchmark measures the throughput of processing incoming data through GAP_FILL with EOWC
+benchmark_name: gap_fill_eowc
+
+# SQL to set up the initial schema and data (run once)
+setup_sql: |
+  CREATE TABLE sensor_data_eowc (
+    ts TIMESTAMP,
+    value DOUBLE,
+    WATERMARK FOR ts AS ts - INTERVAL '1' MINUTE,
+    PRIMARY KEY (ts)
+  ) APPEND ONLY;
+  
+  CREATE MATERIALIZED VIEW gap_filled_sensors_eowc AS
+  SELECT ts, value
+  FROM GAP_FILL(sensor_data_eowc, ts, INTERVAL '1' MINUTE)
+  EMIT ON WINDOW CLOSE;
+
+# SQL to prepare the data before each run
+prepare_sql: |
+  -- No preparation needed for each run
+
+# SQL to clean up after each run
+conclude_sql: |
+  -- APPEND ONLY tables do not support DELETE
+  -- We use different time ranges for each run to avoid primary key conflicts
+
+# SQL to clean up everything after all runs are complete
+cleanup_sql: |
+  DROP MATERIALIZED VIEW IF EXISTS gap_filled_sensors_eowc;
+  DROP TABLE IF EXISTS sensor_data_eowc;
+
+# SQL to benchmark - Insert sparse time series data and measure processing time
+# This tests the throughput of GAP_FILL with EOWC processing incoming data
+# Note: Uses current timestamp to ensure unique time ranges for each run
+benchmark_sql: |
+  -- Insert data with gaps (every 5 minutes) starting from NOW()
+  -- Each run will use a different time range since NOW() advances
+  INSERT INTO sensor_data_eowc (ts, value)
+  SELECT 
+    NOW() + (i * INTERVAL '5 minutes'),
+    20.0 + (i * 0.5)
+  FROM generate_series(0, 100) AS i;
+  
+  -- Insert a timestamp far in the future to advance watermark and close all windows
+  -- Watermark is defined as ts - INTERVAL '1' MINUTE, so this will close all windows
+  INSERT INTO sensor_data_eowc (ts, value)
+  VALUES (
+    NOW() + INTERVAL '10 hours',  -- Far enough to close all windows
+    999.0
+  );
+  
+  -- Wait for watermark to advance and windows to close
+  SELECT pg_sleep(3);
+  
+  -- Query the results - windows should now be closed by watermark advancement
+  SELECT COUNT(*) FROM gap_filled_sensors_eowc;
+
+# Number of times to run the benchmark
+runs: 30
+

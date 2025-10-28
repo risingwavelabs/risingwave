@@ -1,0 +1,44 @@
+# Benchmark configuration for GAP_FILL in normal streaming mode
+benchmark_name: gap_fill_streaming
+
+# SQL to set up the initial schema and data (run once)
+setup_sql: |
+  CREATE TABLE sensor_data (
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (ts)
+  );
+  
+  CREATE MATERIALIZED VIEW gap_filled_sensors AS
+  SELECT ts, value
+  FROM GAP_FILL(sensor_data, ts, INTERVAL '1' MINUTE);
+
+# SQL to prepare the data before each run
+prepare_sql: |
+  -- No preparation needed for each run
+
+# SQL to clean up after each run
+conclude_sql: |
+  -- Clean up the inserted data after each run
+  DELETE FROM sensor_data;
+
+# SQL to clean up everything after all runs are complete
+cleanup_sql: |
+  DROP MATERIALIZED VIEW IF EXISTS gap_filled_sensors;
+  DROP TABLE IF EXISTS sensor_data;
+
+# SQL to benchmark - Insert sparse time series data and measure processing time
+# This tests the throughput of GAP_FILL processing incoming data
+benchmark_sql: |
+  INSERT INTO sensor_data (ts, value)
+  SELECT 
+    '2024-05-21 10:00:00'::TIMESTAMP + (i * INTERVAL '5 minutes'),
+    20.0 + (i * 0.5)
+  FROM generate_series(0, 100) AS i;
+  
+  -- Wait for all data to be processed
+  SELECT COUNT(*) FROM gap_filled_sensors;
+
+# Number of times to run the benchmark
+runs: 30
+
