@@ -404,6 +404,7 @@ impl CommandContext {
                         stream_job_fragments.stream_job_id().table_id as _,
                         upstream_fragment_downstreams,
                         new_sink_downstream,
+                        Some(&info.init_split_assignment),
                     )
                     .await?;
 
@@ -416,11 +417,6 @@ impl CommandContext {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
-
-                barrier_manager_context
-                    .metadata_manager
-                    .update_fragment_splits(&info.init_split_assignment)
-                    .await?;
             }
             Command::RescheduleFragment { reschedules, .. } => {
                 let fragment_splits = reschedules
@@ -455,6 +451,7 @@ impl CommandContext {
                         new_fragments.stream_job_id.table_id as _,
                         upstream_fragment_downstreams,
                         None,
+                        Some(init_split_assignment),
                     )
                     .await?;
 
@@ -467,6 +464,7 @@ impl CommandContext {
                                 sink.tmp_sink_id,
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 None, // no replace plan
+                                None, // no init split assignment
                             )
                             .await?;
                     }
@@ -484,11 +482,6 @@ impl CommandContext {
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
-                    .await?;
-
-                barrier_manager_context
-                    .metadata_manager
-                    .update_fragment_splits(init_split_assignment)
                     .await?;
             }
 

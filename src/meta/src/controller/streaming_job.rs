@@ -80,6 +80,7 @@ use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate,
 };
+use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -762,6 +763,7 @@ impl CatalogController {
         job_id: ObjectId,
         upstream_fragment_new_downstreams: &FragmentDownstreamRelation,
         new_sink_downstream: Option<FragmentDownstreamRelation>,
+        split_assignment: Option<&SplitAssignment>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -780,6 +782,20 @@ impl CatalogController {
         }
         .update(&txn)
         .await?;
+
+        if let Some(split_assignment) = split_assignment {
+            let fragment_splits = split_assignment
+                .iter()
+                .map(|(fragment_id, splits)| {
+                    (
+                        *fragment_id as _,
+                        splits.values().flatten().cloned().collect_vec(),
+                    )
+                })
+                .collect();
+
+            self.update_fragment_splits(&txn, &fragment_splits).await?;
+        }
 
         txn.commit().await?;
 
