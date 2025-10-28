@@ -137,7 +137,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compact_chunk_inline() {
+    fn test_compact_chunk_inline_upsert() {
+        test_compact_chunk_inline::<UPSERT>();
+    }
+
+    #[test]
+    fn test_compact_chunk_inline_retract() {
+        test_compact_chunk_inline::<RETRACT>();
+    }
+
+    fn test_compact_chunk_inline<const KIND: OutputKind>() {
         let key = [0, 1];
         let chunks = vec![
             StreamChunk::from_pretty(
@@ -163,22 +172,28 @@ mod tests {
         ];
         let compactor = StreamChunkCompactor::new(key.to_vec(), chunks);
         let mut iter = compactor
-            .into_compacted_chunks_inline::<RETRACT>(InconsistencyBehavior::Panic)
+            .into_compacted_chunks_inline::<KIND>(InconsistencyBehavior::Panic)
             .into_iter();
 
         let chunk = iter.next().unwrap().compact_vis();
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
+        let expected = match KIND {
+            RETRACT => StreamChunk::from_pretty(
+                " I I I
+                U- 1 1 1
+                U+ 1 1 2
+                + 4 9 2
+                + 2 5 5
+                - 6 6 9",
+            ),
+            UPSERT => StreamChunk::from_pretty(
                 " I I I
                 + 1 1 2
                 + 4 9 2
                 + 2 5 5
                 - 6 6 9",
             ),
-            "{}",
-            chunk.to_pretty()
-        );
+        };
+        assert_eq!(chunk, expected, "{}", chunk.to_pretty());
 
         let chunk = iter.next().unwrap().compact_vis();
         assert_eq!(
@@ -195,7 +210,16 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_chunk_reconstructed() {
+    fn test_compact_chunk_reconstructed_upsert() {
+        test_compact_chunk_reconstructed::<UPSERT>();
+    }
+
+    #[test]
+    fn test_compact_chunk_reconstructed_retract() {
+        test_compact_chunk_reconstructed::<RETRACT>();
+    }
+
+    fn test_compact_chunk_reconstructed<const KIND: OutputKind>() {
         let key = [0, 1];
         let chunks = vec![
             StreamChunk::from_pretty(
@@ -221,15 +245,23 @@ mod tests {
         ];
         let compactor = StreamChunkCompactor::new(key.to_vec(), chunks);
 
-        let chunks = compactor.into_compacted_chunks_reconstructed::<RETRACT>(
+        let chunks = compactor.into_compacted_chunks_reconstructed::<KIND>(
             100,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             InconsistencyBehavior::Panic,
         );
         let chunk = chunks.into_iter().next().unwrap();
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
+        let expected = match KIND {
+            RETRACT => StreamChunk::from_pretty(
+                "  I I I
+                 U- 1 1 1
+                 U+ 1 1 2
+                 + 4 9 2
+                 + 2 5 5
+                 - 6 6 9
+                 + 2 2 2",
+            ),
+            UPSERT => StreamChunk::from_pretty(
                 "  I I I
                  + 1 1 2
                  + 4 9 2
@@ -237,8 +269,7 @@ mod tests {
                  - 6 6 9
                  + 2 2 2",
             ),
-            "{}",
-            chunk.to_pretty()
-        );
+        };
+        assert_eq!(chunk, expected, "{}", chunk.to_pretty());
     }
 }

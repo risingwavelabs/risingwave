@@ -954,7 +954,16 @@ mod test {
     }
 
     #[tokio::test]
-    async fn stream_key_sink_pk_mismatch() {
+    async fn stream_key_sink_pk_mismatch_upsert() {
+        stream_key_sink_pk_mismatch(SinkType::Upsert).await;
+    }
+
+    #[tokio::test]
+    async fn stream_key_sink_pk_mismatch_retract() {
+        stream_key_sink_pk_mismatch(SinkType::Retract).await;
+    }
+
+    async fn stream_key_sink_pk_mismatch(sink_type: SinkType) {
         use risingwave_common::array::StreamChunkTestExt;
         use risingwave_common::array::stream_chunk::StreamChunk;
         use risingwave_common::types::DataType;
@@ -1022,7 +1031,7 @@ mod test {
                 .map(|col| col.column_desc.clone())
                 .collect(),
             downstream_pk: Some(vec![0]),
-            sink_type: SinkType::Upsert,
+            sink_type,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -1066,13 +1075,19 @@ mod test {
         executor.next().await.unwrap().unwrap();
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            chunk_msg.into_chunk().unwrap(),
-            StreamChunk::from_pretty(
+        let expected = match sink_type {
+            SinkType::Retract => StreamChunk::from_pretty(
+                " I I I
+                U- 1 1 10
+                U+ 1 1 40",
+            ),
+            SinkType::Upsert => StreamChunk::from_pretty(
                 " I I I
                 + 1 1 40", // For upsert format, there won't be `U- 1 1 10`.
-            )
-        );
+            ),
+            _ => unreachable!(),
+        };
+        assert_eq!(chunk_msg.into_chunk().unwrap().compact_vis(), expected);
 
         // The last barrier message.
         executor.next().await.unwrap().unwrap();
