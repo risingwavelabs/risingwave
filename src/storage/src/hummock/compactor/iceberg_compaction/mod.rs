@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::hummock::compactor::iceberg_compaction::iceberg_compactor_runner::IcebergCompactorRunner;
+use crate::hummock::compactor::iceberg_compaction::iceberg_compactor_runner::IcebergCompactionPlanRunner;
 
 pub(crate) mod iceberg_compactor_runner;
 
@@ -38,7 +38,7 @@ pub struct IcebergTaskMeta {
 #[derive(Debug)]
 pub struct PoppedIcebergTask {
     pub meta: IcebergTaskMeta,
-    pub runner: Option<IcebergCompactorRunner>,
+    pub runner: Option<IcebergCompactionPlanRunner>,
 }
 
 /// Internal storage. `waiting` and `running` are disjoint.
@@ -49,23 +49,33 @@ struct IcebergTaskQueueInner {
     id_map: HashMap<TaskId, (TaskUniqueIdent, u32)>, /* task_id -> (unique_ident, required_parallelism) */
     waiting_parallelism_sum: u32, // sum(required_parallelism) for waiting tasks only
     running_parallelism_sum: u32, // sum(required_parallelism) for running tasks only
-    runners: HashMap<TaskId, IcebergCompactorRunner>, /* optional runner payloads (may be absent in tests) */
+    runners: HashMap<TaskId, IcebergCompactionPlanRunner>, /* optional runner payloads (may be absent in tests) */
 }
 
-/// FIFO compaction task queue with lightweight replacement and parallelism budgeting.
-/// Features:
-/// - Push with replacement (same `unique_ident` waiting -> metadata/runner updated in place).
-/// - Pop moves the head (if it fits remaining parallelism) to the running set.
-/// - Reject duplicate if the same `unique_ident` is already running.
-/// - Capacity control: reject when adding/replacing would exceed `pending_parallelism_budget`
-///   (sum of waiting tasks' `required_parallelism`). No eviction beyond hard rejection.
-/// - Optional notification when new tasks become schedulable.
+/// FIFO compaction task queue with replacement and parallelism budgeting.
 ///
-/// Invariants (enforced by logic; violation triggers panic):
-/// - `waiting ∩ running = ∅`.
-/// - Each waiting `unique_ident` appears exactly once in `deque`.
-/// - `waiting_parallelism_sum = Σ required_parallelism(waiting)`.
-/// - `running_parallelism_sum = Σ required_parallelism(running)`.
+/// Features:
+/// - Replacement: Same `unique_ident` waiting → metadata/runner updated in place
+/// - Deduplication: Reject if same `unique_ident` already running
+/// - Capacity control: Reject when exceeding `pending_parallelism_budget`
+/// - Parallelism-aware scheduling: Pop only when task fits available parallelism
+///
+/// # TODO: Optimize Replacement for Iceberg OCC
+///
+/// **Problem**: Replaced plans preserve queue position. By execution time, the snapshot may be
+/// stale, causing commit conflicts due to Iceberg's Optimistic Concurrency Control.
+///
+/// **Solution**: Move replaced plans to queue front. Plans based on fresher snapshots have
+/// higher commit success rates and should execute sooner.
+///
+/// **Rationale**: Iceberg commits check if input files still exist. Newer snapshots =
+/// higher success probability. This is semantically "updating", not "jumping the queue".
+///
+/// # Invariants
+/// - `waiting ∩ running = ∅`
+/// - Each waiting `unique_ident` appears exactly once in `deque`
+/// - `waiting_parallelism_sum = Σ required_parallelism(waiting)`
+/// - `running_parallelism_sum = Σ required_parallelism(running)`
 pub struct IcebergTaskQueue {
     inner: IcebergTaskQueueInner,
     /// Maximum parallelism that a single task may require (cluster effective max / scheduling window upper bound).
@@ -165,18 +175,19 @@ impl IcebergTaskQueue {
             .saturating_sub(self.inner.running_parallelism_sum)
     }
 
-    /// Enqueue semantics:
-    /// - Waiting duplicate: replace in place (position preserved) -> `Replaced { old_task_id }`.
-    ///   * If new runner is `Some`, replace runner; else keep old runner.
-    /// - Running duplicate: reject -> `RejectedRunningDuplicate`.
-    /// - Budget exceeded (sum of waiting parallelism would surpass `pending_parallelism_budget`): `RejectedCapacity`.
-    /// - `required_parallelism == 0`: `RejectedInvalidParallelism`.
-    /// - `required_parallelism > max_parallelism`: `RejectedTooLarge`.
-    /// - Otherwise append -> `Added`.
+    /// Push a task into the queue.
+    ///
+    /// Returns:
+    /// - `Replaced`: Same `unique_ident` waiting → updated in place, old runner replaced if provided
+    /// - `RejectedRunningDuplicate`: Same `unique_ident` already running
+    /// - `RejectedCapacity`: Would exceed `pending_parallelism_budget`
+    /// - `RejectedInvalidParallelism`: `required_parallelism == 0`
+    /// - `RejectedTooLarge`: `required_parallelism > max_parallelism`
+    /// - `Added`: Successfully added to queue
     pub fn push(
         &mut self,
         meta: IcebergTaskMeta,
-        runner: Option<IcebergCompactorRunner>,
+        runner: Option<IcebergCompactionPlanRunner>,
     ) -> PushResult {
         let uid = &meta.unique_ident;
         if meta.required_parallelism == 0 {

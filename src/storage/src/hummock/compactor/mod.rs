@@ -59,7 +59,7 @@ pub use context::{
 use futures::{StreamExt, pin_mut};
 // Import iceberg compactor runner types from the local `iceberg_compaction` module.
 use iceberg_compaction::iceberg_compactor_runner::{
-    IcebergCompactorRunner, IcebergCompactorRunnerConfigBuilder,
+    IcebergCompactorRunnerConfigBuilder, create_plan_runners,
 };
 use iceberg_compaction::{IcebergTaskQueue, PushResult};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -476,80 +476,104 @@ pub fn start_iceberg_compactor(
                                     }
                                 };
 
-                                let iceberg_runner = match IcebergCompactorRunner::new(
+                                // Create multiple plan runners from the task
+                                let plan_runners = match create_plan_runners(
                                     iceberg_compaction_task,
                                     compactor_runner_config,
                                     compactor_context.compactor_metrics.clone(),
                                 ).await {
-                                    Ok(runner) => match runner {
-                                        Some(runner) => runner,
-                                        None => {
-                                            tracing::info!("No compaction needed for iceberg compaction task {}", task_id);
-                                            continue 'consume_stream;
-                                        }
-                                    }
+                                    Ok(runners) => runners,
                                     Err(e) => {
-                                        tracing::warn!(error = %e.as_report(), "Failed to create iceberg compactor runner {}", task_id);
+                                        tracing::warn!(error = %e.as_report(), task_id, "Failed to create plan runners");
                                         continue 'consume_stream;
                                     }
                                 };
 
-                                // Push task to queue instead of directly spawning
-                                let meta = iceberg_runner.to_meta();
-                                let push_result = task_queue.push(meta.clone(), Some(iceberg_runner));
+                                if plan_runners.is_empty() {
+                                    tracing::info!(task_id, "No plans to execute");
+                                    continue 'consume_stream;
+                                }
 
-                                match push_result {
-                                    PushResult::Added => {
-                                        tracing::info!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            "Iceberg compaction task added to queue"
-                                        );
-                                    },
-                                    PushResult::Replaced { old_task_id } => {
-                                        tracing::info!(
-                                            task_id = task_id,
-                                            old_task_id = old_task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            "Iceberg compaction task replaced in queue"
-                                        );
-                                    },
-                                    PushResult::RejectedRunningDuplicate => {
-                                        tracing::warn!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            "Iceberg compaction task rejected - duplicate already running"
-                                        );
-                                    },
-                                    PushResult::RejectedCapacity => {
-                                        tracing::warn!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            pending_budget = pending_parallelism_budget,
-                                            "Iceberg compaction task rejected - queue capacity exceeded"
-                                        );
-                                    },
-                                    PushResult::RejectedTooLarge => {
-                                        tracing::error!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            max_parallelism = max_task_parallelism,
-                                            "Iceberg compaction task rejected - parallelism requirement exceeds max"
-                                        );
-                                    },
-                                    PushResult::RejectedInvalidParallelism => {
-                                        tracing::error!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            "Iceberg compaction task rejected - invalid parallelism (must be > 0)"
-                                        );
+                                // Enqueue each plan runner independently
+                                let total_plans = plan_runners.len();
+                                let mut enqueued_count = 0;
+
+                                for runner in plan_runners {
+                                    let meta = runner.to_meta();
+                                    let required_parallelism = runner.required_parallelism();
+                                    let push_result = task_queue.push(meta.clone(), Some(runner));
+
+                                    match push_result {
+                                        PushResult::Added => {
+                                            enqueued_count += 1;
+                                            tracing::debug!(
+                                                task_id = task_id,
+                                                plan_index = enqueued_count - 1,
+                                                unique_ident = %meta.unique_ident,
+                                                required_parallelism = required_parallelism,
+                                                "Plan runner added to queue"
+                                            );
+                                        },
+                                        PushResult::Replaced { old_task_id } => {
+                                            enqueued_count += 1;
+                                            tracing::info!(
+                                                task_id = task_id,
+                                                plan_index = enqueued_count - 1,
+                                                old_task_id = old_task_id,
+                                                unique_ident = %meta.unique_ident,
+                                                required_parallelism = required_parallelism,
+                                                "Plan runner replaced in queue"
+                                            );
+                                        },
+                                        PushResult::RejectedRunningDuplicate => {
+                                            tracing::warn!(
+                                                task_id = task_id,
+                                                unique_ident = %meta.unique_ident,
+                                                "Plan runner rejected - duplicate already running"
+                                            );
+                                            // Continue trying to enqueue other plans
+                                        },
+                                        PushResult::RejectedCapacity => {
+                                            tracing::warn!(
+                                                task_id = task_id,
+                                                unique_ident = %meta.unique_ident,
+                                                required_parallelism = required_parallelism,
+                                                pending_budget = pending_parallelism_budget,
+                                                enqueued_count = enqueued_count,
+                                                total_plans = total_plans,
+                                                "Plan runner rejected - queue capacity exceeded, stopping enqueue"
+                                            );
+                                            // Stop enqueuing remaining plans
+                                            break;
+                                        },
+                                        PushResult::RejectedTooLarge => {
+                                            tracing::error!(
+                                                task_id = task_id,
+                                                unique_ident = %meta.unique_ident,
+                                                required_parallelism = required_parallelism,
+                                                max_parallelism = max_task_parallelism,
+                                                "Plan runner rejected - parallelism requirement exceeds max"
+                                            );
+                                        },
+                                        PushResult::RejectedInvalidParallelism => {
+                                            tracing::error!(
+                                                task_id = task_id,
+                                                unique_ident = %meta.unique_ident,
+                                                required_parallelism = required_parallelism,
+                                                "Plan runner rejected - invalid parallelism (must be > 0)"
+                                            );
+                                        }
                                     }
                                 }
+
+                                tracing::info!(
+                                    task_id = task_id,
+                                    total_plans = total_plans,
+                                    enqueued_count = enqueued_count,
+                                    "Enqueued {} of {} plan runners",
+                                    enqueued_count,
+                                    total_plans
+                                );
                             },
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {
                                 // set flag

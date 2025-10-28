@@ -66,7 +66,7 @@ insert into t_compaction_delete values (5, 'eve', 500), (6, 'frank', 999);
 statement ok
 FLUSH;
 
-sleep 1s
+sleep 5s
 
 query III rowsort
 select * from t_compaction_delete;
@@ -86,7 +86,7 @@ delete from t_compaction_delete where v = 999;
 statement ok
 FLUSH;
 
-sleep 1s
+sleep 5s
 
 query III rowsort
 select * from t_compaction_delete;
@@ -102,7 +102,7 @@ update t_compaction_delete set v = 111 where id = 1;
 statement ok
 FLUSH;
 
-sleep 1s
+sleep 5s
 
 query III rowsort
 select * from t_compaction_delete;
@@ -117,7 +117,7 @@ query ?
 select count(*) from rw_iceberg_files
 where schema_name = 'public'
 and source_name = '__iceberg_source_t_compaction_delete'
-and content = 0;
+and content = 'Data';
 ----
 7
 
@@ -126,7 +126,7 @@ query ?
 select count(*) from rw_iceberg_files
 where schema_name = 'public'
 and source_name = '__iceberg_source_t_compaction_delete'
-and content in (1, 2);
+and content in ('PositionDeletes', 'EqualityDeletes');
 ----
 3
 
@@ -142,7 +142,7 @@ and source_name = '__iceberg_source_t_compaction_delete';
 statement ok
 VACUUM FULL t_compaction_delete;
 
-sleep 1s
+sleep 5s
 
 query III rowsort
 select * from t_compaction_delete;
@@ -156,7 +156,7 @@ query ?
 select count(*) from rw_iceberg_files
 where schema_name = 'public'
 and source_name = '__iceberg_source_t_compaction_delete'
-and content = 0;
+and content = 'Data';
 ----
 1
 
@@ -164,7 +164,7 @@ query ?
 select count(*) from rw_iceberg_files
 where schema_name = 'public'
 and source_name = '__iceberg_source_t_compaction_delete'
-and content in (1, 2);
+and content in ('PositionDeletes', 'EqualityDeletes');
 ----
 1
 
@@ -183,7 +183,7 @@ insert into t_compaction_delete values (9, 'iris', 900), (10, 'jack', 1000);
 statement ok
 FLUSH;
 
-sleep 1s
+sleep 5s
 
 query III rowsort
 select * from t_compaction_delete;
@@ -200,7 +200,7 @@ select * from t_compaction_delete;
 statement ok
 VACUUM FULL t_compaction_delete;
 
-sleep 1s
+sleep 5s
 
 query III rowsort
 select * from t_compaction_delete;
@@ -225,7 +225,7 @@ query ?
 select count(*) from rw_iceberg_files
 where schema_name = 'public'
 and source_name = '__iceberg_source_t_compaction_delete'
-and content in (1, 2);
+and content in ('PositionDeletes', 'EqualityDeletes');
 ----
 0
 
@@ -233,7 +233,7 @@ query ?
 select sum(record_count) from rw_iceberg_files
 where schema_name = 'public'
 and source_name = '__iceberg_source_t_compaction_delete'
-and content = 0;
+and content = 'Data';
 ----
 7
 
