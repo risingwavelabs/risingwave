@@ -300,8 +300,7 @@ impl StreamSink {
 
             if let Some(t) = &target_table {
                 let user_defined_primary_key_table = t.row_id_index.is_none();
-                let sink_is_append_only =
-                    sink_type == SinkType::AppendOnly || sink_type == SinkType::ForceAppendOnly;
+                let sink_is_append_only = sink_type.is_append_only();
 
                 if !user_defined_primary_key_table && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
@@ -315,11 +314,10 @@ impl StreamSink {
                     )));
                 }
 
-                if sink_type != SinkType::Upsert {
+                if sink_is_append_only {
                     None
                 } else {
                     let target_table_mapping = target_table_mapping.unwrap();
-
                     Some(t.pk()
                         .iter()
                         .map(|c| {

@@ -88,20 +88,24 @@ pub enum SinkType {
     Upsert,
     /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
     /// When updating a row, an UPDATE pair (U- then U+) will be written.
+    ///
+    /// Currently only used by DEBEZIUM format.
     Retract,
 }
 
 impl SinkType {
-    pub fn is_append_only(&self) -> bool {
-        self == &Self::AppendOnly || self == &Self::ForceAppendOnly
+    /// Whether the sink type is `AppendOnly` or `ForceAppendOnly`.
+    pub fn is_append_only(self) -> bool {
+        self == Self::AppendOnly || self == Self::ForceAppendOnly
     }
 
-    pub fn is_upsert(&self) -> bool {
-        self == &Self::Upsert
-    }
-
-    pub fn is_retract(&self) -> bool {
-        self == &Self::Retract
+    /// Convert to the string specified in `type = '...'` within the WITH options.
+    pub fn type_str(self) -> &'static str {
+        match self {
+            SinkType::AppendOnly | SinkType::ForceAppendOnly => "append-only",
+            SinkType::Upsert => "upsert",
+            SinkType::Retract => "retract",
+        }
     }
 
     pub fn to_proto(self) -> PbSinkType {

@@ -58,7 +58,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     sink_writer_param: SinkWriterParam,
     chunk_size: usize,
     input_data_types: Vec<DataType>,
-    upsert_behavior: Option<UpsertBehavior>,
+    non_append_only_behavior: Option<NonAppendOnlyBehavior>,
     rate_limit: Option<u32>,
 }
 
@@ -88,9 +88,10 @@ fn force_delete_only(c: StreamChunk) -> StreamChunk {
     c.into()
 }
 
-/// When the sink is an upsert sink, we need to do some extra work for correctness and performance.
+/// When the sink is non-append-only, i.e. upsert or retract, we need to do some extra work for
+/// correctness and performance.
 #[derive(Clone, Copy, Debug)]
-struct UpsertBehavior {
+struct NonAppendOnlyBehavior {
     /// Whether the user specifies a primary key for the sink, and it matches the derived stream
     /// key of the stream.
     ///
@@ -98,7 +99,7 @@ struct UpsertBehavior {
     pk_specified_and_matched: bool,
 }
 
-impl UpsertBehavior {
+impl NonAppendOnlyBehavior {
     /// NOTE(kwannoel):
     ///
     /// After the optimization in <https://github.com/risingwavelabs/risingwave/pull/12250>,
@@ -108,12 +109,12 @@ impl UpsertBehavior {
     /// boundaries. Then we will have double `DELETE`s followed by unspecified sequence
     /// of `INSERT`s, and lead to inconsistent data downstream.
     ///
-    /// We only need to do the compaction for upsert sinks, when the upstream and
+    /// We only need to do the compaction for non-append-only sinks, when the upstream and
     /// downstream PKs are matched. When the upstream and downstream PKs are not matched,
     /// we will buffer the chunks between two barriers, so the compaction is not needed,
     /// since the barriers will preserve chunk boundaries.
     ///
-    /// When the sink is not an upsert sink, it is either `force_append_only` or
+    /// When the sink is an append-only sink, it is either `force_append_only` or
     /// `append_only`, we should only append to downstream, so there should not be any
     /// overlapping keys.
     fn should_compact_in_log_reader(self) -> bool {
@@ -220,11 +221,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             assert_eq!(sink_input_schema.data_types(), info.schema.data_types());
         }
 
-        let upsert_behavior = if sink_param.sink_type == SinkType::Upsert {
+        let non_append_only_behavior = if !sink_param.sink_type.is_append_only() {
             let stream_key = &info.pk_indices;
             let pk_specified_and_matched = (sink_param.downstream_pk.as_ref())
                 .is_some_and(|downstream_pk| stream_key.iter().all(|i| downstream_pk.contains(i)));
-            Some(UpsertBehavior {
+            Some(NonAppendOnlyBehavior {
                 pk_specified_and_matched,
             })
         } else {
@@ -234,7 +235,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         tracing::info!(
             sink_id = sink_param.sink_id.sink_id,
             actor_id = actor_context.id,
-            ?upsert_behavior,
+            ?non_append_only_behavior,
             "Sink executor info"
         );
 
@@ -249,7 +250,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             sink_writer_param,
             chunk_size,
             input_data_types,
-            upsert_behavior,
+            non_append_only_behavior,
             rate_limit,
         })
     }
@@ -291,7 +292,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.input_data_types,
             input_compact_ib,
             self.sink_param.downstream_pk.clone(),
-            self.upsert_behavior,
+            self.non_append_only_behavior,
             metrics.sink_chunk_buffer_size,
             self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
         );
@@ -345,7 +346,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.input_columns,
                             self.sink_param,
                             self.sink_writer_param,
-                            self.upsert_behavior,
+                            self.non_append_only_behavior,
                             input_compact_ib,
                             self.actor_context,
                             rate_limit_rx,
@@ -487,15 +488,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input_data_types: Vec<DataType>,
         input_compact_ib: InconsistencyBehavior,
         downstream_pk: Option<Vec<usize>>,
-        upsert_behavior: Option<UpsertBehavior>,
+        non_append_only_behavior: Option<NonAppendOnlyBehavior>,
         sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
         skip_compact: bool,
     ) {
         // To reorder records, we need to buffer chunks of the entire epoch.
-        if let Some(ub) = upsert_behavior
-            && ub.should_reorder_records()
+        if let Some(b) = non_append_only_behavior
+            && b.should_reorder_records()
         {
-            assert_matches!(sink_type, SinkType::Upsert);
+            assert_matches!(sink_type, SinkType::Upsert | SinkType::Retract);
 
             let mut chunk_buffer = EstimatedVec::new();
             let mut watermark: Option<super::Watermark> = None;
@@ -607,7 +608,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         mut sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
-        upsert_behavior: Option<UpsertBehavior>,
+        non_append_only_behavior: Option<NonAppendOnlyBehavior>,
         input_compact_ib: InconsistencyBehavior,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
@@ -648,8 +649,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let mut log_reader = log_reader
             .transform_chunk(move |chunk| {
-                let chunk = if let Some(ub) = upsert_behavior
-                    && ub.should_compact_in_log_reader()
+                let chunk = if let Some(b) = non_append_only_behavior
+                    && b.should_compact_in_log_reader()
                 {
                     // This guarantees that user has specified a `downstream_pk`.
                     let downstream_pk = downstream_pk.as_ref().unwrap();
