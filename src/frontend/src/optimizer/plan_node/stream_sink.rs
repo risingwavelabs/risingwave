@@ -697,11 +697,10 @@ impl StreamSink {
                 SinkType::Upsert => { /* always qualified */ }
                 SinkType::Retract => {
                     if derived_stream_kind == StreamKind::Upsert {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                        bail_invalid_input_syntax!(
                             "The sink of upsert stream cannot be retract. \
                              Please create a materialized view or sink-into-table with this query before sinking it.",
-                        ))
-                        .into());
+                        );
                     }
                 }
             }
