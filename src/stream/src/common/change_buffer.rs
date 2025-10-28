@@ -225,13 +225,20 @@ impl<K, R> ChangeBuffer<K, R> {
     }
 }
 
-pub type Kind = bool;
-pub mod kind {
-    use super::Kind;
-    pub const UPSERT: Kind = true;
-    pub const RETRACT: Kind = false;
+/// The kind of output for [`ChangeBuffer::into_chunk`] and [`ChangeBuffer::into_chunks`].
+/// Can be [`UPSERT`] or [`RETRACT`].
+pub type OutputKind = bool;
+pub mod output_kind {
+    use super::OutputKind;
+    /// For updates, only keep the new row with `Insert` operation.
+    ///
+    /// The output chunk can only be used in streams with `StreamKind::Upsert`. Refer to it for
+    /// more details.
+    pub const UPSERT: OutputKind = true;
+    /// For updates, keep both the old and new row with `UpdateDelete` and `UpdateInsert` operation.
+    pub const RETRACT: OutputKind = false;
 }
-use kind::*;
+use output_kind::*;
 
 impl<K, R> ChangeBuffer<K, R>
 where
@@ -239,7 +246,10 @@ where
     R: private::Row + Row,
 {
     /// Consume the buffer and produce a single compacted chunk.
-    pub fn into_chunk<const KIND: Kind>(self, data_types: Vec<DataType>) -> Option<StreamChunk> {
+    pub fn into_chunk<const KIND: OutputKind>(
+        self,
+        data_types: Vec<DataType>,
+    ) -> Option<StreamChunk> {
         let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
         for record in self.into_records() {
             let record = match KIND {
@@ -253,7 +263,7 @@ where
     }
 
     /// Consume the buffer and produce a list of compacted chunks with the given size at most.
-    pub fn into_chunks<const KIND: Kind>(
+    pub fn into_chunks<const KIND: OutputKind>(
         self,
         data_types: Vec<DataType>,
         chunk_size: usize,
