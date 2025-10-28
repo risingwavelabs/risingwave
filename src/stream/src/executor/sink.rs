@@ -589,7 +589,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 // the frontend derivation result.
                                 yield Message::Chunk(force_append_only(chunk))
                             }
-                            SinkType::Upsert => yield Message::Chunk(chunk),
+                            SinkType::Upsert | SinkType::Retract => yield Message::Chunk(chunk),
                         }
                     }
                     Message::Barrier(barrier) => {
