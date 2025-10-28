@@ -47,7 +47,7 @@
 
 RisingWave is a real-time event streaming platform designed to offer the <i><b>simplest</b></i> and <i><b>most cost-effective</b></i> way to <b>process</b>, <b>analyze</b>, and <b>manage</b> real-time event data — with built-in support for the [Apache Iceberg™](https://iceberg.apache.org/) open table format. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
 
-RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live streams with historical data, <b>serve</b> ad-hoc queries at low latency, and <b>persist</b> fresh, consistent results to Apache Iceberg™ or any other downstream system.
+RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live streams with historical data, <b>serve</b> ad-hoc queries at low latency, and <b>manage</b> data reliably in Apache Iceberg™ tables.
 
 ![RisingWave](./docs/dev/src/images/architecture_20250609.jpg)
 
@@ -70,9 +70,6 @@ RisingWave integrates real-time stream processing and low-latency serving in a s
 ### Iceberg-based lakehouse ingestion and management
 RisingWave treats Apache Iceberg™ as a first-class citizen. It directly hosts and manages the Iceberg REST catalog, allowing users to create and operate Iceberg tables through a PostgreSQL-compatible interface. RisingWave supports two write modes: Merge-on-Read (MoR) and Copy-on-Write (CoW), to suit different ingestion and query patterns. It also provides built-in table maintenance capabilities, including compaction, small-file optimization, vacuum, and snapshot cleanup, ensuring efficient and consistent data management without external tools or pipelines.
 
-
-With RisingWave, real-time data isn’t just processed — it’s stored, queried, and shared across your entire stack.
-
 ## Key design decisions
 
 RisingWave is designed to be easier to use and more cost-efficient:
@@ -90,8 +87,6 @@ RisingWave stores tables, materialized views, and internal states of stream proc
 - **Fast recovery:** Restores from system failures within seconds.
 - **[Dynamic scaling](https://docs.risingwave.com/deploy/k8s-cluster-scaling):** Instantly adjusts resources to handle workload spikes.
 
-### Elastic disk cache
-
 Beyond caching hot data in memory, RisingWave supports [**elastic disk cache**](https://docs.risingwave.com/get-started/disk-cache), a powerful performance optimization that uses local disks or EBS for efficient data caching. This minimizes access to S3, lowering processing latency and cutting S3 access costs.
 
 ### Apache Iceberg™ native support
@@ -100,10 +95,11 @@ RisingWave [**natively integrates with Apache Iceberg™**](https://docs.risingw
 ## In what use cases does RisingWave excel?
 RisingWave is particularly effective for the following use cases:
 
-* **Streaming analytics**: Achieve sub-second data freshness in live dashboards, ideal for high-stakes scenarios like stock trading, sports betting, and IoT monitoring.
-* **Event-driven applications**: Develop sophisticated monitoring and alerting systems for critical applications such as fraud and anomaly detection.
+* **Live dashboards**: Achieve sub-second data freshness in live dashboards, ideal for high-stakes scenarios like stock trading, sports betting, and IoT monitoring.
+* **Monitoring and alerting**: Develop sophisticated monitoring and alerting systems for critical applications such as fraud and anomaly detection.
 * **Real-time data enrichment**: Continuously ingest data from diverse sources, conduct real-time data enrichment, and efficiently deliver the results to downstream systems.
 * **Feature engineering**: Transform batch and streaming data into features in your machine learning models using a unified codebase, ensuring seamless integration and consistency.
+* **Iceberg-based lakehouses**: Power real-time lakehouse architectures where streaming data is continuously written to Apache Iceberg™ tables for unified analytics, governance, and long-term retention in open formats.
 
 ## Production deployments
 
