@@ -83,8 +83,12 @@ pub enum SinkType {
     /// The input of the sink operator can be INSERT, UPDATE, or DELETE, but it must drop any
     /// UPDATE or DELETE and write only INSERT into the sink connector.
     ForceAppendOnly,
-    /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
+    /// The data written into the sink connector can be INSERT or DELETE.
+    /// When updating a row, an INSERT with new value will be written.
     Upsert,
+    /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
+    /// When updating a row, an UPDATE pair (U- then U+) will be written.
+    Retract,
 }
 
 impl SinkType {
@@ -96,11 +100,16 @@ impl SinkType {
         self == &Self::Upsert
     }
 
+    pub fn is_retract(&self) -> bool {
+        self == &Self::Retract
+    }
+
     pub fn to_proto(self) -> PbSinkType {
         match self {
             SinkType::AppendOnly => PbSinkType::AppendOnly,
             SinkType::ForceAppendOnly => PbSinkType::ForceAppendOnly,
             SinkType::Upsert => PbSinkType::Upsert,
+            SinkType::Retract => PbSinkType::Retract,
         }
     }
 
@@ -109,6 +118,7 @@ impl SinkType {
             PbSinkType::AppendOnly => SinkType::AppendOnly,
             PbSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
             PbSinkType::Upsert => SinkType::Upsert,
+            PbSinkType::Retract => SinkType::Retract,
             PbSinkType::Unspecified => unreachable!(),
         }
     }
