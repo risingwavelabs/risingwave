@@ -183,48 +183,31 @@ impl Reducer {
                             }
                         }
 
-                        // Try to remove up to 8 elements from this list in one go
-                        let take_n = group_indices.len().min(8);
-                        if take_n > 1 {
-                            let mut tmp_ast = ast_node.clone();
-                            let mut applied = 0usize;
-                            for &idx in &group_indices[..take_n] {
-                                if let Some(next_ast) =
-                                    apply_reduction_operation(&tmp_ast, &candidates[idx])
-                                {
-                                    tmp_ast = next_ast;
-                                    applied += 1;
-                                }
-                            }
-
-                            if applied > 1
-                                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                        // Use binary search to find the maximum batch size that works
+                        if group_indices.len() > 1 {
+                            if let Some((success_ast, success_sql, applied_count)) = self
+                                .try_batch_with_binary_search(
+                                    &ast_node,
+                                    &candidates,
+                                    &group_indices,
+                                    sql,
+                                    sql_len,
+                                    &mut seen_queries,
+                                    "List-batch",
+                                    base_path,
+                                )
+                                .await
                             {
-                                let new_sql = new_stmt.to_string();
-                                let new_len = new_sql.len();
-
-                                if new_len < sql_len && !seen_queries.contains(&new_sql) {
-                                    tracing::debug!(
-                                        "List-batch: removed {} elements at path {}, validating (len: {})",
-                                        applied,
-                                        crate::sqlreduce::path::display_ast_path(base_path),
-                                        new_len
-                                    );
-
-                                    if self.checker.is_failure_preserved(sql, &new_sql).await {
-                                        tracing::info!(
-                                            "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
-                                            applied,
-                                            sql_len,
-                                            new_len
-                                        );
-                                        seen_queries.insert(new_sql.clone());
-                                        ast_node = tmp_ast;
-                                        sql_len = new_len;
-                                        found_reduction = true;
-                                        batch_applied = true;
-                                    }
-                                }
+                                tracing::info!(
+                                    "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
+                                    applied_count,
+                                    sql_len,
+                                    success_sql.len()
+                                );
+                                ast_node = success_ast;
+                                sql_len = success_sql.len();
+                                found_reduction = true;
+                                batch_applied = true;
                             }
                         }
                     }
@@ -248,48 +231,31 @@ impl Reducer {
                             }
                         }
 
-                        // Try to remove up to 3 attributes at once (conservative)
-                        let take_n = group_indices.len().min(3);
-                        if take_n > 1 {
-                            let mut tmp_ast = ast_node.clone();
-                            let mut applied = 0usize;
-                            for &idx in &group_indices[..take_n] {
-                                if let Some(next_ast) =
-                                    apply_reduction_operation(&tmp_ast, &candidates[idx])
-                                {
-                                    tmp_ast = next_ast;
-                                    applied += 1;
-                                }
-                            }
-
-                            if applied > 1
-                                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                        // Use binary search to find the maximum batch size that works
+                        if group_indices.len() > 1 {
+                            if let Some((success_ast, success_sql, applied_count)) = self
+                                .try_batch_with_binary_search(
+                                    &ast_node,
+                                    &candidates,
+                                    &group_indices,
+                                    sql,
+                                    sql_len,
+                                    &mut seen_queries,
+                                    "Attr-batch",
+                                    base_path,
+                                )
+                                .await
                             {
-                                let new_sql = new_stmt.to_string();
-                                let new_len = new_sql.len();
-
-                                if new_len < sql_len && !seen_queries.contains(&new_sql) {
-                                    tracing::debug!(
-                                        "Attr-batch: removed {} attributes at path {}, validating (len: {})",
-                                        applied,
-                                        crate::sqlreduce::path::display_ast_path(base_path),
-                                        new_len
-                                    );
-
-                                    if self.checker.is_failure_preserved(sql, &new_sql).await {
-                                        tracing::info!(
-                                            "✓ Valid attr-batch reduction! Removed {} attributes, SQL len {} → {}",
-                                            applied,
-                                            sql_len,
-                                            new_len
-                                        );
-                                        seen_queries.insert(new_sql.clone());
-                                        ast_node = tmp_ast;
-                                        sql_len = new_len;
-                                        found_reduction = true;
-                                        batch_applied = true;
-                                    }
-                                }
+                                tracing::info!(
+                                    "✓ Valid attr-batch reduction! Removed {} attributes, SQL len {} → {}",
+                                    applied_count,
+                                    sql_len,
+                                    success_sql.len()
+                                );
+                                ast_node = success_ast;
+                                sql_len = success_sql.len();
+                                found_reduction = true;
+                                batch_applied = true;
                             }
                         }
                     }
@@ -313,48 +279,31 @@ impl Reducer {
                             }
                         }
 
-                        // Try up to 2 replace operations together (very conservative)
-                        let take_n = group_indices.len().min(2);
-                        if take_n > 1 {
-                            let mut tmp_ast = ast_node.clone();
-                            let mut applied = 0usize;
-                            for &idx in &group_indices[..take_n] {
-                                if let Some(next_ast) =
-                                    apply_reduction_operation(&tmp_ast, &candidates[idx])
-                                {
-                                    tmp_ast = next_ast;
-                                    applied += 1;
-                                }
-                            }
-
-                            if applied > 1
-                                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                        // Use binary search to find the maximum batch size that works
+                        if group_indices.len() > 1 {
+                            if let Some((success_ast, success_sql, applied_count)) = self
+                                .try_batch_with_binary_search(
+                                    &ast_node,
+                                    &candidates,
+                                    &group_indices,
+                                    sql,
+                                    sql_len,
+                                    &mut seen_queries,
+                                    "Replace-batch",
+                                    base_path,
+                                )
+                                .await
                             {
-                                let new_sql = new_stmt.to_string();
-                                let new_len = new_sql.len();
-
-                                if new_len < sql_len && !seen_queries.contains(&new_sql) {
-                                    tracing::debug!(
-                                        "Replace-batch: applied {} replacements at path {}, validating (len: {})",
-                                        applied,
-                                        crate::sqlreduce::path::display_ast_path(base_path),
-                                        new_len
-                                    );
-
-                                    if self.checker.is_failure_preserved(sql, &new_sql).await {
-                                        tracing::info!(
-                                            "✓ Valid replace-batch reduction! Applied {} replacements, SQL len {} → {}",
-                                            applied,
-                                            sql_len,
-                                            new_len
-                                        );
-                                        seen_queries.insert(new_sql.clone());
-                                        ast_node = tmp_ast;
-                                        sql_len = new_len;
-                                        found_reduction = true;
-                                        batch_applied = true;
-                                    }
-                                }
+                                tracing::info!(
+                                    "✓ Valid replace-batch reduction! Applied {} replacements, SQL len {} → {}",
+                                    applied_count,
+                                    sql_len,
+                                    success_sql.len()
+                                );
+                                ast_node = success_ast;
+                                sql_len = success_sql.len();
+                                found_reduction = true;
+                                batch_applied = true;
                             }
                         }
                     }
@@ -378,48 +327,31 @@ impl Reducer {
                             }
                         }
 
-                        // Try up to 2 pullup operations together
-                        let take_n = group_indices.len().min(2);
-                        if take_n > 1 {
-                            let mut tmp_ast = ast_node.clone();
-                            let mut applied = 0usize;
-                            for &idx in &group_indices[..take_n] {
-                                if let Some(next_ast) =
-                                    apply_reduction_operation(&tmp_ast, &candidates[idx])
-                                {
-                                    tmp_ast = next_ast;
-                                    applied += 1;
-                                }
-                            }
-
-                            if applied > 1
-                                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+                        // Use binary search to find the maximum batch size that works
+                        if group_indices.len() > 1 {
+                            if let Some((success_ast, success_sql, applied_count)) = self
+                                .try_batch_with_binary_search(
+                                    &ast_node,
+                                    &candidates,
+                                    &group_indices,
+                                    sql,
+                                    sql_len,
+                                    &mut seen_queries,
+                                    "Pullup-batch",
+                                    base_path,
+                                )
+                                .await
                             {
-                                let new_sql = new_stmt.to_string();
-                                let new_len = new_sql.len();
-
-                                if new_len < sql_len && !seen_queries.contains(&new_sql) {
-                                    tracing::debug!(
-                                        "Pullup-batch: applied {} pullups at path {}, validating (len: {})",
-                                        applied,
-                                        crate::sqlreduce::path::display_ast_path(base_path),
-                                        new_len
-                                    );
-
-                                    if self.checker.is_failure_preserved(sql, &new_sql).await {
-                                        tracing::info!(
-                                            "✓ Valid pullup-batch reduction! Applied {} pullups, SQL len {} → {}",
-                                            applied,
-                                            sql_len,
-                                            new_len
-                                        );
-                                        seen_queries.insert(new_sql.clone());
-                                        ast_node = tmp_ast;
-                                        sql_len = new_len;
-                                        found_reduction = true;
-                                        batch_applied = true;
-                                    }
-                                }
+                                tracing::info!(
+                                    "✓ Valid pullup-batch reduction! Applied {} pullups, SQL len {} → {}",
+                                    applied_count,
+                                    sql_len,
+                                    success_sql.len()
+                                );
+                                ast_node = success_ast;
+                                sql_len = success_sql.len();
+                                found_reduction = true;
+                                batch_applied = true;
                             }
                         }
                     }
@@ -533,5 +465,111 @@ impl Reducer {
         );
 
         final_sql
+    }
+
+    /// Try to apply a batch of operations using binary search to find the maximum working batch size.
+    ///
+    /// Binary search strategy:
+    /// - Start with the full batch size
+    /// - If it works, return success immediately
+    /// - If it fails, binary search for the largest working subset
+    ///
+    /// Returns: (AST, SQL, applied_count) if any batch succeeds, None otherwise
+    async fn try_batch_with_binary_search(
+        &mut self,
+        ast_node: &crate::sqlreduce::path::AstNode,
+        candidates: &[crate::sqlreduce::rules::ReductionCandidate],
+        group_indices: &[usize],
+        original_sql: &str,
+        sql_len: usize,
+        seen_queries: &mut HashSet<String>,
+        batch_type: &str,
+        base_path: &crate::sqlreduce::path::AstPath,
+    ) -> Option<(crate::sqlreduce::path::AstNode, String, usize)> {
+        let total = group_indices.len();
+        
+        tracing::debug!(
+            "{}: Found {} candidates at same path, trying binary search",
+            batch_type,
+            total
+        );
+
+        // Binary search for the maximum working batch size
+        let mut left = 2; // Minimum batch size
+        let mut right = total;
+        let mut best_result: Option<(crate::sqlreduce::path::AstNode, String, usize)> = None;
+
+        while left <= right {
+            let mid = (left + right) / 2;
+            
+            tracing::debug!(
+                "{}: Trying batch size {} (range: {}-{})",
+                batch_type,
+                mid,
+                left,
+                right
+            );
+
+            // Try to apply this batch size
+            let mut tmp_ast = ast_node.clone();
+            let mut applied = 0usize;
+            
+            for &idx in &group_indices[..mid] {
+                if let Some(next_ast) = apply_reduction_operation(&tmp_ast, &candidates[idx]) {
+                    tmp_ast = next_ast;
+                    applied += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if applied >= 2 {
+                if let Some(new_stmt) = ast_node_to_statement(&tmp_ast) {
+                    let new_sql = new_stmt.to_string();
+                    let new_len = new_sql.len();
+
+                    if new_len < sql_len && !seen_queries.contains(&new_sql) {
+                        // Check if the failure is preserved
+                        if self.checker.is_failure_preserved(original_sql, &new_sql).await {
+                            tracing::debug!(
+                                "{}: Batch size {} succeeded, trying larger",
+                                batch_type,
+                                mid
+                            );
+                            seen_queries.insert(new_sql.clone());
+                            best_result = Some((tmp_ast, new_sql, applied));
+                            left = mid + 1; // Try larger batch
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // If we reach here, this batch size didn't work
+            tracing::debug!(
+                "{}: Batch size {} failed, trying smaller",
+                batch_type,
+                mid
+            );
+            right = mid - 1;
+        }
+
+        if let Some((_, ref sql, count)) = best_result {
+            tracing::debug!(
+                "{}: Binary search found optimal batch size {} at path {} (len: {})",
+                batch_type,
+                count,
+                crate::sqlreduce::path::display_ast_path(base_path),
+                sql.len()
+            );
+        } else {
+            tracing::debug!(
+                "{}: Binary search found no valid batch at path {}",
+                batch_type,
+                crate::sqlreduce::path::display_ast_path(base_path)
+            );
+        }
+
+        best_result
     }
 }
