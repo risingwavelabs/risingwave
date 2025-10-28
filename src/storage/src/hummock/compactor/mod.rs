@@ -517,7 +517,7 @@ pub fn start_iceberg_compactor(
                                                 plan_index = enqueued_count - 1,
                                                 unique_ident = %meta.unique_ident,
                                                 required_parallelism = required_parallelism,
-                                                "Plan runner added to queue"
+                                                "Iceberg plan runner added to queue"
                                             );
                                         },
                                         PushResult::Replaced { old_task_id } => {
@@ -528,14 +528,14 @@ pub fn start_iceberg_compactor(
                                                 old_task_id = old_task_id,
                                                 unique_ident = %meta.unique_ident,
                                                 required_parallelism = required_parallelism,
-                                                "Plan runner replaced in queue"
+                                                "Iceberg plan runner replaced in queue"
                                             );
                                         },
                                         PushResult::RejectedRunningDuplicate => {
                                             tracing::warn!(
                                                 task_id = task_id,
                                                 unique_ident = %meta.unique_ident,
-                                                "Plan runner rejected - duplicate already running"
+                                                "Iceberg plan runner rejected - duplicate already running"
                                             );
                                             // Continue trying to enqueue other plans
                                         },
@@ -547,7 +547,7 @@ pub fn start_iceberg_compactor(
                                                 pending_budget = pending_parallelism_budget,
                                                 enqueued_count = enqueued_count,
                                                 total_plans = total_plans,
-                                                "Plan runner rejected - queue capacity exceeded, stopping enqueue"
+                                                "Iceberg plan runner rejected - queue capacity exceeded"
                                             );
                                             // Stop enqueuing remaining plans
                                             break;
@@ -558,7 +558,7 @@ pub fn start_iceberg_compactor(
                                                 unique_ident = %meta.unique_ident,
                                                 required_parallelism = required_parallelism,
                                                 max_parallelism = max_task_parallelism,
-                                                "Plan runner rejected - parallelism requirement exceeds max"
+                                                "Iceberg plan runner rejected - parallelism exceeds max"
                                             );
                                         },
                                         PushResult::RejectedInvalidParallelism => {
@@ -566,7 +566,7 @@ pub fn start_iceberg_compactor(
                                                 task_id = task_id,
                                                 unique_ident = %meta.unique_ident,
                                                 required_parallelism = required_parallelism,
-                                                "Plan runner rejected - invalid parallelism (must be > 0)"
+                                                "Iceberg plan runner rejected - invalid parallelism"
                                             );
                                         }
                                     }
@@ -576,7 +576,7 @@ pub fn start_iceberg_compactor(
                                     task_id = task_id,
                                     total_plans = total_plans,
                                     enqueued_count = enqueued_count,
-                                    "Enqueued {} of {} plan runners",
+                                    "Enqueued {} of {} Iceberg plan runners",
                                     enqueued_count,
                                     total_plans
                                 );
@@ -585,7 +585,7 @@ pub fn start_iceberg_compactor(
                                 // set flag
                                 pull_task_ack = true;
                             },
-                    }
+                        }
                     }
                     Some(Err(e)) => {
                         tracing::warn!("Failed to consume stream. {}", e.message());
