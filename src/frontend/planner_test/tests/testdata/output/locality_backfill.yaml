@@ -103,7 +103,7 @@
         │   └─StreamExchange { dist: HashShard(stream.a1, stream.b1) }
         │     └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2) }
-          └─StreamTableScan { table: idx2, columns: [idx2.id2, idx2.a2, idx2.b2], stream_scan_type: UpstreamOnly, stream_key: [idx2.id2], pk: [a2, b2, id2], dist: UpstreamHashShard(idx2.a2) }
+          └─StreamTableScan { table: idx2, columns: [idx2.id2, idx2.a2, idx2.b2], stream_scan_type: UpstreamOnly, stream_key: [idx2.a2, idx2.id2], pk: [a2, b2, id2], dist: UpstreamHashShard(idx2.a2) }
 - sql: |
     set enable_locality_backfill = true;
     create table t(a int, b int, c int) append only;
