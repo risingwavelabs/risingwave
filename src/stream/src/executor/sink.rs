@@ -190,16 +190,17 @@ impl NonAppendOnlyBehavior {
     }
 }
 
+/// Get the output kind for chunk compaction based on the given sink type.
 fn compact_output_kind(sink_type: SinkType) -> OutputKind {
     match sink_type {
-        SinkType::AppendOnly | SinkType::ForceAppendOnly => {
-            unreachable!("should not compact append-only sink")
-        }
         SinkType::Upsert => output_kind::UPSERT,
         SinkType::Retract => output_kind::RETRACT,
+        // There won't be any `Update` or `Delete` in the chunk, so it doesn't matter.
+        SinkType::AppendOnly | SinkType::ForceAppendOnly => output_kind::RETRACT,
     }
 }
 
+/// Dispatch the code block to different output kinds for chunk compaction based on sink type.
 macro_rules! dispatch_output_kind {
     ($sink_type:expr, $KIND:ident, $body:tt) => {
         #[allow(unused_braces)]
