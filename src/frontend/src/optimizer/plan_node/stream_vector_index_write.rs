@@ -62,7 +62,7 @@ impl StreamVectorIndexWrite {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            Some(table.stream_key().clone()),
+            Some(table.stream_key()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             StreamKind::AppendOnly,
