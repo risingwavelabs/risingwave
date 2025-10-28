@@ -1508,9 +1508,9 @@ cargo build --bin sqlsmith-reducer \
 '''
 
 [tasks.sr]
-alias = "sql-reduce"
+alias = "sql-reduce-short"
 
-[tasks.sql-reduce]
+[tasks.sql-reduce-short]
 category = "Risedev - Reduce"
 description = "Reduce a failing SQL query while preserving error"
 condition = { env_true = ["ENABLE_BUILD_RUST"] }
@@ -1526,7 +1526,6 @@ if [[ -z "${INPUT_FILE:-}" ]]; then
   exit 1
 fi
 
-
 mkdir -p '.sqlsmith'
 echo "Shrinking: $INPUT_FILE"
 
@@ -1534,4 +1533,15 @@ RUST_LOG=info target/debug/sqlsmith-reducer --input-file "$INPUT_FILE" --output-
 
 echo "Shrunk file: $OUTPUT_FILE"
 echo "Log file: $LOG_FILE"
+'''
+
+[tasks.sql-reduce-full]
+category = "Risedev - Reduce"
+description = "Reduce a failing SQL query while preserving error"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
+script = '''
+#!/usr/bin/env bash
+
+target/debug/sqlsmith-reducer "$@"
 '''
