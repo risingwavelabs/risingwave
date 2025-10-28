@@ -87,7 +87,7 @@ impl StreamMaterialize {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            Some(table.stream_key.clone()),
+            Some(table.stream_key().clone()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             kind,
@@ -126,7 +126,7 @@ impl StreamMaterialize {
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<Self> {
-        let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
+        let input = Self::rewrite_input(input, user_distributed_by.clone(), table_type)?;
         // the hidden column name might refer some expr id
         let input = reorganize_elements_id(input);
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
@@ -151,6 +151,7 @@ impl StreamMaterialize {
             name,
             database_id,
             schema_id,
+            user_distributed_by,
             user_order_by,
             columns,
             definition,
@@ -196,13 +197,14 @@ impl StreamMaterialize {
         engine: Engine,
         refreshable: bool,
     ) -> Result<Self> {
-        let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
+        let input = Self::rewrite_input(input, user_distributed_by.clone(), TableType::Table)?;
 
         let table = Self::derive_table_catalog(
             input.clone(),
             name.clone(),
             database_id,
             schema_id,
+            user_distributed_by,
             user_order_by,
             columns,
             definition,
@@ -300,6 +302,7 @@ impl StreamMaterialize {
         name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
+        user_distributed_by: RequiredDist,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -333,7 +336,7 @@ impl StreamMaterialize {
             // No order by for create table, so stream key is identical to table pk.
             (table_pk, pk_column_indices)
         } else {
-            derive_pk(input, user_order_by, &columns)
+            derive_pk(input, user_distributed_by, user_order_by, &columns)
         };
         // assert: `stream_key` is a subset of `table_pk`
 
@@ -611,7 +614,7 @@ impl Distill for StreamMaterialize {
             .map(Pretty::from)
             .collect();
 
-        let stream_key = (table.stream_key.iter())
+        let stream_key = (table.stream_key().iter())
             .map(|&k| table.columns[k].name().to_owned())
             .map(Pretty::from)
             .collect();
