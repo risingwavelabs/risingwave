@@ -460,7 +460,12 @@ impl TableCatalog {
             .any(|dist_key| !self.stream_key.contains(dist_key))
         {
             let mut new_stream_key = self.distribution_key.clone();
-            new_stream_key.extend(self.stream_key.iter());
+            let mut seen: HashSet<usize> = self.distribution_key.iter().copied().collect();
+            for &key in &self.stream_key {
+                if seen.insert(key) {
+                    new_stream_key.push(key);
+                }
+            }
             new_stream_key
         } else {
             self.stream_key.clone()

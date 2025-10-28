@@ -1529,7 +1529,7 @@
         └─StreamExchange { dist: HashShard(idx.col1) }
           └─StreamHashAgg { group_key: [idx.col1, _vnode], aggs: [count] }
             └─StreamProject { exprs: [idx.col1, idx.id, Vnode(idx.id) as _vnode] }
-              └─StreamTableScan { table: idx, columns: [idx.col1, idx.id], stream_scan_type: ArrangementBackfill, stream_key: [idx.id, idx.id], pk: [id], dist: UpstreamHashShard(idx.id) }
+              └─StreamTableScan { table: idx, columns: [idx.col1, idx.id], stream_scan_type: ArrangementBackfill, stream_key: [idx.id], pk: [id], dist: UpstreamHashShard(idx.id) }
 - name: sort agg on an ascending index
   sql: |
     create table t (a int, b int);

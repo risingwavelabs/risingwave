@@ -94,7 +94,13 @@ pub(crate) fn derive_pk(
         RequiredDist::AnyShard | RequiredDist::Any => vec![],
     };
 
-    stream_key.extend(input.expect_stream_key().iter().copied().unique());
+    // Deduplicate: only add keys from input that aren't already in stream_key
+    let mut seen: HashSet<usize> = stream_key.iter().copied().collect();
+    for key in input.expect_stream_key().iter().copied() {
+        if seen.insert(key) {
+            stream_key.push(key);
+        }
+    }
 
     let schema = input.schema();
 

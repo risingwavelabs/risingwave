@@ -70,7 +70,7 @@
     create table t1 (v1 int primary key, v2 int);
     explain (verbose) create index mv_idx on t1(v1, v2);
   explain_output: |
-    StreamMaterialize { columns: [v1, v2], stream_key: [v1, v1], pk_columns: [v1], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [v1, v2], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1.v1) }
       └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2], stream_scan_type: ArrangementBackfill, stream_key: [t1.v1], pk: [v1], dist: UpstreamHashShard(t1.v1) }
 - name: test functional dependency for order key pruning (index 3)
