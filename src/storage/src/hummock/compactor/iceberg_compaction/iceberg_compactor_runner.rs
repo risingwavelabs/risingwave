@@ -156,52 +156,26 @@ impl IcebergCompactionPlanRunner {
         self.compaction_plan.recommended_executor_parallelism() as u32
     }
 
-    /// Returns a unique identifier for this plan, used for queue deduplication.
+    /// Returns a human-readable identifier for this plan, used for logging and debugging.
     ///
-    /// The identifier includes catalog, table, task-type, and plan-index, but intentionally
-    /// excludes task-id. This design enables:
+    /// The identifier includes catalog, table, task-type, and plan-index to provide context
+    /// in logs. Format: `{catalog}-{table}-{task_type}-plan-{index}`
     ///
-    /// 1. **Task type isolation**: Different compaction types (e.g., `SmallDataFileCompaction`
-    ///    vs `FullCompaction`) operate independently without interfering with each other.
+    /// # Note
     ///
-    /// 2. **Same-type deduplication**: Multiple requests of the same type for the same table
-    ///    can be deduplicated automatically.
-    ///
-    /// # Deduplication Behavior
-    ///
-    /// - **Same plan (same type) in waiting queue**: New plan replaces the old one
-    /// - **Same plan (same type) currently running**: New plan is rejected
-    /// - **Different task types**: Completely independent (e.g., `SmallDataFileCompaction plan-0`
-    ///   and `FullCompaction plan-0` are different unique-idents)
+    /// This identifier is **for display only**. The queue does not use it for deduplication.
+    /// Task management (dedup, cancellation) is Meta's responsibility via unique `task_id`.
     ///
     /// # Example
     ///
     /// ```text
-    /// T0: Meta sends `SmallDataFileCompaction` task#1 for table_A
-    ///     → generates plan-0, plan-1, plan-2, plan-3
-    ///     unique_idents: [SmallData-plan-0, SmallData-plan-1, SmallData-plan-2, SmallData-plan-3]
+    /// catalog: "glue"
+    /// table: "my_db.my_table"
+    /// task_type: SmallDataFileCompaction
+    /// plan_index: 0
     ///
-    /// T1: SmallData-plan-0 starts execution
-    ///     Queue: [SmallData-plan-0: running] [SmallData-plan-1,2,3: waiting]
-    ///
-    /// T2: Meta sends FullCompaction task#2 for table_A (no grouping)
-    ///     → generates plan-0
-    ///     unique_ident: [FullCompaction-plan-0]
-    ///
-    ///     Result: FullCompaction-plan-0 is Added (different task_type, no conflict!)
-    ///     Queue: [SmallData-plan-0: running] [SmallData-plan-1,2,3: waiting]
-    ///            [FullCompaction-plan-0: waiting]
-    ///
-    /// T3: Meta sends another SmallDataFileCompaction task#3 for table_A
-    ///     → generates plan-0, plan-1
-    ///
-    ///     Result:
-    ///     - SmallData-plan-0: RejectedRunningDuplicate (old SmallData-plan-0 running)
-    ///     - SmallData-plan-1: Replaced (replaces waiting old SmallData-plan-1)
+    /// → unique_ident: "glue-my_db.my_table-small-plan-0"
     /// ```
-    ///
-    /// This prevents duplicate compaction work of the same type while allowing different
-    /// compaction strategies to run concurrently.
     pub fn unique_ident(&self) -> String {
         let task_type_str = match self.task_type {
             TaskType::SmallDataFileCompaction => "small",
@@ -220,8 +194,6 @@ impl IcebergCompactionPlanRunner {
     pub fn to_meta(&self) -> IcebergTaskMeta {
         IcebergTaskMeta {
             task_id: self.task_id,
-            unique_ident: self.unique_ident(),
-            enqueue_at: std::time::Instant::now(),
             required_parallelism: self.required_parallelism(),
         }
     }

@@ -515,34 +515,13 @@ pub fn start_iceberg_compactor(
                                             tracing::debug!(
                                                 task_id = task_id,
                                                 plan_index = enqueued_count - 1,
-                                                unique_ident = %meta.unique_ident,
                                                 required_parallelism = required_parallelism,
                                                 "Iceberg plan runner added to queue"
                                             );
                                         },
-                                        PushResult::Replaced { old_task_id } => {
-                                            enqueued_count += 1;
-                                            tracing::info!(
-                                                task_id = task_id,
-                                                plan_index = enqueued_count - 1,
-                                                old_task_id = old_task_id,
-                                                unique_ident = %meta.unique_ident,
-                                                required_parallelism = required_parallelism,
-                                                "Iceberg plan runner replaced in queue"
-                                            );
-                                        },
-                                        PushResult::RejectedRunningDuplicate => {
-                                            tracing::warn!(
-                                                task_id = task_id,
-                                                unique_ident = %meta.unique_ident,
-                                                "Iceberg plan runner rejected - duplicate already running"
-                                            );
-                                            // Continue trying to enqueue other plans
-                                        },
                                         PushResult::RejectedCapacity => {
                                             tracing::warn!(
                                                 task_id = task_id,
-                                                unique_ident = %meta.unique_ident,
                                                 required_parallelism = required_parallelism,
                                                 pending_budget = pending_parallelism_budget,
                                                 enqueued_count = enqueued_count,
@@ -555,7 +534,6 @@ pub fn start_iceberg_compactor(
                                         PushResult::RejectedTooLarge => {
                                             tracing::error!(
                                                 task_id = task_id,
-                                                unique_ident = %meta.unique_ident,
                                                 required_parallelism = required_parallelism,
                                                 max_parallelism = max_task_parallelism,
                                                 "Iceberg plan runner rejected - parallelism exceeds max"
@@ -564,7 +542,6 @@ pub fn start_iceberg_compactor(
                                         PushResult::RejectedInvalidParallelism => {
                                             tracing::error!(
                                                 task_id = task_id,
-                                                unique_ident = %meta.unique_ident,
                                                 required_parallelism = required_parallelism,
                                                 "Iceberg plan runner rejected - invalid parallelism"
                                             );
@@ -1145,6 +1122,10 @@ fn schedule_queued_tasks(
 ) {
     while let Some(popped_task) = task_queue.pop() {
         let task_id = popped_task.meta.task_id;
+
+        // Get unique_ident before moving runner
+        let unique_ident = popped_task.runner.as_ref().map(|r| r.unique_ident());
+
         let Some(runner) = popped_task.runner else {
             tracing::error!(
                 task_id = task_id,
@@ -1160,7 +1141,7 @@ fn schedule_queued_tasks(
 
         tracing::info!(
             task_id = task_id,
-            unique_ident = %popped_task.meta.unique_ident,
+            unique_ident = ?unique_ident,
             required_parallelism = popped_task.meta.required_parallelism,
             "Starting iceberg compaction task from queue"
         );
