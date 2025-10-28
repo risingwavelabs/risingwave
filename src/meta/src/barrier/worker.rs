@@ -375,7 +375,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
-                                    let workers = InflightFragmentInfo::workers(runtime_info.job_infos.values().flat_map(|job| job.fragment_infos()));
+                                    let workers = InflightFragmentInfo::workers(runtime_info.job_infos.values().flat_map(|fragments| fragments.values()));
                                     for worker_id in workers {
                                         if !self.control_stream_manager.is_connected(worker_id) {
                                             self.control_stream_manager.try_reconnect_worker(worker_id, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
@@ -773,7 +773,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 database_job_infos,
                 mut state_table_committed_epochs,
                 mut state_table_log_epochs,
-                mut subscription_infos,
+                mut mv_depended_subscriptions,
                 stream_actors,
                 fragment_relations,
                 mut source_splits,
@@ -798,7 +798,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             info!(elapsed=?reset_start_time.elapsed(), ?unconnected_worker, "control stream reset");
 
             {
-                let mut builder = FragmentEdgeBuilder::new(database_job_infos.values().flat_map(|info| info.values().flatten()), &control_stream_manager);
+                let mut builder = FragmentEdgeBuilder::new(database_job_infos.values().flat_map(|jobs| jobs.values().flat_map(|fragments| fragments.values())), &control_stream_manager);
                 builder.add_relations(&fragment_relations);
                 let mut edges = builder.build();
 
@@ -815,7 +815,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &stream_actors,
                         &mut source_splits,
                         &mut background_jobs,
-                        subscription_infos.remove(&database_id).unwrap_or_default(),
+                        &mut mv_depended_subscriptions,
                         is_paused,
                         &hummock_version_stats,
                         &mut cdc_table_snapshot_split_assignment,
@@ -902,8 +902,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !background_jobs.is_empty() {
                     warn!(job_ids = ?background_jobs.keys().collect_vec(), "unused recovered background mview in recovery");
                 }
-                if !subscription_infos.is_empty() {
-                    warn!(?subscription_infos, "unused subscription infos in recovery");
+                if !mv_depended_subscriptions.is_empty() {
+                    warn!(?mv_depended_subscriptions, "unused subscription infos in recovery");
                 }
                 if !state_table_committed_epochs.is_empty() {
                     warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
