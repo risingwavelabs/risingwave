@@ -685,8 +685,10 @@ impl MetadataManager {
             })
             .collect();
 
+        let inner = self.catalog_controller.inner.write().await;
+
         self.catalog_controller
-            .update_fragment_splits(&fragment_splits)
+            .update_fragment_splits(&inner.db, &fragment_splits)
             .await
     }
 

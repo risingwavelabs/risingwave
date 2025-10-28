@@ -33,10 +33,10 @@ use risingwave_meta_model::prelude::{
     Fragment as FragmentModel, FragmentRelation, FragmentSplits, Sink, StreamingJob,
 };
 use risingwave_meta_model::{
-    ActorId, ConnectorSplits, DatabaseId, DispatcherType, FragmentId, I32Array, JobStatus,
-    ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap,
-    WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink, source,
-    streaming_job, table,
+    ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
+    JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
+    VnodeBitmap, WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink,
+    source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{ExprTrait, OnConflict, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
@@ -513,41 +513,8 @@ impl CatalogController {
             .await?
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
 
-        // Build (FragmentModel, Vec<ActorModel>) from the in-memory cache
-        let fragment_actors_from_cache: Vec<(_, Vec<ActorModel>)> = {
-            let info = self.env.shared_actor_infos().read_guard();
-
-            fragments
-                .into_iter()
-                .map(|fm| {
-                    let fragment = info.get_fragment(fm.fragment_id as _).unwrap();
-
-                    let actors = fragment
-                        .actors
-                        .iter()
-                        .map(|(actor_id, actor_info)| ActorModel {
-                            actor_id: *actor_id as _,
-                            fragment_id: fm.fragment_id,
-                            status: ActorStatus::Running, // status is always Running in the shared info
-                            worker_id: actor_info.worker_id as _,
-                            splits:    ConnectorSplits::from(&PbConnectorSplits {
-                                splits: actor_info.splits.iter().map(ConnectorSplit::from).collect(),
-                            }),
-                            vnode_bitmap: actor_info.vnode_bitmap.as_ref().map(|bitmap| {
-                                VnodeBitmap::from(&bitmap.to_protobuf())
-                            }),
-                            expr_context: (&StreamContext {
-                                timezone: job_info.timezone.clone()
-                            }.to_expr_context()).into(),
-                        })
-                        .collect();
-                    (fm, actors)
-                })
-                .collect()
-        };
-
-        // Use cache-based result from here on
-        let fragment_actors = fragment_actors_from_cache;
+        let fragment_actors =
+            self.collect_fragment_actor_pairs(fragments, job_info.timezone.clone())?;
 
         let job_definition = resolve_streaming_job_definition(&inner.db, &HashSet::from([job_id]))
             .await?
@@ -847,6 +814,68 @@ impl CatalogController {
         Ok(actor_cnt)
     }
 
+    fn collect_fragment_actor_map(
+        &self,
+        fragment_ids: &[FragmentId],
+        timezone: Option<String>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorModel>>> {
+        let guard = self.env.shared_actor_infos().read_guard();
+        let stream_context = StreamContext { timezone };
+        let pb_expr_context = stream_context.to_expr_context();
+        let expr_context: ExprContext = (&pb_expr_context).into();
+
+        let mut actor_map = HashMap::with_capacity(fragment_ids.len());
+        for fragment_id in fragment_ids {
+            let fragment_info = guard.get_fragment(*fragment_id as _).ok_or_else(|| {
+                anyhow!("fragment {} not found in shared actor info", fragment_id)
+            })?;
+
+            let actors = fragment_info
+                .actors
+                .iter()
+                .map(|(actor_id, actor_info)| ActorModel {
+                    actor_id: *actor_id as _,
+                    fragment_id: *fragment_id,
+                    status: ActorStatus::Running,
+                    splits: ConnectorSplits::from(&PbConnectorSplits {
+                        splits: actor_info.splits.iter().map(ConnectorSplit::from).collect(),
+                    }),
+                    worker_id: actor_info.worker_id as _,
+                    vnode_bitmap: actor_info
+                        .vnode_bitmap
+                        .as_ref()
+                        .map(|bitmap| VnodeBitmap::from(&bitmap.to_protobuf())),
+                    expr_context: expr_context.clone(),
+                })
+                .collect();
+
+            actor_map.insert(*fragment_id, actors);
+        }
+
+        Ok(actor_map)
+    }
+
+    fn collect_fragment_actor_pairs(
+        &self,
+        fragments: Vec<fragment::Model>,
+        timezone: Option<String>,
+    ) -> MetaResult<Vec<(fragment::Model, Vec<ActorModel>)>> {
+        let fragment_ids: Vec<_> = fragments.iter().map(|f| f.fragment_id).collect();
+        let mut actor_map = self.collect_fragment_actor_map(&fragment_ids, timezone)?;
+        fragments
+            .into_iter()
+            .map(|fragment| {
+                let actors = actor_map.remove(&fragment.fragment_id).ok_or_else(|| {
+                    anyhow!(
+                        "fragment {} missing in shared actor info map",
+                        fragment.fragment_id
+                    )
+                })?;
+                Ok((fragment, actors))
+            })
+            .collect()
+    }
+
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
     pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, StreamJobFragments>> {
         let inner = self.inner.read().await;
@@ -865,45 +894,8 @@ impl CatalogController {
                 .all(&inner.db)
                 .await?;
 
-            let fragment_actors = {
-                let guard = self.env.shared_actor_infos().read_guard();
-
-                fragments
-                    .into_iter()
-                    .map(|fragment| {
-                        let fragment_info = guard.get_fragment(fragment.fragment_id as _).unwrap();
-
-                        let actors = fragment_info
-                            .actors
-                            .iter()
-                            .map(|(actor_id, actor_info)| ActorModel {
-                                actor_id: *actor_id as _,
-                                fragment_id: fragment.fragment_id as _,
-                                status: ActorStatus::Running,
-                                splits: ConnectorSplits::from(&PbConnectorSplits {
-                                    splits: actor_info
-                                        .splits
-                                        .iter()
-                                        .map(ConnectorSplit::from)
-                                        .collect(),
-                                }),
-                                worker_id: actor_info.worker_id,
-                                vnode_bitmap: actor_info
-                                    .vnode_bitmap
-                                    .as_ref()
-                                    .map(|bitmap| VnodeBitmap::from(&bitmap.to_protobuf())),
-                                expr_context: (&StreamContext {
-                                    timezone: job.timezone.clone(),
-                                }
-                                .to_expr_context())
-                                    .into(),
-                            })
-                            .collect();
-
-                        (fragment, actors)
-                    })
-                    .collect()
-            };
+            let fragment_actors =
+                self.collect_fragment_actor_pairs(fragments, job.timezone.clone())?;
 
             table_fragments.insert(
                 job.job_id as ObjectId,
@@ -1633,16 +1625,17 @@ impl CatalogController {
         has_table_been_migrated(&txn, table_id).await
     }
 
-    pub async fn update_fragment_splits(
+    pub async fn update_fragment_splits<C>(
         &self,
+        txn: &C,
         fragment_splits: &HashMap<FragmentId, Vec<SplitImpl>>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<()>
+    where
+        C: ConnectionTrait,
+    {
         if fragment_splits.is_empty() {
             return Ok(());
         }
-
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
 
         let models: Vec<fragment_splits::ActiveModel> = fragment_splits
             .iter()
@@ -1660,10 +1653,8 @@ impl CatalogController {
                     .update_column(fragment_splits::Column::Splits)
                     .to_owned(),
             )
-            .exec(&txn)
+            .exec(txn)
             .await?;
-
-        txn.commit().await?;
 
         Ok(())
     }
