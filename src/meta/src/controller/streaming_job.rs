@@ -77,6 +77,7 @@ use crate::controller::utils::{
     check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
     fetch_target_fragments, get_fragment_actor_ids, get_internal_tables_by_id, get_table_columns,
     grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
+    try_get_iceberg_table_by_downstream_sink,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -606,7 +607,7 @@ impl CatalogController {
     #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
-        job_id: ObjectId,
+        mut job_id: ObjectId,
         is_cancelled: bool,
     ) -> MetaResult<(bool, Option<DatabaseId>)> {
         let mut inner = self.inner.write().await;
@@ -630,14 +631,37 @@ impl CatalogController {
             if streaming_job.create_type == CreateType::Background
                 && streaming_job.job_status == JobStatus::Creating
             {
-                // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
-                tracing::warn!(
-                    id = job_id,
-                    "streaming job is created in background and still in creating status"
-                );
-                return Ok((false, Some(database_id)));
+                if obj.obj_type == ObjectType::Table
+                    && let Some(table) = Table::find_by_id(job_id).one(&txn).await?
+                    && matches!(table.engine, Some(table::Engine::Iceberg))
+                {
+                    // If the job is an iceberg table, we still need to clean it.
+                } else {
+                    // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
+                    tracing::warn!(
+                        id = job_id,
+                        "streaming job is created in background and still in creating status"
+                    );
+                    return Ok((false, Some(database_id)));
+                }
             }
         }
+
+        let iceberg_table_id = try_get_iceberg_table_by_downstream_sink(&txn, job_id).await?;
+        if let Some(iceberg_table_id) = iceberg_table_id {
+            // If the job is iceberg sink, we need to clean the iceberg table as well.
+            // Here we will drop the sink objects directly.
+            let internal_tables = get_internal_tables_by_id(job_id, &txn).await?;
+            Object::delete_many()
+                .filter(
+                    object::Column::Oid
+                        .eq(job_id)
+                        .or(object::Column::Oid.is_in(internal_tables)),
+                )
+                .exec(&txn)
+                .await?;
+            job_id = iceberg_table_id;
+        };
 
         let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
@@ -938,11 +962,103 @@ impl CatalogController {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
+        if let Some(table) = Table::find_by_id(job_id).one(&txn).await? {
+            if matches!(table.engine, Some(table::Engine::Iceberg)) {
+                // Ignore it and let it be handled in iceberg sink.
+                tracing::info!(
+                    "streaming job {} is for iceberg table, wait for iceberg sink to finish it",
+                    job_id
+                );
+                return Ok(());
+            }
+        }
+
+        // If the job is iceberg sink, we should finish the iceberg table with it.
+        let iceberg_table_id = try_get_iceberg_table_by_downstream_sink(&txn, job_id).await?;
+        let (table_notification_op, table_objects, table_updated_user_info) =
+            if let Some(table_id) = iceberg_table_id {
+                Self::finish_streaming_job_inner(&txn, table_id).await?
+            } else {
+                (Operation::Update, vec![], vec![])
+            };
+        println!(
+            "heiheihei: Finishing iceberg table for streaming job {:?}, notification_op: {:?}, objects: {:?}, updated_user_info: {:?}",
+            iceberg_table_id, table_notification_op, table_objects, table_updated_user_info
+        );
+
+        let (notification_op, objects, updated_user_info) =
+            Self::finish_streaming_job_inner(&txn, job_id).await?;
+
+        println!(
+            "heiheihei: Finishing streaming job {}, notification_op: {:?}, objects: {:?}, updated_user_info: {:?}",
+            job_id, notification_op, objects, updated_user_info
+        );
+
+        txn.commit().await?;
+
+        // notify frontend about the iceberg table first
+        if !table_objects.is_empty() {
+            self.notify_frontend(
+                table_notification_op,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: table_objects,
+                }),
+            )
+            .await;
+            if !table_updated_user_info.is_empty() {
+                self.notify_users_update(table_updated_user_info).await;
+            }
+        }
+
+        let mut version = self
+            .notify_frontend(
+                notification_op,
+                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
+            )
+            .await;
+
+        // notify users about the default privileges
+        if !updated_user_info.is_empty() {
+            version = self.notify_users_update(updated_user_info).await;
+        }
+
+        if let Some(iceberg_table_id) = iceberg_table_id {
+            inner
+                .creating_table_finish_notifier
+                .values_mut()
+                .for_each(|creating_tables| {
+                    if let Some(txs) = creating_tables.remove(&iceberg_table_id) {
+                        for tx in txs {
+                            let _ = tx.send(Ok(version));
+                        }
+                    }
+                });
+        }
+
+        inner
+            .creating_table_finish_notifier
+            .values_mut()
+            .for_each(|creating_tables| {
+                if let Some(txs) = creating_tables.remove(&job_id) {
+                    for tx in txs {
+                        let _ = tx.send(Ok(version));
+                    }
+                }
+            });
+
+        Ok(())
+    }
+
+    /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
+    pub async fn finish_streaming_job_inner(
+        txn: &DatabaseTransaction,
+        job_id: ObjectId,
+    ) -> MetaResult<(Operation, Vec<risingwave_pb::meta::Object>, Vec<PbUserInfo>)> {
         let job_type = Object::find_by_id(job_id)
             .select_only()
             .column(object::Column::ObjType)
             .into_tuple()
-            .one(&txn)
+            .one(txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
 
@@ -950,7 +1066,7 @@ impl CatalogController {
             .select_only()
             .column(streaming_job::Column::CreateType)
             .into_tuple()
-            .one(&txn)
+            .one(txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
 
@@ -962,7 +1078,7 @@ impl CatalogController {
                 current_cluster_version().into(),
             )
             .filter(object::Column::Oid.eq(job_id))
-            .exec(&txn)
+            .exec(txn)
             .await?;
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("streaming job", job_id));
@@ -974,13 +1090,13 @@ impl CatalogController {
             job_status: Set(JobStatus::Created),
             ..Default::default()
         };
-        job.update(&txn).await?;
+        job.update(txn).await?;
 
         // notify frontend: job, internal tables.
         let internal_table_objs = Table::find()
             .find_also_related(Object)
             .filter(table::Column::BelongsToJobId.eq(job_id))
-            .all(&txn)
+            .all(txn)
             .await?;
         let mut objects = internal_table_objs
             .iter()
@@ -1001,7 +1117,7 @@ impl CatalogController {
             ObjectType::Table => {
                 let (table, obj) = Table::find_by_id(job_id)
                     .find_also_related(Object)
-                    .one(&txn)
+                    .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
                 if table.table_type == TableType::MaterializedView {
@@ -1011,7 +1127,7 @@ impl CatalogController {
                 if let Some(source_id) = table.optional_associated_source_id {
                     let (src, obj) = Source::find_by_id(source_id)
                         .find_also_related(Object)
-                        .one(&txn)
+                        .one(txn)
                         .await?
                         .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
                     objects.push(PbObject {
@@ -1027,7 +1143,7 @@ impl CatalogController {
             ObjectType::Sink => {
                 let (sink, obj) = Sink::find_by_id(job_id)
                     .find_also_related(Object)
-                    .one(&txn)
+                    .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
                 objects.push(PbObject {
@@ -1037,13 +1153,13 @@ impl CatalogController {
             ObjectType::Index => {
                 let (index, obj) = Index::find_by_id(job_id)
                     .find_also_related(Object)
-                    .one(&txn)
+                    .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
                 {
                     let (table, obj) = Table::find_by_id(index.index_table_id)
                         .find_also_related(Object)
-                        .one(&txn)
+                        .one(txn)
                         .await?
                         .ok_or_else(|| {
                             MetaError::catalog_id_not_found("table", index.index_table_id)
@@ -1063,7 +1179,7 @@ impl CatalogController {
                             .eq(index.primary_table_id)
                             .and(user_privilege::Column::Action.eq(Action::Select)),
                     )
-                    .all(&txn)
+                    .all(txn)
                     .await?;
                 if !primary_table_privileges.is_empty() {
                     let index_state_table_ids: Vec<TableId> = Table::find()
@@ -1075,7 +1191,7 @@ impl CatalogController {
                                 .or(table::Column::TableId.eq(index.index_table_id)),
                         )
                         .into_tuple()
-                        .all(&txn)
+                        .all(txn)
                         .await?;
                     let mut new_privileges = vec![];
                     for privilege in &primary_table_privileges {
@@ -1091,13 +1207,11 @@ impl CatalogController {
                             });
                         }
                     }
-                    UserPrivilege::insert_many(new_privileges)
-                        .exec(&txn)
-                        .await?;
+                    UserPrivilege::insert_many(new_privileges).exec(txn).await?;
 
                     updated_user_info = list_user_info_by_ids(
                         primary_table_privileges.into_iter().map(|p| p.user_id),
-                        &txn,
+                        txn,
                     )
                     .await?;
                 }
@@ -1109,7 +1223,7 @@ impl CatalogController {
             ObjectType::Source => {
                 let (source, obj) = Source::find_by_id(job_id)
                     .find_also_related(Object)
-                    .one(&txn)
+                    .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
                 objects.push(PbObject {
@@ -1122,34 +1236,10 @@ impl CatalogController {
         }
 
         if job_type != ObjectType::Index {
-            updated_user_info = grant_default_privileges_automatically(&txn, job_id).await?;
-        }
-        txn.commit().await?;
-
-        let mut version = self
-            .notify_frontend(
-                notification_op,
-                NotificationInfo::ObjectGroup(PbObjectGroup { objects }),
-            )
-            .await;
-
-        // notify users about the default privileges
-        if !updated_user_info.is_empty() {
-            version = self.notify_users_update(updated_user_info).await;
+            updated_user_info = grant_default_privileges_automatically(txn, job_id).await?;
         }
 
-        inner
-            .creating_table_finish_notifier
-            .values_mut()
-            .for_each(|creating_tables| {
-                if let Some(txs) = creating_tables.remove(&job_id) {
-                    for tx in txs {
-                        let _ = tx.send(Ok(version));
-                    }
-                }
-            });
-
-        Ok(())
+        Ok((notification_op, objects, updated_user_info))
     }
 
     pub async fn finish_replace_streaming_job(

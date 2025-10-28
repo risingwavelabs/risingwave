@@ -699,6 +699,17 @@ where
                         .into_tuple()
                         .all(db)
                         .await?;
+                    if object_type == ObjectType::Table {
+                        let engine = Table::find_by_id(object_id)
+                            .select_only()
+                            .column(table::Column::Engine)
+                            .into_tuple::<table::Engine>()
+                            .one(db)
+                            .await?;
+                        if engine == Some(table::Engine::Iceberg) && sinks.len() == 1 {
+                            continue;
+                        }
+                    }
                     details.extend(sinks.into_iter().map(|(schema_name, sink_name)| {
                         format!("sink {}.{} depends on it", schema_name, sink_name)
                     }));
@@ -776,12 +787,15 @@ where
                 _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
             }
         }
+        if details.is_empty() {
+            return Ok(());
+        }
 
         return Err(MetaError::permission_denied(format!(
             "{} used by {} other objects. \nDETAIL: {}\n\
             {}",
             object_type.as_str(),
-            count,
+            details.len(),
             details.join("\n"),
             match object_type {
                 ObjectType::Function | ObjectType::Connection | ObjectType::Secret =>
@@ -2149,6 +2163,43 @@ where
         FragmentTypeMask::from(mview_fragment).contains(FragmentTypeFlag::UpstreamSinkUnion);
 
     Ok(migrated)
+}
+
+pub async fn try_get_iceberg_table_by_downstream_sink<C>(
+    txn: &C,
+    sink_id: SinkId,
+) -> MetaResult<Option<TableId>>
+where
+    C: ConnectionTrait,
+{
+    let sink = Sink::find_by_id(sink_id).one(txn).await?;
+    let Some(sink) = sink else {
+        return Ok(None);
+    };
+
+    // TODO: more robust way to identify iceberg sink and table
+    if sink.name.starts_with("__iceberg_sink_") {
+        let object_ids: Vec<ObjectId> = ObjectDependency::find()
+            .select_only()
+            .column(object_dependency::Column::Oid)
+            .filter(object_dependency::Column::UsedBy.eq(sink_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        if let Some(table_id) = object_ids.into_iter().max()
+            && let Some(table_engine) = Table::find_by_id(table_id)
+                .select_only()
+                .column(table::Column::Engine)
+                .into_tuple::<table::Engine>()
+                .one(txn)
+                .await?
+        {
+            if table_engine == table::Engine::Iceberg {
+                return Ok(Some(table_id));
+            }
+        }
+    }
+    Ok(None)
 }
 
 pub fn build_select_node_list(

@@ -59,20 +59,21 @@ impl CatalogController {
                 }
                 ObjectType::Table => {
                     check_object_refer_for_drop(object_type, object_id, &txn).await?;
-                    let indexes = get_referring_objects(object_id, &txn).await?;
-                    for obj in indexes.iter().filter(|object| {
+                    let objects = get_referring_objects(object_id, &txn).await?;
+                    for obj in objects.iter().filter(|object| {
                         object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
                     }) {
                         report_drop_object(obj.obj_type, obj.oid, &txn).await;
                     }
                     assert!(
-                        indexes.iter().all(|obj| obj.obj_type == ObjectType::Index),
-                        "only index could be dropped in restrict mode"
+                        objects.iter().all(|obj| obj.obj_type == ObjectType::Index
+                            || obj.obj_type == ObjectType::Sink),
+                        "only index and iceberg sink could be dropped in restrict mode"
                     );
-                    for idx in &indexes {
-                        check_object_refer_for_drop(idx.obj_type, idx.oid, &txn).await?;
+                    for obj in &objects {
+                        check_object_refer_for_drop(obj.obj_type, obj.oid, &txn).await?;
                     }
-                    indexes
+                    objects
                 }
                 object_type @ (ObjectType::Source | ObjectType::Sink) => {
                     check_object_refer_for_drop(object_type, object_id, &txn).await?;
@@ -91,6 +92,32 @@ impl CatalogController {
                 }
             },
         };
+
+        // check iceberg source.
+        if obj.obj_type == ObjectType::Table {
+            let table_name = Table::find_by_id(object_id)
+                .select_only()
+                .column(table::Column::Name)
+                .into_tuple::<String>()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+            let iceberg_source = Source::find()
+                .inner_join(Object)
+                .filter(
+                    object::Column::DatabaseId
+                        .eq(database_id)
+                        .and(object::Column::SchemaId.eq(obj.schema_id.unwrap()))
+                        .and(source::Column::Name.eq(format!("__iceberg_source_{}", table_name))),
+                )
+                .into_partial_model()
+                .one(&txn)
+                .await?;
+            if let Some(iceberg_source) = iceberg_source {
+                removed_objects.push(iceberg_source);
+            }
+        }
+
         removed_objects.push(obj);
         let mut removed_object_ids: HashSet<_> =
             removed_objects.iter().map(|obj| obj.oid).collect();

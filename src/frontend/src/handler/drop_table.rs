@@ -18,7 +18,7 @@ use risingwave_common::catalog::Engine;
 use risingwave_common::util::tokio_util::either::Either;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::ConnectorProperties;
-use risingwave_sqlparser::ast::{Ident, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 use tracing::warn;
 
 use super::RwPgResponse;
@@ -66,7 +66,7 @@ pub async fn handle_drop_table(
         (table.associated_source_id(), table.id(), table.engine)
     };
 
-    match engine {
+    let iceberg_catalog = match engine {
         Engine::Iceberg => {
             let either = if let Ok(source) = session
                 .env()
@@ -103,82 +103,48 @@ pub async fn handle_drop_table(
                 None
             };
 
-            // TODO(iceberg): make iceberg engine table drop ddl atomic
-            // Drop sink
-            // Drop iceberg table
-            //   - Purge table from warehouse
-            //   - Drop table from catalog
-            // Drop source
-            crate::handler::drop_sink::handle_drop_sink(
-                handler_args.clone(),
-                ObjectName::from(match schema_name {
-                    Some(ref schema) => vec![
-                        Ident::from(schema.as_str()),
-                        Ident::from((ICEBERG_SINK_PREFIX.to_owned() + &table_name).as_str()),
-                    ],
-                    None => vec![Ident::from(
-                        (ICEBERG_SINK_PREFIX.to_owned() + &table_name).as_str(),
-                    )],
-                }),
-                true,
-                false,
-            )
-            .await?;
-
             if let Some(either) = either {
-                let (iceberg_catalog, table_id) = match either {
+                match either {
                     Either::Left(iceberg_properties) => {
                         let catalog = iceberg_properties.create_catalog().await?;
                         let table_id = iceberg_properties
                             .table
                             .to_table_ident()
                             .context("Unable to parse table name")?;
-                        (catalog, table_id)
+                        Some((catalog, table_id))
                     }
                     Either::Right(iceberg_config) => {
                         let catalog = iceberg_config.create_catalog().await?;
                         let table_id = iceberg_config
                             .full_table_name()
                             .context("Unable to parse table name")?;
-                        (catalog, table_id)
+                        Some((catalog, table_id))
                     }
-                };
-
-                // For JNI catalog and storage catalog, drop table will purge the table as well.
-                iceberg_catalog
-                    .drop_table(&table_id)
-                    .await
-                    .context("failed to drop iceberg table")?;
-
-                crate::handler::drop_source::handle_drop_source(
-                    handler_args.clone(),
-                    ObjectName::from(match schema_name {
-                        Some(ref schema) => vec![
-                            Ident::from(schema.as_str()),
-                            Ident::from((ICEBERG_SOURCE_PREFIX.to_owned() + &table_name).as_str()),
-                        ],
-                        None => vec![Ident::from(
-                            (ICEBERG_SOURCE_PREFIX.to_owned() + &table_name).as_str(),
-                        )],
-                    }),
-                    true,
-                    false,
-                )
-                .await?;
+                }
             } else {
                 warn!(
                     "Table {} with iceberg engine but with no source and sink. It might be created partially. Please check it with iceberg catalog",
                     table_name
                 );
+                None
             }
         }
-        Engine::Hummock => {}
-    }
+        Engine::Hummock => None,
+    };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .drop_table(source_id.map(|id| id.table_id), table_id, cascade)
         .await?;
+
+    // TODO: move it to meta side.
+    if let Some((iceberg_catalog, table_id)) = iceberg_catalog {
+        // For JNI catalog and storage catalog, drop table will purge the table as well.
+        iceberg_catalog
+            .drop_table(&table_id)
+            .await
+            .context("failed to drop iceberg table")?;
+    }
 
     Ok(PgResponse::empty_result(StatementType::DROP_TABLE))
 }

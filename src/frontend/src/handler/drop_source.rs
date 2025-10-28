@@ -18,6 +18,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::ICEBERG_SOURCE_PREFIX;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 
@@ -66,6 +67,14 @@ pub async fn handle_drop_source(
             }
         }
     };
+
+    if source_name.starts_with(ICEBERG_SOURCE_PREFIX) {
+        return Err(crate::error::ErrorCode::NotSupported(
+            "Dropping Iceberg sources is not supported".to_owned(),
+            "Please use DROP TABLE command.".to_owned(),
+        )
+        .into());
+    }
 
     session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
