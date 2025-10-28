@@ -1100,21 +1100,6 @@ pub async fn scan_task_to_chunk_with_deletes(
     }
 }
 
-/// Legacy scan function that doesn't process delete files.
-/// Kept for backward compatibility. Delegates to `scan_task_to_chunk_with_deletes`.
-#[try_stream(ok = DataChunk, error = ConnectorError)]
-pub async fn scan_task_to_chunk(
-    table: Table,
-    data_file_scan_task: FileScanTask,
-    opts: IcebergScanOpts,
-    metrics: Option<Arc<IcebergScanMetrics>>,
-) {
-    #[for_await]
-    for chunk in scan_task_to_chunk_with_deletes(table, data_file_scan_task, opts, metrics) {
-        yield chunk?;
-    }
-}
-
 #[derive(Debug)]
 pub struct IcebergFileReader {}
 

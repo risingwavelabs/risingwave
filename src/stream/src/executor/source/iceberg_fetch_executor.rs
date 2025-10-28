@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
-use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
+use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 use risingwave_storage::store::PrefetchOptions;
@@ -357,7 +357,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         for task in batch {
             let mut chunks = vec![];
             #[for_await]
-            for chunk in scan_task_to_chunk(
+            for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 task,
                 IcebergScanOpts {

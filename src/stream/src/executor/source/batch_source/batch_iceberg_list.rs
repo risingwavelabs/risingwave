@@ -114,7 +114,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "encountered an error in batch posix fs list");
+                    tracing::warn!(error = %e.as_report(), "encountered an error in batch iceberg list");
                     return Err(e);
                 }
                 Ok(msg) => match msg {
@@ -137,7 +137,8 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                             "RefreshStart triggered file re-listing"
                                         );
                                         is_refreshing = true;
-                                        // todo: implement iceberg list、
+
+                                        // re-list iceberg scan tasks
                                         let iceberg_list_stream = Self::list_iceberg_scan_task(
                                             *iceberg_properties.clone(),
                                             downstream_columns.clone(),

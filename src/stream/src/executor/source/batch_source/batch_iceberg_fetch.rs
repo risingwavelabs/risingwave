@@ -23,7 +23,7 @@ use risingwave_common::array::Op;
 use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::types::{JsonbVal, Scalar, ScalarRef, ToOwnedDatum};
-use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
+use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use thiserror_ext::AsReport;
 
@@ -309,7 +309,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         for task in read_batch {
             let mut chunks = vec![];
             #[for_await]
-            for chunk in scan_task_to_chunk(
+            for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 task,
                 IcebergScanOpts {
