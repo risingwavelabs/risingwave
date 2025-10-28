@@ -14,7 +14,6 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
@@ -45,8 +44,8 @@ use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
-use super::HummockResult;
-use crate::hummock::HummockError;
+use super::IcebergTaskMeta;
+use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
 static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
@@ -56,6 +55,7 @@ static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegist
         ))
     });
 
+#[derive(Debug)]
 pub struct IcebergCompactorRunner {
     pub task_id: u64,
     pub catalog: Arc<dyn Catalog>,
@@ -65,6 +65,10 @@ pub struct IcebergCompactorRunner {
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
     pub task_type: TaskType,
+
+    compaction_type: CompactionType,
+    branch: String,
+    compaction_plan: CompactionPlan,
 }
 
 pub fn default_writer_properties() -> WriterProperties {
@@ -104,36 +108,6 @@ pub struct IcebergCompactorRunnerConfig {
     pub size_estimation_smoothing_factor: f64,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct RunnerContext {
-    pub max_available_parallelism: u32,
-    pub running_task_parallelism: Arc<AtomicU32>,
-}
-
-impl RunnerContext {
-    pub fn new(max_available_parallelism: u32, running_task_parallelism: Arc<AtomicU32>) -> Self {
-        Self {
-            max_available_parallelism,
-            running_task_parallelism,
-        }
-    }
-
-    pub fn is_available_parallelism_sufficient(&self, input_parallelism: u32) -> bool {
-        (self.max_available_parallelism - self.running_task_parallelism.load(Ordering::SeqCst))
-            >= input_parallelism
-    }
-
-    pub fn incr_running_task_parallelism(&self, increment: u32) {
-        self.running_task_parallelism
-            .fetch_add(increment, Ordering::SeqCst);
-    }
-
-    pub fn decr_running_task_parallelism(&self, decrement: u32) {
-        self.running_task_parallelism
-            .fetch_sub(decrement, Ordering::SeqCst);
-    }
-}
-
 impl IcebergCompactorRunner {
     pub async fn new(
         iceberg_compaction_task: IcebergCompactionTask,
@@ -155,6 +129,58 @@ impl IcebergCompactorRunner {
             .full_table_name()
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
+        let parsed_task_type = TaskType::try_from(task_type).map_err(|e| {
+            HummockError::compaction_executor(format!("Invalid task type: {}", e.as_report()))
+        })?;
+        let compaction_type = Self::get_compaction_type(parsed_task_type);
+        let planning_config = CompactionPlanningConfigBuilder::default()
+            .max_parallelism(config.max_parallelism as usize)
+            .min_size_per_partition(config.min_size_per_partition)
+            .max_file_count_per_partition(config.max_file_count_per_partition as _)
+            .base(CompactionBaseConfig {
+                target_file_size: config.target_file_size_bytes,
+            })
+            .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
+            .small_file_threshold(config.small_file_threshold)
+            .max_task_total_size(config.max_task_total_size)
+            .build()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to build iceberg compaction planning config: {:?}",
+                    e.as_report()
+                );
+            });
+
+        let branch = commit_branch(
+            iceberg_config.r#type.as_str(),
+            iceberg_config.write_mode.as_str(),
+        );
+
+        let planner = CompactionPlanner::new(planning_config.clone());
+
+        let table = catalog
+            .load_table(&table_ident)
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+        let compaction_plan = planner
+            .plan_compaction_with_branch(&table, compaction_type, &branch)
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?
+            .ok_or_else(|| HummockError::compaction_executor("Not find compaction plan"))?;
+
+        let input_parallelism = compaction_plan.recommended_executor_parallelism() as u32;
+
+        // Parallelism validation is now centralized in the queue (`IcebergTaskQueue::push`).
+        // Keep lightweight debug assertions here to catch planner regressions early in tests.
+        debug_assert!(input_parallelism > 0, "Planner returned zero parallelism");
+        debug_assert!(
+            input_parallelism <= config.max_parallelism,
+            "Planner recommended parallelism {} exceeding config.max_parallelism {}",
+            input_parallelism,
+            config.max_parallelism
+        );
+
         Ok(Self {
             task_id,
             catalog,
@@ -162,79 +188,41 @@ impl IcebergCompactorRunner {
             iceberg_config,
             config,
             metrics,
-            task_type: TaskType::try_from(task_type).map_err(|e| {
-                HummockError::compaction_executor(format!("Invalid task type: {}", e.as_report()))
-            })?,
+            task_type: parsed_task_type,
+            compaction_type,
+            branch,
+            compaction_plan,
         })
     }
 
-    pub async fn compact(
-        self,
-        context: RunnerContext,
-        shutdown_rx: Receiver<()>,
-    ) -> HummockResult<()> {
+    pub fn required_parallelism(&self) -> u32 {
+        self.compaction_plan.recommended_executor_parallelism() as u32
+    }
+
+    pub fn unique_ident(&self) -> String {
+        format!(
+            "{}-{}",
+            self.iceberg_config.catalog_name(),
+            self.table_ident
+        )
+    }
+
+    pub fn to_meta(&self) -> IcebergTaskMeta {
+        IcebergTaskMeta {
+            task_id: self.task_id,
+            unique_ident: self.unique_ident(),
+            enqueue_at: std::time::Instant::now(),
+            required_parallelism: self.required_parallelism(),
+        }
+    }
+
+    pub async fn compact(self, shutdown_rx: Receiver<()>) -> HummockResult<()> {
         let task_id = self.task_id;
         let now = std::time::Instant::now();
 
         let compact = async move {
-            let compaction_type = Self::get_compaction_type(self.task_type);
-            let planning_config = CompactionPlanningConfigBuilder::default()
-                .max_parallelism(self.config.max_parallelism as usize)
-                .min_size_per_partition(self.config.min_size_per_partition)
-                .max_file_count_per_partition(self.config.max_file_count_per_partition as _)
-                .base(CompactionBaseConfig {
-                    target_file_size: self.config.target_file_size_bytes,
-                })
-                .enable_heuristic_output_parallelism(
-                    self.config.enable_heuristic_output_parallelism,
-                )
-                .small_file_threshold(self.config.small_file_threshold)
-                .max_task_total_size(self.config.max_task_total_size)
-                .build()
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "Failed to build iceberg compaction planning config: {:?}",
-                        e.as_report()
-                    );
-                });
-
-            let branch = commit_branch(
-                self.iceberg_config.r#type.as_str(),
-                self.iceberg_config.write_mode.as_str(),
-            );
-
-            let planner = CompactionPlanner::new(planning_config.clone());
-
-            let table = self
-                .catalog
-                .load_table(&self.table_ident)
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-            let compaction_plan = planner
-                .plan_compaction_with_branch(&table, compaction_type, &branch)
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?
-                .ok_or_else(|| HummockError::compaction_executor("Not find compaction plan"))?;
-
-            let statistics = self.analyze_task_statistics(&compaction_plan);
-
-            let input_parallelism = compaction_plan.recommended_executor_parallelism() as u32;
-            let output_parallelism = compaction_plan.recommended_output_parallelism() as u32;
-
-            if !context.is_available_parallelism_sufficient(
-                compaction_plan.recommended_executor_parallelism() as _,
-            ) {
-                tracing::warn!(
-                    task_id = task_id,
-                    table = ?self.table_ident,
-                    input_parallelism = input_parallelism,
-                    "Available parallelism is less than input parallelism task will not run",
-                );
-                return Err(HummockError::compaction_executor(
-                    "Available parallelism is less than input parallelism",
-                ));
-            }
+            // Parallelism is already validated by queue at push time
+            let statistics = self.analyze_task_statistics();
 
             let compaction_execution_config = CompactionExecutionConfigBuilder::default()
                 .enable_validate_compaction(self.config.enable_validate_compaction)
@@ -258,36 +246,36 @@ impl IcebergCompactorRunner {
                 task_id = task_id,
                 task_type = ?self.task_type,
                 table = ?self.table_ident,
-                input_parallelism = input_parallelism,
-                output_parallelism = output_parallelism,
+                input_parallelism = self.compaction_plan.recommended_executor_parallelism(),
+                output_parallelism = self.compaction_plan.recommended_output_parallelism(),
                 statistics = ?statistics,
-                planning_config = ?planning_config,
-                "Iceberg compaction task started",
+                preplanned = true,
+                "Iceberg compaction task started (using cached plan)",
             );
 
             let retry_config = CommitManagerRetryConfig::default();
             let compaction = CompactionBuilder::new(
                 self.catalog.clone(),
                 self.table_ident.clone(),
-                CompactionType::Full,
+                self.compaction_type,
             )
             .with_catalog_name(self.iceberg_config.catalog_name())
             .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
             .with_registry(ICEBERG_COMPACTION_METRICS_REGISTRY.clone())
             .with_retry_config(retry_config)
-            .with_to_branch(branch)
+            .with_to_branch(self.branch)
             .build();
 
-            context.incr_running_task_parallelism(input_parallelism);
             self.metrics.compact_task_pending_num.inc();
+
+            let input_parallelism = self.compaction_plan.recommended_executor_parallelism() as u32;
             self.metrics
                 .compact_task_pending_parallelism
                 .add(input_parallelism as _);
 
             let _release_guard = scopeguard::guard(
-                (input_parallelism, context.clone(), self.metrics.clone()), /* metrics.clone() if Arc */
-                |(val, ctx, metrics_guard)| {
-                    ctx.decr_running_task_parallelism(val);
+                (input_parallelism, self.metrics.clone()),
+                |(val, metrics_guard)| {
                     metrics_guard.compact_task_pending_num.dec();
                     metrics_guard.compact_task_pending_parallelism.sub(val as _);
                 },
@@ -298,7 +286,7 @@ impl IcebergCompactorRunner {
                 stats,
                 table,
             } = compaction
-                .compact_with_plan(compaction_plan, &compaction_execution_config)
+                .compact_with_plan(self.compaction_plan, &compaction_execution_config)
                 .await
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
@@ -414,7 +402,7 @@ impl IcebergCompactorRunner {
         Ok(())
     }
 
-    fn analyze_task_statistics(&self, plan: &CompactionPlan) -> IcebergCompactionTaskStatistics {
+    fn analyze_task_statistics(&self) -> IcebergCompactionTaskStatistics {
         let mut total_data_file_size: u64 = 0;
         let mut total_data_file_count = 0;
         let mut total_pos_del_file_size: u64 = 0;
@@ -422,17 +410,17 @@ impl IcebergCompactorRunner {
         let mut total_eq_del_file_size: u64 = 0;
         let mut total_eq_del_file_count = 0;
 
-        for data_file in &plan.files_to_compact.data_files {
+        for data_file in &self.compaction_plan.files_to_compact.data_files {
             total_data_file_size += data_file.file_size_in_bytes;
             total_data_file_count += 1;
         }
 
-        for pos_del_file in &plan.files_to_compact.position_delete_files {
+        for pos_del_file in &self.compaction_plan.files_to_compact.position_delete_files {
             total_pos_del_file_size += pos_del_file.file_size_in_bytes;
             total_pos_del_file_count += 1;
         }
 
-        for eq_del_file in &plan.files_to_compact.equality_delete_files {
+        for eq_del_file in &self.compaction_plan.files_to_compact.equality_delete_files {
             total_eq_del_file_size += eq_del_file.file_size_in_bytes;
             total_eq_del_file_count += 1;
         }
