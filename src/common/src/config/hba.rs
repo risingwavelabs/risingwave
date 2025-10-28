@@ -282,16 +282,16 @@ mod tests {
     #[test]
     fn test_ldap_config_serialization() {
         let mut auth_options = HashMap::new();
-        auth_options.insert("ldapserver".to_string(), "ldap.example.com".to_string());
-        auth_options.insert("ldapport".to_string(), "389".to_string());
-        auth_options.insert("ldapprefix".to_string(), "cn=".to_string());
-        auth_options.insert("ldapsuffix".to_string(), ",dc=example,dc=com".to_string());
+        auth_options.insert("ldapserver".to_owned(), "ldap.example.com".to_owned());
+        auth_options.insert("ldapport".to_owned(), "389".to_owned());
+        auth_options.insert("ldapprefix".to_owned(), "cn=".to_owned());
+        auth_options.insert("ldapsuffix".to_owned(), ",dc=example,dc=com".to_owned());
 
         let entry = HbaEntry {
             connection_type: ConnectionType::Host,
-            databases: vec!["all".to_string()],
-            users: vec!["all".to_string()],
-            addresses: Some(vec![AddressPattern::Cidr("10.0.0.0/8".to_string())]),
+            databases: vec!["all".to_owned()],
+            users: vec!["all".to_owned()],
+            addresses: Some(vec![AddressPattern::Cidr("10.0.0.0/8".to_owned())]),
             auth_method: AuthMethod::Ldap,
             auth_options,
         };
@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(parsed_config.entries[0].auth_method, AuthMethod::Ldap);
         assert_eq!(
             parsed_config.entries[0].auth_options.get("ldapserver"),
-            Some(&"ldap.example.com".to_string())
+            Some(&"ldap.example.com".to_owned())
         );
     }
 }

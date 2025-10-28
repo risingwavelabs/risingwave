@@ -271,7 +271,7 @@ impl LdapConfig {
     }
 
     /// Parse LDAP URL (RFC 4516 format)
-    /// Format: ldap[s]://host:port/basedn?attributes?scope?filter
+    /// Format: ldap\[s\]://host:port/basedn?attributes?scope?filter
     fn from_ldap_url(ldap_url: &str, options: &HashMap<String, String>) -> PsqlResult<Self> {
         // Validate that conflicting parameters are not present
         // According to PostgreSQL docs, ldapurl cannot be mixed with parameters that would conflict
@@ -295,8 +295,9 @@ impl LdapConfig {
         }
 
         // Parse the URL using standard URL parsing
-        let url = url::Url::parse(ldap_url)
-            .map_err(|e| PsqlError::StartupError(format!("Invalid LDAP URL: {}", e).into()))?;
+        let url = url::Url::parse(ldap_url).map_err(|e| {
+            PsqlError::StartupError(format!("Invalid LDAP URL: {}", e.as_report()).into())
+        })?;
 
         // Validate scheme
         let scheme = url.scheme();
@@ -444,6 +445,7 @@ impl LdapAuthenticator {
     }
 
     /// Establish an LDAP connection with configurable options
+    #[allow(rw::format_error)]
     async fn establish_connection(&self) -> PsqlResult<ldap3::Ldap> {
         let config = &self.config;
         let mut settings = ldap3::LdapConnSettings::new();
@@ -550,7 +552,7 @@ impl LdapAuthenticator {
         match bind_result.success() {
             Ok(_) => Ok(true),
             Err(e) => {
-                tracing::error!(%e, "LDAP bind unsuccessful");
+                tracing::error!(error = %e.as_report(), "LDAP bind unsuccessful");
                 Err(PsqlError::StartupError(
                     format!("LDAP bind failed: {}", e.as_report()).into(),
                 ))
@@ -599,7 +601,7 @@ impl LdapAuthenticator {
         match bind_result.success() {
             Ok(_) => Ok(true),
             Err(e) => {
-                tracing::error!(%e, "LDAP bind unsuccessful");
+                tracing::error!(error = %e.as_report(), "LDAP bind unsuccessful");
                 Err(PsqlError::StartupError(
                     format!("LDAP bind failed: {}", e.as_report()).into(),
                 ))

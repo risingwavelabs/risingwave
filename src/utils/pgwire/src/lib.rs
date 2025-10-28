@@ -19,6 +19,8 @@
 #![feature(never_type)]
 #![feature(error_generic_member_access)]
 #![feature(str_as_str)]
+#![feature(register_tool)]
+#![register_tool(rw)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
