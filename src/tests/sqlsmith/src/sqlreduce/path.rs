@@ -625,16 +625,25 @@ impl AstNode {
                     AstField::Projection => {
                         if let Some(AstNode::SelectItemList(items)) = new_child {
                             new_select.projection = items;
+                        } else {
+                            // Remove projection by setting to empty vec (SELECT without columns is invalid, but we try it)
+                            new_select.projection = vec![];
                         }
                     }
                     AstField::From => {
                         if let Some(AstNode::TableList(tables)) = new_child {
                             new_select.from = tables;
+                        } else {
+                            // Remove FROM clause by setting to empty vec
+                            new_select.from = vec![];
                         }
                     }
                     AstField::GroupBy => {
                         if let Some(AstNode::ExprList(exprs)) = new_child {
                             new_select.group_by = exprs;
+                        } else {
+                            // Remove GROUP BY by setting to empty vec
+                            new_select.group_by = vec![];
                         }
                     }
                     _ => return None,
@@ -860,7 +869,10 @@ impl AstNode {
                         new_with.cte_tables = new_ctes;
                         Some(AstNode::With(new_with))
                     } else {
-                        None
+                        // Remove all CTEs by setting to empty vec
+                        let mut new_with = with_clause.clone();
+                        new_with.cte_tables = vec![];
+                        Some(AstNode::With(new_with))
                     }
                 }
                 _ => None,

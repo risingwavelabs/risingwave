@@ -184,8 +184,8 @@ impl Reducer {
                         }
 
                         // Use binary search to find the maximum batch size that works
-                        if group_indices.len() > 1 {
-                            if let Some((success_ast, success_sql, applied_count)) = self
+                        if group_indices.len() > 1
+                            && let Some((success_ast, success_sql, applied_count)) = self
                                 .try_batch_with_binary_search(
                                     &ast_node,
                                     &candidates,
@@ -197,18 +197,17 @@ impl Reducer {
                                     base_path,
                                 )
                                 .await
-                            {
-                                tracing::info!(
-                                    "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
-                                    applied_count,
-                                    sql_len,
-                                    success_sql.len()
-                                );
-                                ast_node = success_ast;
-                                sql_len = success_sql.len();
-                                found_reduction = true;
-                                batch_applied = true;
-                            }
+                        {
+                            tracing::info!(
+                                "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
+                                applied_count,
+                                sql_len,
+                                success_sql.len()
+                            );
+                            ast_node = success_ast;
+                            sql_len = success_sql.len();
+                            found_reduction = true;
+                            batch_applied = true;
                         }
                     }
 
@@ -232,8 +231,8 @@ impl Reducer {
                         }
 
                         // Use binary search to find the maximum batch size that works
-                        if group_indices.len() > 1 {
-                            if let Some((success_ast, success_sql, applied_count)) = self
+                        if group_indices.len() > 1
+                            && let Some((success_ast, success_sql, applied_count)) = self
                                 .try_batch_with_binary_search(
                                     &ast_node,
                                     &candidates,
@@ -245,18 +244,17 @@ impl Reducer {
                                     base_path,
                                 )
                                 .await
-                            {
-                                tracing::info!(
-                                    "✓ Valid attr-batch reduction! Removed {} attributes, SQL len {} → {}",
-                                    applied_count,
-                                    sql_len,
-                                    success_sql.len()
-                                );
-                                ast_node = success_ast;
-                                sql_len = success_sql.len();
-                                found_reduction = true;
-                                batch_applied = true;
-                            }
+                        {
+                            tracing::info!(
+                                "✓ Valid attr-batch reduction! Removed {} attributes, SQL len {} → {}",
+                                applied_count,
+                                sql_len,
+                                success_sql.len()
+                            );
+                            ast_node = success_ast;
+                            sql_len = success_sql.len();
+                            found_reduction = true;
+                            batch_applied = true;
                         }
                     }
 
@@ -280,8 +278,8 @@ impl Reducer {
                         }
 
                         // Use binary search to find the maximum batch size that works
-                        if group_indices.len() > 1 {
-                            if let Some((success_ast, success_sql, applied_count)) = self
+                        if group_indices.len() > 1
+                            && let Some((success_ast, success_sql, applied_count)) = self
                                 .try_batch_with_binary_search(
                                     &ast_node,
                                     &candidates,
@@ -293,18 +291,17 @@ impl Reducer {
                                     base_path,
                                 )
                                 .await
-                            {
-                                tracing::info!(
-                                    "✓ Valid replace-batch reduction! Applied {} replacements, SQL len {} → {}",
-                                    applied_count,
-                                    sql_len,
-                                    success_sql.len()
-                                );
-                                ast_node = success_ast;
-                                sql_len = success_sql.len();
-                                found_reduction = true;
-                                batch_applied = true;
-                            }
+                        {
+                            tracing::info!(
+                                "✓ Valid replace-batch reduction! Applied {} replacements, SQL len {} → {}",
+                                applied_count,
+                                sql_len,
+                                success_sql.len()
+                            );
+                            ast_node = success_ast;
+                            sql_len = success_sql.len();
+                            found_reduction = true;
+                            batch_applied = true;
                         }
                     }
 
@@ -328,8 +325,8 @@ impl Reducer {
                         }
 
                         // Use binary search to find the maximum batch size that works
-                        if group_indices.len() > 1 {
-                            if let Some((success_ast, success_sql, applied_count)) = self
+                        if group_indices.len() > 1
+                            && let Some((success_ast, success_sql, applied_count)) = self
                                 .try_batch_with_binary_search(
                                     &ast_node,
                                     &candidates,
@@ -341,18 +338,17 @@ impl Reducer {
                                     base_path,
                                 )
                                 .await
-                            {
-                                tracing::info!(
-                                    "✓ Valid pullup-batch reduction! Applied {} pullups, SQL len {} → {}",
-                                    applied_count,
-                                    sql_len,
-                                    success_sql.len()
-                                );
-                                ast_node = success_ast;
-                                sql_len = success_sql.len();
-                                found_reduction = true;
-                                batch_applied = true;
-                            }
+                        {
+                            tracing::info!(
+                                "✓ Valid pullup-batch reduction! Applied {} pullups, SQL len {} → {}",
+                                applied_count,
+                                sql_len,
+                                success_sql.len()
+                            );
+                            ast_node = success_ast;
+                            sql_len = success_sql.len();
+                            found_reduction = true;
+                            batch_applied = true;
                         }
                     }
 
@@ -391,9 +387,10 @@ impl Reducer {
                 // Only consider if it's actually smaller and we haven't seen it
                 if new_len >= sql_len {
                     tracing::debug!(
-                        "Candidate not smaller ({} >= {}), skipping",
+                        "Candidate not smaller ({} >= {}), skipping. Generated SQL: {}",
                         new_len,
-                        sql_len
+                        sql_len,
+                        new_sql
                     );
                     i += 1;
                     continue;
@@ -474,7 +471,8 @@ impl Reducer {
     /// - If it works, return success immediately
     /// - If it fails, binary search for the largest working subset
     ///
-    /// Returns: (AST, SQL, applied_count) if any batch succeeds, None otherwise
+    /// Returns: (AST, SQL, `applied_count`) if any batch succeeds, None otherwise
+    #[allow(clippy::too_many_arguments)]
     async fn try_batch_with_binary_search(
         &mut self,
         ast_node: &crate::sqlreduce::path::AstNode,
@@ -487,7 +485,7 @@ impl Reducer {
         base_path: &crate::sqlreduce::path::AstPath,
     ) -> Option<(crate::sqlreduce::path::AstNode, String, usize)> {
         let total = group_indices.len();
-        
+
         tracing::debug!(
             "{}: Found {} candidates at same path, trying binary search",
             batch_type,
@@ -501,7 +499,7 @@ impl Reducer {
 
         while left <= right {
             let mid = (left + right) / 2;
-            
+
             tracing::debug!(
                 "{}: Trying batch size {} (range: {}-{})",
                 batch_type,
@@ -513,7 +511,7 @@ impl Reducer {
             // Try to apply this batch size
             let mut tmp_ast = ast_node.clone();
             let mut applied = 0usize;
-            
+
             for &idx in &group_indices[..mid] {
                 if let Some(next_ast) = apply_reduction_operation(&tmp_ast, &candidates[idx]) {
                     tmp_ast = next_ast;
@@ -523,34 +521,34 @@ impl Reducer {
                 }
             }
 
-            if applied >= 2 {
-                if let Some(new_stmt) = ast_node_to_statement(&tmp_ast) {
-                    let new_sql = new_stmt.to_string();
-                    let new_len = new_sql.len();
+            if applied >= 2
+                && let Some(new_stmt) = ast_node_to_statement(&tmp_ast)
+            {
+                let new_sql = new_stmt.to_string();
+                let new_len = new_sql.len();
 
-                    if new_len < sql_len && !seen_queries.contains(&new_sql) {
-                        // Check if the failure is preserved
-                        if self.checker.is_failure_preserved(original_sql, &new_sql).await {
-                            tracing::debug!(
-                                "{}: Batch size {} succeeded, trying larger",
-                                batch_type,
-                                mid
-                            );
-                            seen_queries.insert(new_sql.clone());
-                            best_result = Some((tmp_ast, new_sql, applied));
-                            left = mid + 1; // Try larger batch
-                            continue;
-                        }
+                if new_len < sql_len && !seen_queries.contains(&new_sql) {
+                    // Check if the failure is preserved
+                    if self
+                        .checker
+                        .is_failure_preserved(original_sql, &new_sql)
+                        .await
+                    {
+                        tracing::debug!(
+                            "{}: Batch size {} succeeded, trying larger",
+                            batch_type,
+                            mid
+                        );
+                        seen_queries.insert(new_sql.clone());
+                        best_result = Some((tmp_ast, new_sql, applied));
+                        left = mid + 1; // Try larger batch
+                        continue;
                     }
                 }
             }
 
             // If we reach here, this batch size didn't work
-            tracing::debug!(
-                "{}: Batch size {} failed, trying smaller",
-                batch_type,
-                mid
-            );
+            tracing::debug!("{}: Batch size {} failed, trying smaller", batch_type, mid);
             right = mid - 1;
         }
 
