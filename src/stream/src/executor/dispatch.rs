@@ -973,17 +973,18 @@ impl Dispatcher for HashDataDispatcher {
         let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
             .take(num_outputs)
             .collect_vec();
-        let mut last_vnode_when_update_delete = None;
+        let mut last_update_delete_row_idx = None;
         let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
         // Apply output indices after calculating the vnode.
         let chunk = self.output_mapping.apply(chunk);
 
-        for ((vnode, &op), visible) in vnodes
+        for (row_idx, ((vnode, &op), visible)) in vnodes
             .iter()
             .copied()
             .zip_eq_fast(chunk.ops())
             .zip_eq_fast(chunk.visibility().iter())
+            .enumerate()
         {
             // Build visibility map for every output chunk.
             for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
@@ -992,7 +993,7 @@ impl Dispatcher for HashDataDispatcher {
 
             if !visible {
                 assert!(
-                    last_vnode_when_update_delete.is_none(),
+                    last_update_delete_row_idx.is_none(),
                     "invisible row between U- and U+, op = {op:?}",
                 );
                 new_ops.push(op);
@@ -1000,16 +1001,24 @@ impl Dispatcher for HashDataDispatcher {
             }
 
             // The 'update' message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
-            // need to be rewritten to common `Delete` and `Insert` if they were dispatched to
-            // different actors.
+            // need to be rewritten to common `Delete` and `Insert` if the distribution key
+            // columns are changed, since the distribution key should be part of the stream key
+            // of the downstream executor.
             if op == Op::UpdateDelete {
-                last_vnode_when_update_delete = Some(vnode);
+                last_update_delete_row_idx = Some(row_idx);
             } else if op == Op::UpdateInsert {
-                if vnode
-                    != last_vnode_when_update_delete
-                        .take()
-                        .expect("missing U- before U+")
-                {
+                let delete_row_idx = last_update_delete_row_idx
+                    .take()
+                    .expect("missing U- before U+");
+
+                // Check if any distribution key column value changed
+                let dist_key_changed = self.keys.iter().any(|&key_idx| {
+                    let delete_datum = chunk.columns()[key_idx].datum_at(delete_row_idx);
+                    let insert_datum = chunk.columns()[key_idx].datum_at(row_idx);
+                    delete_datum != insert_datum
+                });
+
+                if dist_key_changed {
                     new_ops.push(Op::Delete);
                     new_ops.push(Op::Insert);
                 } else {
@@ -1021,7 +1030,7 @@ impl Dispatcher for HashDataDispatcher {
             }
         }
         assert!(
-            last_vnode_when_update_delete.is_none(),
+            last_update_delete_row_idx.is_none(),
             "missing U+ after U-"
         );
 
@@ -1278,8 +1287,6 @@ mod tests {
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
-    // TODO: this test contains update being shuffled to different partitions, which is not
-    // supported for now.
     #[tokio::test]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
