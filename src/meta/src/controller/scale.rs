@@ -149,7 +149,7 @@ where
         })
         .collect();
 
-    let RenderedGraph { fragments, .. } = render_jobs(
+    let RenderedGraph { fragments, .. } = render_jobs_with_rendering(
         txn,
         actor_id_counter,
         jobs,
@@ -186,6 +186,17 @@ impl RenderedGraph {
     pub fn empty() -> Self {
         Self::default()
     }
+}
+
+#[derive(Default)]
+pub struct PreparedRenderGraph {
+    pub ensembles: Vec<NoShuffleEnsemble>,
+    pub fragment_map: HashMap<FragmentId, fragment::Model>,
+    pub job_map: HashMap<ObjectId, streaming_job::Model>,
+    context: RenderActorsContextOwned,
+}
+
+impl PreparedRenderGraph {
 }
 
 /// Fragment-scoped rendering entry point used by operational tooling.
@@ -257,16 +268,21 @@ where
         return Err(anyhow!("streaming jobs {:?} not found", missing).into());
     }
 
-    let fragments = render_no_shuffle_ensembles(
-        txn,
-        actor_id_counter,
-        &ensembles,
-        &fragment_map,
-        &jobs,
-        &workers,
-        adaptive_parallelism_strategy,
-    )
-    .await?;
+    let render_context = render_no_shuffle_ensembles(txn, &ensembles, &fragment_map, &jobs).await?;
+
+    let fragments = if render_context.is_empty() {
+        HashMap::new()
+    } else {
+        render_actors(
+            actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &jobs,
+            &workers,
+            adaptive_parallelism_strategy,
+            render_context.as_ref(),
+        )?
+    };
 
     Ok(RenderedGraph {
         fragments,
@@ -276,16 +292,22 @@ where
 
 /// Job-scoped rendering entry point that walks every no-shuffle root belonging to the
 /// provided streaming jobs before delegating to the shared rendering backend.
-pub async fn render_jobs<C>(
+/// Gather no-shuffle DAGs, fragment models, and job metadata for the provided jobs.
+async fn prepare_no_shuffle_job_state<C>(
     txn: &C,
-    actor_id_counter: &AtomicU32,
-    job_ids: HashSet<ObjectId>,
-    workers: BTreeMap<WorkerId, WorkerInfo>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<RenderedGraph>
+    job_ids: &HashSet<ObjectId>,
+) -> MetaResult<(
+    Vec<NoShuffleEnsemble>,
+    HashMap<FragmentId, fragment::Model>,
+    HashMap<ObjectId, streaming_job::Model>,
+)>
 where
     C: ConnectionTrait,
 {
+    if job_ids.is_empty() {
+        return Ok((Vec::new(), HashMap::new(), HashMap::new()));
+    }
+
     let excluded_fragments_query = FragmentRelation::find()
         .select_only()
         .column(fragment_relation::Column::TargetFragmentId)
@@ -304,7 +326,15 @@ where
         .all(txn)
         .await?;
 
+    if fragments.is_empty() {
+        return Ok((Vec::new(), HashMap::new(), HashMap::new()));
+    }
+
     let ensembles = find_fragment_no_shuffle_dags_detailed(txn, &fragments).await?;
+
+    if ensembles.is_empty() {
+        return Ok((Vec::new(), HashMap::new(), HashMap::new()));
+    }
 
     let fragments = Fragment::find()
         .filter(
@@ -324,31 +354,85 @@ where
         .map(|fragment| (fragment.fragment_id, fragment))
         .collect();
 
-    let job_ids = fragment_map
+    if fragment_map.is_empty() {
+        return Ok((Vec::new(), HashMap::new(), HashMap::new()));
+    }
+
+    let related_job_ids = fragment_map
         .values()
         .map(|fragment| fragment.job_id)
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect_vec();
 
-    let jobs: HashMap<_, _> = StreamingJob::find()
-        .filter(streaming_job::Column::JobId.is_in(job_ids))
+    let job_map: HashMap<_, _> = StreamingJob::find()
+        .filter(streaming_job::Column::JobId.is_in(related_job_ids))
         .all(txn)
         .await?
         .into_iter()
         .map(|job| (job.job_id, job))
         .collect();
 
-    let fragments = render_no_shuffle_ensembles(
-        txn,
+    Ok((ensembles, fragment_map, job_map))
+}
+
+/// Collect the metadata needed for rendering without generating new actor assignments.
+pub async fn render_jobs<C>(txn: &C, job_ids: HashSet<ObjectId>) -> MetaResult<PreparedRenderGraph>
+where
+    C: ConnectionTrait,
+{
+    let (ensembles, fragment_map, job_map) = prepare_no_shuffle_job_state(txn, &job_ids).await?;
+
+    if ensembles.is_empty() {
+        return Ok(PreparedRenderGraph {
+            ensembles,
+            fragment_map,
+            job_map,
+            context: RenderActorsContextOwned::default(),
+        });
+    }
+
+    let context = render_no_shuffle_ensembles(txn, &ensembles, &fragment_map, &job_map).await?;
+
+    Ok(PreparedRenderGraph {
+        ensembles,
+        fragment_map,
+        job_map,
+        context,
+    })
+}
+
+/// Convenience wrapper that collects metadata and renders actors in a single step.
+pub async fn render_jobs_with_rendering<C>(
+    txn: &C,
+    actor_id_counter: &AtomicU32,
+    job_ids: HashSet<ObjectId>,
+    workers: BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+) -> MetaResult<RenderedGraph>
+where
+    C: ConnectionTrait,
+{
+    let PreparedRenderGraph {
+        ensembles,
+        fragment_map,
+        job_map,
+        context,
+    } = render_jobs(txn, job_ids).await?;
+
+    if ensembles.is_empty() {
+        return Ok(RenderedGraph::empty());
+    }
+
+    let fragments = render_actors(
         actor_id_counter,
         &ensembles,
         &fragment_map,
-        &jobs,
+        &job_map,
         &workers,
         adaptive_parallelism_strategy,
-    )
-    .await?;
+        context.as_ref(),
+    )?;
 
     Ok(RenderedGraph {
         fragments,
@@ -363,18 +447,15 @@ where
 ///   * grouping the rendered fragments by database and streaming job.
 async fn render_no_shuffle_ensembles<C>(
     txn: &C,
-    actor_id_counter: &AtomicU32,
     ensembles: &[NoShuffleEnsemble],
     fragment_map: &HashMap<FragmentId, fragment::Model>,
     job_map: &HashMap<ObjectId, streaming_job::Model>,
-    worker_map: &BTreeMap<WorkerId, WorkerInfo>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<FragmentRenderMap>
+) -> MetaResult<RenderActorsContextOwned>
 where
     C: ConnectionTrait,
 {
     if ensembles.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(RenderActorsContextOwned::default());
     }
 
     #[cfg(debug_assertions)]
@@ -410,26 +491,42 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
-    let context = RenderActorsContext {
-        fragment_source_ids: &fragment_source_ids,
-        fragment_splits: &fragment_splits,
-        streaming_job_databases: &streaming_job_databases,
-        database_map: &database_map,
-    };
-
-    render_actors(
-        actor_id_counter,
-        ensembles,
-        fragment_map,
-        job_map,
-        worker_map,
-        adaptive_parallelism_strategy,
-        context,
-    )
+    Ok(RenderActorsContextOwned {
+        fragment_source_ids,
+        fragment_splits,
+        streaming_job_databases,
+        database_map,
+    })
 }
 
 // Only metadata resolved asynchronously lives here so the renderer stays synchronous
 // and the call site keeps the runtime dependencies (maps, strategy, actor counter, etc.) explicit.
+#[derive(Debug, Default)]
+struct RenderActorsContextOwned {
+    fragment_source_ids: HashMap<FragmentId, SourceId>,
+    fragment_splits: HashMap<FragmentId, Vec<SplitImpl>>,
+    streaming_job_databases: HashMap<ObjectId, DatabaseId>,
+    database_map: HashMap<DatabaseId, database::Model>,
+}
+
+impl RenderActorsContextOwned {
+    fn as_ref(&self) -> RenderActorsContext<'_> {
+        RenderActorsContext {
+            fragment_source_ids: &self.fragment_source_ids,
+            fragment_splits: &self.fragment_splits,
+            streaming_job_databases: &self.streaming_job_databases,
+            database_map: &self.database_map,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.fragment_source_ids.is_empty()
+            && self.fragment_splits.is_empty()
+            && self.streaming_job_databases.is_empty()
+            && self.database_map.is_empty()
+    }
+}
+
 struct RenderActorsContext<'a> {
     fragment_source_ids: &'a HashMap<FragmentId, SourceId>,
     fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
@@ -1226,16 +1323,11 @@ mod tests {
             },
         )]);
 
-        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
-        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
-        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
-        let database_map = HashMap::from([(database_id, database_model)]);
-
-        let context = RenderActorsContext {
-            fragment_source_ids: &fragment_source_ids,
-            fragment_splits: &fragment_splits,
-            streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+        let context = RenderActorsContextOwned {
+            fragment_source_ids: HashMap::new(),
+            fragment_splits: HashMap::new(),
+            streaming_job_databases: HashMap::from([(job_id, database_id)]),
+            database_map: HashMap::from([(database_id, database_model)]),
         };
 
         let result = render_actors(
@@ -1245,7 +1337,7 @@ mod tests {
             &job_map,
             &worker_map,
             AdaptiveParallelismStrategy::Auto,
-            context,
+            context.as_ref(),
         )
         .expect("actor rendering succeeds");
 
@@ -1330,16 +1422,11 @@ mod tests {
             ),
         ]);
 
-        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
-        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
-        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
-        let database_map = HashMap::from([(database_id, database_model)]);
-
-        let context = RenderActorsContext {
-            fragment_source_ids: &fragment_source_ids,
-            fragment_splits: &fragment_splits,
-            streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+        let context = RenderActorsContextOwned {
+            fragment_source_ids: HashMap::new(),
+            fragment_splits: HashMap::new(),
+            streaming_job_databases: HashMap::from([(job_id, database_id)]),
+            database_map: HashMap::from([(database_id, database_model)]),
         };
 
         let result = render_actors(
@@ -1349,7 +1436,7 @@ mod tests {
             &job_map,
             &worker_map,
             AdaptiveParallelismStrategy::Auto,
-            context,
+            context.as_ref(),
         )
         .expect("actor rendering succeeds");
 
@@ -1461,20 +1548,17 @@ mod tests {
             offset: "0".into(),
         });
 
-        let fragment_source_ids = HashMap::from([
-            (entry_fragment_id, source_id),
-            (downstream_fragment_id, source_id),
-        ]);
-        let fragment_splits =
-            HashMap::from([(entry_fragment_id, vec![split_a.clone(), split_b.clone()])]);
-        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
-        let database_map = HashMap::from([(database_id, database_model)]);
-
-        let context = RenderActorsContext {
-            fragment_source_ids: &fragment_source_ids,
-            fragment_splits: &fragment_splits,
-            streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+        let context = RenderActorsContextOwned {
+            fragment_source_ids: HashMap::from([
+                (entry_fragment_id, source_id),
+                (downstream_fragment_id, source_id),
+            ]),
+            fragment_splits: HashMap::from([(
+                entry_fragment_id,
+                vec![split_a.clone(), split_b.clone()],
+            )]),
+            streaming_job_databases: HashMap::from([(job_id, database_id)]),
+            database_map: HashMap::from([(database_id, database_model)]),
         };
 
         let result = render_actors(
@@ -1484,7 +1568,7 @@ mod tests {
             &job_map,
             &worker_map,
             AdaptiveParallelismStrategy::Auto,
-            context,
+            context.as_ref(),
         )
         .expect("actor rendering succeeds");
 

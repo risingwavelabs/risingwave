@@ -41,7 +41,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
-    find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
+    find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs_with_rendering,
 };
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
@@ -506,7 +506,7 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
-        let RenderedGraph { fragments, .. } = render_jobs(
+        let RenderedGraph { fragments, .. } = render_jobs_with_rendering(
             txn,
             self.env.actor_id_generator(),
             jobs,
