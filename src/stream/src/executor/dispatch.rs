@@ -25,6 +25,7 @@ use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
@@ -992,31 +993,26 @@ impl Dispatcher for HashDataDispatcher {
             }
 
             if !visible {
-                assert!(
-                    last_update_delete_row_idx.is_none(),
-                    "invisible row between U- and U+, op = {op:?}",
-                );
                 new_ops.push(op);
                 continue;
             }
 
-            // The 'update' message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
+            // The `Update` message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
             // need to be rewritten to common `Delete` and `Insert` if the distribution key
-            // columns are changed, since the distribution key should be part of the stream key
-            // of the downstream executor.
+            // columns are changed, since the distribution key will eventually be part of the
+            // stream key of the downstream executor, and there's an invariant that stream key
+            // must be the same for rows within an `Update` pair.
             if op == Op::UpdateDelete {
                 last_update_delete_row_idx = Some(row_idx);
             } else if op == Op::UpdateInsert {
                 let delete_row_idx = last_update_delete_row_idx
                     .take()
                     .expect("missing U- before U+");
+                assert!(delete_row_idx + 1 == row_idx, "U- and U+ are not adjacent");
 
                 // Check if any distribution key column value changed
-                let dist_key_changed = self.keys.iter().any(|&key_idx| {
-                    let delete_datum = chunk.columns()[key_idx].datum_at(delete_row_idx);
-                    let insert_datum = chunk.columns()[key_idx].datum_at(row_idx);
-                    delete_datum != insert_datum
-                });
+                let dist_key_changed = chunk.row_at(delete_row_idx).1.project(&self.keys)
+                    != chunk.row_at(row_idx).1.project(&self.keys);
 
                 if dist_key_changed {
                     new_ops.push(Op::Delete);
@@ -1029,10 +1025,7 @@ impl Dispatcher for HashDataDispatcher {
                 new_ops.push(op);
             }
         }
-        assert!(
-            last_update_delete_row_idx.is_none(),
-            "missing U+ after U-"
-        );
+        assert!(last_update_delete_row_idx.is_none(), "missing U+ after U-");
 
         let ops = new_ops;
 
@@ -1289,10 +1282,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_dispatcher_complex() {
-        test_hash_dispatcher_complex_inner().await
-    }
-
-    async fn test_hash_dispatcher_complex_inner() {
         // This test only works when vnode count is 256.
         assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
 
