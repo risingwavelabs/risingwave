@@ -15,6 +15,7 @@
 use std::cmp::{Ordering, max, min};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering as AtomicOrdering;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
@@ -23,7 +24,9 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_meta_model::ObjectId;
+use risingwave_meta_model::{
+    DatabaseId as ModelDatabaseId, FragmentId as ModelFragmentId, ObjectId, TableId as ModelTableId,
+};
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
@@ -31,15 +34,16 @@ use tracing::{info, warn};
 
 use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::MetaResult;
-use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
+use crate::barrier::{DatabaseRenderContext, DatabaseRuntimeInfoSnapshot};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::RenderedGraph;
 use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor, StreamContext};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
-use crate::stream::{SourceChange, StreamFragmentGraph};
+use crate::stream::{SourceChange, StreamFragmentGraph, UpstreamSinkInfo};
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
@@ -102,38 +106,15 @@ impl GlobalBarrierWorkerContextImpl {
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
-        let database_id = database_id.map(|database_id| database_id.database_id as _);
+        let database_id_i32 = database_id.map(|database_id| database_id.database_id as _);
 
-        let all_actor_infos = self
+        let RenderedGraph { fragments, .. } = self
             .metadata_manager
             .catalog_controller
-            .load_all_actors_dynamic(database_id, worker_nodes)
+            .load_all_actors_dynamic(database_id_i32, worker_nodes)
             .await?;
 
-        Ok(all_actor_infos
-            .into_iter()
-            .map(|(loaded_database_id, job_fragment_infos)| {
-                if let Some(database_id) = database_id {
-                    assert_eq!(database_id, loaded_database_id);
-                }
-                (
-                    DatabaseId::new(loaded_database_id as _),
-                    job_fragment_infos
-                        .into_iter()
-                        .map(|(job_id, fragment_infos)| {
-                            let job_id = TableId::new(job_id as _);
-                            (
-                                job_id,
-                                fragment_infos
-                                    .into_iter()
-                                    .map(|(fragment_id, info)| (fragment_id as _, info))
-                                    .collect(),
-                            )
-                        })
-                        .collect(),
-                )
-            })
-            .collect())
+        Ok(Self::convert_fragment_render_map(fragments))
     }
 
     #[expect(clippy::type_complexity)]
@@ -275,7 +256,7 @@ impl GlobalBarrierWorkerContextImpl {
             DatabaseId,
             HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
         >,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<HashMap<TableId, (FragmentId, Vec<UpstreamSinkInfo>)>> {
         let mut jobs = inflight_jobs.values_mut().try_fold(
             HashMap::new(),
             |mut acc, table_map| -> MetaResult<_> {
@@ -294,6 +275,7 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .get_user_created_table_by_ids(job_ids.into_iter().map(|id| id as _).collect())
             .await?;
+        let mut upstream_sink_info_map = HashMap::new();
         for table in tables {
             assert_eq!(table.table_type(), PbTableType::Table);
             let fragment_infos = jobs.get_mut(&table.id).unwrap();
@@ -327,9 +309,41 @@ impl GlobalBarrierWorkerContextImpl {
                 .get_all_upstream_sink_infos(&table, target_fragment_id as _)
                 .await?;
             refill_upstream_sink_union_in_table(&mut target_fragment.nodes, &upstream_infos);
+            upstream_sink_info_map.insert(
+                TableId::new(table.id as _),
+                (target_fragment_id, upstream_infos),
+            );
         }
 
-        Ok(())
+        Ok(upstream_sink_info_map)
+    }
+
+    fn convert_fragment_render_map(
+        fragments: HashMap<
+            ModelDatabaseId,
+            HashMap<ModelTableId, HashMap<ModelFragmentId, InflightFragmentInfo>>,
+        >,
+    ) -> HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>> {
+        fragments
+            .into_iter()
+            .map(|(db_id, job_fragment_infos)| {
+                (
+                    DatabaseId::new(db_id as _),
+                    job_fragment_infos
+                        .into_iter()
+                        .map(|(job_id, fragment_infos)| {
+                            (
+                                TableId::new(job_id as _),
+                                fragment_infos
+                                    .into_iter()
+                                    .map(|(fragment_id, info)| (fragment_id as _, info))
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
     }
 
     pub(super) async fn reload_runtime_info_impl(
@@ -431,7 +445,7 @@ impl GlobalBarrierWorkerContextImpl {
                             })?
                     }
 
-                    self.recovery_table_with_upstream_sinks(&mut info).await?;
+                    let _ = self.recovery_table_with_upstream_sinks(&mut info).await?;
 
                     let info = info;
 
@@ -468,7 +482,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .get_mv_depended_subscriptions(None)
                         .await?;
 
-                    let stream_actors = self.load_stream_actors(&info).await?;
+                    let (stream_actors, _) = self.load_stream_actors(&info).await?;
 
                     let fragment_relations = self
                         .metadata_manager
@@ -589,15 +603,27 @@ impl GlobalBarrierWorkerContextImpl {
             .complete_dropped_tables(dropped_table_ids.into_iter().map(|id| id.table_id as _))
             .await;
 
+        let actor_id_snapshot = self.env.actor_id_generator().load(AtomicOrdering::Relaxed);
+
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        let all_info = self
-            .resolve_graph_info(None, &active_streaming_nodes)
+        let RenderedGraph {
+            fragments: all_info_raw,
+            ensembles,
+            fragment_map,
+            job_map,
+            owned_context,
+        } = self
+            .metadata_manager
+            .catalog_controller
+            .load_all_actors_dynamic(Some(database_id.database_id as _), &active_streaming_nodes)
             .await
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
+
+        let all_info = Self::convert_fragment_render_map(all_info_raw);
 
         let mut info = all_info
             .get(&database_id)
@@ -606,7 +632,7 @@ impl GlobalBarrierWorkerContextImpl {
                 HashMap::from([(database_id, table_map)])
             });
 
-        self.recovery_table_with_upstream_sinks(&mut info).await?;
+        let upstream_sink_infos = self.recovery_table_with_upstream_sinks(&mut info).await?;
 
         let Some(info) = info.into_iter().next().map(|(loaded_database_id, info)| {
             assert_eq!(loaded_database_id, database_id);
@@ -643,7 +669,7 @@ impl GlobalBarrierWorkerContextImpl {
             )
             .await?;
 
-        let stream_actors = self.load_stream_actors(&all_info).await?;
+        let (stream_actors, job_extra_info) = self.load_stream_actors(&all_info).await?;
 
         // get split assignments for all actors
         let mut source_splits = HashMap::new();
@@ -678,6 +704,10 @@ impl GlobalBarrierWorkerContextImpl {
                     .next_generation(cdc_table_ids.into_iter()),
             )
         };
+
+        self.env
+            .actor_id_generator()
+            .store(actor_id_snapshot, AtomicOrdering::Relaxed);
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,
@@ -688,13 +718,24 @@ impl GlobalBarrierWorkerContextImpl {
             source_splits,
             background_jobs,
             cdc_table_snapshot_split_assignment,
+            render_context: Some(DatabaseRenderContext {
+                ensembles,
+                fragment_map,
+                job_map,
+                owned_context,
+                job_extra_info,
+                upstream_sink_infos,
+            }),
         }))
     }
 
     async fn load_stream_actors(
         &self,
         all_info: &HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
-    ) -> MetaResult<HashMap<ActorId, StreamActor>> {
+    ) -> MetaResult<(
+        HashMap<ActorId, StreamActor>,
+        HashMap<ObjectId, StreamingJobExtraInfo>,
+    )> {
         let job_ids = all_info
             .values()
             .flat_map(|jobs| jobs.keys().map(|job_id| job_id.table_id as i32))
@@ -734,6 +775,6 @@ impl GlobalBarrierWorkerContextImpl {
                 }
             }
         }
-        Ok(stream_actors)
+        Ok((stream_actors, job_extra_info))
     }
 }

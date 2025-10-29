@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::{replace, take};
 use std::task::{Context, Poll};
 
 use futures::FutureExt;
 use prometheus::{HistogramTimer, IntCounter};
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -37,6 +38,7 @@ use crate::barrier::rpc::{ControlStreamManager, DatabaseInitialBarrierCollector}
 use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
+use crate::controller::scale::WorkerInfo;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
@@ -407,8 +409,10 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
 
     pub(crate) fn enter(
         self,
-        runtime_info: DatabaseRuntimeInfoSnapshot,
+        mut runtime_info: DatabaseRuntimeInfoSnapshot,
         control_stream_manager: &mut ControlStreamManager,
+        worker_map: &BTreeMap<WorkerId, WorkerInfo>,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     ) {
         let database_status = self
             .control
@@ -426,18 +430,25 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 DatabaseRecoveringStage::Resetting { .. } => state,
             },
         };
-        let DatabaseRuntimeInfoSnapshot {
-            job_infos,
-            mut state_table_committed_epochs,
-            mut state_table_log_epochs,
-            mut mv_depended_subscriptions,
-            stream_actors,
-            fragment_relations,
-            mut source_splits,
-            mut background_jobs,
-            mut cdc_table_snapshot_split_assignment,
-        } = runtime_info;
         let result: MetaResult<_> = try {
+            runtime_info.re_render(
+                self.database_id,
+                self.control.env.actor_id_generator(),
+                worker_map,
+                adaptive_parallelism_strategy,
+            )?;
+            let DatabaseRuntimeInfoSnapshot {
+                job_infos,
+                mut state_table_committed_epochs,
+                mut state_table_log_epochs,
+                mut mv_depended_subscriptions,
+                stream_actors,
+                fragment_relations,
+                mut source_splits,
+                mut background_jobs,
+                mut cdc_table_snapshot_split_assignment,
+                render_context: _,
+            } = runtime_info;
             let mut builder = FragmentEdgeBuilder::new(
                 job_infos
                     .values()

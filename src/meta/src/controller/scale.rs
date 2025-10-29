@@ -112,7 +112,7 @@ pub async fn load_fragment_info<C>(
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<FragmentRenderMap>
+) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
 {
@@ -129,7 +129,7 @@ where
     let jobs: Vec<ObjectId> = query.into_tuple().all(txn).await?;
 
     if jobs.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(RenderedGraph::empty());
     }
 
     let jobs: HashSet<ObjectId> = jobs.into_iter().collect();
@@ -149,7 +149,7 @@ where
         })
         .collect();
 
-    let RenderedGraph { fragments, .. } = render_jobs(
+    let rendered_graph = render_jobs(
         txn,
         actor_id_counter,
         jobs,
@@ -158,7 +158,7 @@ where
     )
     .await?;
 
-    Ok(fragments)
+    Ok(rendered_graph)
 }
 
 #[derive(Debug)]
@@ -176,10 +176,21 @@ pub struct WorkerInfo {
 pub type FragmentRenderMap =
     HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>;
 
+#[derive(Debug, Clone, Default)]
+pub struct RenderActorsOwnedContext {
+    pub fragment_source_ids: HashMap<FragmentId, SourceId>,
+    pub fragment_splits: HashMap<FragmentId, Vec<SplitImpl>>,
+    pub streaming_job_databases: HashMap<ObjectId, DatabaseId>,
+    pub database_map: HashMap<DatabaseId, database::Model>,
+}
+
 #[derive(Default)]
 pub struct RenderedGraph {
     pub fragments: FragmentRenderMap,
     pub ensembles: Vec<NoShuffleEnsemble>,
+    pub fragment_map: HashMap<FragmentId, fragment::Model>,
+    pub job_map: HashMap<ObjectId, streaming_job::Model>,
+    pub owned_context: RenderActorsOwnedContext,
 }
 
 impl RenderedGraph {
@@ -257,7 +268,7 @@ where
         return Err(anyhow!("streaming jobs {:?} not found", missing).into());
     }
 
-    let fragments = render_no_shuffle_ensembles(
+    let (fragments, owned_context) = render_no_shuffle_ensembles(
         txn,
         actor_id_counter,
         &ensembles,
@@ -271,6 +282,9 @@ where
     Ok(RenderedGraph {
         fragments,
         ensembles,
+        fragment_map,
+        job_map: jobs,
+        owned_context,
     })
 }
 
@@ -339,7 +353,7 @@ where
         .map(|job| (job.job_id, job))
         .collect();
 
-    let fragments = render_no_shuffle_ensembles(
+    let (fragments, owned_context) = render_no_shuffle_ensembles(
         txn,
         actor_id_counter,
         &ensembles,
@@ -353,6 +367,9 @@ where
     Ok(RenderedGraph {
         fragments,
         ensembles,
+        fragment_map,
+        job_map: jobs,
+        owned_context,
     })
 }
 
@@ -369,12 +386,12 @@ async fn render_no_shuffle_ensembles<C>(
     job_map: &HashMap<ObjectId, streaming_job::Model>,
     worker_map: &BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<FragmentRenderMap>
+) -> MetaResult<(FragmentRenderMap, RenderActorsOwnedContext)>
 where
     C: ConnectionTrait,
 {
     if ensembles.is_empty() {
-        return Ok(HashMap::new());
+        return Ok((HashMap::new(), RenderActorsOwnedContext::default()));
     }
 
     #[cfg(debug_assertions)]
@@ -410,22 +427,29 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
-    let context = RenderActorsContext {
-        fragment_source_ids: &fragment_source_ids,
-        fragment_splits: &fragment_splits,
-        streaming_job_databases: &streaming_job_databases,
-        database_map: &database_map,
+    let owned_context = RenderActorsOwnedContext {
+        fragment_source_ids,
+        fragment_splits,
+        streaming_job_databases,
+        database_map,
     };
 
-    render_actors(
+    let fragments = render_actors(
         actor_id_counter,
         ensembles,
         fragment_map,
         job_map,
         worker_map,
         adaptive_parallelism_strategy,
-        context,
-    )
+        RenderActorsContext {
+            fragment_source_ids: &owned_context.fragment_source_ids,
+            fragment_splits: &owned_context.fragment_splits,
+            streaming_job_databases: &owned_context.streaming_job_databases,
+            database_map: &owned_context.database_map,
+        },
+    )?;
+
+    Ok((fragments, owned_context))
 }
 
 // Only metadata resolved asynchronously lives here so the renderer stays synchronous
@@ -674,6 +698,31 @@ fn render_actors(
     }
 
     Ok(all_fragments)
+}
+
+pub(crate) fn render_actors_with_context(
+    actor_id_counter: &AtomicU32,
+    ensembles: &[NoShuffleEnsemble],
+    fragment_map: &HashMap<FragmentId, fragment::Model>,
+    job_map: &HashMap<ObjectId, streaming_job::Model>,
+    worker_map: &BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    context: &RenderActorsOwnedContext,
+) -> MetaResult<FragmentRenderMap> {
+    render_actors(
+        actor_id_counter,
+        ensembles,
+        fragment_map,
+        job_map,
+        worker_map,
+        adaptive_parallelism_strategy,
+        RenderActorsContext {
+            fragment_source_ids: &context.fragment_source_ids,
+            fragment_splits: &context.fragment_splits,
+            streaming_job_databases: &context.streaming_job_databases,
+            database_map: &context.database_map,
+        },
+    )
 }
 
 #[cfg(debug_assertions)]
