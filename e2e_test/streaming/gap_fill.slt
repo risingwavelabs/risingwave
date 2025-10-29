@@ -2,6 +2,9 @@
 # This tests the StreamGapFill executor.
 
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 CREATE TABLE gap_normal_table (
     ts TIMESTAMP,
     value DOUBLE,
@@ -25,9 +28,6 @@ statement ok
 INSERT INTO gap_normal_table VALUES
     ('2024-05-21 10:08:00', 20.0);
 
-# Wait for processing
-sleep 3s
-
 # Check the result - GAP_FILL uses LOCF (Last Observation Carried Forward) by default
 query TR
 SELECT ts, value FROM gap_filled_normal ORDER BY ts;
@@ -48,9 +48,6 @@ statement ok
 INSERT INTO gap_normal_table VALUES
     ('2024-05-21 10:01:00', 11.0);
 
-# Wait for processing
-sleep 3s
-
 # Check result - filled row at 10:01 should be replaced with original data
 query TR
 SELECT ts, value FROM gap_filled_normal ORDER BY ts;
@@ -69,9 +66,6 @@ SELECT ts, value FROM gap_filled_normal ORDER BY ts;
 statement ok
 INSERT INTO gap_normal_table VALUES
     ('2024-05-21 10:04:00', 14.0);
-
-# Wait for processing
-sleep 3s
 
 # Check result - gaps should be refilled with the new value
 query TR
@@ -92,9 +86,6 @@ SELECT ts, value FROM gap_filled_normal ORDER BY ts;
 statement ok
 INSERT INTO gap_normal_table VALUES
     ('2024-05-21 09:57:00', 7.0);
-
-# Wait for processing
-sleep 3s
 
 # Check result - new gaps should be filled before 10:00:00
 query TR
@@ -117,9 +108,6 @@ SELECT ts, value FROM gap_filled_normal ORDER BY ts;
 statement ok
 INSERT INTO gap_normal_table VALUES
     ('2024-05-21 09:56:00', 6.0);
-
-# Wait for processing
-sleep 3s
 
 # Check result - should have exactly one filled row between 09:56 and 09:57
 query TR
@@ -148,9 +136,6 @@ CREATE MATERIALIZED VIEW gap_filled_custom AS
 SELECT ts, value
 FROM GAP_FILL(gap_normal_table, ts, INTERVAL '1' MINUTE, LOCF(value));
 
-# Wait for processing
-sleep 2s
-
 # Should have same result with explicit LOCF strategy
 query TR
 SELECT ts, value FROM gap_filled_custom ORDER BY ts;
@@ -178,9 +163,6 @@ CREATE MATERIALIZED VIEW gap_filled_interpolate AS
 SELECT ts, value
 FROM GAP_FILL(gap_normal_table, ts, INTERVAL '1' MINUTE, INTERPOLATE(value));
 
-# Wait for processing
-sleep 2s
-
 # Check interpolated values
 query TR
 SELECT ts, value FROM gap_filled_interpolate ORDER BY ts;
@@ -204,9 +186,6 @@ statement ok
 INSERT INTO gap_normal_table VALUES
     ('2024-05-21 10:06:00', 16.0);
 
-# Wait for processing
-sleep 3s
-
 # Check result - interpolated values should be recalculated
 query TR
 SELECT ts, value FROM gap_filled_interpolate ORDER BY ts;
@@ -229,9 +208,6 @@ SELECT ts, value FROM gap_filled_interpolate ORDER BY ts;
 statement ok
 INSERT INTO gap_normal_table VALUES
     ('2024-05-21 09:54:00', 4.0);
-
-# Wait for processing
-sleep 3s
 
 # Check result - new interpolated values should be created before earliest
 query TR
@@ -285,9 +261,6 @@ SELECT ts, temperature, pressure, status
 FROM GAP_FILL(gap_multi_column_table, ts, INTERVAL '1' MINUTE,
               INTERPOLATE(temperature), LOCF(pressure), KEEPNULL(status));
 
-# Wait for processing
-sleep 3s
-
 # Check result - temperature interpolated, pressure LOCF, status NULL
 query TRRR
 SELECT ts, temperature, pressure, status FROM gap_filled_mixed ORDER BY ts;
@@ -303,9 +276,6 @@ statement ok
 INSERT INTO gap_multi_column_table VALUES
     ('2024-05-21 10:02:00', 22.0, 110.0, 'warning');
 
-# Wait for processing
-sleep 3s
-
 # Check result - interpolated values should be recalculated, LOCF and NULL should update
 query TRRR
 SELECT ts, temperature, pressure, status FROM gap_filled_mixed ORDER BY ts;
@@ -320,9 +290,6 @@ SELECT ts, temperature, pressure, status FROM gap_filled_mixed ORDER BY ts;
 statement ok
 DELETE FROM gap_multi_column_table
 WHERE ts = '2024-05-21 10:02:00';
-
-# Wait for processing
-sleep 3s
 
 # Check result - should revert to original gap filling
 query TRRR

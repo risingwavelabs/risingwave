@@ -8,7 +8,7 @@ setup_sql: |
     value DOUBLE,
     PRIMARY KEY (ts)
   );
-  
+
   CREATE MATERIALIZED VIEW gap_filled_sensors AS
   SELECT ts, value
   FROM GAP_FILL(sensor_data, ts, INTERVAL '1' MINUTE);
@@ -31,11 +31,11 @@ cleanup_sql: |
 # This tests the throughput of GAP_FILL processing incoming data
 benchmark_sql: |
   INSERT INTO sensor_data (ts, value)
-  SELECT 
+  SELECT
     '2024-05-21 10:00:00'::TIMESTAMP + (i * INTERVAL '5 minutes'),
     20.0 + (i * 0.5)
   FROM generate_series(0, 100) AS i;
-  
+
   -- Wait for all data to be processed
   SELECT COUNT(*) FROM gap_filled_sensors;
 

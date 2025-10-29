@@ -10,7 +10,7 @@ setup_sql: |
     WATERMARK FOR ts AS ts - INTERVAL '1' MINUTE,
     PRIMARY KEY (ts)
   ) APPEND ONLY;
-  
+
   CREATE MATERIALIZED VIEW gap_filled_sensors_eowc AS
   SELECT ts, value
   FROM GAP_FILL(sensor_data_eowc, ts, INTERVAL '1' MINUTE)
@@ -37,11 +37,11 @@ benchmark_sql: |
   -- Insert data with gaps (every 5 minutes) starting from NOW()
   -- Each run will use a different time range since NOW() advances
   INSERT INTO sensor_data_eowc (ts, value)
-  SELECT 
+  SELECT
     NOW() + (i * INTERVAL '5 minutes'),
     20.0 + (i * 0.5)
   FROM generate_series(0, 100) AS i;
-  
+
   -- Insert a timestamp far in the future to advance watermark and close all windows
   -- Watermark is defined as ts - INTERVAL '1' MINUTE, so this will close all windows
   INSERT INTO sensor_data_eowc (ts, value)
@@ -49,10 +49,10 @@ benchmark_sql: |
     NOW() + INTERVAL '10 hours',  -- Far enough to close all windows
     999.0
   );
-  
+
   -- Wait for watermark to advance and windows to close
   SELECT pg_sleep(3);
-  
+
   -- Query the results - windows should now be closed by watermark advancement
   SELECT COUNT(*) FROM gap_filled_sensors_eowc;
 
