@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{CheckedAdd, Decimal, ToOwnedDatum};
 use risingwave_expr::ExprError;
@@ -43,6 +44,10 @@ pub struct EowcGapFillExecutorArgs<S: StateStore> {
     pub gap_interval: NonStrictExpression,
 }
 
+pub struct GapFillMetrics {
+    pub gap_fill_generated_rows_count: LabelGuardedIntCounter,
+}
+
 struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -53,6 +58,9 @@ struct ExecutorInner<S: StateStore> {
     time_column_index: usize,
     fill_columns: Vec<(usize, FillStrategy)>,
     gap_interval: NonStrictExpression,
+
+    // Metrics
+    metrics: GapFillMetrics,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -110,6 +118,7 @@ impl<S: StateStore> ExecutorInner<S> {
         time_column_index: usize,
         fill_columns: &[(usize, FillStrategy)],
         interval: risingwave_common::types::Interval,
+        metrics: &GapFillMetrics,
     ) -> Result<Vec<OwnedRow>, ExprError> {
         let mut filled_rows = Vec::new();
         let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
@@ -264,18 +273,32 @@ impl<S: StateStore> ExecutorInner<S> {
             };
         }
 
+        // Update metrics with the number of generated rows
+        metrics
+            .gap_fill_generated_rows_count
+            .inc_by(filled_rows.len() as u64);
+
         Ok(filled_rows)
     }
 }
 
 impl<S: StateStore> Execute for EowcGapFillExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.executor_inner().boxed()
+        self.execute_inner().boxed()
     }
 }
 
 impl<S: StateStore> EowcGapFillExecutor<S> {
     pub fn new(args: EowcGapFillExecutorArgs<S>) -> Self {
+        let metrics = args.actor_ctx.streaming_metrics.clone();
+        let actor_id = args.actor_ctx.id.to_string();
+        let fragment_id = args.actor_ctx.fragment_id.to_string();
+        let gap_fill_metrics = GapFillMetrics {
+            gap_fill_generated_rows_count: metrics
+                .gap_fill_generated_rows_count
+                .with_guarded_label_values(&[&actor_id, &fragment_id]),
+        };
+
         Self {
             input: args.input,
 
@@ -288,12 +311,13 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                 time_column_index: args.time_column_index,
                 fill_columns: args.fill_columns,
                 gap_interval: args.gap_interval,
+                metrics: gap_fill_metrics,
             },
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn executor_inner(self) {
+    async fn execute_inner(self) {
         let Self {
             input,
             inner: mut this,
@@ -350,6 +374,7 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                                 this.time_column_index,
                                 &this.fill_columns,
                                 interval,
+                                &this.metrics,
                             )?;
                             for filled_row in filled_rows {
                                 if let Some(chunk) =
