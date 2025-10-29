@@ -32,7 +32,6 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
-use tokio::time::Instant;
 use tonic::Status;
 use tracing::{Instrument, debug, error, info, warn};
 use uuid::Uuid;
@@ -40,11 +39,11 @@ use uuid::Uuid;
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::rpc::{ControlStreamManager, merge_node_rpc_errors};
+use crate::barrier::rpc::{ControlStreamManager, WorkerNodeEvent, merge_node_rpc_errors};
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
-    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    RecoveryReason, schedule,
+    BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
+    schedule,
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
@@ -322,8 +321,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
                     info!(?changed_worker, "worker changed");
 
-                    if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                    match changed_worker {
+                        ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) => {
+                            self.control_stream_manager.add_worker(node, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
+                        }
+                        ActiveStreamingWorkerChange::Remove(node) => {
+                            self.control_stream_manager.remove_worker(node);
+                        }
                     }
                 }
 
@@ -375,12 +379,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
-                                    let workers = InflightFragmentInfo::workers(runtime_info.job_infos.values().flat_map(|fragments| fragments.values()));
-                                    for worker_id in workers {
-                                        if !self.control_stream_manager.is_connected(worker_id) {
-                                            self.control_stream_manager.try_reconnect_worker(worker_id, entering_initializing.control().inflight_infos(), self.term_id.clone(), &*self.context).await;
-                                        }
-                                    }
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
                                 } _ => {
                                     info!(database_id = database_id.database_id, "database removed after reloading empty runtime info");
@@ -399,7 +397,16 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         self.failure_recovery(e).await;
                     }
                 }
-                (worker_id, resp_result) = self.control_stream_manager.next_response() => {
+                (worker_id, event) = self.control_stream_manager.next_event(&self.term_id, &self.context) => {
+                    let resp_result = match event {
+                        WorkerNodeEvent::Response(result) => {
+                            result
+                        }
+                        WorkerNodeEvent::Connected(connected) => {
+                            connected.initialize(self.checkpoint_control.inflight_infos());
+                            continue;
+                        }
+                    };
                     let result: MetaResult<()> = try {
                         let resp = match resp_result {
                             Err(err) => {
@@ -462,20 +469,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
                 new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
-                    if let Some((Command::CreateStreamingJob { info, .. }, _)) = &new_barrier.command {
-                        let worker_ids: HashSet<_> =
-                            info.stream_job_fragments.inner
-                            .actors_to_create()
-                            .flat_map(|(_, _, actors)|
-                                actors.map(|(_, worker_id)| worker_id)
-                            )
-                            .collect();
-                        for worker_id in worker_ids {
-                            if !self.control_stream_manager.is_connected(worker_id) {
-                                self.control_stream_manager.try_reconnect_worker(worker_id, self.checkpoint_control.inflight_infos(), self.term_id.clone(), &*self.context).await;
-                            }
-                        }
-                    }
                     let database_id = new_barrier.database_id;
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
                         if !self.enable_recovery {
@@ -703,7 +696,6 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
 use crate::barrier::edge_builder::FragmentEdgeBuilder;
-use crate::controller::fragment::InflightFragmentInfo;
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
@@ -786,16 +778,15 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             self.sink_manager.reset().await;
             let term_id = Uuid::new_v4().to_string();
 
-            let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
-            let reset_start_time = Instant::now();
-            let unconnected_worker = control_stream_manager
-                .reset(
+
+            let mut control_stream_manager = ControlStreamManager::recover(
+                    self.env.clone(),
                     active_streaming_nodes.current(),
-                    term_id.clone(),
-                    &*self.context,
+                    &term_id,
+                    self.context.clone(),
                 )
                 .await;
-            info!(elapsed=?reset_start_time.elapsed(), ?unconnected_worker, "control stream reset");
+
 
             {
                 let mut builder = FragmentEdgeBuilder::new(database_job_infos.values().flat_map(|jobs| jobs.values().flat_map(|fragments| fragments.values())), &control_stream_manager);
@@ -839,7 +830,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
                 while !collecting_databases.is_empty() {
                     let (worker_id, result) =
-                        control_stream_manager.next_response().await;
+                        control_stream_manager.next_response(&term_id, &self.context).await;
                     let resp = match result {
                         Err(e) => {
                             warn!(worker_id, err = %e.as_report(), "worker node failure during recovery");

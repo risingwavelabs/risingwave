@@ -85,9 +85,6 @@ struct BarrierState {
 use risingwave_common::must_match;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
-use risingwave_pb::stream_service::streaming_control_stream_request::{
-    DatabaseInitialPartialGraph, InitialPartialGraph,
-};
 
 use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
@@ -552,6 +549,7 @@ impl DatabaseStatus {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct ManagedBarrierState {
     pub(crate) databases: HashMap<DatabaseId, DatabaseStatus>,
 }
@@ -569,27 +567,6 @@ pub(super) enum ManagedBarrierStateEvent {
 }
 
 impl ManagedBarrierState {
-    pub(super) fn new(
-        actor_manager: Arc<StreamActorManager>,
-        initial_partial_graphs: Vec<DatabaseInitialPartialGraph>,
-        term_id: String,
-    ) -> Self {
-        let mut databases = HashMap::new();
-        for database in initial_partial_graphs {
-            let database_id = DatabaseId::new(database.database_id);
-            assert!(!databases.contains_key(&database_id));
-            let state = DatabaseManagedBarrierState::new(
-                database_id,
-                term_id.clone(),
-                actor_manager.clone(),
-                database.graphs,
-            );
-            databases.insert(database_id, DatabaseStatus::Running(state));
-        }
-
-        Self { databases }
-    }
-
     pub(super) fn next_event(
         &mut self,
     ) -> impl Future<Output = (DatabaseId, ManagedBarrierStateEvent)> + '_ {
@@ -632,7 +609,6 @@ impl DatabaseManagedBarrierState {
         database_id: DatabaseId,
         term_id: String,
         actor_manager: Arc<StreamActorManager>,
-        initial_partial_graphs: Vec<InitialPartialGraph>,
     ) -> Self {
         let (local_barrier_manager, barrier_event_rx, actor_failure_rx) =
             LocalBarrierManager::new(database_id, term_id, actor_manager.env.clone());
@@ -640,15 +616,7 @@ impl DatabaseManagedBarrierState {
             database_id,
             actor_states: Default::default(),
             actor_pending_new_output_requests: Default::default(),
-            graph_states: initial_partial_graphs
-                .into_iter()
-                .map(|graph| {
-                    (
-                        PartialGraphId::new(graph.partial_graph_id),
-                        PartialGraphManagedBarrierState::new(&actor_manager),
-                    )
-                })
-                .collect(),
+            graph_states: Default::default(),
             table_ids: Default::default(),
             actor_manager,
             local_barrier_manager,

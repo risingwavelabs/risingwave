@@ -956,14 +956,6 @@ impl InflightFragmentInfo {
                 .any(|actor| (actor.worker_id) == worker_id)
         })
     }
-
-    pub(crate) fn workers(infos: impl IntoIterator<Item = &Self>) -> HashSet<WorkerId> {
-        infos
-            .into_iter()
-            .flat_map(|info| info.actors.values())
-            .map(|actor| actor.worker_id)
-            .collect()
-    }
 }
 
 impl InflightDatabaseInfo {

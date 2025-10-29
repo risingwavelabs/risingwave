@@ -17,13 +17,14 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Formatter};
 use std::future::poll_fn;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use futures::StreamExt;
-use futures::future::join_all;
+use futures::future::{BoxFuture, join_all};
+use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::util::epoch::Epoch;
@@ -43,7 +44,7 @@ use risingwave_pb::stream_service::inject_barrier_request::{
     BuildActorInfo, FragmentBuildActorInfo,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::{
-    CreatePartialGraphRequest, PbDatabaseInitialPartialGraph, PbInitRequest, PbInitialPartialGraph,
+    CreatePartialGraphRequest, PbCreatePartialGraphRequest, PbInitRequest,
     RemovePartialGraphRequest, ResetDatabaseRequest,
 };
 use risingwave_pb::stream_service::{
@@ -52,7 +53,7 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
-use tokio::time::sleep;
+use tokio::time::{Instant, sleep};
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -98,65 +99,29 @@ struct ControlStreamNode {
     handle: StreamingControlHandle,
 }
 
+enum WorkerNodeState {
+    Connected {
+        control_stream: ControlStreamNode,
+        removed: bool,
+    },
+    Reconnecting(BoxFuture<'static, StreamingControlHandle>),
+}
+
 pub(super) struct ControlStreamManager {
-    connected_nodes: HashMap<WorkerId, ControlStreamNode>,
-    workers: HashMap<WorkerId, WorkerNode>,
+    workers: HashMap<WorkerId, (WorkerNode, WorkerNodeState)>,
     pub env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
     pub(super) fn new(env: MetaSrvEnv) -> Self {
         Self {
-            connected_nodes: Default::default(),
             workers: Default::default(),
             env,
         }
     }
 
-    pub(super) fn is_connected(&self, worker_id: WorkerId) -> bool {
-        self.connected_nodes.contains_key(&worker_id)
-    }
-
     pub(super) fn host_addr(&self, worker_id: WorkerId) -> HostAddress {
-        self.workers[&worker_id].host.clone().unwrap()
-    }
-
-    #[await_tree::instrument("try_reconnect_worker({worker_id})")]
-    pub(super) async fn try_reconnect_worker(
-        &mut self,
-        worker_id: WorkerId,
-        inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
-        term_id: String,
-        context: &impl GlobalBarrierWorkerContext,
-    ) {
-        if self.connected_nodes.contains_key(&worker_id) {
-            warn!(worker_id, "node already connected");
-            return;
-        }
-        let node = &self.workers[&worker_id];
-        let node_host = node.host.as_ref().unwrap();
-
-        let init_request = Self::collect_init_request(inflight_infos, term_id);
-        match context.new_control_stream(node, &init_request).await {
-            Ok(handle) => {
-                assert!(
-                    self.connected_nodes
-                        .insert(
-                            worker_id,
-                            ControlStreamNode {
-                                worker_id,
-                                host: node.host.clone().unwrap(),
-                                handle,
-                            }
-                        )
-                        .is_none()
-                );
-                info!(?node_host, "add control stream worker");
-            }
-            Err(e) => {
-                error!(err = %e.as_report(), ?node_host, "fail to create worker node");
-            }
-        }
+        self.workers[&worker_id].0.host.clone().unwrap()
     }
 
     pub(super) async fn add_worker(
@@ -167,41 +132,61 @@ impl ControlStreamManager {
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
-        let node = match self.workers.entry(node_id) {
-            Entry::Occupied(entry) => {
-                let entry = entry.into_mut();
-                assert_eq!(entry.host, node.host);
-                warn!(id = node.id, host = ?node.host, "node already exists");
-                &*entry
+        if let Entry::Occupied(entry) = self.workers.entry(node_id) {
+            let (existing_node, worker_state) = entry.get();
+            assert_eq!(existing_node.host, node.host);
+            warn!(id = node.id, host = ?node.host, "node already exists");
+            match worker_state {
+                WorkerNodeState::Connected { .. } => {
+                    warn!(id = node.id, host = ?node.host, "new node already connected");
+                    return;
+                }
+                WorkerNodeState::Reconnecting(_) => {
+                    warn!(id = node.id, host = ?node.host, "remove previous pending worker connect request and reconnect");
+                    entry.remove();
+                }
             }
-            Entry::Vacant(entry) => &*entry.insert(node),
-        };
-        if self.connected_nodes.contains_key(&node_id) {
-            warn!(id = node.id, host = ?node.host, "new node already connected");
-            return;
         }
         let node_host = node.host.clone().unwrap();
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
-        let init_request = Self::collect_init_request(inflight_infos, term_id);
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
-            match context.new_control_stream(node, &init_request).await {
-                Ok(handle) => {
+            match context
+                .new_control_stream(
+                    &node,
+                    &PbInitRequest {
+                        term_id: term_id.clone(),
+                    },
+                )
+                .await
+            {
+                Ok(mut handle) => {
+                    WorkerNodeConnected {
+                        handle: &mut handle,
+                        node: &node,
+                    }
+                    .initialize(inflight_infos);
+                    info!(?node_host, "add control stream worker");
                     assert!(
-                        self.connected_nodes
+                        self.workers
                             .insert(
                                 node_id,
-                                ControlStreamNode {
-                                    worker_id: node.id as _,
-                                    host: node.host.clone().unwrap(),
-                                    handle,
-                                }
+                                (
+                                    node,
+                                    WorkerNodeState::Connected {
+                                        control_stream: ControlStreamNode {
+                                            worker_id: node_id as _,
+                                            host: node_host,
+                                            handle,
+                                        },
+                                        removed: false
+                                    }
+                                )
                             )
                             .is_none()
                     );
-                    info!(?node_host, "add control stream worker");
                     return;
                 }
                 Err(e) => {
@@ -216,100 +201,260 @@ impl ControlStreamManager {
         error!(?node_host, "fail to create worker node after retry");
     }
 
-    pub(super) async fn reset(
-        &mut self,
-        nodes: &HashMap<WorkerId, WorkerNode>,
+    pub(super) fn remove_worker(&mut self, node: WorkerNode) {
+        if let Entry::Occupied(mut entry) = self.workers.entry(node.id as _) {
+            let (_, worker_state) = entry.get_mut();
+            match worker_state {
+                WorkerNodeState::Connected { removed, .. } => {
+                    info!(worker_id = node.id, "mark connected worker as removed");
+                    *removed = true;
+                }
+                WorkerNodeState::Reconnecting(_) => {
+                    info!(worker_id = node.id, "remove worker");
+                    entry.remove();
+                }
+            }
+        }
+    }
+
+    fn retry_connect(
+        node: WorkerNode,
         term_id: String,
-        context: &impl GlobalBarrierWorkerContext,
-    ) -> HashSet<WorkerId> {
+        context: Arc<impl GlobalBarrierWorkerContext>,
+    ) -> BoxFuture<'static, StreamingControlHandle> {
+        async move {
+            let mut attempt = 0;
+            let backoff = ExponentialBackoff::from_millis(100)
+                .max_delay(Duration::from_mins(1))
+                .factor(5);
+            let init_request = PbInitRequest { term_id };
+            for delay in backoff {
+                attempt += 1;
+                sleep(delay).await;
+                match context.new_control_stream(&node, &init_request).await {
+                    Ok(handle) => {
+                        return handle;
+                    }
+                    Err(e) => {
+                        warn!(e = %e.as_report(), ?node, attempt, "fail to create control stream worker");
+                    }
+                }
+            }
+            unreachable!("end of retry backoff")
+        }.boxed()
+    }
+
+    pub(super) async fn recover(
+        env: MetaSrvEnv,
+        nodes: &HashMap<WorkerId, WorkerNode>,
+        term_id: &str,
+        context: Arc<impl GlobalBarrierWorkerContext>,
+    ) -> Self {
+        let reset_start_time = Instant::now();
         let init_request = PbInitRequest {
-            databases: vec![],
-            term_id,
+            term_id: term_id.to_owned(),
         };
         let init_request = &init_request;
-        self.workers = nodes.clone();
-        let nodes = join_all(nodes.iter().map(|(worker_id, node)| async move {
+        let nodes = join_all(nodes.iter().map(|(worker_id, node)| async {
             let result = context.new_control_stream(node, init_request).await;
             (*worker_id, node.clone(), result)
         }))
         .await;
-        self.connected_nodes.clear();
-        let mut failed_workers = HashSet::new();
+        let mut unconnected_workers = HashSet::new();
+        let mut workers = HashMap::new();
         for (worker_id, node, result) in nodes {
             match result {
                 Ok(handle) => {
+                    let control_stream = ControlStreamNode {
+                        worker_id: node.id as _,
+                        host: node.host.clone().unwrap(),
+                        handle,
+                    };
                     assert!(
-                        self.connected_nodes
+                        workers
                             .insert(
                                 worker_id,
-                                ControlStreamNode {
-                                    worker_id: node.id as _,
-                                    host: node.host.clone().unwrap(),
-                                    handle
-                                }
+                                (
+                                    node,
+                                    WorkerNodeState::Connected {
+                                        control_stream,
+                                        removed: false
+                                    }
+                                )
                             )
                             .is_none()
                     );
                 }
                 Err(e) => {
-                    failed_workers.insert(worker_id);
+                    unconnected_workers.insert(worker_id);
                     warn!(
                         e = %e.as_report(),
                         worker_id,
                         ?node,
                         "failed to connect to node"
-                    )
+                    );
+                    assert!(
+                        workers
+                            .insert(
+                                worker_id,
+                                (
+                                    node.clone(),
+                                    WorkerNodeState::Reconnecting(Self::retry_connect(
+                                        node,
+                                        term_id.to_owned(),
+                                        context.clone()
+                                    ))
+                                )
+                            )
+                            .is_none()
+                    );
                 }
             }
         }
 
-        failed_workers
+        info!(elapsed=?reset_start_time.elapsed(), ?unconnected_workers, "control stream reset");
+
+        Self { workers, env }
     }
 
     /// Clear all nodes and response streams in the manager.
     pub(super) fn clear(&mut self) {
         *self = Self::new(self.env.clone());
     }
+}
 
-    fn poll_next_response(
-        &mut self,
+pub(super) struct WorkerNodeConnected<'a> {
+    node: &'a WorkerNode,
+    handle: &'a mut StreamingControlHandle,
+}
+
+impl<'a> WorkerNodeConnected<'a> {
+    pub(super) fn initialize(
+        self,
+        inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
+    ) {
+        for request in ControlStreamManager::collect_init_partial_graph(inflight_infos) {
+            if let Err(e) = self.handle.send_request(StreamingControlStreamRequest {
+                request: Some(
+                    streaming_control_stream_request::Request::CreatePartialGraph(request),
+                ),
+            }) {
+                warn!(e = %e.as_report(), node = ?self.node, "failed to send initial partial graph request");
+            }
+        }
+    }
+}
+
+pub(super) enum WorkerNodeEvent<'a> {
+    Response(MetaResult<streaming_control_stream_response::Response>),
+    Connected(WorkerNodeConnected<'a>),
+}
+
+impl ControlStreamManager {
+    fn poll_next_event<'a>(
+        this_opt: &mut Option<&'a mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<(
-        WorkerId,
-        MetaResult<streaming_control_stream_response::Response>,
-    )> {
-        if self.connected_nodes.is_empty() {
+        term_id: &str,
+        context: &Arc<impl GlobalBarrierWorkerContext>,
+        poll_reconnect: bool,
+    ) -> Poll<(WorkerId, WorkerNodeEvent<'a>)> {
+        let this = this_opt.as_mut().expect("Future polled after completion");
+        if this.workers.is_empty() {
             return Poll::Pending;
         }
-        let mut poll_result: Poll<(WorkerId, MetaResult<_>)> = Poll::Pending;
         {
-            for (worker_id, node) in &mut self.connected_nodes {
-                match node.handle.response_stream.poll_next_unpin(cx) {
+            for (&worker_id, (node, worker_state)) in &mut this.workers {
+                let control_stream = match worker_state {
+                    WorkerNodeState::Connected { control_stream, .. } => control_stream,
+                    WorkerNodeState::Reconnecting(_) if !poll_reconnect => {
+                        continue;
+                    }
+                    WorkerNodeState::Reconnecting(join_handle) => {
+                        match join_handle.poll_unpin(cx) {
+                            Poll::Ready(handle) => {
+                                info!(id=node.id, host=?node.host, "reconnected to worker");
+                                *worker_state = WorkerNodeState::Connected {
+                                    control_stream: ControlStreamNode {
+                                        worker_id: node.id as _,
+                                        host: node.host.clone().unwrap(),
+                                        handle,
+                                    },
+                                    removed: false,
+                                };
+                                let this = this_opt.take().expect("should exist");
+                                let (node, worker_state) =
+                                    this.workers.get_mut(&worker_id).expect("should exist");
+                                let WorkerNodeState::Connected { control_stream, .. } =
+                                    worker_state
+                                else {
+                                    unreachable!()
+                                };
+                                return Poll::Ready((
+                                    worker_id,
+                                    WorkerNodeEvent::Connected(WorkerNodeConnected {
+                                        node,
+                                        handle: &mut control_stream.handle,
+                                    }),
+                                ));
+                            }
+                            Poll::Pending => {
+                                continue;
+                            }
+                        }
+                    }
+                };
+                match control_stream.handle.response_stream.poll_next_unpin(cx) {
                     Poll::Ready(result) => {
-                        poll_result = Poll::Ready((
-                            *worker_id,
-                            result
-                                .ok_or_else(|| anyhow!("end of stream").into())
+                        {
+                            let result = result
+                                .ok_or_else(|| (false, anyhow!("end of stream").into()))
                                 .and_then(|result| {
-                                    result.map_err(Into::<MetaError>::into).and_then(|resp| {
+                                    result.map_err(|err| -> (bool, MetaError) {(false, err.into())}).and_then(|resp| {
                                         match resp
                                             .response
-                                            .ok_or_else(||anyhow!("empty response"))?
+                                            .ok_or_else(|| (false, anyhow!("empty response").into()))?
                                         {
-                                            streaming_control_stream_response::Response::Shutdown(_) => Err(anyhow!(
+                                            streaming_control_stream_response::Response::Shutdown(_) => Err((true, anyhow!(
                                                 "worker node {worker_id} is shutting down"
                                             )
-                                            .into()),
+                                                .into())),
                                             streaming_control_stream_response::Response::Init(_) => {
                                                 // This arm should be unreachable.
-                                                Err(anyhow!("get unexpected init response").into())
+                                                Err((false, anyhow!("get unexpected init response").into()))
                                             }
-                                            resp => Ok(resp),
+                                            resp => {
+                                                if let streaming_control_stream_response::Response::CompleteBarrier(barrier_resp) = &resp {
+                                                    assert_eq!(worker_id, barrier_resp.worker_id as WorkerId);
+                                                }
+                                                Ok(resp)
+                                            },
                                         }
                                     })
-                                })
-                        ));
-                        break;
+                                });
+                            let result = match result {
+                                Ok(resp) => Ok(resp),
+                                Err((shutdown, err)) => {
+                                    warn!(worker_id = node.id, host = ?node.host, err = %err.as_report(), "get error from response stream");
+                                    let WorkerNodeState::Connected { removed, .. } = worker_state
+                                    else {
+                                        unreachable!("checked connected")
+                                    };
+                                    if *removed || shutdown {
+                                        this.workers.remove(&worker_id);
+                                    } else {
+                                        *worker_state = WorkerNodeState::Reconnecting(
+                                            ControlStreamManager::retry_connect(
+                                                node.clone(),
+                                                term_id.to_owned(),
+                                                context.clone(),
+                                            ),
+                                        );
+                                    }
+                                    Err(err)
+                                }
+                            };
+                            return Poll::Ready((worker_id, WorkerNodeEvent::Response(result)));
+                        }
                     }
                     Poll::Pending => {
                         continue;
@@ -318,48 +463,55 @@ impl ControlStreamManager {
             }
         };
 
-        if let Poll::Ready((worker_id, Err(err))) = &poll_result {
-            let node = self
-                .connected_nodes
-                .remove(worker_id)
-                .expect("should exist when get shutdown resp");
-            warn!(worker_id = node.worker_id, host = ?node.host, err = %err.as_report(), "get error from response stream");
-        }
+        Poll::Pending
+    }
 
-        poll_result
+    #[await_tree::instrument("control_stream_next_event")]
+    pub(super) async fn next_event<'a>(
+        &'a mut self,
+        term_id: &str,
+        context: &Arc<impl GlobalBarrierWorkerContext>,
+    ) -> (WorkerId, WorkerNodeEvent<'a>) {
+        let mut this = Some(self);
+        poll_fn(|cx| Self::poll_next_event(&mut this, cx, term_id, context, true)).await
     }
 
     #[await_tree::instrument("control_stream_next_response")]
     pub(super) async fn next_response(
         &mut self,
+        term_id: &str,
+        context: &Arc<impl GlobalBarrierWorkerContext>,
     ) -> (
         WorkerId,
         MetaResult<streaming_control_stream_response::Response>,
     ) {
-        poll_fn(|cx| self.poll_next_response(cx)).await
+        let mut this = Some(self);
+        let (worker_id, event) =
+            poll_fn(|cx| Self::poll_next_event(&mut this, cx, term_id, context, false)).await;
+        match event {
+            WorkerNodeEvent::Response(result) => (worker_id, result),
+            WorkerNodeEvent::Connected(_) => {
+                unreachable!("set poll_reconnect=false")
+            }
+        }
     }
 
-    fn collect_init_request(
+    fn collect_init_partial_graph(
         initial_inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
-        term_id: String,
-    ) -> PbInitRequest {
-        PbInitRequest {
-            databases: initial_inflight_infos
-                .map(|(database_id, creating_job_ids)| {
-                    let mut graphs = vec![PbInitialPartialGraph {
-                        partial_graph_id: to_partial_graph_id(None),
-                    }];
-                    graphs.extend(creating_job_ids.map(|job_id| PbInitialPartialGraph {
-                        partial_graph_id: to_partial_graph_id(Some(job_id)),
-                    }));
-                    PbDatabaseInitialPartialGraph {
-                        database_id: database_id.database_id,
-                        graphs,
-                    }
-                })
-                .collect(),
-            term_id,
-        }
+    ) -> impl Iterator<Item = PbCreatePartialGraphRequest> {
+        initial_inflight_infos.flat_map(|(database_id, creating_job_ids)| {
+            [PbCreatePartialGraphRequest {
+                partial_graph_id: to_partial_graph_id(None),
+                database_id: database_id.into(),
+            }]
+            .into_iter()
+            .chain(
+                creating_job_ids.map(move |job_id| PbCreatePartialGraphRequest {
+                    partial_graph_id: to_partial_graph_id(Some(job_id)),
+                    database_id: database_id.into(),
+                }),
+            )
+        })
     }
 }
 
@@ -829,6 +981,17 @@ impl ControlStreamManager {
         )
     }
 
+    fn connected_workers(&self) -> impl Iterator<Item = (WorkerId, &ControlStreamNode)> + '_ {
+        self.workers
+            .iter()
+            .filter_map(|(worker_id, (_, worker_state))| match worker_state {
+                WorkerNodeState::Connected { control_stream, .. } => {
+                    Some((*worker_id, control_stream))
+                }
+                WorkerNodeState::Reconnecting(_) => None,
+            })
+    }
+
     pub(super) fn inject_barrier<'a>(
         &mut self,
         database_id: DatabaseId,
@@ -848,7 +1011,10 @@ impl ControlStreamManager {
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
 
         for worker_id in node_actors.keys() {
-            if !self.connected_nodes.contains_key(worker_id) {
+            if let Some((_, worker_state)) = self.workers.get(worker_id)
+                && let WorkerNodeState::Connected { .. } = worker_state
+            {
+            } else {
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
@@ -860,11 +1026,10 @@ impl ControlStreamManager {
 
         let mut node_need_collect = HashMap::new();
 
-        self.connected_nodes
-            .iter()
+        self.connected_workers()
             .try_for_each(|(node_id, node)| {
                 let actor_ids_to_collect = node_actors
-                    .get(node_id)
+                    .get(&node_id)
                     .map(|actors| actors.iter().cloned())
                     .into_iter()
                     .flatten()
@@ -901,7 +1066,7 @@ impl ControlStreamManager {
                                         partial_graph_id,
                                         actors_to_build: new_actors
                                             .as_mut()
-                                            .map(|new_actors| new_actors.remove(&(*node_id as _)))
+                                            .map(|new_actors| new_actors.remove(&(node_id as _)))
                                             .into_iter()
                                             .flatten()
                                             .flatten()
@@ -950,7 +1115,7 @@ impl ControlStreamManager {
                             ))
                         })?;
 
-                    node_need_collect.insert(*node_id as WorkerId, is_empty);
+                    node_need_collect.insert(node_id as WorkerId, is_empty);
                     Result::<_, MetaError>::Ok(())
                 }
             })
@@ -975,7 +1140,7 @@ impl ControlStreamManager {
         creating_job_id: Option<TableId>,
     ) {
         let partial_graph_id = to_partial_graph_id(creating_job_id);
-        self.connected_nodes.iter().for_each(|(_, node)| {
+        self.connected_workers().for_each(|(_, node)| {
             if node
                 .handle
                 .request_sender
@@ -1006,7 +1171,7 @@ impl ControlStreamManager {
             .into_iter()
             .map(|job_id| to_partial_graph_id(Some(job_id)))
             .collect_vec();
-        self.connected_nodes.iter().for_each(|(_, node)| {
+        self.connected_workers().for_each(|(_, node)| {
             if node.handle
                 .request_sender
                 .send(StreamingControlStreamRequest {
@@ -1031,8 +1196,7 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         reset_request_id: u32,
     ) -> HashSet<WorkerId> {
-        self.connected_nodes
-            .iter()
+        self.connected_workers()
             .filter_map(|(worker_id, node)| {
                 if node
                     .handle
@@ -1050,7 +1214,7 @@ impl ControlStreamManager {
                     warn!(worker_id, node = ?node.host,"failed to send reset database request");
                     None
                 } else {
-                    Some(*worker_id)
+                    Some(worker_id)
                 }
             })
             .collect()
