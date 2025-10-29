@@ -977,9 +977,6 @@ impl Dispatcher for HashDataDispatcher {
         let mut last_update_delete_row_idx = None;
         let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
-        // Apply output indices after calculating the vnode.
-        let chunk = self.output_mapping.apply(chunk);
-
         for (row_idx, ((vnode, &op), visible)) in vnodes
             .iter()
             .copied()
@@ -1028,6 +1025,8 @@ impl Dispatcher for HashDataDispatcher {
         assert!(last_update_delete_row_idx.is_none(), "missing U+ after U-");
 
         let ops = new_ops;
+        // Apply output mapping after calculating the vnode and new visibility maps.
+        let chunk = self.output_mapping.apply(chunk);
 
         // individually output StreamChunk integrated with vis_map
         futures::future::try_join_all(
