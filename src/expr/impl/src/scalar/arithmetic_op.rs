@@ -21,7 +21,6 @@ use risingwave_common::types::{
 };
 use risingwave_expr::{ExprError, Result, function};
 use rust_decimal::MathematicalOps;
-use special::{Gamma, Primitive};
 
 #[function("add(*int, *int) -> auto")]
 #[function("add(decimal, decimal) -> auto")]
@@ -448,13 +447,13 @@ pub fn decimal_trim_scale(d: Decimal) -> Decimal {
 /// ----
 /// NaN
 ///
-/// statement error
+/// statement error overflow
 /// SELECT gamma('-inf'::float8);
 ///
 /// query R
 /// SELECT gamma('0.5'::float8);
 /// ----
-/// 1.7724538509055159
+/// 1.772453850905516
 ///
 /// query R
 /// SELECT gamma('1'::float8);
@@ -481,16 +480,16 @@ pub fn decimal_trim_scale(d: Decimal) -> Decimal {
 /// ----
 /// 24
 ///
-/// statement error
+/// statement error overflow
 /// SELECT gamma('-1'::float8);
 ///
-/// statement error
+/// statement error underflow
 /// SELECT gamma('-1000.5'::float8);
 ///
-/// statement error
+/// statement error overflow
 /// SELECT gamma('0'::float8);
 ///
-/// statement error
+/// statement error overflow
 /// SELECT gamma('1000'::float8);
 /// ```
 #[function("gamma(float8) -> float8")]
@@ -500,30 +499,18 @@ pub fn gamma_f64(input: F64) -> Result<F64> {
         return Ok(result);
     } else if input.is_infinite() {
         if input.is_negative() {
-            return Err(ExprError::InvalidParam {
-                name: "gamma",
-                reason: "value out of range: overflow".into(),
-            });
+            return Err(ExprError::NumericOverflow);
         }
     } else {
-        result = F64::from(Gamma::gamma(input.0));
+        result = input.gamma();
         if result.is_nan() || result.is_infinite() {
             if !result.is_zero() {
-                return Err(ExprError::InvalidParam {
-                    name: "gamma",
-                    reason: "value out of range: overflow".into(),
-                });
+                return Err(ExprError::NumericOverflow);
             } else {
-                return Err(ExprError::InvalidParam {
-                    name: "gamma",
-                    reason: "value out of range: underflow".into(),
-                });
+                return Err(ExprError::NumericUnderflow);
             }
         } else if result.is_zero() {
-            return Err(ExprError::InvalidParam {
-                name: "gamma",
-                reason: "value out of range: underflow".into(),
-            });
+            return Err(ExprError::NumericUnderflow);
         }
     }
     Ok(result)
@@ -575,7 +562,7 @@ pub fn gamma_f64(input: F64) -> Result<F64> {
 /// ----
 /// 3.1780538303479458
 ///
-/// statement error
+/// statement error overflow
 /// SELECT lgamma('-1'::float8);
 ///
 /// query R
@@ -583,7 +570,7 @@ pub fn gamma_f64(input: F64) -> Result<F64> {
 /// ----
 /// -5914.437701116853
 ///
-/// statement error
+/// statement error overflow
 /// SELECT gamma('0'::float8);
 ///
 /// query R
@@ -591,17 +578,14 @@ pub fn gamma_f64(input: F64) -> Result<F64> {
 /// ----
 /// 5905.220423209181
 ///
-/// statement error
+/// statement error overflow
 /// SELECT gamma('1e308'::float8);
 /// ```
 #[function("lgamma(float8) -> float8")]
 pub fn lgamma_f64(input: F64) -> Result<F64> {
-    let (result, _sign) = input.0.lgamma();
+    let (result, _sign) = input.ln_gamma();
     if result.is_infinite() && input.is_finite() {
-        return Err(ExprError::InvalidParam {
-            name: "lgamma",
-            reason: "value out of range: overflow".into(),
-        });
+        return Err(ExprError::NumericOverflow);
     }
     Ok(F64::from(result))
 }

@@ -59,7 +59,6 @@ serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
 smallvec = { workspace = true }
-special = "0.11.4"
 sql-json-path = { version = "0.1.1", features = ["jsonbb"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }

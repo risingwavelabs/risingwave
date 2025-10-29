@@ -7327,15 +7327,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lambert_w"
-version = "1.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd135c9fde3fbb293ec97da3cb6ec6b938c90ac220d2e19287ad2f82cdafce09"
-dependencies = [
- "libm",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11976,7 +11967,6 @@ dependencies = [
  "sha1",
  "sha2",
  "smallvec",
- "special",
  "sql-json-path",
  "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
@@ -14302,16 +14292,6 @@ checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "special"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2037227570e0bedf82a7f866a3e7cebe218ec9cd0d5399151942ee7358f90bb6"
-dependencies = [
- "lambert_w",
- "libm",
 ]
 
 [[package]]
