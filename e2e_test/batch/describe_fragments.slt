@@ -133,9 +133,9 @@ skipif madsim
 system ok
 psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.idx" \
 --expected 'Fragment % (Actor %)
-StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key: [tbl.id], pk_columns: [name, age, tbl.id], pk_conflict: NoCheck }
+StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key: [name, tbl.id], pk_columns: [name, age, tbl.id], pk_conflict: NoCheck }
 ├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
-├── stream key: [ tbl.id ]
+├── stream key: [ tbl.name, tbl.id ]
 └── MergeExecutor { output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ], stream key: [ tbl.id ] }
 (empty)
 Fragment % (Actor %)
@@ -145,22 +145,6 @@ StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
 ├── Upstream { output: [ name, age, created_at, id ], stream key: [] }
 └── BatchPlanNode { output: [ name, age, created_at, id ], stream key: [] }'
 
-
-skipif madsim
-system ok
-psql_validate.py --db $__DATABASE__ --sql "DESCRIBE FRAGMENTS describe_plan_test.idx" \
---expected 'Fragment % (Actor %)
-StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key: [tbl.id], pk_columns: [name, age, tbl.id], pk_conflict: NoCheck }
-├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
-├── stream key: [ tbl.id ]
-└── MergeExecutor { output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ], stream key: [ tbl.id ] }
-(empty)
-Fragment % (Actor %)
-StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
-├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
-├── stream key: [ tbl.id ]
-├── Upstream { output: [ name, age, created_at, id ], stream key: [] }
-└── BatchPlanNode { output: [ name, age, created_at, id ], stream key: [] }'
 
 
 skipif madsim
