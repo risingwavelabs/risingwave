@@ -599,25 +599,34 @@ impl GlobalBarrierWorkerContextImpl {
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
         let all_info = self
-            .resolve_graph_info(None, &active_streaming_nodes)
+            .resolve_graph_info(Some(database_id), &active_streaming_nodes)
             .await
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
 
-        let mut info = all_info
+        let mut database_info = all_info
             .get(&database_id)
             .cloned()
             .map_or_else(HashMap::new, |table_map| {
                 HashMap::from([(database_id, table_map)])
             });
 
-        self.recovery_table_with_upstream_sinks(&mut info).await?;
+        self.recovery_table_with_upstream_sinks(&mut database_info)
+            .await?;
 
-        let Some(info) = info.into_iter().next().map(|(loaded_database_id, info)| {
-            assert_eq!(loaded_database_id, database_id);
-            info
-        }) else {
+        assert!(database_info.len() <= 1);
+
+        let stream_actors = self.load_stream_actors(&database_info).await?;
+
+        let Some(info) = database_info
+            .into_iter()
+            .next()
+            .map(|(loaded_database_id, info)| {
+                assert_eq!(loaded_database_id, database_id);
+                info
+            })
+        else {
             return Ok(None);
         };
 
@@ -648,8 +657,6 @@ impl GlobalBarrierWorkerContextImpl {
                     .collect(),
             )
             .await?;
-
-        let stream_actors = self.load_stream_actors(&all_info).await?;
 
         // get split assignments for all actors
         let mut source_splits = HashMap::new();
