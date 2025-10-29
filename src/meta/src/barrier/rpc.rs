@@ -369,36 +369,39 @@ impl ControlStreamManager {
                     WorkerNodeState::Reconnecting(_) if !poll_reconnect => {
                         continue;
                     }
-                    WorkerNodeState::Reconnecting(join_handle) => match join_handle.poll_unpin(cx) {
-                        Poll::Ready(handle) => {
-                            info!(id=node.id, host=?node.host, "reconnected to worker");
-                            *worker_state = WorkerNodeState::Connected {
-                                control_stream: ControlStreamNode {
-                                    worker_id: node.id as _,
-                                    host: node.host.clone().unwrap(),
-                                    handle,
-                                },
-                                removed: false,
-                            };
-                            let this = this_opt.take().expect("should exist");
-                            let (node, worker_state) =
-                                this.workers.get_mut(&worker_id).expect("should exist");
-                            let WorkerNodeState::Connected { control_stream, .. } = worker_state
-                            else {
-                                unreachable!()
-                            };
-                            return Poll::Ready((
-                                worker_id,
-                                WorkerNodeEvent::Connected(WorkerNodeConnected {
-                                    node,
-                                    handle: &mut control_stream.handle,
-                                }),
-                            ));
+                    WorkerNodeState::Reconnecting(join_handle) => {
+                        match join_handle.poll_unpin(cx) {
+                            Poll::Ready(handle) => {
+                                info!(id=node.id, host=?node.host, "reconnected to worker");
+                                *worker_state = WorkerNodeState::Connected {
+                                    control_stream: ControlStreamNode {
+                                        worker_id: node.id as _,
+                                        host: node.host.clone().unwrap(),
+                                        handle,
+                                    },
+                                    removed: false,
+                                };
+                                let this = this_opt.take().expect("should exist");
+                                let (node, worker_state) =
+                                    this.workers.get_mut(&worker_id).expect("should exist");
+                                let WorkerNodeState::Connected { control_stream, .. } =
+                                    worker_state
+                                else {
+                                    unreachable!()
+                                };
+                                return Poll::Ready((
+                                    worker_id,
+                                    WorkerNodeEvent::Connected(WorkerNodeConnected {
+                                        node,
+                                        handle: &mut control_stream.handle,
+                                    }),
+                                ));
+                            }
+                            Poll::Pending => {
+                                continue;
+                            }
                         }
-                        Poll::Pending => {
-                            continue;
-                        }
-                    },
+                    }
                 };
                 match control_stream.handle.response_stream.poll_next_unpin(cx) {
                     Poll::Ready(result) => {
