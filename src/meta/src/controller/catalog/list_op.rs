@@ -64,6 +64,7 @@ impl CatalogController {
     pub async fn list_background_creating_jobs(
         &self,
         include_initial: bool,
+        database_id: Option<DatabaseId>,
     ) -> MetaResult<Vec<(ObjectId, String, DateTime)>> {
         let inner = self.inner.read().await;
         let status_cond = if include_initial {
@@ -80,7 +81,12 @@ impl CatalogController {
             .filter(
                 streaming_job::Column::CreateType
                     .eq(CreateType::Background)
-                    .and(status_cond.clone()),
+                    .and(status_cond.clone())
+                    .and(
+                        database_id
+                            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+                            .unwrap_or_else(|| SimpleExpr::from(true)),
+                    ),
             )
             .into_tuple()
             .all(&inner.db)
@@ -94,7 +100,12 @@ impl CatalogController {
             .filter(
                 streaming_job::Column::CreateType
                     .eq(CreateType::Background)
-                    .and(status_cond),
+                    .and(status_cond)
+                    .and(
+                        database_id
+                            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+                            .unwrap_or_else(|| SimpleExpr::from(true)),
+                    ),
             )
             .into_tuple()
             .all(&inner.db)
