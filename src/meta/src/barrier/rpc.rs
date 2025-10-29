@@ -407,43 +407,52 @@ impl ControlStreamManager {
                     Poll::Ready(result) => {
                         {
                             let result = result
-                                .ok_or_else(|| anyhow!("end of stream").into())
+                                .ok_or_else(|| (false, anyhow!("end of stream").into()))
                                 .and_then(|result| {
-                                    result.map_err(Into::<MetaError>::into).and_then(|resp| {
+                                    result.map_err(|err| -> (bool, MetaError) {(false, err.into())}).and_then(|resp| {
                                         match resp
                                             .response
-                                            .ok_or_else(|| anyhow!("empty response"))?
+                                            .ok_or_else(|| (false, anyhow!("empty response").into()))?
                                         {
-                                            streaming_control_stream_response::Response::Shutdown(_) => Err(anyhow!(
+                                            streaming_control_stream_response::Response::Shutdown(_) => Err((true, anyhow!(
                                                 "worker node {worker_id} is shutting down"
                                             )
-                                                .into()),
+                                                .into())),
                                             streaming_control_stream_response::Response::Init(_) => {
                                                 // This arm should be unreachable.
-                                                Err(anyhow!("get unexpected init response").into())
+                                                Err((false, anyhow!("get unexpected init response").into()))
                                             }
-                                            resp => Ok(resp),
+                                            resp => {
+                                                if let streaming_control_stream_response::Response::CompleteBarrier(barrier_resp) = &resp {
+                                                    assert_eq!(worker_id, barrier_resp.worker_id as WorkerId);
+                                                }
+                                                Ok(resp)
+                                            },
                                         }
                                     })
                                 });
-                            if let Err(err) = &result {
-                                warn!(worker_id = node.id, host = ?node.host, err = %err.as_report(), "get error from response stream");
-                                let WorkerNodeState::Connected { removed, .. } = worker_state
-                                else {
-                                    unreachable!("checked connected")
-                                };
-                                if *removed {
-                                    this.workers.remove(&worker_id);
-                                } else {
-                                    *worker_state = WorkerNodeState::Reconnecting(
-                                        ControlStreamManager::retry_connect(
-                                            node.clone(),
-                                            term_id.to_owned(),
-                                            context.clone(),
-                                        ),
-                                    );
+                            let result = match result {
+                                Ok(resp) => Ok(resp),
+                                Err((shutdown, err)) => {
+                                    warn!(worker_id = node.id, host = ?node.host, err = %err.as_report(), "get error from response stream");
+                                    let WorkerNodeState::Connected { removed, .. } = worker_state
+                                    else {
+                                        unreachable!("checked connected")
+                                    };
+                                    if *removed || shutdown {
+                                        this.workers.remove(&worker_id);
+                                    } else {
+                                        *worker_state = WorkerNodeState::Reconnecting(
+                                            ControlStreamManager::retry_connect(
+                                                node.clone(),
+                                                term_id.to_owned(),
+                                                context.clone(),
+                                            ),
+                                        );
+                                    }
+                                    Err(err)
                                 }
-                            }
+                            };
                             return Poll::Ready((worker_id, WorkerNodeEvent::Response(result)));
                         }
                     }
