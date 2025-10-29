@@ -83,11 +83,17 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn list_background_job_progress(&self) -> MetaResult<HashMap<TableId, String>> {
+    async fn list_background_job_progress(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<HashMap<TableId, String>> {
         let mgr = &self.metadata_manager;
         let job_info = mgr
             .catalog_controller
-            .list_background_creating_jobs(false)
+            .list_background_creating_jobs(
+                false,
+                database_id.map(|database_id| database_id.database_id as _),
+            )
             .await?;
 
         Ok(job_info
@@ -349,7 +355,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // Background job progress needs to be recovered.
                     tracing::info!("recovering background job progress");
                     let background_jobs = self
-                        .list_background_job_progress()
+                        .list_background_job_progress(None)
                         .await
                         .context("recover background job progress should not fail")?;
 
@@ -496,7 +502,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                     let background_jobs = {
                         let mut background_jobs = self
-                            .list_background_job_progress()
+                            .list_background_job_progress(None)
                             .await
                             .context("recover background job progress should not fail")?;
                         info.values()
@@ -586,7 +592,7 @@ impl GlobalBarrierWorkerContextImpl {
             "recovering background job progress of database"
         );
         let background_jobs = self
-            .list_background_job_progress()
+            .list_background_job_progress(Some(database_id))
             .await
             .context("recover background job progress of database should not fail")?;
         tracing::info!(?database_id, "recovered background job progress");

@@ -59,7 +59,7 @@ impl GlobalBarrierManager {
         let job_info = self
             .metadata_manager
             .catalog_controller
-            .list_background_creating_jobs(true)
+            .list_background_creating_jobs(true, None)
             .await?;
         for (job_id, definition, _init_at) in job_info {
             if let Entry::Vacant(e) = ddl_progress.entry(job_id as _) {

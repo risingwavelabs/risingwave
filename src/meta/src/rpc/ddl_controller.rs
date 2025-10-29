@@ -2189,7 +2189,7 @@ impl DdlController {
             if self
                 .metadata_manager
                 .catalog_controller
-                .list_background_creating_jobs(true)
+                .list_background_creating_jobs(true, None)
                 .await?
                 .is_empty()
             {
