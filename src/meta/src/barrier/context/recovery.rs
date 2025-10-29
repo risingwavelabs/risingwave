@@ -33,11 +33,10 @@ use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
-use crate::barrier::info::InflightStreamingJobInfo;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentId, StreamActor, StreamContext, TableParallelism};
+use crate::model::{ActorId, FragmentId, StreamActor, StreamContext};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{SourceChange, StreamFragmentGraph};
@@ -700,7 +699,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     async fn load_stream_actors(
         &self,
-        all_info: &HashMap<DatabaseId, HashMap<TableId, InflightStreamingJobInfo>>,
+        all_info: &HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
     ) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let job_ids = all_info
             .values()
@@ -715,23 +714,18 @@ impl GlobalBarrierWorkerContextImpl {
 
         let mut stream_actors = HashMap::new();
 
-        for (_, streaming_info) in all_info.values().flatten() {
+        for (job_id, streaming_info) in all_info.values().flatten() {
             let StreamingJobExtraInfo {
                 timezone,
                 job_definition,
             } = job_extra_info
-                .get(&(streaming_info.job_id.table_id as i32))
+                .get(&(job_id.table_id as i32))
                 .cloned()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "no streaming job info for {}",
-                        streaming_info.job_id.table_id
-                    )
-                })?;
+                .ok_or_else(|| anyhow!("no streaming job info for {}", job_id.table_id))?;
 
             let expr_context = Some(StreamContext { timezone }.to_expr_context());
 
-            for (fragment_id, fragment_info) in &streaming_info.fragment_infos {
+            for (fragment_id, fragment_info) in streaming_info {
                 for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_info.actors {
                     stream_actors.insert(
                         *actor_id,
