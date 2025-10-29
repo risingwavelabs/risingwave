@@ -20,6 +20,7 @@
 use std::fmt;
 
 use risingwave_sqlparser::ast::*;
+use strum::EnumDiscriminants;
 
 /// Represents all possible AST field names that can be navigated.
 /// This provides compile-time safety for field access.
@@ -250,7 +251,9 @@ pub fn display_ast_path(path: &AstPath) -> String {
 /// Represents a node in the AST that can be navigated and modified.
 /// This is a simplified representation focusing on the most commonly
 /// reduced SQL constructs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(strum::Display))]
+#[strum_discriminants(name(AstNodeType))]
 pub enum AstNode {
     Statement(Statement),
     Query(Box<Query>),
@@ -909,29 +912,9 @@ impl AstNode {
 
             _ => {
                 // Add debug logging for unmatched cases
-                let node_type = match self {
-                    AstNode::Statement(_) => "Statement",
-                    AstNode::Query(_) => "Query",
-                    AstNode::Select(_) => "Select",
-                    AstNode::Expr(_) => "Expr",
-                    AstNode::SelectItem(_) => "SelectItem",
-                    AstNode::TableWithJoins(_) => "TableWithJoins",
-                    AstNode::Join(_) => "Join",
-                    AstNode::TableFactor(_) => "TableFactor",
-                    AstNode::OrderByExpr(_) => "OrderByExpr",
-                    AstNode::With(_) => "With",
-                    AstNode::Cte(_) => "Cte",
-                    AstNode::ExprList(_) => "ExprList",
-                    AstNode::SelectItemList(_) => "SelectItemList",
-                    AstNode::TableList(_) => "TableList",
-                    AstNode::JoinList(_) => "JoinList",
-                    AstNode::OrderByList(_) => "OrderByList",
-                    AstNode::CteList(_) => "CteList",
-                    AstNode::Option(_) => "Option",
-                };
                 tracing::debug!(
                     "set_child: No match for {} ({:?}) with component {:?}",
-                    node_type,
+                    AstNodeType::from(self),
                     std::mem::discriminant(self),
                     component
                 );
@@ -1208,27 +1191,8 @@ pub fn ast_node_to_statement(node: &AstNode) -> Option<Statement> {
 }
 
 /// Get a human-readable name for an AST node type.
-pub fn get_node_type_name(node: &AstNode) -> &'static str {
-    match node {
-        AstNode::Statement(_) => "Statement",
-        AstNode::Query(_) => "Query",
-        AstNode::Select(_) => "Select",
-        AstNode::Expr(_) => "Expr",
-        AstNode::SelectItem(_) => "SelectItem",
-        AstNode::TableWithJoins(_) => "TableWithJoins",
-        AstNode::Join(_) => "Join",
-        AstNode::TableFactor(_) => "TableFactor",
-        AstNode::OrderByExpr(_) => "OrderByExpr",
-        AstNode::With(_) => "With",
-        AstNode::Cte(_) => "Cte",
-        AstNode::ExprList(_) => "ExprList",
-        AstNode::SelectItemList(_) => "SelectItemList",
-        AstNode::TableList(_) => "TableList",
-        AstNode::JoinList(_) => "JoinList",
-        AstNode::OrderByList(_) => "OrderByList",
-        AstNode::CteList(_) => "CteList",
-        AstNode::Option(_) => "Option",
-    }
+pub fn get_node_type_name(node: &AstNode) -> String {
+    AstNodeType::from(node).to_string()
 }
 
 #[cfg(test)]
