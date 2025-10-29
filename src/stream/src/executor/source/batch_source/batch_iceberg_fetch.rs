@@ -163,7 +163,6 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                         && file_queue.is_empty()
                                         && is_list_finished
                                         && is_refreshing
-                                    // && *is_load_finished.read()
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,

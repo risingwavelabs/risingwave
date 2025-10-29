@@ -75,6 +75,15 @@ use crate::task::barrier_worker::managed_state::{
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
+/// Per-actor refresh progress report
+#[derive(Debug, Clone)]
+pub struct RefreshProgress {
+    pub actor_id: u32,
+    pub associated_source_id: u32,
+    pub list_finished: bool,
+    pub load_finished: bool,
+}
+
 /// Collect result of some barrier on current compute node. Will be reported to the meta service in [`LocalBarrierWorker::on_epoch_completed`].
 #[derive(Debug)]
 pub struct BarrierCompleteResult {
@@ -85,10 +94,15 @@ pub struct BarrierCompleteResult {
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
 
     /// The source IDs that have finished listing data for refreshable batch sources.
+    /// @deprecated: Use refresh_progress instead for proper per-actor tracking
     pub list_finished_source_ids: Vec<u32>,
 
     /// The source IDs that have finished loading data for refreshable batch sources.
+    /// @deprecated: Use refresh_progress instead for proper per-actor tracking
     pub load_finished_source_ids: Vec<u32>,
+
+    /// Per-actor refresh progress (list and load completion)
+    pub refresh_progress: Vec<RefreshProgress>,
 
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
 
@@ -633,7 +647,7 @@ mod await_epoch_completed_future {
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
-    use crate::task::{BarrierCompleteResult, PartialGraphId, await_tree_key};
+    use crate::task::{BarrierCompleteResult, PartialGraphId, RefreshProgress, await_tree_key};
 
     pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
         + 'static;
@@ -648,6 +662,7 @@ mod await_epoch_completed_future {
         create_mview_progress: Vec<PbCreateMviewProgress>,
         list_finished_source_ids: Vec<u32>,
         load_finished_source_ids: Vec<u32>,
+        refresh_progress: Vec<RefreshProgress>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         truncate_tables: Vec<u32>,
         refresh_finished_tables: Vec<u32>,
@@ -670,6 +685,7 @@ mod await_epoch_completed_future {
                     create_mview_progress,
                     list_finished_source_ids,
                     load_finished_source_ids,
+                    refresh_progress,
                     cdc_table_backfill_progress,
                     truncate_tables,
                     refresh_finished_tables,
@@ -750,6 +766,7 @@ impl LocalBarrierWorker {
                 create_mview_progress,
                 list_finished_source_ids,
                 load_finished_source_ids,
+                refresh_progress,
                 cdc_table_backfill_progress,
                 truncate_tables,
                 refresh_finished_tables,
@@ -786,6 +803,7 @@ impl LocalBarrierWorker {
                         create_mview_progress,
                         list_finished_source_ids,
                         load_finished_source_ids,
+                        refresh_progress,
                         cdc_table_backfill_progress,
                         truncate_tables,
                         refresh_finished_tables,
@@ -806,6 +824,7 @@ impl LocalBarrierWorker {
             sync_result,
             list_finished_source_ids,
             load_finished_source_ids,
+            refresh_progress,
             cdc_table_backfill_progress,
             truncate_tables,
             refresh_finished_tables,
@@ -871,6 +890,9 @@ impl LocalBarrierWorker {
                         cdc_table_backfill_progress,
                         truncate_tables,
                         refresh_finished_tables,
+                        // TODO: After proto generation, convert refresh_progress to protobuf format
+                        // refresh_progress: refresh_progress.into_iter().map(|p| p.into()).collect(),
+                        refresh_progress: vec![], // Placeholder until proto is generated
                     },
                 )
             }

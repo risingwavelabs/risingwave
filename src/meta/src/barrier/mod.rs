@@ -40,6 +40,7 @@ mod info;
 mod manager;
 mod notifier;
 mod progress;
+mod refresh_progress;
 mod rpc;
 mod schedule;
 #[cfg(test)]

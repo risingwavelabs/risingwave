@@ -55,6 +55,12 @@ message BarrierCompleteResponse {
     // Buffered rows that are yet to be consumed (used by locality backfill to report precise progress)
     uint64 buffered_rows = 6;
   }
+  message RefreshProgress {
+    uint32 actor_id = 1;
+    uint32 associated_source_id = 2;
+    bool list_finished = 3;
+    bool load_finished = 4;
+  }
   message CdcTableBackfillProgress {
     uint32 actor_id = 1;
     uint64 epoch = 2;
@@ -99,6 +105,8 @@ message BarrierCompleteResponse {
   // SourceExecutor reports the source list is finished, and then
   // meta will issue a ListFinish barrier to notify the source to start loading.
   repeated uint32 list_finished_source_ids = 16;
+  // Per-actor refresh progress (list and load completion)
+  repeated RefreshProgress refresh_progress = 17;
 }
 
 message StreamingControlStreamRequest {

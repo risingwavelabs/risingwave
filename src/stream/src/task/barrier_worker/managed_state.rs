@@ -69,6 +69,7 @@ enum ManagedBarrierStateInner {
         create_mview_progress: Vec<PbCreateMviewProgress>,
         list_finished_source_ids: Vec<u32>,
         load_finished_source_ids: Vec<u32>,
+        refresh_progress: Vec<crate::task::barrier_worker::RefreshProgress>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         truncate_tables: Vec<u32>,
         refresh_finished_tables: Vec<u32>,
@@ -321,11 +322,13 @@ pub(crate) struct PartialGraphManagedBarrierState {
 
     /// Record the source list finished reports for each epoch of concurrent checkpoints.
     /// Used for refreshable batch source.
-    pub(crate) list_finished_source_ids: HashMap<u64, HashSet<u32>>,
+    /// Maps: epoch -> (associated_source_id, actor_ids that reported)
+    pub(crate) list_finished_source_ids: HashMap<u64, HashMap<u32, HashSet<ActorId>>>,
 
     /// Record the source load finished reports for each epoch of concurrent checkpoints.
     /// Used for refreshable batch source.
-    pub(crate) load_finished_source_ids: HashMap<u64, HashSet<u32>>,
+    /// Maps: epoch -> (associated_source_id, actor_ids that reported)
+    pub(crate) load_finished_source_ids: HashMap<u64, HashMap<u32, HashSet<ActorId>>>,
 
     pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
 
@@ -1133,7 +1136,9 @@ impl DatabaseManagedBarrierState {
                 .list_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
-                .insert(associated_source_id);
+                .entry(associated_source_id)
+                .or_default()
+                .insert(actor_id);
         } else {
             warn!(
                 ?epoch,
@@ -1159,7 +1164,9 @@ impl DatabaseManagedBarrierState {
                 .load_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
-                .insert(associated_source_id);
+                .entry(associated_source_id)
+                .or_default()
+                .insert(actor_id);
         } else {
             warn!(
                 ?epoch,
@@ -1243,19 +1250,55 @@ impl PartialGraphManagedBarrierState {
                 .map(|(actor, state)| state.to_pb(actor))
                 .collect();
 
-            let list_finished_source_ids = self
+            // Collect per-actor refresh progress
+            let list_finished_map = self
                 .list_finished_source_ids
                 .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
+                .unwrap_or_default();
 
-            let load_finished_source_ids = self
+            let load_finished_map = self
                 .load_finished_source_ids
                 .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
+                .unwrap_or_default();
+
+            // Convert to refresh progress messages
+            let mut refresh_progress = vec![];
+
+            // Actors that finished listing
+            for (source_id, actor_ids) in &list_finished_map {
+                for &actor_id in actor_ids {
+                    refresh_progress.push(crate::task::barrier_worker::RefreshProgress {
+                        actor_id,
+                        associated_source_id: *source_id,
+                        list_finished: true,
+                        load_finished: false,
+                    });
+                }
+            }
+
+            // Actors that finished loading
+            for (source_id, actor_ids) in &load_finished_map {
+                for &actor_id in actor_ids {
+                    // Check if we already have a progress entry for this actor from list phase
+                    if let Some(existing) = refresh_progress
+                        .iter_mut()
+                        .find(|p| p.actor_id == actor_id && p.associated_source_id == *source_id)
+                    {
+                        existing.load_finished = true;
+                    } else {
+                        refresh_progress.push(crate::task::barrier_worker::RefreshProgress {
+                            actor_id,
+                            associated_source_id: *source_id,
+                            list_finished: false,
+                            load_finished: true,
+                        });
+                    }
+                }
+            }
+
+            // For backward compatibility, also collect source IDs (deprecated)
+            let list_finished_source_ids = list_finished_map.keys().copied().collect();
+            let load_finished_source_ids = load_finished_map.keys().copied().collect();
 
             let cdc_table_backfill_progress = self
                 .cdc_table_backfill_progress
@@ -1284,6 +1327,7 @@ impl PartialGraphManagedBarrierState {
                     create_mview_progress,
                     list_finished_source_ids,
                     load_finished_source_ids,
+                    refresh_progress,
                     truncate_tables,
                     refresh_finished_tables,
                     cdc_table_backfill_progress,
@@ -1314,6 +1358,7 @@ impl PartialGraphManagedBarrierState {
             create_mview_progress,
             list_finished_source_ids,
             load_finished_source_ids,
+            refresh_progress,
             cdc_table_backfill_progress,
             truncate_tables,
             refresh_finished_tables,
@@ -1321,11 +1366,12 @@ impl PartialGraphManagedBarrierState {
             create_mview_progress,
             list_finished_source_ids,
             load_finished_source_ids,
+            refresh_progress,
             truncate_tables,
             refresh_finished_tables,
             cdc_table_backfill_progress,
         } => {
-            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, truncate_tables, refresh_finished_tables)
+            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, refresh_progress, cdc_table_backfill_progress, truncate_tables, refresh_finished_tables)
         });
         BarrierToComplete {
             barrier: barrier_state.barrier,
@@ -1333,6 +1379,7 @@ impl PartialGraphManagedBarrierState {
             create_mview_progress,
             list_finished_source_ids,
             load_finished_source_ids,
+            refresh_progress,
             truncate_tables,
             refresh_finished_tables,
             cdc_table_backfill_progress,
@@ -1346,6 +1393,7 @@ pub(crate) struct BarrierToComplete {
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
     pub list_finished_source_ids: Vec<u32>,
     pub load_finished_source_ids: Vec<u32>,
+    pub refresh_progress: Vec<crate::task::barrier_worker::RefreshProgress>,
     pub truncate_tables: Vec<u32>,
     pub refresh_finished_tables: Vec<u32>,
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
