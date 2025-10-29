@@ -722,7 +722,7 @@ impl GlobalStreamManager {
     pub(crate) async fn reschedule_streaming_job(
         &self,
         job_id: u32,
-        target: ReschedulePolicy,
+        policy: ReschedulePolicy,
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
@@ -760,7 +760,7 @@ impl GlobalStreamManager {
 
         let commands = self
             .scale_controller
-            .reschedule_inplace(HashMap::from([(job_id.table_id as _, target)]), workers)
+            .reschedule_inplace(HashMap::from([(job_id.table_id as _, policy)]), workers)
             .await?;
 
         if !deferred {

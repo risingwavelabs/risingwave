@@ -296,10 +296,6 @@ impl ScaleController {
         policy: HashMap<ObjectId, ReschedulePolicy>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        // jobs: HashMap<ObjectId, TargetResourcePolicy>,
-        // workers: BTreeMap<WorkerId, Worker>,
-        // ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, crate::controller::fragment::InflightFragmentInfo >>>>
-
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -347,7 +343,7 @@ impl ScaleController {
                 (
                     id,
                     WorkerInfo {
-                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                         resource_group: worker.resource_group(),
                     },
                 )
@@ -443,7 +439,7 @@ impl ScaleController {
                 (
                     id,
                     WorkerInfo {
-                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                         resource_group: worker.resource_group(),
                     },
                 )
@@ -945,7 +941,7 @@ impl GlobalStreamManager {
                 (
                     worker.id as i32,
                     WorkerInfo {
-                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                         resource_group: worker.resource_group(),
                     },
                 )

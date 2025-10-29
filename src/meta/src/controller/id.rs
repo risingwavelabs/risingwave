@@ -54,7 +54,7 @@ impl<const TYPE: IdCategoryType> IdGenerator<TYPE> {
                 .one(conn)
                 .await?
                 .unwrap_or_default(),
-            _ => unreachable!("IdGeneratorV2 only supports Table and Fragment"),
+            _ => unreachable!("IdGenerator only supports Table and Fragment"),
         };
 
         Ok(Self(AtomicU64::new(id as u64)))
@@ -86,7 +86,7 @@ impl IdGeneratorManager {
         match C {
             IdCategory::Table => self.tables.generate_interval(1),
             IdCategory::Fragment => self.fragments.generate_interval(1),
-            _ => unreachable!("IdGeneratorV2 only supports Table and Fragment"),
+            _ => unreachable!("IdGenerator only supports Table and Fragment"),
         }
     }
 
@@ -94,7 +94,7 @@ impl IdGeneratorManager {
         match C {
             IdCategory::Table => self.tables.generate_interval(interval),
             IdCategory::Fragment => self.fragments.generate_interval(interval),
-            _ => unreachable!("IdGeneratorV2 only supports Table and Fragment"),
+            _ => unreachable!("IdGenerator only supports Table and Fragment"),
         }
     }
 }

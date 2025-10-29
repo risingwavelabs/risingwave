@@ -142,7 +142,7 @@ where
             (
                 worker.id as i32,
                 WorkerInfo {
-                    weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                    parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                     resource_group: worker.resource_group(),
                 },
             )
@@ -169,7 +169,7 @@ pub struct TargetResourcePolicy {
 
 #[derive(Debug, Clone)]
 pub struct WorkerInfo {
-    pub weight: NonZeroUsize,
+    pub parallelism: NonZeroUsize,
     pub resource_group: Option<String>,
 }
 
@@ -510,7 +510,7 @@ fn render_actors(
                     .unwrap_or(DEFAULT_RESOURCE_GROUP)
                     == resource_group.as_str()
                 {
-                    Some((*worker_id, worker.weight))
+                    Some((*worker_id, worker.parallelism))
                 } else {
                     None
                 }
@@ -1221,7 +1221,7 @@ mod tests {
         let worker_map = BTreeMap::from([(
             1,
             WorkerInfo {
-                weight: NonZeroUsize::new(1).unwrap(),
+                parallelism: NonZeroUsize::new(1).unwrap(),
                 resource_group: Some("rg-a".into()),
             },
         )]);
@@ -1317,14 +1317,14 @@ mod tests {
             (
                 1,
                 WorkerInfo {
-                    weight: NonZeroUsize::new(1).unwrap(),
+                    parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-hash".into()),
                 },
             ),
             (
                 2,
                 WorkerInfo {
-                    weight: NonZeroUsize::new(1).unwrap(),
+                    parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-hash".into()),
                 },
             ),
@@ -1437,14 +1437,14 @@ mod tests {
             (
                 1,
                 WorkerInfo {
-                    weight: NonZeroUsize::new(1).unwrap(),
+                    parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-source".into()),
                 },
             ),
             (
                 2,
                 WorkerInfo {
-                    weight: NonZeroUsize::new(1).unwrap(),
+                    parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-source".into()),
                 },
             ),
