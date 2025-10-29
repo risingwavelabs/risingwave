@@ -82,11 +82,75 @@ select '2.5'::jsonb::smallint, '3.5'::jsonb::smallint;
 ----
 2 4
 
-statement error cannot cast jsonb null to type boolean
+query T
 select 'null'::jsonb::bool;
+----
+NULL
 
 query T
 select null::jsonb::bool;
+----
+NULL
+
+query R
+select 'null'::jsonb::double precision;
+----
+NULL
+
+query R
+select '1.0'::jsonb::real;
+----
+1
+
+query T
+select 'null'::jsonb::real;
+----
+NULL
+
+statement error cannot cast jsonb array to type number
+select '[1.0]'::jsonb::real;
+
+query I
+select '12345'::jsonb::smallint;
+----
+12345
+
+query T
+select 'null'::jsonb::smallint;
+----
+NULL
+
+statement error cannot cast jsonb string to type number
+select '"hello"'::jsonb::smallint;
+
+query I
+select '12345'::jsonb::int;
+----
+12345
+
+query T
+select 'null'::jsonb::int;
+----
+NULL
+
+statement error cannot cast jsonb string to type number
+select '"hello"'::jsonb::int;
+
+query I
+select '12345'::jsonb::bigint;
+----
+12345
+
+query T
+select 'null'::jsonb::bigint;
+----
+NULL
+
+statement error cannot cast jsonb string to type number
+select '"hello"'::jsonb::bigint;
+
+query T
+select 'null'::jsonb::decimal;
 ----
 NULL
 
