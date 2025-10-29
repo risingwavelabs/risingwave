@@ -1487,13 +1487,12 @@ script = "./develop/sql_bench/main.py $@"
 
 [tasks.build-sqlsmith-reducer]
 category = "RiseDev - Build"
-description = "Build Rust components"
+description = "Build Sqlsmith Reducer"
 condition = { env_true = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!/usr/bin/env bash
 
 set -e
-echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)sqlsmith-reducer$(tput sgr0)"
 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
@@ -1513,7 +1512,6 @@ alias = "sql-reduce-short"
 [tasks.sql-reduce-short]
 category = "Risedev - Reduce"
 description = "Reduce a failing SQL query while preserving error"
-condition = { env_true = ["ENABLE_BUILD_RUST"] }
 dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
 script = '''
 #!/usr/bin/env bash
@@ -1538,7 +1536,6 @@ echo "Log file: $LOG_FILE"
 [tasks.sql-reduce-full]
 category = "Risedev - Reduce"
 description = "Reduce a failing SQL query while preserving error"
-condition = { env_true = ["ENABLE_BUILD_RUST"] }
 dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
 script = '''
 #!/usr/bin/env bash
