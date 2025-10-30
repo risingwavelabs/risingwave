@@ -31,6 +31,8 @@ pub enum SinkType {
     ForceAppendOnly,
     #[sea_orm(string_value = "UPSERT")]
     Upsert,
+    #[sea_orm(string_value = "RETRACT")]
+    Retract,
 }
 
 impl From<SinkType> for PbSinkType {
@@ -39,6 +41,7 @@ impl From<SinkType> for PbSinkType {
             SinkType::AppendOnly => Self::AppendOnly,
             SinkType::ForceAppendOnly => Self::ForceAppendOnly,
             SinkType::Upsert => Self::Upsert,
+            SinkType::Retract => Self::Retract,
         }
     }
 }
@@ -49,6 +52,7 @@ impl From<PbSinkType> for SinkType {
             PbSinkType::AppendOnly => Self::AppendOnly,
             PbSinkType::ForceAppendOnly => Self::ForceAppendOnly,
             PbSinkType::Upsert => Self::Upsert,
+            PbSinkType::Retract => Self::Retract,
             PbSinkType::Unspecified => unreachable!("Unspecified sink type"),
         }
     }

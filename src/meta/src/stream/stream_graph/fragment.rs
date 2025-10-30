@@ -498,11 +498,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
     // following logic in <StreamSink as Explain>::distill
     sink_node.identity = {
         let sink_type = SinkType::from_proto(sink.sink_type());
-        let sink_type_str = if sink_type.is_append_only() {
-            "append-only"
-        } else {
-            "upsert"
-        };
+        let sink_type_str = sink_type.type_str();
         let column_names = new_sink_columns
             .iter()
             .map(|col| {
@@ -511,7 +507,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
                     .to_string()
             })
             .join(", ");
-        let downstream_pk = if sink_type.is_upsert() {
+        let downstream_pk = if !sink_type.is_append_only() {
             let downstream_pk = sink
                 .downstream_pk
                 .iter()

@@ -28,7 +28,7 @@ use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SINK_TYPE_RETRACT, SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_connector::{WithPropertiesExt, match_sink_name_str};
 use risingwave_pb::expr::expr_node::Type;
@@ -174,16 +174,49 @@ pub struct StreamSink {
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc, log_store_type: SinkLogStoreType) -> Self {
-        let base = input.plan_base().clone_with_new_plan_id();
+        // The sink executor will transform the chunk into desired format based on the sink type
+        // before writing to the sink or emitting to the downstream. Thus, we need to derive the
+        // stream kind based on the sink type.
+        // We assert here because checks should already be done in `derive_sink_type`.
+        let input_kind = input.stream_kind();
+        let kind = match sink_desc.sink_type {
+            SinkType::AppendOnly => {
+                assert_eq!(
+                    input_kind,
+                    StreamKind::AppendOnly,
+                    "{input_kind} stream cannot be used as input of append-only sink",
+                );
+                StreamKind::AppendOnly
+            }
+            SinkType::ForceAppendOnly => StreamKind::AppendOnly,
+            SinkType::Upsert => StreamKind::Upsert,
+            SinkType::Retract => {
+                assert_ne!(
+                    input_kind,
+                    StreamKind::Upsert,
+                    "upsert stream cannot be used as input of retract sink",
+                );
+                StreamKind::Retract
+            }
+        };
 
-        if let SinkType::AppendOnly = sink_desc.sink_type {
-            let kind = input.stream_kind();
-            assert_matches!(
-                kind,
-                StreamKind::AppendOnly,
-                "{kind} stream cannot be used as input of append-only sink",
-            );
-        }
+        let base = PlanBase::new_stream(
+            input.ctx(),
+            input.schema().clone(),
+            // FIXME: We may reconstruct the chunk based on user-specified downstream pk, so
+            // we should also use `downstream_pk` as the stream key of the output. Though this
+            // is unlikely to result in correctness issues:
+            // - for sink-into-table, the `Materialize` node in the downstream table will always
+            //   enforce the pk consistency
+            // - for other sinks, the output of `Sink` node is not used
+            input.stream_key().map(|v| v.to_vec()),
+            input.functional_dependency().clone(),
+            input.distribution().clone(),
+            kind,
+            input.emit_on_window_close(),
+            input.watermark_columns().clone(),
+            input.columns_monotonicity().clone(),
+        );
 
         Self {
             base,
@@ -252,7 +285,7 @@ impl StreamSink {
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
     ) -> Result<Self> {
         let sink_type =
-            Self::derive_sink_type(input.append_only(), &properties, format_desc.as_ref())?;
+            Self::derive_sink_type(input.stream_kind(), &properties, format_desc.as_ref())?;
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
@@ -267,8 +300,7 @@ impl StreamSink {
 
             if let Some(t) = &target_table {
                 let user_defined_primary_key_table = t.row_id_index.is_none();
-                let sink_is_append_only =
-                    sink_type == SinkType::AppendOnly || sink_type == SinkType::ForceAppendOnly;
+                let sink_is_append_only = sink_type.is_append_only();
 
                 if !user_defined_primary_key_table && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
@@ -282,11 +314,10 @@ impl StreamSink {
                     )));
                 }
 
-                if sink_type != SinkType::Upsert {
+                if sink_is_append_only {
                     None
                 } else {
                     let target_table_mapping = target_table_mapping.unwrap();
-
                     Some(t.pk()
                         .iter()
                         .map(|c| {
@@ -553,17 +584,23 @@ impl StreamSink {
 
     fn sink_type_in_prop(properties: &WithOptionsSecResolved) -> Result<Option<SinkType>> {
         if let Some(sink_type) = properties.get(SINK_TYPE_OPTION) {
-            if sink_type == SINK_TYPE_APPEND_ONLY {
-                return Ok(Some(SinkType::AppendOnly));
-            } else if sink_type == SINK_TYPE_DEBEZIUM || sink_type == SINK_TYPE_UPSERT {
-                return Ok(Some(SinkType::Upsert));
-            } else {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "`{}` must be {}, {}, or {}",
-                    SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_UPSERT
-                ))
-                .into());
-            }
+            let sink_type = match sink_type.as_str() {
+                SINK_TYPE_APPEND_ONLY => SinkType::AppendOnly,
+                SINK_TYPE_UPSERT => SinkType::Upsert,
+                SINK_TYPE_RETRACT | SINK_TYPE_DEBEZIUM => SinkType::Retract,
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "`{}` must be {}, {}, {}, or {}",
+                        SINK_TYPE_OPTION,
+                        SINK_TYPE_APPEND_ONLY,
+                        SINK_TYPE_RETRACT,
+                        SINK_TYPE_UPSERT,
+                        SINK_TYPE_DEBEZIUM,
+                    ))
+                    .into());
+                }
+            };
+            return Ok(Some(sink_type));
         }
         Ok(None)
     }
@@ -582,17 +619,22 @@ impl StreamSink {
         Ok(properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true"))
     }
 
+    /// Derive the sink type based on...
+    ///
+    /// - the derived stream kind of the plan, from the optimizer
+    /// - sink format required by [`SinkFormatDesc`], if any
+    /// - user-specified sink type or `force_append_only` in WITH options, if any
     fn derive_sink_type(
-        input_append_only: bool,
+        derived_stream_kind: StreamKind,
         properties: &WithOptionsSecResolved,
         format_desc: Option<&SinkFormatDesc>,
     ) -> Result<SinkType> {
-        let frontend_derived_append_only = input_append_only;
         let (user_defined_sink_type, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 Some(match f.format {
                     SinkFormat::AppendOnly => SinkType::AppendOnly,
-                    SinkFormat::Upsert | SinkFormat::Debezium => SinkType::Upsert,
+                    SinkFormat::Upsert => SinkType::Upsert,
+                    SinkFormat::Debezium => SinkType::Retract,
                 }),
                 Self::is_user_force_append_only(&WithOptionsSecResolved::without_secrets(
                     f.options.clone(),
@@ -616,11 +658,12 @@ impl StreamSink {
             .into());
         }
 
-        let user_force_append_only = if user_force_append_only && frontend_derived_append_only {
-            false
-        } else {
-            user_force_append_only
-        };
+        let user_force_append_only =
+            if user_force_append_only && derived_stream_kind.is_append_only() {
+                false
+            } else {
+                user_force_append_only
+            };
 
         if user_force_append_only && user_defined_sink_type != Some(SinkType::AppendOnly) {
             return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -635,28 +678,42 @@ impl StreamSink {
         }
 
         if let Some(user_defined_sink_type) = user_defined_sink_type {
-            if user_defined_sink_type == SinkType::AppendOnly {
-                if user_force_append_only {
-                    return Ok(SinkType::ForceAppendOnly);
-                }
-                if !frontend_derived_append_only {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
-                                Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
-                        if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
+            match user_defined_sink_type {
+                SinkType::AppendOnly => {
+                    if user_force_append_only {
+                        return Ok(SinkType::ForceAppendOnly);
+                    }
+                    if derived_stream_kind != StreamKind::AppendOnly {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "The sink of {} stream cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
+                             Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
+                            derived_stream_kind,
+                            if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
                     ))
                         .into());
-                } else {
-                    return Ok(SinkType::AppendOnly);
+                    }
+                }
+                SinkType::ForceAppendOnly => unreachable!(),
+                SinkType::Upsert => { /* always qualified */ }
+                SinkType::Retract => {
+                    if derived_stream_kind == StreamKind::Upsert {
+                        bail_invalid_input_syntax!(
+                            "The sink of upsert stream cannot be retract. \
+                             Please create a materialized view or sink-into-table with this query before sinking it.",
+                        );
+                    }
                 }
             }
-
             Ok(user_defined_sink_type)
         } else {
-            match frontend_derived_append_only {
-                true => Ok(SinkType::AppendOnly),
-                false => Ok(SinkType::Upsert),
-            }
+            // No specification at all, follow the optimizer's derivation.
+            // This is also the case for sink-into-table.
+            Ok(match derived_stream_kind {
+                // We downgrade `Retract` to `Upsert` unless explicitly specified the type in options,
+                // as it is well supported by most sinks and reduces the amount of data written.
+                StreamKind::Retract | StreamKind::Upsert => SinkType::Upsert,
+                StreamKind::AppendOnly => SinkType::AppendOnly,
+            })
         }
     }
 
