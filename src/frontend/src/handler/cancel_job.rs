@@ -58,18 +58,23 @@ pub(super) async fn handle_cancel(
     }
 
     let canceled_jobs = if !filtered_job_ids.is_empty() {
-        let cancel_fut = async {
-            session
-                .env()
-                .meta_client()
-                .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
-                    job_ids: filtered_job_ids,
-                }))
-                .await
-                .map_err(Into::into)
-        };
-
-        execute_with_long_running_notification(cancel_fut, &session, "CANCEL JOBS", 30).await?
+        // Wrap in async block to convert RpcError to RwError
+        execute_with_long_running_notification(
+            async {
+                session
+                    .env()
+                    .meta_client()
+                    .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
+                        job_ids: filtered_job_ids,
+                    }))
+                    .await
+                    .map_err(Into::into)
+            },
+            &session,
+            "CANCEL JOBS",
+            30,
+        )
+        .await?
     } else {
         vec![]
     };

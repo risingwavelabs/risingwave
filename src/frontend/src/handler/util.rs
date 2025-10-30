@@ -43,6 +43,8 @@ use risingwave_sqlparser::ast::{
     TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
+use tokio::select;
+use tokio::time::{Duration, sleep};
 
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::ProtocolError;
@@ -344,9 +346,6 @@ pub async fn execute_with_long_running_notification<F, T>(
 where
     F: std::future::Future<Output = RwResult<T>>,
 {
-    use tokio::select;
-    use tokio::time::{Duration, sleep};
-
     let notify_fut = sleep(Duration::from_secs(notify_timeout_secs));
     tokio::pin!(operation_fut);
 
