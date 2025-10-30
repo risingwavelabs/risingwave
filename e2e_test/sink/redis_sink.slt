@@ -42,7 +42,7 @@ FROM
     connector = 'redis',
     redis.url= 'redis://redis-server:6379/',
 )FORMAT PLAIN ENCODE TEMPLATE(
-    redis_value_type ='stream', 
+    redis_value_type ='stream',
     stream = 'test_stream',
     key_format = 'key:{v1}',
     value_format = 'value:{v2}'
