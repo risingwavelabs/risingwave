@@ -108,7 +108,7 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: ScaleControllerRef,
+    _scale_controller: ScaleControllerRef,
 
     pub(super) env: MetaSrvEnv,
 
@@ -133,7 +133,7 @@ impl GlobalBarrierWorkerContextImpl {
             metadata_manager,
             hummock_manager,
             source_manager,
-            scale_controller,
+            _scale_controller: scale_controller,
             env,
             barrier_scheduler,
         }

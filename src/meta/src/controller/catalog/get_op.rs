@@ -17,7 +17,8 @@ use risingwave_meta_model::table::RefreshState;
 
 use super::*;
 use crate::controller::utils::{
-    get_database_resource_group, get_existing_job_resource_group, get_table_columns,
+    StreamingJobExtraInfo, get_database_resource_group, get_existing_job_resource_group,
+    get_streaming_job_extra_info as fetch_streaming_job_extra_info, get_table_columns,
 };
 
 impl CatalogController {
@@ -531,6 +532,22 @@ impl CatalogController {
         Ok(job_id)
     }
 
+    pub async fn list_streaming_job_with_database(
+        &self,
+    ) -> MetaResult<HashMap<DatabaseId, Vec<ObjectId>>> {
+        let inner = self.inner.read().await;
+        let database_objects: Vec<(DatabaseId, ObjectId)> = StreamingJob::find()
+            .select_only()
+            .column(object::Column::DatabaseId)
+            .column(streaming_job::Column::JobId)
+            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(database_objects.into_iter().into_group_map())
+    }
+
     // Output: Vec<(table id, db name, schema name, table name, resource group)>
     pub async fn list_table_objects(
         &self,
@@ -604,5 +621,16 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
         Ok(status)
+    }
+
+    pub async fn get_streaming_job_extra_info(
+        &self,
+        job_ids: Vec<ObjectId>,
+    ) -> MetaResult<HashMap<ObjectId, StreamingJobExtraInfo>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let result = fetch_streaming_job_extra_info(&txn, job_ids).await?;
+        Ok(result)
     }
 }
