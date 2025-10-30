@@ -334,7 +334,6 @@ impl ScaleController {
             streaming_job.update(&txn).await?;
         }
 
-        // update
         let jobs = policy.keys().copied().collect();
 
         let workers = workers
@@ -522,19 +521,6 @@ impl ScaleController {
         if render_result.is_empty() {
             return Ok(HashMap::new());
         }
-
-        // for (db, jobs) in &render_result {
-        //     println!("\tdb: {db}");
-        //     for (job, fragments) in jobs {
-        //         println!("\t\tjob: {job}");
-        //         for (fragment, fragment_info) in fragments {
-        //             println!("\t\t\tfragment: {fragment:?}");
-        //             for (actor, actor_info) in &fragment_info.actors {
-        //                 println!("\t\t\t\tactor: {actor:?}, {actor_info:?}");
-        //             }
-        //         }
-        //     }
-        // }
 
         let job_ids = render_result
             .values()
