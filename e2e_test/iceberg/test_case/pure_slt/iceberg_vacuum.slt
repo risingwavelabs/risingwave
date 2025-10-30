@@ -103,7 +103,6 @@ statement ok
 VACUUM FULL t_vacuum_test;
 
 # Check file types remaining after VACUUM FULL
-# content: 0 = data, 1 = position deletes, 2 = equality deletes
 # After the first VACUUM FULL, we expect 1 data file and 1 equality delete file
 query ??
 select content, count(*) from rw_iceberg_files where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test' group by content order by content;
