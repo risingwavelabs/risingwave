@@ -73,7 +73,7 @@ impl StreamExchange {
                 "distribution key must be a subset of stream key before shuffle to a different distribution\n\
                  - dist_key: {input_dist_key:?}\n\
                  - stream_key: {input_stream_key:?}\n\
-                 - schema: {:?}\n\
+                 - schema: {}\n\
                  - plan:\n{}",
                 input.schema().formatted_col_names(),
                 input.explain_to_string()
