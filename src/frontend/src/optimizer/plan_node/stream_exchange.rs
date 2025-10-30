@@ -47,12 +47,14 @@ impl StreamExchange {
             "exchange can not be used to enforce such distribution"
         );
 
-        // For non-append-only stream, check distribution key is a subset of stream key for input plan.
+        // For non-append-only distributed stream, check that distribution key is a subset of stream key
+        // for input plan.
         //
         // Otherwise, the changes on the same stream key might already be on different parallelism, and
         // merging them with this exchange could break the correct ordering, leading to inconsistent
         // stream or data loss.
         if !input.append_only()
+            && input.distribution() != &Distribution::Single
             && let Some(input_dist_key) = input.distribution().dist_column_indices_opt()
             && let Some(input_stream_key) = input.stream_key()
         {
