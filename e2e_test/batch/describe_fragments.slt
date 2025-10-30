@@ -139,9 +139,7 @@ StreamMaterialize { columns: [name, age, created_at, tbl.id(hidden)], stream_key
 └── MergeExecutor { output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ], stream key: [ tbl.id ] }
 (empty)
 Fragment % (Actor %)
-StreamTableScan { table: tbl, columns: [name, age, created_at, id] }
-├── output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ]
-├── stream key: [ tbl.id ]
+StreamTableScan { table: tbl, columns: [name, age, created_at, id] } { output: [ tbl.name, tbl.age, tbl.created_at, tbl.id ], stream key: [ tbl.id ] }
 ├── Upstream { output: [ name, age, created_at, id ], stream key: [] }
 └── BatchPlanNode { output: [ name, age, created_at, id ], stream key: [] }'
 
