@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
 
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::Op;
 use risingwave_common::gap_fill_types::FillStrategy;
 use risingwave_common::metrics::LabelGuardedIntCounter;
-use risingwave_common::row::{self, CompactedRow, OwnedRow, Row};
+use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{
     CheckedAdd, Datum, Decimal, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
@@ -40,7 +40,7 @@ pub struct GapFillExecutorArgs<S: StateStore> {
     pub schema: Schema,
     pub chunk_size: usize,
     pub time_column_index: usize,
-    pub fill_columns: Vec<(usize, FillStrategy)>,
+    pub fill_columns: HashMap<usize, FillStrategy>,
     pub gap_interval: NonStrictExpression,
     pub state_table: StateTable<S>,
 }
@@ -166,9 +166,8 @@ impl<S: StateStore> ManagedGapFillState<S> {
 
     /// Serialize time value to cache key.
     pub fn serialize_time_to_cache_key(&self, row: impl Row) -> GapFillCacheKey {
-        let time_datum = row.datum_at(self.time_column_index);
-        let time_row = OwnedRow::new(vec![time_datum.to_owned_datum()]);
-        time_row.memcmp_serialize(&self.time_key_serde)
+        row.project(&[self.time_column_index])
+            .memcmp_serialize(&self.time_key_serde)
     }
 
     /// Scans a range of data from `StateStore` to build a window of rows before `end_time`.
@@ -255,19 +254,11 @@ impl<S: StateStore> ManagedGapFillState<S> {
 
     /// Converts a state table row to a `GapFillStateRow`.
     fn get_gapfill_row(&self, state_row: OwnedRow) -> GapFillStateRow {
-        let is_filled = self.extract_is_filled_flag(&state_row);
+        let row_type = self.extract_is_filled(&state_row);
         let output_row = Self::state_row_to_output_row(&state_row);
         let cache_key = self.serialize_time_to_cache_key(&output_row);
 
-        GapFillStateRow::new(
-            cache_key,
-            output_row,
-            if is_filled {
-                RowType::Filled
-            } else {
-                RowType::Original
-            },
-        )
+        GapFillStateRow::new(cache_key, output_row, row_type)
     }
 
     pub async fn flush(
@@ -291,16 +282,29 @@ impl<S: StateStore> ManagedGapFillState<S> {
         OwnedRow::new(output_data)
     }
 
+    /// Extract the `is_filled` flag from a state table row and convert it to `RowType`.
+    fn extract_is_filled(&self, state_row: &OwnedRow) -> RowType {
+        let is_filled = matches!(
+            state_row
+                .datum_at(self.filled_column_index)
+                .and_then(|d| d.to_owned_datum()),
+            Some(ScalarImpl::Bool(true))
+        );
+        if is_filled {
+            RowType::Filled
+        } else {
+            RowType::Original
+        }
+    }
+
     /// Extract the `is_filled` flag from a state table row.
     fn extract_is_filled_flag(&self, state_row: &OwnedRow) -> bool {
-        if let Some(ScalarImpl::Bool(is_filled)) = state_row
-            .datum_at(self.filled_column_index)
-            .and_then(|d| d.to_owned_datum())
-        {
-            is_filled
-        } else {
-            false
-        }
+        matches!(
+            state_row
+                .datum_at(self.filled_column_index)
+                .and_then(|d| d.to_owned_datum()),
+            Some(ScalarImpl::Bool(true))
+        )
     }
 }
 
@@ -338,11 +342,7 @@ impl GapFillCacheManager {
 
     /// Check if the given time is within the current cache window bounds.
     pub fn contains_time(&self, cache_key: &GapFillCacheKey) -> bool {
-        if let Some((earliest, latest)) = &self.window_bounds {
-            cache_key >= earliest && cache_key <= latest
-        } else {
-            false
-        }
+        matches!(&self.window_bounds, Some((earliest, latest)) if cache_key >= earliest && cache_key <= latest)
     }
 
     /// Load a continuous window of data into the cache, replacing all existing data.
@@ -619,7 +619,7 @@ pub struct GapFillExecutor<S: StateStore> {
     schema: Schema,
     chunk_size: usize,
     time_column_index: usize,
-    fill_columns: Vec<(usize, FillStrategy)>,
+    fill_columns: HashMap<usize, FillStrategy>,
     gap_interval: NonStrictExpression,
 
     // State management
@@ -735,7 +735,7 @@ impl<S: StateStore> GapFillExecutor<S> {
     /// - `curr_row`: Reference to the current row (end of the gap).
     /// - `interval`: The interval to use for generating each filled row (typically a time interval).
     /// - `time_column_index`: The index of the time column in the row, used to increment time values.
-    /// - `fill_columns`: A slice of tuples, each containing a column index and a `FillStrategy` specifying how to fill missing values in that column.
+    /// - `fill_columns`: A `HashMap` mapping column indices to their respective `FillStrategy`.
     /// - `metrics`: Metrics for tracking the number of generated rows.
     ///
     /// # Fill Strategy Application
@@ -750,7 +750,7 @@ impl<S: StateStore> GapFillExecutor<S> {
         curr_row: &OwnedRow,
         interval: &risingwave_common::types::Interval,
         time_column_index: usize,
-        fill_columns: &[(usize, FillStrategy)],
+        fill_columns: &HashMap<usize, FillStrategy>,
         metrics: &GapFillMetrics,
     ) -> StreamExecutorResult<Vec<OwnedRow>> {
         let mut filled_rows = Vec::new();
@@ -836,7 +836,7 @@ impl<S: StateStore> GapFillExecutor<S> {
         let mut interpolation_states: Vec<Datum> = Vec::new();
 
         for i in 0..prev_row.len() {
-            if let Some((_, strategy)) = fill_columns.iter().find(|(col, _)| *col == i) {
+            if let Some(strategy) = fill_columns.get(&i) {
                 if matches!(strategy, FillStrategy::Interpolate) {
                     let step = Self::calculate_step(
                         prev_row.datum_at(i).to_owned_datum(),
@@ -873,9 +873,7 @@ impl<S: StateStore> GapFillExecutor<S> {
                         _ => unreachable!("Time column should be Timestamp or Timestamptz"),
                     };
                     Some(fill_time_scalar)
-                } else if let Some((_, strategy)) =
-                    fill_columns.iter().find(|(col, _)| *col == col_idx)
-                {
+                } else if let Some(strategy) = fill_columns.get(&col_idx) {
                     // Apply the fill strategy for this column
                     match strategy {
                         FillStrategy::Locf => prev_row.datum_at(col_idx).to_owned_datum(),
@@ -971,7 +969,8 @@ impl<S: StateStore> GapFillExecutor<S> {
             match msg? {
                 Message::Chunk(chunk) => {
                     let chunk = chunk.compact_vis();
-                    let mut output_rows = Vec::new();
+                    let mut chunk_builder =
+                        StreamChunkBuilder::new(chunk_size, schema.data_types());
 
                     for (op, row_ref) in chunk.rows() {
                         let row = row_ref.to_owned_row();
@@ -1013,7 +1012,11 @@ impl<S: StateStore> GapFillExecutor<S> {
                                             ManagedGapFillState::<S>::state_row_to_output_row(
                                                 &state_row,
                                             );
-                                        output_rows.push((Op::Delete, output_row));
+                                        if let Some(chunk) =
+                                            chunk_builder.append_row(Op::Delete, &output_row)
+                                        {
+                                            yield Message::Chunk(chunk);
+                                        }
                                     }
 
                                     managed_state.batch_delete(state_rows_to_delete);
@@ -1029,7 +1032,9 @@ impl<S: StateStore> GapFillExecutor<S> {
                                     RowType::Original,
                                 );
 
-                                output_rows.push((op, row.clone()));
+                                if let Some(chunk) = chunk_builder.append_row(op, &row) {
+                                    yield Message::Chunk(chunk);
+                                }
 
                                 // Refill gaps adjacent to the new row.
                                 if let Some((_prev_key, prev_row_data)) = prev_original {
@@ -1057,7 +1062,11 @@ impl<S: StateStore> GapFillExecutor<S> {
                                             (&filled_row).into(),
                                             RowType::Filled,
                                         );
-                                        output_rows.push((Op::Insert, filled_row));
+                                        if let Some(chunk) =
+                                            chunk_builder.append_row(Op::Insert, &filled_row)
+                                        {
+                                            yield Message::Chunk(chunk);
+                                        }
                                     }
                                 }
 
@@ -1086,7 +1095,11 @@ impl<S: StateStore> GapFillExecutor<S> {
                                             (&filled_row).into(),
                                             RowType::Filled,
                                         );
-                                        output_rows.push((Op::Insert, filled_row));
+                                        if let Some(chunk) =
+                                            chunk_builder.append_row(Op::Insert, &filled_row)
+                                        {
+                                            yield Message::Chunk(chunk);
+                                        }
                                     }
                                 }
                             }
@@ -1139,7 +1152,11 @@ impl<S: StateStore> GapFillExecutor<S> {
                                         ManagedGapFillState::<S>::state_row_to_output_row(
                                             &state_row,
                                         );
-                                    output_rows.push((Op::Delete, output_row));
+                                    if let Some(chunk) =
+                                        chunk_builder.append_row(Op::Delete, &output_row)
+                                    {
+                                        yield Message::Chunk(chunk);
+                                    }
                                 }
                                 managed_state.batch_delete(state_rows_to_delete);
 
@@ -1148,7 +1165,9 @@ impl<S: StateStore> GapFillExecutor<S> {
                                     ManagedGapFillState::<S>::row_to_state_row(&row, false);
                                 managed_state.delete(&state_row);
                                 cache_manager.remove(&cache_key);
-                                output_rows.push((op, row.clone()));
+                                if let Some(chunk) = chunk_builder.append_row(op, &row) {
+                                    yield Message::Chunk(chunk);
+                                }
 
                                 // If both neighbors exist, refill the gap between them.
                                 if let (Some((_, prev_row_data)), Some((_, next_row_data))) =
@@ -1180,24 +1199,19 @@ impl<S: StateStore> GapFillExecutor<S> {
                                             (&filled_row).into(),
                                             RowType::Filled,
                                         );
-                                        output_rows.push((Op::Insert, filled_row));
+                                        if let Some(chunk) =
+                                            chunk_builder.append_row(Op::Insert, &filled_row)
+                                        {
+                                            yield Message::Chunk(chunk);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
-                    if !output_rows.is_empty() {
-                        let mut chunk_builder =
-                            StreamChunkBuilder::new(chunk_size, schema.data_types());
-                        for (op, row) in output_rows {
-                            if let Some(chunk) = chunk_builder.append_row(op, &row) {
-                                yield Message::Chunk(chunk);
-                            }
-                        }
-                        if let Some(chunk) = chunk_builder.take() {
-                            yield Message::Chunk(chunk);
-                        }
+                    if let Some(chunk) = chunk_builder.take() {
+                        yield Message::Chunk(chunk);
                     }
                 }
                 Message::Watermark(watermark) => {
@@ -1233,7 +1247,7 @@ mod tests {
 
     async fn create_executor(
         store: MemoryStateStore,
-        fill_columns: Vec<(usize, FillStrategy)>,
+        fill_columns: HashMap<usize, FillStrategy>,
         schema: Schema,
         gap_interval: Interval,
     ) -> (MessageSender, BoxedMessageStream) {
@@ -1295,7 +1309,7 @@ mod tests {
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Float64),
         ]);
-        let fill_columns = vec![(1, FillStrategy::Locf), (2, FillStrategy::Locf)];
+        let fill_columns = HashMap::from([(1, FillStrategy::Locf), (2, FillStrategy::Locf)]);
         let (mut tx, mut executor) =
             create_executor(store, fill_columns, schema, Interval::from_minutes(1)).await;
 
@@ -1438,7 +1452,7 @@ mod tests {
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Float64),
         ]);
-        let fill_columns = vec![(1, FillStrategy::Null), (2, FillStrategy::Null)];
+        let fill_columns = HashMap::from([(1, FillStrategy::Null), (2, FillStrategy::Null)]);
         let (mut tx, mut executor) =
             create_executor(store, fill_columns, schema, Interval::from_minutes(1)).await;
 
@@ -1559,10 +1573,10 @@ mod tests {
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Float64),
         ]);
-        let fill_columns = vec![
+        let fill_columns = HashMap::from([
             (1, FillStrategy::Interpolate),
             (2, FillStrategy::Interpolate),
-        ];
+        ]);
         let (mut tx, mut executor) =
             create_executor(store, fill_columns, schema, Interval::from_minutes(1)).await;
 
@@ -1685,7 +1699,7 @@ mod tests {
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Float64),
         ]);
-        let fill_columns = vec![(1, FillStrategy::Locf), (2, FillStrategy::Interpolate)];
+        let fill_columns = HashMap::from([(1, FillStrategy::Locf), (2, FillStrategy::Interpolate)]);
 
         // --- First run ---
         let (mut tx, mut executor) = create_executor(
@@ -1780,12 +1794,12 @@ mod tests {
             Field::unnamed(DataType::Float64),
         ]);
 
-        let fill_columns = vec![
+        let fill_columns = HashMap::from([
             (1, FillStrategy::Interpolate),
             (2, FillStrategy::Locf),
             (3, FillStrategy::Null),
             (4, FillStrategy::Interpolate),
-        ];
+        ]);
         let gap_interval = Interval::from_days(1);
         let (mut tx, mut executor) =
             create_executor(store, fill_columns, schema, gap_interval).await;
