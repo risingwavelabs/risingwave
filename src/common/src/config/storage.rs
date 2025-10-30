@@ -1081,6 +1081,10 @@ pub mod default {
             50 * 1024 // 50GB
         }
 
+        pub fn iceberg_compaction_max_file_group_size_bytes() -> u64 {
+            100 * 1024 * 1024 * 1024 // 100GB
+        }
+
         pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {
             4.0
         }
