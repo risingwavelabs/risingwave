@@ -369,8 +369,7 @@ impl TemplateRedisPubSubStreamKeyEncoder {
                 let pubsub_key = row
                     .datum_at(*pubsub_col)
                     .ok_or_else(|| SinkError::Redis("pubsub_key is null".to_owned()))?
-                    .to_text()
-                    .clone();
+                    .to_text();
                 Ok(TemplateEncoderOutput::RedisPubSubStreamKey(pubsub_key))
             }
         }
