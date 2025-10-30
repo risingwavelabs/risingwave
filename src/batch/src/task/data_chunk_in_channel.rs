@@ -36,7 +36,7 @@ impl DataChunkInChannel {
         let prost_data_chunk = self
             .prost_data_chunk
             .get_or_init(|| async {
-                let res = self.data_chunk.clone().compact();
+                let res = self.data_chunk.clone().compact_vis();
                 res.to_protobuf()
             })
             .await;

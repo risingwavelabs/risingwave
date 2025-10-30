@@ -123,11 +123,15 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
         let secret_refs = sink_desc.get_secret_refs().clone();
-        let downstream_pk = sink_desc
-            .downstream_pk
-            .iter()
-            .map(|i| *i as usize)
-            .collect_vec();
+        let downstream_pk = if sink_desc.downstream_pk.is_empty() {
+            None
+        } else {
+            Some(
+                (sink_desc.downstream_pk.iter())
+                    .map(|idx| *idx as usize)
+                    .collect_vec(),
+            )
+        };
         let columns = sink_desc
             .column_catalogs
             .clone()

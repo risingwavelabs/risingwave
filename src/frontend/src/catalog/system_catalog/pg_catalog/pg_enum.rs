@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The `pg_enum` catalog contains entries showing the values and labels for each enum type.
 /// The internal representation of a given enum value is actually the OID of its associated row in
-/// `pg_enum`. Reference: [`https://www.postgresql.org/docs/current/catalog-pg-enum.html`]
+/// `pg_enum`. Reference: `https://www.postgresql.org/docs/current/catalog-pg-enum.html`
 #[system_catalog(view, "pg_catalog.pg_enum")]
 #[derive(Fields)]
 struct PgEnum {

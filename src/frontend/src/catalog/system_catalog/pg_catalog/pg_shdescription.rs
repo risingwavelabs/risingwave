@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_shdescription` stores optional descriptions (comments) for shared database
-/// objects. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-shdescription.html`]
+/// objects. Ref: `https://www.postgresql.org/docs/current/catalog-pg-shdescription.html`
 #[system_catalog(view, "pg_catalog.pg_shdescription")]
 #[derive(Fields)]
 struct PgShdescription {

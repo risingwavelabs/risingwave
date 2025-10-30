@@ -57,6 +57,26 @@ impl CatalogController {
         Ok(ObjectModel(conn, obj.unwrap()).into())
     }
 
+    pub async fn get_table_catalog_by_name(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        name: &str,
+    ) -> MetaResult<Option<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_obj = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::Name
+                    .eq(name)
+                    .and(object::Column::DatabaseId.eq(database_id))
+                    .and(object::Column::SchemaId.eq(schema_id)),
+            )
+            .one(&inner.db)
+            .await?;
+        Ok(table_obj.map(|(table, obj)| ObjectModel(table, obj.unwrap()).into()))
+    }
+
     pub async fn get_table_by_name(
         &self,
         database_name: &str,
@@ -277,30 +297,26 @@ impl CatalogController {
     pub async fn get_mv_depended_subscriptions(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+    ) -> MetaResult<HashMap<TableId, HashMap<SubscriptionId, u64>>> {
         let inner = self.inner.read().await;
         let select = Subscription::find()
             .select_only()
             .select_column(subscription::Column::SubscriptionId)
             .select_column(subscription::Column::DependentTableId)
-            .select_column(subscription::Column::RetentionSeconds)
-            .select_column(object::Column::DatabaseId)
-            .join(JoinType::InnerJoin, subscription::Relation::Object.def());
+            .select_column(subscription::Column::RetentionSeconds);
         let select = if let Some(database_id) = database_id {
-            select.filter(object::Column::DatabaseId.eq(database_id))
+            select
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .filter(object::Column::DatabaseId.eq(database_id))
         } else {
             select
         };
-        let subscription_objs: Vec<(SubscriptionId, ObjectId, i64, DatabaseId)> =
+        let subscription_objs: Vec<(SubscriptionId, ObjectId, i64)> =
             select.into_tuple().all(&inner.db).await?;
-        let mut map: HashMap<_, HashMap<_, HashMap<_, _>>> = HashMap::new();
+        let mut map: HashMap<_, HashMap<_, _>> = HashMap::new();
         // Write object at the same time we write subscription, so we must be able to get obj
-        for (subscription_id, dependent_table_id, retention_seconds, database_id) in
-            subscription_objs
-        {
-            map.entry(database_id)
-                .or_default()
-                .entry(dependent_table_id)
+        for (subscription_id, dependent_table_id, retention_seconds) in subscription_objs {
+            map.entry(dependent_table_id)
                 .or_default()
                 .insert(subscription_id, retention_seconds as _);
         }

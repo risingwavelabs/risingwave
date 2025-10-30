@@ -46,8 +46,8 @@ pub struct SinkDesc {
     /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
-    /// User-defined primary key indices for upsert sink.
-    pub downstream_pk: Vec<usize>,
+    /// User-defined primary key indices for upsert sink, if any.
+    pub downstream_pk: Option<Vec<usize>>,
 
     /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
@@ -83,7 +83,7 @@ pub struct SinkDesc {
     /// Whether the sink job should run in foreground or background.
     pub create_type: CreateType,
 
-    pub is_exactly_once: bool,
+    pub is_exactly_once: Option<bool>,
 
     pub auto_refresh_schema_from_table: Option<TableId>,
 }
@@ -137,7 +137,8 @@ impl SinkDesc {
                 .map(|column| column.to_protobuf())
                 .collect_vec(),
             plan_pk: self.plan_pk.iter().map(|k| k.to_protobuf()).collect_vec(),
-            downstream_pk: self.downstream_pk.iter().map(|idx| *idx as _).collect_vec(),
+            downstream_pk: (self.downstream_pk.as_ref())
+                .map_or_else(Vec::new, |pk| pk.iter().map(|idx| *idx as _).collect_vec()),
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,

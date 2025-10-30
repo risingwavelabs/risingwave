@@ -302,8 +302,7 @@ impl TemplateRedisGeoKeyEncoder {
         let member = row
             .datum_at(self.member_col)
             .ok_or_else(|| SinkError::Redis("member is null".to_owned()))?
-            .to_text()
-            .clone();
+            .to_text();
         let key = self.key_encoder.encode_cols(row, col_indices)?;
         Ok(TemplateEncoderOutput::RedisGeoKey((key, member)))
     }
@@ -692,7 +691,7 @@ mod tests {
 
         // Create an encoder with the template
         let encoder = TemplateStringEncoder::new(
-            schema.clone(),
+            schema,
             Some(vec![0, 1, 2]), // Include all columns
             complex_template.to_owned(),
         );

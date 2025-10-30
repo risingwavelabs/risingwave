@@ -40,12 +40,6 @@ pub struct StreamFragment {
 
     /// Mark whether this fragment requires exactly one actor.
     pub requires_singleton: bool,
-
-    /// Number of table ids (stateful states) for this fragment.
-    pub table_ids_cnt: u32,
-
-    /// Mark the upstream table ids of this fragment.
-    pub upstream_table_ids: Vec<u32>,
 }
 
 /// An edge between the nodes in the fragment graph.
@@ -67,8 +61,6 @@ impl StreamFragment {
             fragment_type_mask: FragmentTypeMask::empty(),
             requires_singleton: false,
             node: None,
-            table_ids_cnt: 0,
-            upstream_table_ids: vec![],
         }
     }
 
@@ -78,8 +70,6 @@ impl StreamFragment {
             node: self.node.clone().map(|n| *n),
             fragment_type_mask: self.fragment_type_mask.into(),
             requires_singleton: self.requires_singleton,
-            table_ids_cnt: self.table_ids_cnt,
-            upstream_table_ids: self.upstream_table_ids.clone(),
         }
     }
 }

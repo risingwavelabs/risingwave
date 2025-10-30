@@ -278,16 +278,16 @@ impl TryFrom<SinkParam> for RedisSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        if param.downstream_pk.is_empty() {
+        let Some(pk_indices) = param.downstream_pk.clone() else {
             return Err(SinkError::Config(anyhow!(
                 "Redis Sink Primary Key must be specified."
             )));
-        }
+        };
         let config = RedisConfig::from_btreemap(param.properties.clone())?;
         Ok(Self {
             config,
             schema: param.schema(),
-            pk_indices: param.downstream_pk,
+            pk_indices,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,

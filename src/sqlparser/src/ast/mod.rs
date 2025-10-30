@@ -3896,7 +3896,7 @@ impl fmt::Display for AsOf {
             ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
             ProcessTimeWithInterval((value, leading_field)) => write!(
                 f,
-                " FOR SYSTEM_TIME AS OF NOW() - {} {}",
+                " FOR SYSTEM_TIME AS OF NOW() - '{}' {}",
                 value, leading_field
             ),
             TimestampNum(ts) => write!(f, " FOR SYSTEM_TIME AS OF {}", ts),
@@ -3946,7 +3946,7 @@ impl fmt::Display for BackfillOrderStrategy {
                 for (start, end) in map {
                     parts.push(format!("{} -> {}", start, end));
                 }
-                write!(f, "{}", display_comma_separated(&parts))
+                write!(f, "FIXED({})", display_comma_separated(&parts))
             }
         }
     }

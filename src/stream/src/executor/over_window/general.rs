@@ -18,7 +18,6 @@ use std::ops::RangeInclusive;
 
 use delta_btree_map::Change;
 use itertools::Itertools;
-use risingwave_common::array::Op;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::row::RowExt;
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
@@ -33,6 +32,7 @@ use super::frame_finder::merge_rows_frames;
 use super::over_partition::{OverPartition, PartitionDelta};
 use super::range_cache::{CacheKey, PartitionCache};
 use crate::cache::ManagedLruCache;
+use crate::common::change_buffer::ChangeBuffer;
 use crate::common::metrics::MetricsInfo;
 use crate::consistency::consistency_panic;
 use crate::executor::monitor::OverWindowMetrics;
@@ -274,69 +274,11 @@ impl<S: StateStore> OverWindowExecutor<S> {
         this: &'_ ExecutorInner<S>,
         chunk: &'a StreamChunk,
     ) -> impl Iterator<Item = Record<RowRef<'a>>> {
-        let mut changes_merged = BTreeMap::new();
-        for (op, row) in chunk.rows() {
-            let pk = DefaultOrdered(this.get_input_pk(row));
-            match op {
-                Op::Insert | Op::UpdateInsert => {
-                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
-                        match prev_change {
-                            Record::Delete { old_row } => {
-                                *prev_change = Record::Update {
-                                    old_row: *old_row,
-                                    new_row: row,
-                                };
-                            }
-                            _ => {
-                                consistency_panic!(
-                                    ?pk,
-                                    ?row,
-                                    ?prev_change,
-                                    "inconsistent changes in input chunk, double-inserting"
-                                );
-                                if let Record::Update { old_row, .. } = prev_change {
-                                    *prev_change = Record::Update {
-                                        old_row: *old_row,
-                                        new_row: row,
-                                    };
-                                } else {
-                                    *prev_change = Record::Insert { new_row: row };
-                                }
-                            }
-                        }
-                    } else {
-                        changes_merged.insert(pk, Record::Insert { new_row: row });
-                    }
-                }
-                Op::Delete | Op::UpdateDelete => {
-                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
-                        match prev_change {
-                            Record::Insert { .. } => {
-                                changes_merged.remove(&pk);
-                            }
-                            Record::Update {
-                                old_row: real_old_row,
-                                ..
-                            } => {
-                                *prev_change = Record::Delete {
-                                    old_row: *real_old_row,
-                                };
-                            }
-                            _ => {
-                                consistency_panic!(
-                                    ?pk,
-                                    "inconsistent changes in input chunk, double-deleting"
-                                );
-                                *prev_change = Record::Delete { old_row: row };
-                            }
-                        }
-                    } else {
-                        changes_merged.insert(pk, Record::Delete { old_row: row });
-                    }
-                }
-            }
+        let mut cb = ChangeBuffer::with_capacity(chunk.cardinality());
+        for record in chunk.records() {
+            cb.apply_record(record, |row| this.get_input_pk(row));
         }
-        changes_merged.into_values()
+        cb.into_records()
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]

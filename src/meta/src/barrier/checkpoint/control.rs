@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::future::{Future, poll_fn};
 use std::mem::take;
 use std::task::Poll;
@@ -23,7 +23,7 @@ use fail::fail_point;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{SourceId, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -42,16 +42,16 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightStreamingJobInfo, SharedActorInfos};
 use crate::barrier::notifier::Notifier;
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
+use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::rpc::{ControlStreamManager, from_partial_graph_id};
 use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, InflightSubscriptionInfo};
+use crate::barrier::{BarrierKind, Command, CreateStreamingJobType};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::fill_snapshot_backfill_epoch;
+use crate::stream::{SourceChange, fill_snapshot_backfill_epoch};
 use crate::{MetaError, MetaResult};
 
 pub(crate) struct CheckpointControl {
@@ -253,7 +253,7 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 Some((command, notifiers)),
                 checkpoint,
-                span.clone(),
+                span,
                 control_stream_manager,
                 &self.hummock_version_stats,
             )
@@ -277,7 +277,7 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 None,
                 checkpoint,
-                span.clone(),
+                span,
                 control_stream_manager,
                 &self.hummock_version_stats,
             )
@@ -371,25 +371,16 @@ impl CheckpointControl {
 
     pub(crate) fn inflight_infos(
         &self,
-    ) -> impl Iterator<
-        Item = (
-            DatabaseId,
-            &InflightSubscriptionInfo,
-            impl Iterator<Item = TableId> + '_,
-        ),
-    > + '_ {
+    ) -> impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId> + '_)> + '_ {
         self.databases.iter().flat_map(|(database_id, database)| {
-            database
-                .database_state()
-                .map(|(database_state, creating_jobs)| {
-                    (
-                        *database_id,
-                        &database_state.inflight_subscription_info,
-                        creating_jobs
-                            .values()
-                            .filter_map(|job| job.is_consuming().then_some(job.job_id)),
-                    )
-                })
+            database.database_state().map(|(_, creating_jobs)| {
+                (
+                    *database_id,
+                    creating_jobs
+                        .values()
+                        .filter_map(|job| job.is_consuming().then_some(job.job_id)),
+                )
+            })
         })
     }
 }
@@ -818,7 +809,32 @@ impl DatabaseCheckpointControl {
                     .remove(&table_id)
                     .expect("should exist");
                 assert!(creating_streaming_job.is_finished());
-                assert!(epoch_state.finished_jobs.insert(table_id, resps).is_none());
+
+                let mut source_backfill_fragments = HashMap::new();
+                for info in creating_streaming_job.graph_info().fragment_infos() {
+                    if let Some((source_id, upstream_source_fragment_id)) =
+                        info.nodes.find_source_backfill()
+                    {
+                        source_backfill_fragments
+                            .entry(source_id as SourceId)
+                            .or_insert(BTreeSet::new())
+                            .insert((info.fragment_id, upstream_source_fragment_id));
+                    }
+                }
+                let source_change = if !source_backfill_fragments.is_empty() {
+                    Some(SourceChange::CreateJobFinished {
+                        finished_backfill_fragments: source_backfill_fragments,
+                    })
+                } else {
+                    None
+                };
+
+                assert!(
+                    epoch_state
+                        .finished_jobs
+                        .insert(table_id, (resps, source_change))
+                        .is_none()
+                );
             }
         }
         assert!(self.completing_barrier.is_none());
@@ -830,6 +846,22 @@ impl DatabaseCheckpointControl {
                 assert!(node.state.creating_jobs_to_wait.is_empty());
                 assert!(node.state.node_to_collect.is_empty());
 
+                // Process list_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
+                let list_finished_source_ids: Vec<_> = node
+                    .state
+                    .resps
+                    .iter()
+                    .flat_map(|resp| &resp.list_finished_source_ids)
+                    .cloned()
+                    .collect::<HashSet<_>>() // deduplicate
+                    .into_iter()
+                    .collect();
+                if !list_finished_source_ids.is_empty() {
+                    // Add list_finished_source_ids to the task for processing
+                    let task = task.get_or_insert_default();
+                    task.list_finished_source_ids
+                        .extend(list_finished_source_ids);
+                }
                 // Process load_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
                 let load_finished_source_ids: Vec<_> = node
                     .state
@@ -837,6 +869,8 @@ impl DatabaseCheckpointControl {
                     .iter()
                     .flat_map(|resp| &resp.load_finished_source_ids)
                     .cloned()
+                    .collect::<HashSet<_>>() // deduplicate
+                    .into_iter()
                     .collect();
                 if !load_finished_source_ids.is_empty() {
                     // Add load_finished_source_ids to the task for processing
@@ -851,6 +885,8 @@ impl DatabaseCheckpointControl {
                     .iter()
                     .flat_map(|resp| &resp.refresh_finished_tables)
                     .cloned()
+                    .collect::<HashSet<_>>() // deduplicate
+                    .into_iter()
                     .collect();
                 if !refresh_finished_table_ids.is_empty() {
                     // Add refresh_finished_table_ids to the task for processing
@@ -859,7 +895,7 @@ impl DatabaseCheckpointControl {
                         .extend(refresh_finished_table_ids);
                 }
 
-                let mut finished_jobs = self.create_mview_tracker.apply_collected_command(
+                let staging_commit_info = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),
                     &node.command_ctx.barrier_info,
                     &node.state.resps,
@@ -869,7 +905,7 @@ impl DatabaseCheckpointControl {
                     .cdc_table_backfill_tracker
                     .apply_collected_command(&node.state.resps);
                 if !node.command_ctx.barrier_info.kind.is_checkpoint() {
-                    assert!(finished_jobs.is_empty());
+                    assert!(staging_commit_info.is_none());
                     node.notifiers.into_iter().for_each(|notifier| {
                         notifier.notify_collected();
                     });
@@ -884,12 +920,16 @@ impl DatabaseCheckpointControl {
                     }
                     continue;
                 }
+                let mut staging_commit_info =
+                    staging_commit_info.expect("should be Some for checkpoint");
                 node.state
                     .finished_jobs
                     .drain()
-                    .for_each(|(job_id, resps)| {
+                    .for_each(|(job_id, (resps, source_change))| {
                         node.state.resps.extend(resps);
-                        finished_jobs.push(TrackingJob::New(TrackingCommand { job_id }));
+                        staging_commit_info
+                            .finished_jobs
+                            .push(TrackingJob::new(job_id.table_id as _, source_change));
                     });
                 let task = task.get_or_insert_default();
                 node.command_ctx.collect_commit_epoch_info(
@@ -898,7 +938,7 @@ impl DatabaseCheckpointControl {
                     self.collect_backfill_pinned_upstream_log_epoch(),
                 );
                 self.completing_barrier = Some(node.command_ctx.barrier_info.prev_epoch());
-                task.finished_jobs.extend(finished_jobs);
+                task.finished_jobs.extend(staging_commit_info.finished_jobs);
                 task.finished_cdc_table_backfill
                     .extend(finished_cdc_backfill);
                 task.notifiers.extend(node.notifiers);
@@ -908,6 +948,9 @@ impl DatabaseCheckpointControl {
                         (Some((node.command_ctx, node.enqueue_time)), vec![]),
                     )
                     .expect("non duplicate");
+                task.commit_info
+                    .truncate_tables
+                    .extend(staging_commit_info.table_ids_to_truncate);
                 break;
             }
         }
@@ -973,7 +1016,7 @@ struct BarrierEpochState {
 
     creating_jobs_to_wait: HashSet<TableId>,
 
-    finished_jobs: HashMap<TableId, Vec<BarrierCompleteResponse>>,
+    finished_jobs: HashMap<TableId, (Vec<BarrierCompleteResponse>, Option<SourceChange>)>,
 }
 
 impl BarrierEpochState {
@@ -1122,10 +1165,13 @@ impl DatabaseCheckpointControl {
                         edges.as_mut().expect("should exist"),
                     )?;
 
-                    self.state
-                        .inflight_graph_info
-                        .shared_actor_infos
-                        .upsert(self.database_id, job.graph_info().fragment_infos.values());
+                    self.state.inflight_graph_info.shared_actor_infos.upsert(
+                        self.database_id,
+                        job.graph_info()
+                            .fragment_infos
+                            .values()
+                            .map(|fragment| (fragment, job.job_id)),
+                    );
 
                     self.creating_streaming_job_controls.insert(job_id, job);
                 }
@@ -1151,7 +1197,7 @@ impl DatabaseCheckpointControl {
 
         let (
             pre_applied_graph_info,
-            pre_applied_subscription_info,
+            mv_subscription_max_retention,
             table_ids_to_commit,
             jobs_to_wait,
             prev_paused_reason,
@@ -1191,8 +1237,8 @@ impl DatabaseCheckpointControl {
 
         let command_ctx = CommandContext::new(
             barrier_info,
-            pre_applied_subscription_info,
-            table_ids_to_commit.clone(),
+            mv_subscription_max_retention,
+            table_ids_to_commit,
             command,
             span,
         );

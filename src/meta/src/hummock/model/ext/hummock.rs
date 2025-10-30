@@ -107,7 +107,7 @@ impl Transactional<Transaction> for CompactStatus {
 #[async_trait::async_trait]
 impl Transactional<Transaction> for CompactTaskAssignment {
     async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        let task = self.compact_task.to_owned().unwrap();
+        let task = self.compact_task.clone().unwrap();
         let m = compaction_task::ActiveModel {
             id: Set(task.task_id.try_into().unwrap()),
             context_id: Set(self.context_id.try_into().unwrap()),

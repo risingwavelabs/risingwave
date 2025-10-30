@@ -26,8 +26,8 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
     BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
-    LogicalLocalityProvider, LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown,
-    StreamTableScan, ToBatch, ToStream, generic,
+    LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamTableScan, ToBatch,
+    ToStream, generic,
 };
 use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
@@ -324,7 +324,7 @@ impl LogicalScan {
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::TableScan::new(
-            self.required_col_idx().to_vec(),
+            self.required_col_idx().clone(),
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
@@ -342,11 +342,11 @@ impl LogicalScan {
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
-            self.output_col_idx().to_vec(),
+            self.output_col_idx().clone(),
             self.table().clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             predicate,
             self.as_of(),
         )
@@ -359,7 +359,7 @@ impl LogicalScan {
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.predicate().clone(),
             self.as_of(),
         )
@@ -565,52 +565,6 @@ impl LogicalScan {
 
         None
     }
-
-    fn try_better_locality_inner(&self, columns: &[usize]) -> Option<PlanRef> {
-        if !self
-            .core
-            .ctx()
-            .session_ctx()
-            .config()
-            .enable_index_selection()
-        {
-            return None;
-        }
-        if columns.is_empty() {
-            return None;
-        }
-        if self.table_indexes().is_empty() {
-            return None;
-        }
-        let orders = if columns.len() <= 3 {
-            OrderType::all()
-        } else {
-            // Limit the number of order type combinations to avoid explosion.
-            // For more than 3 columns, we only consider ascending nulls last and descending.
-            // Since by default, indexes are created with ascending nulls last.
-            // This is a heuristic to reduce the search space.
-            vec![OrderType::ascending_nulls_last(), OrderType::descending()]
-        };
-        for order_type_combo in columns
-            .iter()
-            .map(|&col| orders.iter().map(move |ot| ColumnOrder::new(col, *ot)))
-            .multi_cartesian_product()
-            .take(256)
-        // limit the number of combinations
-        {
-            let required_order = Order {
-                column_orders: order_type_combo,
-            };
-
-            let order_satisfied_index = self.indexes_satisfy_order(&required_order);
-            for index in order_satisfied_index {
-                if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
-                    return Some(index_scan.into());
-                }
-            }
-        }
-        None
-    }
 }
 
 impl ToBatch for LogicalScan {
@@ -726,12 +680,48 @@ impl ToStream for LogicalScan {
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if let Some(better_plan) = self.try_better_locality_inner(columns) {
-            Some(better_plan)
-        } else if self.ctx().session_ctx().config().enable_locality_backfill() {
-            Some(LogicalLocalityProvider::new(self.clone().into(), columns.to_owned()).into())
-        } else {
-            None
+        if !self
+            .core
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_index_selection()
+        {
+            return None;
         }
+        if columns.is_empty() {
+            return None;
+        }
+        if self.table_indexes().is_empty() {
+            return None;
+        }
+        let orders = if columns.len() <= 3 {
+            OrderType::all()
+        } else {
+            // Limit the number of order type combinations to avoid explosion.
+            // For more than 3 columns, we only consider ascending nulls last and descending.
+            // Since by default, indexes are created with ascending nulls last.
+            // This is a heuristic to reduce the search space.
+            vec![OrderType::ascending_nulls_last(), OrderType::descending()]
+        };
+        for order_type_combo in columns
+            .iter()
+            .map(|&col| orders.iter().map(move |ot| ColumnOrder::new(col, *ot)))
+            .multi_cartesian_product()
+            .take(256)
+        // limit the number of combinations
+        {
+            let required_order = Order {
+                column_orders: order_type_combo,
+            };
+
+            let order_satisfied_index = self.indexes_satisfy_order(&required_order);
+            for index in order_satisfied_index {
+                if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
+                    return Some(index_scan.into());
+                }
+            }
+        }
+        None
     }
 }

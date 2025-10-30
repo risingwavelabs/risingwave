@@ -226,8 +226,7 @@ metrics_level = "Disabled"
 [meta]
 default_parallelism = {default_parallelism}
 "#
-            )
-            .to_owned();
+            );
             file.write_all(config_data.as_bytes())
                 .expect("failed to write config file");
             file.into_temp_path()
@@ -337,6 +336,11 @@ default_parallelism = {default_parallelism}
             per_session_queries: vec![].into(),
             ..Default::default()
         }
+    }
+
+    /// Returns the total number of cores for streaming compute nodes.
+    pub fn total_streaming_cores(&self) -> u32 {
+        (self.compute_nodes * self.compute_node_cores) as u32
     }
 }
 
@@ -665,7 +669,7 @@ impl Cluster {
         let rand_nodes = worker_nodes
             .iter()
             .choose_multiple(&mut rand::rng(), n)
-            .to_vec();
+            .clone();
         Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
 

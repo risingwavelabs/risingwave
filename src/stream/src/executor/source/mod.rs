@@ -48,7 +48,8 @@ mod iceberg_list_executor;
 pub use iceberg_list_executor::*;
 mod iceberg_fetch_executor;
 pub use iceberg_fetch_executor::*;
-
+mod batch_source; // For refreshable batch source executors
+pub use batch_source::*;
 mod source_backfill_state_table;
 pub(crate) use source_backfill_state_table::BackfillStateTableHandler;
 

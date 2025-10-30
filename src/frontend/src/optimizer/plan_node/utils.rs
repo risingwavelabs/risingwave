@@ -38,8 +38,6 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::bail;
-use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{PbAsOf, as_of};
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
@@ -364,6 +362,7 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
+use risingwave_pb::common::{PbBatchQueryEpoch, batch_query_epoch};
 
 pub fn infer_kv_log_store_table_catalog_inner(
     input: &StreamPlanRef,
@@ -480,18 +479,29 @@ pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
         } else {
             false
         }
+    } else if plan.as_stream_locality_provider().is_some() {
+        // Since backfill ordering doesn't support recovery yet, we don't allow
+        // locality provider to be executed in background ddl.
+        false
     } else {
         assert!(!plan.inputs().is_empty());
         plan.inputs().iter().all(plan_can_use_background_ddl)
     }
 }
 
-pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
+pub fn unix_timestamp_sec_to_epoch(ts: i64) -> risingwave_common::util::epoch::Epoch {
+    let ts = ts.checked_add(1).unwrap();
+    risingwave_common::util::epoch::Epoch::from_unix_millis_or_earliest(
+        u64::try_from(ts).unwrap_or(0).checked_mul(1000).unwrap(),
+    )
+}
+
+pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch>> {
     let Some(a) = a else {
         return Ok(None);
     };
     Feature::TimeTravel.check_available()?;
-    let as_of_type = match a {
+    let timestamp = match a {
         AsOf::ProcessTime => {
             return Err(ErrorCode::NotSupported(
                 "do not support as of proctime".to_owned(),
@@ -499,11 +509,11 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
             )
             .into());
         }
-        AsOf::TimestampNum(ts) => AsOfType::Timestamp(as_of::Timestamp { timestamp: *ts }),
+        AsOf::TimestampNum(ts) => *ts,
         AsOf::TimestampString(ts) => {
             let date_time = speedate::DateTime::parse_str_rfc3339(ts)
                 .map_err(|_e| anyhow!("fail to parse timestamp"))?;
-            let timestamp = if date_time.time.tz_offset.is_none() {
+            if date_time.time.tz_offset.is_none() {
                 // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
                 risingwave_expr::expr_context::TIME_ZONE::try_with(|set_time_zone| {
                     let tz =
@@ -526,8 +536,7 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
                 })??
             } else {
                 date_time.timestamp_tz()
-            };
-            AsOfType::Timestamp(as_of::Timestamp { timestamp })
+            }
         }
         AsOf::VersionNum(_) | AsOf::VersionString(_) => {
             return Err(ErrorCode::NotSupported(
@@ -543,15 +552,16 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
             )
             .map_err(|_| anyhow!("fail to parse interval"))?;
             let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;
-            let timestamp = chrono::Utc::now()
+            chrono::Utc::now()
                 .timestamp()
                 .checked_sub(interval_sec)
-                .ok_or_else(|| anyhow!("invalid timestamp"))?;
-            AsOfType::Timestamp(as_of::Timestamp { timestamp })
+                .ok_or_else(|| anyhow!("invalid timestamp"))?
         }
     };
-    Ok(Some(PbAsOf {
-        as_of_type: Some(as_of_type),
+    Ok(Some(PbBatchQueryEpoch {
+        epoch: Some(batch_query_epoch::PbEpoch::TimeTravel(
+            unix_timestamp_sec_to_epoch(timestamp).0,
+        )),
     }))
 }
 

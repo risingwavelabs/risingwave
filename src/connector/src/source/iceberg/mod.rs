@@ -44,7 +44,7 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
 
 pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
-use crate::connector_common::IcebergCommon;
+use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
 use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
@@ -58,6 +58,9 @@ pub const ICEBERG_CONNECTOR: &str = "iceberg";
 pub struct IcebergProperties {
     #[serde(flatten)]
     pub common: IcebergCommon,
+
+    #[serde(flatten)]
+    pub table: IcebergTableIdentifier,
 
     // For jdbc catalog
     #[serde(rename = "catalog.jdbc.user")]
@@ -110,7 +113,9 @@ impl IcebergProperties {
             java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support java_catalog_props for iceberg source
-        self.common.load_table(&java_catalog_props).await
+        self.common
+            .load_table(&self.table, &java_catalog_props)
+            .await
     }
 }
 
@@ -312,8 +317,8 @@ impl IcebergSplitEnumerator {
                     None => {
                         // convert unix time to human-readable time
                         let time = chrono::DateTime::from_timestamp_millis(timestamp);
-                        if time.is_some() {
-                            bail!("Cannot find a snapshot older than {}", time.unwrap());
+                        if let Some(time) = time {
+                            bail!("Cannot find a snapshot older than {}", time);
                         } else {
                             bail!("Cannot find a snapshot");
                         }
@@ -727,7 +732,7 @@ mod tests {
             length,
             start: 0,
             record_count: Some(0),
-            data_file_path: format!("test_{}.parquet", id).to_owned(),
+            data_file_path: format!("test_{}.parquet", id),
             data_file_content: DataContentType::Data,
             data_file_format: iceberg::spec::DataFileFormat::Parquet,
             schema: Arc::new(Schema::builder().build().unwrap()),

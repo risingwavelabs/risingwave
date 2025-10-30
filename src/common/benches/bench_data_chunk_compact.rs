@@ -59,7 +59,7 @@ fn bench_data_chunk_compact(c: &mut Criterion) {
                     ),
                     |b| {
                         b.iter(|| {
-                            let _ = chunk.clone().compact();
+                            let _ = chunk.clone().compact_vis();
                         })
                     },
                 );
