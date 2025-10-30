@@ -23,16 +23,14 @@ use tokio::sync::Notify;
 
 type TaskId = u64;
 
-/// Metadata for a task in the queue.
+/// Task metadata for queue operations.
 ///
-/// The runner (payload) is stored separately in the queue's `HashMap` to allow:
-/// - Tests to create tasks without runners
-/// - Queue operations without moving runner ownership
+/// The actual runner payload is stored separately to support queue operations
+/// without moving ownership, and to allow tests without runner instances.
 #[derive(Debug, Clone)]
 pub struct IcebergTaskMeta {
-    /// Unique task ID assigned by Meta
-    pub task_id: TaskId,
-    /// Parallelism required to execute this task (must be >0 and <= `max_parallelism`)
+    pub task_id: u64,
+    /// Must be in range `1..=max_parallelism`
     pub required_parallelism: u32,
 }
 
@@ -44,50 +42,50 @@ pub struct PoppedIcebergTask {
 
 /// Internal storage for the task queue.
 struct IcebergTaskQueueInner {
-    deque: VecDeque<IcebergTaskMeta>, // FIFO of waiting task metadata
-    id_map: HashMap<TaskId, u32>,     // task_id -> required_parallelism
-    waiting_parallelism_sum: u32,     // sum(required_parallelism) for waiting tasks
-    running_parallelism_sum: u32,     // sum(required_parallelism) for running tasks
-    runners: HashMap<TaskId, IcebergCompactionPlanRunner>, // optional runner payloads
+    /// FIFO queue of waiting task metadata
+    deque: VecDeque<IcebergTaskMeta>,
+    /// Maps `task_id` to `required_parallelism` for tracking
+    id_map: HashMap<TaskId, u32>,
+    /// Sum of `required_parallelism` for all waiting tasks
+    waiting_parallelism_sum: u32,
+    /// Sum of `required_parallelism` for all running tasks
+    running_parallelism_sum: u32,
+    /// Optional runner payloads indexed by `task_id`
+    runners: HashMap<TaskId, IcebergCompactionPlanRunner>,
 }
 
-/// Pure FIFO task queue with parallelism-aware scheduling.
+/// FIFO task queue with parallelism-based scheduling for Iceberg compaction.
 ///
-/// This queue provides simple, reliable task scheduling with:
-/// - **FIFO ordering**: Tasks execute in submission order
-/// - **Parallelism control**: Tasks wait if insufficient parallelism available
-/// - **Capacity limiting**: Prevents unbounded queue growth via `pending_parallelism_budget`
+/// Tasks execute in submission order when sufficient parallelism is available.
+/// The queue tracks waiting and running tasks to prevent over-commitment of resources.
 ///
-/// # Design Philosophy
+/// Constraints:
+/// - Each task requires `1..=max_parallelism` units
+/// - Total waiting parallelism cannot exceed `pending_parallelism_budget`
+/// - Total running parallelism cannot exceed `max_parallelism`
+/// - Tasks block until enough parallelism is available
 ///
-/// **Simplicity over cleverness**: No deduplication, no replacement, no reordering.
-/// Task management (dedup, merging) is Meta's responsibility. The queue only:
-/// 1. Accepts tasks
-/// 2. Schedules in FIFO order
-/// 3. Controls parallelism
-/// 4. Releases resources on completion
-///
-/// # Invariants
-///
-/// - `waiting_parallelism_sum = Σ required_parallelism(waiting tasks)`
-/// - `running_parallelism_sum = Σ required_parallelism(running tasks)`
-/// - `waiting_parallelism_sum ≤ pending_parallelism_budget`
+/// Note: The queue does NOT deduplicate or reorder tasks. Task management
+/// (deduplication, merging, cancellation) is Meta's responsibility.
 pub struct IcebergTaskQueue {
     inner: IcebergTaskQueueInner,
-    /// Maximum parallelism that a single task may require
+    /// Maximum concurrent parallelism for running tasks
     max_parallelism: u32,
-    /// Budget for `sum(required_parallelism)` of waiting tasks
+    /// Maximum total parallelism for waiting tasks (backpressure limit)
     pending_parallelism_budget: u32,
-    /// Notification for when tasks become schedulable
+    /// Optional notification for event-driven scheduling
     schedule_notify: Option<Arc<Notify>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum PushResult {
     Added,
-    RejectedCapacity,           // waiting parallelism budget exceeded
-    RejectedTooLarge,           // required_parallelism > max_parallelism
-    RejectedInvalidParallelism, // required_parallelism == 0
+    /// Would exceed `pending_parallelism_budget`
+    RejectedCapacity,
+    /// `required_parallelism` > `max_parallelism`
+    RejectedTooLarge,
+    /// `required_parallelism` == 0
+    RejectedInvalidParallelism,
 }
 
 impl IcebergTaskQueue {
@@ -169,11 +167,7 @@ impl IcebergTaskQueue {
 
     /// Push a task into the queue.
     ///
-    /// Validates and adds task to FIFO queue. Returns:
-    /// - `Added`: Successfully enqueued
-    /// - `RejectedInvalidParallelism`: `required_parallelism == 0`
-    /// - `RejectedTooLarge`: `required_parallelism > max_parallelism`
-    /// - `RejectedCapacity`: Would exceed `pending_parallelism_budget`
+    /// The task is validated and added to the end of the FIFO queue if constraints are met.
     pub fn push(
         &mut self,
         meta: IcebergTaskMeta,
@@ -205,7 +199,10 @@ impl IcebergTaskQueue {
         PushResult::Added
     }
 
-    /// Pop the head task if it fits available parallelism.
+    /// Pop the next task if sufficient parallelism is available.
+    ///
+    /// Returns `None` if the queue is empty or the front task cannot fit
+    /// within the available parallelism budget.
     pub fn pop(&mut self) -> Option<PoppedIcebergTask> {
         let front = self.inner.deque.front()?;
         if front.required_parallelism > self.available_parallelism() {
@@ -226,7 +223,9 @@ impl IcebergTaskQueue {
         Some(PoppedIcebergTask { meta, runner })
     }
 
-    /// Mark a task as finished, freeing its parallelism.
+    /// Mark a task as finished, freeing its parallelism for other tasks.
+    ///
+    /// Returns `true` if the task was found and removed, `false` otherwise.
     pub fn finish_running(&mut self, task_id: TaskId) -> bool {
         let Some(required) = self.inner.id_map.remove(&task_id) else {
             return false;
