@@ -67,7 +67,6 @@ pub async fn handle_drop_subscription(
         catalog_writer.drop_subscription(subscription_id.subscription_id, cascade),
         &session,
         "DROP SUBSCRIPTION",
-        30,
     )
     .await?;
 

@@ -62,7 +62,6 @@ pub async fn handle_drop_view(
         catalog_writer.drop_view(view_id, cascade),
         &session,
         "DROP VIEW",
-        30,
     )
     .await?;
 

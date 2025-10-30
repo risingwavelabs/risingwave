@@ -78,7 +78,6 @@ pub async fn handle_drop_mv(
         catalog_writer.drop_materialized_view(table_id, cascade),
         &session,
         "DROP MATERIALIZED VIEW",
-        30,
     )
     .await?;
 

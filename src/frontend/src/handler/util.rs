@@ -322,11 +322,12 @@ pub fn get_table_catalog_by_table_name(
 /// Execute an async operation with a notification if it takes too long.
 /// This is useful for operations that might be delayed due to high barrier latency.
 ///
+/// The notification timeout duration is controlled by the `ddl_notification_timeout_secs` session variable.
+///
 /// # Arguments
 /// * `operation_fut` - The async operation to execute
 /// * `session` - The session to send notifications to
 /// * `operation_name` - The name of the operation for the notification message (e.g., "DROP TABLE")
-/// * `notify_timeout_secs` - Number of seconds to wait before sending a notification
 ///
 /// # Example
 /// ```ignore
@@ -334,19 +335,24 @@ pub fn get_table_catalog_by_table_name(
 ///     catalog_writer.drop_table(source_id, table_id, cascade),
 ///     &session,
 ///     "DROP TABLE",
-///     30,
 /// ).await?;
 /// ```
 pub async fn execute_with_long_running_notification<F, T>(
     operation_fut: F,
     session: &SessionImpl,
     operation_name: &str,
-    notify_timeout_secs: u64,
 ) -> RwResult<T>
 where
     F: std::future::Future<Output = RwResult<T>>,
 {
-    let notify_fut = sleep(Duration::from_secs(notify_timeout_secs));
+    let notify_timeout_secs = session.config().ddl_notification_timeout_secs();
+    
+    // If timeout is 0, disable notifications and just execute the operation
+    if notify_timeout_secs == 0 {
+        return operation_fut.await;
+    }
+
+    let notify_fut = sleep(Duration::from_secs(notify_timeout_secs as u64));
     tokio::pin!(operation_fut);
 
     select! {

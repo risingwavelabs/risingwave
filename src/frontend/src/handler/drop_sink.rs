@@ -63,7 +63,6 @@ pub async fn handle_drop_sink(
         catalog_writer.drop_sink(sink_id.sink_id, cascade),
         &session,
         "DROP SINK",
-        30,
     )
     .await?;
 

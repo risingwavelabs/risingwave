@@ -106,7 +106,6 @@ pub async fn handle_drop_index(
             catalog_writer.drop_index(index_id, cascade),
             &session,
             "DROP INDEX",
-            30,
         )
         .await?;
     }

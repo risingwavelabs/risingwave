@@ -72,7 +72,6 @@ pub(super) async fn handle_cancel(
             },
             &session,
             "CANCEL JOBS",
-            30,
         )
         .await?
     } else {

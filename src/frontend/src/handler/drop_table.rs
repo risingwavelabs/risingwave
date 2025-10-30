@@ -181,7 +181,6 @@ pub async fn handle_drop_table(
         catalog_writer.drop_table(source_id.map(|id| id.table_id), table_id, cascade),
         &session,
         "DROP TABLE",
-        30,
     )
     .await?;
 

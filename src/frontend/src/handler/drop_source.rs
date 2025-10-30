@@ -75,7 +75,6 @@ pub async fn handle_drop_source(
         catalog_writer.drop_source(source.id, cascade),
         &session,
         "DROP SOURCE",
-        30,
     )
     .await?;
 
