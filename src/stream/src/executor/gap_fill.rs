@@ -886,13 +886,14 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 Self::apply_step(&mut interpolation_states[col_idx], step);
                                 interpolation_states[col_idx].clone()
                             } else {
-                                prev_row.datum_at(col_idx).to_owned_datum()
+                                // If interpolation step is None, fill with NULL
+                                None
                             }
                         }
                     }
                 } else {
-                    // No strategy specified, use the value from previous row
-                    prev_row.datum_at(col_idx).to_owned_datum()
+                    // No strategy specified, default to NULL
+                    None
                 };
                 new_row_data.push(datum);
             }
