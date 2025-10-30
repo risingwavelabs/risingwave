@@ -360,7 +360,8 @@ where
             session.notice_to_user(format!(
                 "{} has taken more than {} secs, likely due to high barrier latency.\n\
                 You may trigger cluster recovery to let {} take effect immediately.\n\
-                Run RECOVER in a separate session to trigger recovery.",
+                Run RECOVER in a separate session to trigger recovery.\n\
+                See: https://docs.risingwave.com/sql/commands/sql-recover#recover",
                 operation_name, notify_timeout_secs, operation_name
             ));
             operation_fut.await
