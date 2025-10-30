@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::array::Op;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
@@ -40,7 +42,7 @@ pub struct EowcGapFillExecutorArgs<S: StateStore> {
     pub prev_row_table: StateTable<S>,
     pub chunk_size: usize,
     pub time_column_index: usize,
-    pub fill_columns: Vec<(usize, FillStrategy)>,
+    pub fill_columns: HashMap<usize, FillStrategy>,
     pub gap_interval: NonStrictExpression,
 }
 
@@ -56,7 +58,7 @@ struct ExecutorInner<S: StateStore> {
     prev_row_table: StateTable<S>,
     chunk_size: usize,
     time_column_index: usize,
-    fill_columns: Vec<(usize, FillStrategy)>,
+    fill_columns: HashMap<usize, FillStrategy>,
     gap_interval: NonStrictExpression,
 
     // Metrics
@@ -116,7 +118,7 @@ impl<S: StateStore> ExecutorInner<S> {
         prev_row: &OwnedRow,
         curr_row: &OwnedRow,
         time_column_index: usize,
-        fill_columns: &[(usize, FillStrategy)],
+        fill_columns: &HashMap<usize, FillStrategy>,
         interval: risingwave_common::types::Interval,
         metrics: &GapFillMetrics,
     ) -> Result<Vec<OwnedRow>, ExprError> {
@@ -197,7 +199,7 @@ impl<S: StateStore> ExecutorInner<S> {
         let mut interpolation_states: Vec<Datum> = Vec::new();
 
         for i in 0..prev_row.len() {
-            if let Some((_, strategy)) = fill_columns.iter().find(|(col, _)| *col == i) {
+            if let Some(strategy) = fill_columns.get(&i) {
                 if matches!(strategy, FillStrategy::Interpolate) {
                     let step = Self::calculate_step(
                         prev_row.datum_at(i),
@@ -234,9 +236,7 @@ impl<S: StateStore> ExecutorInner<S> {
                         _ => unreachable!("Time column should be Timestamp or Timestamptz"),
                     };
                     Some(fill_time_scalar)
-                } else if let Some((_, strategy)) =
-                    fill_columns.iter().find(|(col, _)| *col == col_idx)
-                {
+                } else if let Some(strategy) = fill_columns.get(&col_idx) {
                     // Apply the fill strategy for this column
                     match strategy {
                         FillStrategy::Locf => prev_row.datum_at(col_idx).to_owned_datum(),
@@ -450,7 +450,7 @@ mod tests {
 
     async fn create_executor<S: StateStore>(
         time_column_index: usize,
-        fill_columns: Vec<(usize, FillStrategy)>,
+        fill_columns: HashMap<usize, FillStrategy>,
         gap_interval: NonStrictExpression,
         store: S,
     ) -> (MessageSender, BoxedMessageStream) {
@@ -524,12 +524,12 @@ mod tests {
     async fn test_gap_fill_interpolate() {
         let time_column_index = 0;
         let gap_interval = Interval::from_days(1);
-        let fill_columns = vec![
+        let fill_columns = HashMap::from([
             (1, FillStrategy::Interpolate),
             (2, FillStrategy::Interpolate),
             (3, FillStrategy::Interpolate),
             (4, FillStrategy::Interpolate),
-        ];
+        ]);
         let store = MemoryStateStore::new();
         let (mut tx, mut gap_fill_executor) = create_executor(
             time_column_index,
@@ -591,12 +591,12 @@ mod tests {
     async fn test_gap_fill_locf() {
         let time_column_index = 0;
         let gap_interval = Interval::from_days(1);
-        let fill_columns = vec![
+        let fill_columns = HashMap::from([
             (1, FillStrategy::Locf),
             (2, FillStrategy::Locf),
             (3, FillStrategy::Locf),
             (4, FillStrategy::Locf),
-        ];
+        ]);
         let store = MemoryStateStore::new();
         let (mut tx, mut gap_fill_executor) = create_executor(
             time_column_index,
@@ -658,12 +658,12 @@ mod tests {
     async fn test_gap_fill_null() {
         let time_column_index = 0;
         let gap_interval = Interval::from_days(1);
-        let fill_columns = vec![
+        let fill_columns = HashMap::from([
             (1, FillStrategy::Null),
             (2, FillStrategy::Null),
             (3, FillStrategy::Null),
             (4, FillStrategy::Null),
-        ];
+        ]);
         let store = MemoryStateStore::new();
         let (mut tx, mut gap_fill_executor) = create_executor(
             time_column_index,
@@ -725,12 +725,12 @@ mod tests {
     async fn test_gap_fill_mixed_strategy() {
         let time_column_index = 0;
         let gap_interval = Interval::from_days(1);
-        let fill_columns = vec![
+        let fill_columns = HashMap::from([
             (1, FillStrategy::Interpolate),
             (2, FillStrategy::Locf),
             (3, FillStrategy::Null),
             (4, FillStrategy::Interpolate),
-        ];
+        ]);
         let store = MemoryStateStore::new();
         let (mut tx, mut gap_fill_executor) = create_executor(
             time_column_index,
@@ -792,12 +792,12 @@ mod tests {
     async fn test_gap_fill_fail_over() {
         let time_column_index = 0;
         let gap_interval = Interval::from_days(1);
-        let fill_columns = vec![
+        let fill_columns = HashMap::from([
             (1, FillStrategy::Locf),
             (2, FillStrategy::Interpolate),
             (3, FillStrategy::Locf),
             (4, FillStrategy::Locf),
-        ];
+        ]);
         let store = MemoryStateStore::new();
         let (mut tx, mut gap_fill_executor) = create_executor(
             time_column_index,
