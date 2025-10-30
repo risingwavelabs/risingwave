@@ -21,6 +21,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
+use risingwave_common::config::HbaEntry;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -29,6 +30,7 @@ use serde::Deserialize;
 use thiserror_ext::AsReport;
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::ldap_auth::LdapAuthenticator;
 use crate::net::{AddressRef, Listener, TcpKeepalive};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
@@ -175,6 +177,7 @@ pub enum UserAuthenticator {
         salt: [u8; 4],
     },
     OAuth(HashMap<String, String>),
+    Ldap(String, HbaEntry),
 }
 
 /// A JWK Set is a JSON object that represents a set of JWKs.
@@ -253,6 +256,12 @@ impl UserAuthenticator {
                 )
                 .await
                 .map_err(PsqlError::StartupError)?
+            }
+            UserAuthenticator::Ldap(user_name, hba_entry) => {
+                let ldap_auth = LdapAuthenticator::new(hba_entry)?;
+                // Convert password to string, defaulting to empty if not valid UTF-8
+                let password_str = String::from_utf8_lossy(password).into_owned();
+                ldap_auth.authenticate(user_name, &password_str).await?
             }
         };
         if !success {

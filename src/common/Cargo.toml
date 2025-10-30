@@ -50,6 +50,7 @@ hashbrown0_14 = { workspace = true }
 hex = "0.4.3"
 http = "1"
 humantime = "2.3"
+ipnet = "2.9"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
