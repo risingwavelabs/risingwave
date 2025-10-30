@@ -317,6 +317,55 @@ pub fn get_table_catalog_by_table_name(
     Ok((table.clone(), schema_name.to_owned()))
 }
 
+/// Execute an async operation with a notification if it takes too long.
+/// This is useful for operations that might be delayed due to high barrier latency.
+///
+/// # Arguments
+/// * `operation_fut` - The async operation to execute
+/// * `session` - The session to send notifications to
+/// * `operation_name` - The name of the operation for the notification message (e.g., "DROP TABLE")
+/// * `notify_timeout_secs` - Number of seconds to wait before sending a notification
+///
+/// # Example
+/// ```ignore
+/// execute_with_long_running_notification(
+///     catalog_writer.drop_table(source_id, table_id, cascade),
+///     &session,
+///     "DROP TABLE",
+///     30,
+/// ).await?;
+/// ```
+pub async fn execute_with_long_running_notification<F, T>(
+    operation_fut: F,
+    session: &SessionImpl,
+    operation_name: &str,
+    notify_timeout_secs: u64,
+) -> RwResult<T>
+where
+    F: std::future::Future<Output = RwResult<T>>,
+{
+    use tokio::select;
+    use tokio::time::{Duration, sleep};
+
+    let notify_fut = sleep(Duration::from_secs(notify_timeout_secs));
+    tokio::pin!(operation_fut);
+
+    select! {
+        _ = notify_fut => {
+            session.notice_to_user(format!(
+                "{} has taken more than {} secs, likely due to high barrier latency.\n\
+                You may trigger cluster recovery to let {} take effect immediately.\n\
+                Run RECOVER in a separate session to trigger recovery.",
+                operation_name, notify_timeout_secs, operation_name
+            ));
+            operation_fut.await
+        }
+        result = &mut operation_fut => {
+            result
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use postgres_types::{ToSql, Type};

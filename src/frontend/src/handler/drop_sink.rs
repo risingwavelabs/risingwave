@@ -16,6 +16,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
+use super::util::execute_with_long_running_notification;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
@@ -58,7 +59,13 @@ pub async fn handle_drop_sink(
     let sink_id = sink.id;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_sink(sink_id.sink_id, cascade).await?;
+    execute_with_long_running_notification(
+        catalog_writer.drop_sink(sink_id.sink_id, cascade),
+        &session,
+        "DROP SINK",
+        30,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }
