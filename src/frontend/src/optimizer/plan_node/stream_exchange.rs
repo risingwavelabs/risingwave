@@ -25,6 +25,7 @@ use super::utils::{Distill, childless_record, plan_node_name};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::Explain as _;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::LOCAL_PHASE_VNODE_COLUMN_NAME;
 use crate::optimizer::property::{
     Distribution, DistributionDisplay, MonotonicityMap, RequiredDist,
 };
@@ -53,10 +54,17 @@ impl StreamExchange {
         // Otherwise, the changes on the same stream key might already be on different parallelism, and
         // merging them with this exchange could break the correct ordering, leading to inconsistent
         // stream or data loss.
+        //
+        // An exception is two-phase aggregation or top-n, where we used the `rw_vnode(dist_key)` as the
+        // group key (thus stream key). In this case, changes on the same stream key (then vnode value)
+        // must be on the same parallelism based on our scheduling algorithm, thus it's safe to shuffle.
         if !input.append_only()
             && input.distribution() != &Distribution::Single
             && let Some(input_dist_key) = input.distribution().dist_column_indices_opt()
             && let Some(input_stream_key) = input.stream_key()
+            && input_stream_key
+                .iter()
+                .all(|k| input.schema()[*k].name != LOCAL_PHASE_VNODE_COLUMN_NAME)
         {
             assert!(
                 input_dist_key
@@ -65,7 +73,9 @@ impl StreamExchange {
                 "distribution key must be a subset of stream key before shuffle to a different distribution\n\
                  - dist_key: {input_dist_key:?}\n\
                  - stream_key: {input_stream_key:?}\n\
+                 - schema: {:?}\n\
                  - plan:\n{}",
+                input.schema().formatted_col_names(),
                 input.explain_to_string()
             );
         }
