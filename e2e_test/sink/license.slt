@@ -104,7 +104,7 @@ statement error
 CREATE SINK redis_sink
 FROM
     t WITH (
-    primary_key = 'v1',
+    primary_key = 'k',
     connector = 'redis',
     redis.url= 'redis://127.0.0.1:6379/',
 )FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true',stream='aaa', key_format = 'key_is:{k}', redis_value_type ='stream', value_format = 'jafk:{k}_');
