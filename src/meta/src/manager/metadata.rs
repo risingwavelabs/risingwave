@@ -53,7 +53,6 @@ pub struct MetadataManager {
 #[derive(Debug)]
 pub(crate) enum ActiveStreamingWorkerChange {
     Add(WorkerNode),
-    #[expect(dead_code)]
     Remove(WorkerNode),
     Update(WorkerNode),
 }
@@ -377,7 +376,7 @@ impl MetadataManager {
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
         let jobs = self
             .catalog_controller
-            .list_background_creating_jobs(false)
+            .list_background_creating_jobs(false, None)
             .await?;
 
         Ok(jobs

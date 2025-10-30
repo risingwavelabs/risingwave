@@ -181,7 +181,7 @@ itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { version = "0.2.2", features = ["float_roundtrip"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
-lru = "0.14"
+lru = "0.16"
 madsim = "0.2.34"
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = ["native-tls-tls", "rust_decimal"] }
@@ -204,7 +204,7 @@ rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
     "cmake-build",
 ] }
 redis = { version = "0.32" }
-regex = "1.11"
+regex = "1.12"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }

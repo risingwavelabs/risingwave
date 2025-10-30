@@ -68,11 +68,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         job_id: TableId,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
-    async fn new_control_stream(
-        &self,
-        node: &WorkerNode,
-        init_request: &PbInitRequest,
-    ) -> MetaResult<StreamingControlHandle>;
+    fn new_control_stream<'a>(
+        &'a self,
+        node: &'a WorkerNode,
+        init_request: &'a PbInitRequest,
+    ) -> impl Future<Output = MetaResult<StreamingControlHandle>> + Send + 'a;
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;
 
