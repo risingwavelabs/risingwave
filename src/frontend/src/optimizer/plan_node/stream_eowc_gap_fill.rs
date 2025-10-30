@@ -151,7 +151,7 @@ impl StreamNode for StreamEowcGapFill {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
-        NodeBody::EowcGapFill(EowcGapFillNode {
+        NodeBody::EowcGapFill(Box::new(EowcGapFillNode {
             time_column_index: self.time_col().index() as u32,
             interval: Some(self.interval().to_expr_proto()),
             fill_columns: self
@@ -162,7 +162,7 @@ impl StreamNode for StreamEowcGapFill {
             fill_strategies,
             buffer_table: Some(buffer_table),
             prev_row_table: Some(prev_row_table),
-        })
+        }))
     }
 }
 

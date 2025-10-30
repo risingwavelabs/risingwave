@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -63,7 +64,7 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
             })
             .collect::<anyhow::Result<_>>()?;
 
-        let fill_columns_with_strategies: Vec<(usize, FillStrategy)> =
+        let fill_columns_with_strategies: HashMap<usize, FillStrategy> =
             fill_columns.into_iter().zip_eq(fill_strategies).collect();
 
         let vnodes = params.vnode_bitmap.map(Arc::new);
