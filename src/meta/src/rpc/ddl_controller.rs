@@ -1138,6 +1138,12 @@ impl DdlController {
             .drop_object(object_type, object_id, drop_mode)
             .await?;
 
+        if object_type == ObjectType::Source {
+            self.env
+                .notification_manager_ref()
+                .notify_local_subscribers(LocalNotification::SourceDropped(object_id));
+        }
+
         let ReleaseContext {
             database_id,
             removed_streaming_job_ids,
