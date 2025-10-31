@@ -98,6 +98,8 @@ pub struct TableCatalog {
     pub pk: Vec<ColumnOrder>,
 
     /// `pk_indices` of the corresponding materialize operator's output.
+    /// For the backward compatibility, we should use `stream_key()` method to get the stream key.
+    /// never use this field directly.
     pub stream_key: Vec<usize>,
 
     /// Type of the table. Used to distinguish user-created tables, materialized views, index
@@ -452,6 +454,29 @@ impl TableCatalog {
             .collect()
     }
 
+    /// Derive the stream key, which must include all distribution keys.
+    /// For backward compatibility, if distribution key is not in stream key(e.g. indexes created in old versions),
+    /// we need to add them to stream key.
+    pub fn stream_key(&self) -> Vec<usize> {
+        // if distribution key is not in stream key, we need to add them to stream key
+        if self
+            .distribution_key
+            .iter()
+            .any(|dist_key| !self.stream_key.contains(dist_key))
+        {
+            let mut new_stream_key = self.distribution_key.clone();
+            let mut seen: HashSet<usize> = self.distribution_key.iter().copied().collect();
+            for &key in &self.stream_key {
+                if seen.insert(key) {
+                    new_stream_key.push(key);
+                }
+            }
+            new_stream_key
+        } else {
+            self.stream_key.clone()
+        }
+    }
+
     /// Get a [`TableDesc`] of the table.
     ///
     /// Note: this must be called on existing tables, otherwise it will fail to get the vnode count
@@ -464,7 +489,7 @@ impl TableCatalog {
         TableDesc {
             table_id: self.id,
             pk: self.pk.clone(),
-            stream_key: self.stream_key.clone(),
+            stream_key: self.stream_key(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             append_only: self.append_only,
@@ -553,7 +578,7 @@ impl TableCatalog {
                 .map(|c| c.to_protobuf())
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
-            stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
+            stream_key: self.stream_key().iter().map(|x| *x as _).collect(),
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),

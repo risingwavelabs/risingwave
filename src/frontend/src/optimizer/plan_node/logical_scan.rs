@@ -718,7 +718,16 @@ impl ToStream for LogicalScan {
             let order_satisfied_index = self.indexes_satisfy_order(&required_order);
             for index in order_satisfied_index {
                 if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
-                    return Some(index_scan.into());
+                    // The selected index's distribution key must be the subset the locality columns.
+                    // Because index's stream key is [distribution key] + [primary table's primary key].
+                    // For streaming queries, we have to ensure any updates ordering (U-/U+) isn't disturbed
+                    // after the later shuffle introduced by the locality operator,
+                    // so we have to ensure the distribution key of the index scan is the subset of the locality columns.
+                    if let Some(dist_key) = index_scan.distribution_key()
+                        && dist_key.iter().all(|k| columns.contains(k))
+                    {
+                        return Some(index_scan.into());
+                    }
                 }
             }
         }

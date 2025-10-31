@@ -826,7 +826,7 @@
     create table a(v int);
     explain create index b on a((1+1)*v);
   explain_output: |
-    StreamMaterialize { columns: [MULTIPLY, v, a._row_id(hidden)], stream_key: [a._row_id], pk_columns: [MULTIPLY, a._row_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [MULTIPLY, v, a._row_id(hidden)], stream_key: [MULTIPLY, a._row_id], pk_columns: [MULTIPLY, a._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard($expr1) }
       └─StreamProject { exprs: [(2:Int32 * a.v) as $expr1, a.v, a._row_id] }
         └─StreamTableScan { table: a, columns: [v, _row_id] }

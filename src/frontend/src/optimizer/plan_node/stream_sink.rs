@@ -255,7 +255,12 @@ impl StreamSink {
             Self::derive_sink_type(input.append_only(), &properties, format_desc.as_ref())?;
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
+        let (pk, _) = derive_pk(
+            input.clone(),
+            user_distributed_by.clone(),
+            user_order_by,
+            &columns,
+        );
         let mut downstream_pk = {
             let downstream_pk =
                 Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
