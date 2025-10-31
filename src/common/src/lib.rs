@@ -81,6 +81,7 @@ pub mod catalog;
 pub mod config;
 pub mod constants;
 pub mod field_generator;
+pub mod gap_fill_types;
 pub mod global_jvm;
 pub mod hash;
 pub mod log;
