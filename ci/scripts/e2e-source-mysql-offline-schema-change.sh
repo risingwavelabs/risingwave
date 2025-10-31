@@ -72,10 +72,24 @@ mysql -e "
 "
 
 sleep 5
-risedev psql -c "select * from t;"
+echo "--- Verify t before schema change (should be 1 row)"
+COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM t;" | xargs)
+if [ "$COUNT" -eq 1 ]; then
+    echo "✓ PASS: t has 1 row before schema change"
+else
+    echo "✗ FAIL: t has $COUNT rows, expected 1"
+    exit 1
+fi
 
 sleep 5
-risedev psql -c "select * from t1;"
+echo "--- Verify t1 before schema change (should be 1 row)"
+COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM t1;" | xargs)
+if [ "$COUNT" -eq 1 ]; then
+    echo "✓ PASS: t1 has 1 row before schema change"
+else
+    echo "✗ FAIL: t1 has $COUNT rows, expected 1"
+    exit 1
+fi
 
 
 echo "\n\n\n-------------Take RW offline------------\n\n\n"
@@ -104,10 +118,24 @@ risedev ci-resume mysql-offline-schema-change-test
 # If the bug is reproduced, you won't see rows with k=2 and k=3, check the logs of compute-node!
 
 sleep 20
-risedev psql -c "select * from t;"
+echo "--- Verify t after schema change (should be 3 rows)"
+COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM t;" | xargs)
+if [ "$COUNT" -eq 3 ]; then
+    echo "✓ PASS: t has 3 rows after schema change"
+else
+    echo "✗ FAIL: t has $COUNT rows, expected 3"
+    exit 1
+fi
 
 sleep 10
-risedev psql -c "select * from t1;"
+echo "--- Verify t1 after schema change (should be 3 rows)"
+COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM t1;" | xargs)
+if [ "$COUNT" -eq 3 ]; then
+    echo "✓ PASS: t1 has 3 rows after schema change"
+else
+    echo "✗ FAIL: t1 has $COUNT rows, expected 3"
+    exit 1
+fi
 
 
 echo "\n\n\n-------------All verifications passed------------\n\n\n"
