@@ -224,7 +224,7 @@ impl CatalogController {
                 _ => None,
             })
             .and_then(|node| node.options.as_ref())
-            .map(|proto_opts| CdcScanOptions::from_proto(proto_opts))
+            .map(CdcScanOptions::from_proto)
             .filter(|opts| opts.is_parallelized_backfill())
             .map(|opts| StreamingParallelism::Fixed(opts.backfill_parallelism as usize));
 
