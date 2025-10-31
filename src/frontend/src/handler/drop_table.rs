@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName};
 use tracing::warn;
 
 use super::RwPgResponse;
+use super::util::execute_with_long_running_notification;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, TableType};
@@ -176,9 +177,12 @@ pub async fn handle_drop_table(
     }
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .drop_table(source_id.map(|id| id.table_id), table_id, cascade)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.drop_table(source_id.map(|id| id.table_id), table_id, cascade),
+        &session,
+        "DROP TABLE",
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_TABLE))
 }
