@@ -426,7 +426,7 @@ impl CatalogController {
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
     ) -> MetaResult<()> {
-        let fragments = Self::extract_fragment_models_from_fragments(job_id, get_fragments())?;
+        let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
 
         let inner = self.inner.write().await;
 

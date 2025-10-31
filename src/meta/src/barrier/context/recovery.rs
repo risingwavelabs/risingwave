@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -271,6 +271,29 @@ impl GlobalBarrierWorkerContextImpl {
         Ok((table_committed_epoch, log_epochs))
     }
 
+    fn collect_cdc_table_backfill_actors<'a, I>(jobs: I) -> HashMap<u32, HashSet<ActorId>>
+    where
+        I: Iterator<Item = (&'a TableId, &'a HashMap<FragmentId, InflightFragmentInfo>)>,
+    {
+        let mut cdc_table_backfill_actors = HashMap::new();
+
+        for (job_id, fragments) in jobs {
+            for fragment_info in fragments.values() {
+                if fragment_info
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::StreamCdcScan)
+                {
+                    cdc_table_backfill_actors
+                        .entry(job_id.table_id())
+                        .or_insert_with(HashSet::new)
+                        .extend(fragment_info.actors.keys().cloned());
+                }
+            }
+        }
+
+        cdc_table_backfill_actors
+    }
+
     /// For normal DDL operations, the `UpstreamSinkUnion` operator is modified dynamically, and does not persist the
     /// newly added or deleted upstreams in meta-store. Therefore, when restoring jobs, we need to restore the
     /// information required by the operator based on the current state of the upstream (sink) and downstream (table) of
@@ -519,10 +542,10 @@ impl GlobalBarrierWorkerContextImpl {
                         }
                     }
 
-                    let cdc_table_backfill_actors = self
-                        .metadata_manager
-                        .catalog_controller
-                        .cdc_table_backfill_actor_ids()?;
+                    let cdc_table_backfill_actors = Self::collect_cdc_table_backfill_actors(
+                        info.values().flat_map(|jobs| jobs.iter()),
+                    );
+
                     let cdc_table_ids = cdc_table_backfill_actors
                         .keys()
                         .cloned()
@@ -666,10 +689,8 @@ impl GlobalBarrierWorkerContextImpl {
             }
         }
 
-        let cdc_table_backfill_actors = self
-            .metadata_manager
-            .catalog_controller
-            .cdc_table_backfill_actor_ids()?;
+        let cdc_table_backfill_actors = Self::collect_cdc_table_backfill_actors(info.iter());
+
         let cdc_table_ids = cdc_table_backfill_actors
             .keys()
             .cloned()
