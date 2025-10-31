@@ -124,7 +124,17 @@ risedev slt './e2e_test/source_legacy/cdc/mongodb/**/*.slt'
 
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+
+source ci/scripts/e2e-source-mysql-offline-schema-change.sh
+
+echo "--- mysql offline schema change test done --- \n\n"
+
+echo "--- re-starting risingwave cluster"
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+risedev ci-start ci-1cn-1fe-with-recovery
+
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
+
 
 echo "--- mysql & postgres cdc validate test"
 risedev slt './e2e_test/source_legacy/cdc/cdc.validate.mysql.slt'

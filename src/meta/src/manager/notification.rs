@@ -17,6 +17,7 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -48,6 +49,7 @@ pub enum LocalNotification {
     BatchParallelismChange,
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
+    SourceDropped(ObjectId),
 }
 
 #[derive(Debug)]
