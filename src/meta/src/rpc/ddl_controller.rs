@@ -56,7 +56,6 @@ use risingwave_pb::ddl_service::{
     alter_swap_rename_request,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
@@ -1310,7 +1309,6 @@ impl DdlController {
                                 new_sink_fragment.actors[i].actor_id,
                                 PbActorStatus {
                                     location: Some(PbActorLocation { worker_node_id }),
-                                    state: PbActorState::Inactive as _,
                                 },
                             )
                         })

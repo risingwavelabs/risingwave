@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 
 pub mod prelude;
 
-pub mod actor;
 pub mod catalog_version;
 pub mod cdc_table_snapshot_split;
 pub mod cluster;

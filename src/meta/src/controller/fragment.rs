@@ -28,7 +28,6 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_meta_model::actor::{ActorModel, ActorStatus};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
@@ -46,7 +45,6 @@ use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -93,6 +91,16 @@ pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
     pub splits: Vec<SplitImpl>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActorModel {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub splits: ConnectorSplits,
+    pub worker_id: WorkerId,
+    pub vnode_bitmap: Option<VnodeBitmap>,
+    pub expr_context: ExprContext,
 }
 
 #[derive(Clone, Debug)]
@@ -344,7 +352,6 @@ impl CatalogController {
             let ActorModel {
                 actor_id,
                 fragment_id,
-                status,
                 worker_id,
                 splits,
                 vnode_bitmap,
@@ -360,7 +367,6 @@ impl CatalogController {
                 actor_id as _,
                 PbActorStatus {
                     location: PbActorLocation::from_worker(worker_id as u32),
-                    state: PbActorState::from(status) as _,
                 },
             );
 
@@ -856,7 +862,6 @@ impl CatalogController {
                 .map(|(actor_id, actor_info)| ActorModel {
                     actor_id: *actor_id as _,
                     fragment_id: *fragment_id,
-                    status: ActorStatus::Running,
                     splits: ConnectorSplits::from(&PbConnectorSplits {
                         splits: actor_info.splits.iter().map(ConnectorSplit::from).collect(),
                     }),
@@ -975,7 +980,6 @@ impl CatalogController {
                         actor_id: *actor_id as _,
                         fragment_id: *fragment_id as _,
                         worker_id: actor.worker_id,
-                        status: ActorStatus::Running,
                     })
             })
             .collect_vec();
@@ -1666,7 +1670,6 @@ mod tests {
     use risingwave_common::id::JobId;
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
-    use risingwave_meta_model::actor::{ActorModel, ActorStatus};
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::{
         ActorId, ConnectorSplits, ExprContext, FragmentId, I32Array, StreamNode, TableId,
@@ -1678,6 +1681,7 @@ mod tests {
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{MergeNode, PbStreamNode, PbUnionNode};
 
+    use super::ActorModel;
     use crate::MetaResult;
     use crate::controller::catalog::CatalogController;
     use crate::model::{Fragment, StreamActor};
@@ -1808,7 +1812,6 @@ mod tests {
                 ActorModel {
                     actor_id: actor_id as ActorId,
                     fragment_id: TEST_FRAGMENT_ID,
-                    status: ActorStatus::Running,
                     splits: actor_splits,
                     worker_id: 0,
                     vnode_bitmap: actor_bitmaps
@@ -1851,6 +1854,11 @@ mod tests {
             CatalogController::compose_fragment(fragment.clone(), actors.clone(), None).unwrap();
 
         assert_eq!(pb_actor_status.len(), actor_count as usize);
+        assert!(
+            pb_actor_status
+                .values()
+                .all(|actor_status| actor_status.location.is_some())
+        );
         assert_eq!(pb_actor_splits.len(), actor_count as usize);
 
         let pb_actors = pb_fragment.actors.clone();
@@ -1878,7 +1886,6 @@ mod tests {
             ActorModel {
                 actor_id,
                 fragment_id,
-                status,
                 splits,
                 worker_id: _,
                 vnode_bitmap,
@@ -1915,8 +1922,6 @@ mod tests {
                     );
                 }
             });
-
-            assert_eq!(status, ActorStatus::Running);
 
             assert_eq!(
                 splits,

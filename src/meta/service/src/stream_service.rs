@@ -37,7 +37,6 @@ use risingwave_pb::meta::list_table_fragments_response::{
 };
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::table_fragments::PbState;
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -381,7 +380,6 @@ impl StreamManagerService for StreamServiceImpl {
             .map(|actor_location| list_actor_states_response::ActorState {
                 actor_id: actor_location.actor_id as _,
                 fragment_id: actor_location.fragment_id as _,
-                state: PbActorState::from(actor_location.status) as _,
                 worker_id: actor_location.worker_id as _,
             })
             .collect_vec();
