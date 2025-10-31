@@ -93,7 +93,7 @@ pub struct InflightActorInfo {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActorModel {
+struct ActorInfo {
     pub actor_id: ActorId,
     pub fragment_id: FragmentId,
     pub splits: ConnectorSplits,
@@ -258,11 +258,11 @@ impl CatalogController {
         Ok(fragment)
     }
 
-    pub fn compose_table_fragments(
+    fn compose_table_fragments(
         table_id: u32,
         state: PbState,
         ctx: Option<PbStreamContext>,
-        fragments: Vec<(fragment::Model, Vec<ActorModel>)>,
+        fragments: Vec<(fragment::Model, Vec<ActorInfo>)>,
         parallelism: StreamingParallelism,
         max_parallelism: usize,
         job_definition: Option<String>,
@@ -299,9 +299,9 @@ impl CatalogController {
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn compose_fragment(
+    fn compose_fragment(
         fragment: fragment::Model,
-        actors: Vec<ActorModel>,
+        actors: Vec<ActorInfo>,
         job_definition: Option<String>,
     ) -> MetaResult<(
         Fragment,
@@ -344,7 +344,7 @@ impl CatalogController {
                 )
             }
 
-            let ActorModel {
+            let ActorInfo {
                 actor_id,
                 fragment_id,
                 worker_id,
@@ -837,7 +837,7 @@ impl CatalogController {
         &self,
         fragment_ids: &[FragmentId],
         timezone: Option<String>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorModel>>> {
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorInfo>>> {
         let guard = self.env.shared_actor_infos().read_guard();
         let stream_context = StreamContext { timezone };
         let pb_expr_context = stream_context.to_expr_context();
@@ -852,7 +852,7 @@ impl CatalogController {
             let actors = fragment_info
                 .actors
                 .iter()
-                .map(|(actor_id, actor_info)| ActorModel {
+                .map(|(actor_id, actor_info)| ActorInfo {
                     actor_id: *actor_id as _,
                     fragment_id: *fragment_id,
                     splits: ConnectorSplits::from(&PbConnectorSplits {
@@ -877,7 +877,7 @@ impl CatalogController {
         &self,
         fragments: Vec<fragment::Model>,
         timezone: Option<String>,
-    ) -> MetaResult<Vec<(fragment::Model, Vec<ActorModel>)>> {
+    ) -> MetaResult<Vec<(fragment::Model, Vec<ActorInfo>)>> {
         let fragment_ids: Vec<_> = fragments.iter().map(|f| f.fragment_id).collect();
         let mut actor_map = self.collect_fragment_actor_map(&fragment_ids, timezone)?;
         fragments
@@ -1671,7 +1671,7 @@ mod tests {
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{MergeNode, PbStreamNode, PbUnionNode};
 
-    use super::ActorModel;
+    use super::ActorInfo;
     use crate::MetaResult;
     use crate::controller::catalog::CatalogController;
     use crate::model::{Fragment, StreamActor};
@@ -1799,7 +1799,7 @@ mod tests {
                     }],
                 });
 
-                ActorModel {
+                ActorInfo {
                     actor_id: actor_id as ActorId,
                     fragment_id: TEST_FRAGMENT_ID,
                     splits: actor_splits,
@@ -1866,14 +1866,14 @@ mod tests {
     }
 
     fn check_actors(
-        actors: Vec<ActorModel>,
+        actors: Vec<ActorInfo>,
         actor_upstreams: &FragmentActorUpstreams,
         pb_actors: Vec<StreamActor>,
         pb_actor_splits: HashMap<u32, PbConnectorSplits>,
         stream_node: &PbStreamNode,
     ) {
         for (
-            ActorModel {
+            ActorInfo {
                 actor_id,
                 fragment_id,
                 splits,
