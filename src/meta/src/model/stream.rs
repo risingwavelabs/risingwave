@@ -25,7 +25,6 @@ use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -355,8 +354,8 @@ impl StreamJobFragments {
         )
     }
 
-    /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
-    /// `Inactive` on the given workers.
+    /// Create a new `TableFragments` with state of `Initial`, recording actor locations on the given
+    /// workers.
     pub fn new(
         stream_job_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
@@ -372,7 +371,6 @@ impl StreamJobFragments {
                     actor_id,
                     ActorStatus {
                         location: PbActorLocation::from_worker(alignment_id.worker_id()),
-                        state: ActorState::Inactive as i32,
                     },
                 )
             })
@@ -417,13 +415,6 @@ impl StreamJobFragments {
     /// Returns whether the table fragments is in `Created` state.
     pub fn is_created(&self) -> bool {
         self.state == State::Created
-    }
-
-    /// Update state of all actors
-    pub fn update_actors_state(&mut self, state: ActorState) {
-        for actor_status in self.actor_status.values_mut() {
-            actor_status.set_state(state);
-        }
     }
 
     /// Returns actor ids associated with this table.
@@ -656,18 +647,6 @@ impl StreamJobFragments {
         table_ids
     }
 
-    /// Returns states of actors group by worker id.
-    pub fn worker_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
-        let mut map = BTreeMap::default();
-        for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.worker_id() as WorkerId;
-            map.entry(node_id)
-                .or_insert_with(Vec::new)
-                .push((actor_id, actor_status.state()));
-        }
-        map
-    }
-
     /// Returns actor locations group by worker id.
     pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
@@ -676,20 +655,6 @@ impl StreamJobFragments {
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
-    }
-
-    /// Returns the status of actors group by worker id.
-    pub fn active_actors(&self) -> Vec<StreamActor> {
-        let mut actors = vec![];
-        for fragment in self.fragments.values() {
-            for actor in &fragment.actors {
-                if self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32 {
-                    continue;
-                }
-                actors.push(actor.clone());
-            }
-        }
-        actors
     }
 
     pub fn actors_to_create(

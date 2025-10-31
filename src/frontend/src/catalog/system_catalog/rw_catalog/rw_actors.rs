@@ -37,7 +37,7 @@ async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActor>> {
             actor_id: state.actor_id as i32,
             fragment_id: state.fragment_id as i32,
             worker_id: state.worker_id as i32,
-            state: state.state().as_str_name().into(),
+            state: "RUNNING".into(),
         })
         .collect())
 }
