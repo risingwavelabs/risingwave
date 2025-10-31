@@ -26,6 +26,7 @@ use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::SplitImpl;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_meta_model::actor::{ActorModel, ActorStatus};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
@@ -187,16 +188,16 @@ impl NotificationManager {
 }
 
 impl CatalogController {
-    pub fn extract_fragment_models_from_fragments(
+    pub fn prepare_fragment_models_from_fragments(
         job_id: ObjectId,
         fragments: impl Iterator<Item = &Fragment>,
     ) -> MetaResult<Vec<fragment::Model>> {
         fragments
-            .map(|fragment| Self::extract_fragment_model_for_new_job(job_id, fragment))
+            .map(|fragment| Self::prepare_fragment_model_for_new_job(job_id, fragment))
             .try_collect()
     }
 
-    pub fn extract_fragment_model_for_new_job(
+    pub fn prepare_fragment_model_for_new_job(
         job_id: ObjectId,
         fragment: &Fragment,
     ) -> MetaResult<fragment::Model> {
@@ -215,6 +216,18 @@ impl CatalogController {
 
         assert!(!pb_actors.is_empty());
 
+        let fragment_parallelism = nodes
+            .node_body
+            .as_ref()
+            .and_then(|body| match body {
+                NodeBody::StreamCdcScan(node) => Some(node),
+                _ => None,
+            })
+            .and_then(|node| node.options.as_ref())
+            .map(|proto_opts| CdcScanOptions::from_proto(proto_opts))
+            .filter(|opts| opts.is_parallelized_backfill())
+            .map(|opts| StreamingParallelism::Fixed(opts.backfill_parallelism as usize));
+
         let stream_node = StreamNode::from(nodes);
 
         let distribution_type = PbFragmentDistributionType::try_from(*pb_distribution_type)
@@ -231,7 +244,7 @@ impl CatalogController {
             state_table_ids,
             upstream_fragment_id: Default::default(),
             vnode_count: vnode_count as _,
-            parallelism: None,
+            parallelism: fragment_parallelism,
         };
 
         Ok(fragment)
@@ -912,32 +925,6 @@ impl CatalogController {
         }
 
         Ok(table_fragments)
-    }
-
-    /// Returns pairs of (job id, actor ids), where actors belong to CDC table backfill fragment of the job.
-    pub fn cdc_table_backfill_actor_ids(&self) -> MetaResult<HashMap<u32, HashSet<u32>>> {
-        let guard = self.env.shared_actor_info.read_guard();
-        let job_id_actor_ids = guard
-            .iter_over_fragments()
-            .filter(|(_, fragment)| {
-                fragment
-                    .fragment_type_mask
-                    .contains(FragmentTypeFlag::StreamCdcScan)
-            })
-            .map(|(_, fragment)| {
-                let job_id = fragment.job_id as u32;
-                let actor_ids: HashSet<u32> = fragment.actors.keys().copied().collect();
-                (job_id, actor_ids)
-            })
-            .into_group_map()
-            .into_iter()
-            .map(|(job_id, actor_ids_vec)| {
-                let actor_ids = actor_ids_vec.into_iter().flatten().collect();
-                (job_id, actor_ids)
-            })
-            .collect();
-
-        Ok(job_id_actor_ids)
     }
 
     pub async fn upstream_fragments(
@@ -1773,7 +1760,7 @@ mod tests {
         };
 
         let fragment =
-            CatalogController::extract_fragment_model_for_new_job(TEST_JOB_ID, &pb_fragment)?;
+            CatalogController::prepare_fragment_model_for_new_job(TEST_JOB_ID, &pb_fragment)?;
 
         check_fragment(fragment, pb_fragment);
 
