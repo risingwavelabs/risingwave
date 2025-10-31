@@ -38,6 +38,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
@@ -58,10 +59,11 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
+use super::info::{CommandFragmentChanges, InflightDatabaseInfo};
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
+use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::utils::collect_resp_info;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -341,7 +343,7 @@ pub enum Command {
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
     MergeSnapshotBackfillStreamingJobs(
-        HashMap<JobId, (HashSet<TableId>, InflightStreamingJobInfo)>,
+        HashMap<JobId, (HashSet<TableId>, HashMap<FragmentId, InflightFragmentInfo>)>,
     ),
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
@@ -483,9 +485,14 @@ impl Command {
         Self::Resume
     }
 
-    pub(crate) fn fragment_changes(
+    #[expect(clippy::type_complexity)]
+    pub(super) fn fragment_changes(
         &self,
-    ) -> Option<(Option<JobId>, HashMap<FragmentId, CommandFragmentChanges>)> {
+        hummock_version_stats: &HummockVersionStats,
+    ) -> Option<(
+        Option<(JobId, CreateMviewProgressTracker)>,
+        HashMap<FragmentId, CommandFragmentChanges>,
+    )> {
         match self {
             Command::Flush => None,
             Command::Pause => None,
@@ -541,8 +548,9 @@ impl Command {
                         }),
                     );
                 }
+                let tracker = CreateMviewProgressTracker::new(info, hummock_version_stats);
 
-                Some((Some(info.streaming_job.id()), changes))
+                Some((Some((info.streaming_job.id(), tracker)), changes))
             }
             Command::RescheduleFragment { reschedules, .. } => Some((
                 None,

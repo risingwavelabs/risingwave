@@ -19,12 +19,15 @@ use std::mem::take;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::hummock::HummockVersionStats;
 use tracing::warn;
 
 use crate::barrier::info::{
-    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, SharedActorInfos, SubscriberType,
+    BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
+    SharedActorInfos, SubscriberType,
 };
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::controller::fragment::InflightFragmentInfo;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(crate) struct BarrierWorkerState {
@@ -134,6 +137,7 @@ impl BarrierWorkerState {
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
+        hummock_version_stats: &HummockVersionStats,
     ) -> (
         InflightDatabaseInfo,
         HashMap<TableId, u64>,
@@ -148,11 +152,11 @@ impl BarrierWorkerState {
         }) = command
         {
             None
-        } else if let Some((new_job_id, fragment_changes)) =
-            command.and_then(Command::fragment_changes)
+        } else if let Some((new_job, fragment_changes)) =
+            command.and_then(|command| command.fragment_changes(hummock_version_stats))
         {
             self.inflight_graph_info
-                .pre_apply(new_job_id, &fragment_changes);
+                .pre_apply(new_job, &fragment_changes);
             Some(fragment_changes)
         } else {
             None
@@ -198,10 +202,17 @@ impl BarrierWorkerState {
         let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
         let mut jobs_to_wait = HashSet::new();
         if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
-            for (table_id, (_, graph_info)) in jobs_to_merge {
-                jobs_to_wait.insert(*table_id);
-                table_ids_to_commit.extend(graph_info.existing_table_ids());
-                self.inflight_graph_info.add_existing(graph_info.clone());
+            for (&job_id, (_, graph_info)) in jobs_to_merge {
+                jobs_to_wait.insert(job_id);
+                table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
+                    graph_info.values(),
+                ));
+                self.inflight_graph_info.add_existing(InflightStreamingJobInfo {
+                    job_id,
+                    fragment_infos: graph_info.clone(),
+                    subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
+                    status: CreateStreamingJobStatus::Created,
+                });
             }
         }
 
