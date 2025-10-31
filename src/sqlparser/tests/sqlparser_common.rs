@@ -4140,7 +4140,7 @@ fn parse_window_clause() {
 
 #[test]
 fn parse_alter_fragment_set_parallelism() {
-    match verified_stmt("ALTER FRAGMENT 1 SET PARALLELISM = 4") {
+    match verified_stmt("ALTER FRAGMENT 1 SET PARALLELISM TO 4") {
         Statement::AlterFragment {
             fragment_id,
             operation,
