@@ -73,7 +73,7 @@ pub(crate) fn resolve_index_schema(
     Ok((schema_name.to_owned(), table.clone(), index_table_name))
 }
 
-struct IndexColumnExprValidator {
+pub(crate) struct IndexColumnExprValidator {
     allow_impure: bool,
     result: Result<()>,
 }
@@ -86,7 +86,7 @@ impl IndexColumnExprValidator {
         )
     }
 
-    fn validate(expr: &ExprImpl, allow_impure: bool) -> Result<()> {
+    pub(crate) fn validate(expr: &ExprImpl, allow_impure: bool) -> Result<()> {
         match expr {
             ExprImpl::InputRef(_) | ExprImpl::FunctionCall(_) => {}
             other_expr => {
