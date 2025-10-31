@@ -23,7 +23,6 @@ use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -150,7 +149,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .state_table_info
             .info()
             .keys()
-            .map(|table_id| table_id.table_id)
+            .copied()
             .collect::<BTreeSet<_>>();
 
         let commit_table_ids = sync_result
@@ -163,12 +162,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .iter()
                     .flat_map(|sstable| sstable.sst_info.table_ids.clone())
             })
-            .chain(
-                sync_result
-                    .table_watermarks
-                    .keys()
-                    .map(|table_id| table_id.table_id),
-            )
+            .chain(sync_result.table_watermarks.keys().copied())
             .chain(table_ids.iter().cloned())
             .collect::<BTreeSet<_>>();
 
@@ -179,11 +173,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             vec![]
         } else {
             vec![NewTableFragmentInfo {
-                table_ids: commit_table_ids
-                    .iter()
-                    .cloned()
-                    .map(TableId::from)
-                    .collect(),
+                table_ids: commit_table_ids.iter().cloned().collect(),
             }]
         };
 
@@ -224,7 +214,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                 tables_to_commit: commit_table_ids
                     .iter()
                     .cloned()
-                    .map(|table_id| (TableId::new(table_id), epoch))
+                    .map(|table_id| (table_id, epoch))
                     .collect(),
                 truncate_tables: HashSet::new(),
             })

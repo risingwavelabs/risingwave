@@ -149,7 +149,7 @@ pub struct HummockManager {
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
 
-    table_id_to_table_option: parking_lot::RwLock<HashMap<u32, TableOption>>,
+    table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -537,7 +537,7 @@ impl HummockManager {
 
     pub fn update_table_id_to_table_option(
         &self,
-        new_table_id_to_table_option: HashMap<u32, TableOption>,
+        new_table_id_to_table_option: HashMap<TableId, TableOption>,
     ) {
         *self.table_id_to_table_option.write() = new_table_id_to_table_option;
     }

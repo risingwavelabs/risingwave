@@ -15,10 +15,11 @@
 pub mod hummock_version_ext;
 
 use parse_display::Display;
+use risingwave_common::catalog::TableId;
 
 use crate::CompactionGroupId;
 
-pub type StateTableId = u32;
+pub type StateTableId = TableId;
 
 /// A compaction task's `StaticCompactionGroupId` indicates the compaction group that all its input
 /// SSTs belong to.
@@ -77,12 +78,12 @@ pub mod group_split {
     ) -> FullKey<Vec<u8>> {
         if VirtualNode::MAX_REPRESENTABLE == vnode {
             // Modify `table_id` to `next_table_id` to satisfy the `split_to_right`` rule, so that the `table_id`` originally passed in will be split to left.
-            table_id = table_id.strict_add(1);
+            table_id = table_id.table_id().strict_add(1).into();
             vnode = VirtualNode::ZERO;
         }
 
         FullKey::new(
-            TableId::from(table_id),
+            table_id,
             TableKey(vnode.to_be_bytes().to_vec()),
             HummockEpoch::MAX,
         )
@@ -208,7 +209,7 @@ pub mod group_split {
         new_sst_id: &mut HummockSstableId,
         old_sst_size: u64,
         new_sst_size: u64,
-        new_table_ids: Vec<u32>,
+        new_table_ids: Vec<TableId>,
     ) -> (SstableInfo, SstableInfo) {
         let mut sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = sst_info.clone();
@@ -242,22 +243,22 @@ pub mod group_split {
 
     // Should avoid split same table_id into two groups
     pub fn split_table_ids_with_split_key(
-        table_ids: &Vec<u32>,
+        table_ids: &Vec<TableId>,
         split_key: Bytes,
-    ) -> (Vec<u32>, Vec<u32>) {
+    ) -> (Vec<TableId>, Vec<TableId>) {
         assert!(table_ids.is_sorted());
         let split_full_key = FullKey::decode(&split_key);
         let split_user_key = split_full_key.user_key;
         let vnode = split_user_key.get_vnode_id();
-        let table_id = split_user_key.table_id.table_id();
+        let table_id = split_user_key.table_id;
         split_table_ids_with_table_id_and_vnode(table_ids, table_id, vnode)
     }
 
     pub fn split_table_ids_with_table_id_and_vnode(
-        table_ids: &Vec<u32>,
+        table_ids: &Vec<TableId>,
         table_id: StateTableId,
         vnode: usize,
-    ) -> (Vec<u32>, Vec<u32>) {
+    ) -> (Vec<TableId>, Vec<TableId>) {
         assert!(table_ids.is_sorted());
         assert_eq!(VirtualNode::ZERO, VirtualNode::from_index(vnode));
         let pos = table_ids.partition_point(|&id| id < table_id);
@@ -494,46 +495,75 @@ pub mod group_split {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
 
     #[test]
     fn test_split_table_ids() {
-        let table_ids = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let table_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            .iter()
+            .map(Into::<TableId>::into)
+            .collect();
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
             &table_ids,
-            5,
+            5.into(),
             VirtualNode::ZERO.to_index(),
         );
-        assert_eq!(left, vec![1, 2, 3, 4]);
-        assert_eq!(right, vec![5, 6, 7, 8, 9]);
+        assert_eq!(
+            left,
+            [1, 2, 3, 4].iter().map(Into::<TableId>::into).collect_vec()
+        );
+        assert_eq!(
+            right,
+            [5, 6, 7, 8, 9]
+                .iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
 
         // test table_id not in the table_ids
 
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
             &table_ids,
-            10,
+            10.into(),
             VirtualNode::ZERO.to_index(),
         );
-        assert_eq!(left, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(
+            left,
+            [1, 2, 3, 4, 5, 6, 7, 8, 9]
+                .iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
         assert!(right.is_empty());
 
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
             &table_ids,
-            0,
+            0.into(),
             VirtualNode::ZERO.to_index(),
         );
 
         assert!(left.is_empty());
-        assert_eq!(right, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(
+            right,
+            [1, 2, 3, 4, 5, 6, 7, 8, 9]
+                .iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
     }
 
     #[test]
     fn test_split_table_ids_with_split_key() {
-        let table_ids = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
-        let split_key = super::group_split::build_split_key(5, VirtualNode::ZERO);
+        let table_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(Into::into).collect();
+        let split_key = super::group_split::build_split_key(5.into(), VirtualNode::ZERO);
         let (left, right) =
             super::group_split::split_table_ids_with_split_key(&table_ids, split_key);
-        assert_eq!(left, vec![1, 2, 3, 4]);
-        assert_eq!(right, vec![5, 6, 7, 8, 9]);
+        assert_eq!(
+            left,
+            [1, 2, 3, 4].iter().map(Into::<TableId>::into).collect_vec()
+        );
+        assert_eq!(right, [5, 6, 7, 8, 9].iter().map(Into::into).collect_vec());
     }
 }

@@ -40,6 +40,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use rand::rng as thread_rng;
 use rand::seq::SliceRandom;
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
@@ -435,10 +436,10 @@ impl HummockManager {
                 .state_table_info
                 .compaction_group_member_table_ids(compaction_group_id)
                 .iter()
-                .map(|table_id| table_id.table_id)
+                .copied()
                 .collect();
 
-            let mut table_id_to_option: HashMap<u32, _> = HashMap::default();
+            let mut table_id_to_option: HashMap<TableId, _> = HashMap::default();
 
             {
                 let guard = self.table_id_to_table_option.read();
@@ -584,8 +585,7 @@ impl HummockManager {
                         .existing_table_ids
                         .iter()
                         .filter_map(|table_id| {
-                            let id = (*table_id).try_into().unwrap();
-                            all_versioned_table_schemas.get(&id).map(|column_ids| {
+                            all_versioned_table_schemas.get(table_id).map(|column_ids| {
                                 (
                                     *table_id,
                                     TableSchema {
@@ -1175,8 +1175,8 @@ impl HummockManager {
                     .insert(*table_id, compact_task.split_weight_by_vnode);
             }
         } else {
-            let mut table_size_info: HashMap<u32, u64> = HashMap::default();
-            let mut existing_table_ids: HashSet<u32> = HashSet::default();
+            let mut table_size_info: HashMap<TableId, u64> = HashMap::default();
+            let mut existing_table_ids: HashSet<TableId> = HashSet::default();
             for input_ssts in &compact_task.input_ssts {
                 for sst in &input_ssts.table_infos {
                     existing_table_ids.extend(sst.table_ids.iter());
@@ -1381,14 +1381,14 @@ fn update_table_stats_for_vnode_watermark_trivial_reclaim(
     if task.task_type != TaskType::VnodeWatermark {
         return;
     }
-    let mut deleted_table_keys: HashMap<u32, u64> = HashMap::default();
+    let mut deleted_table_keys: HashMap<TableId, u64> = HashMap::default();
     for s in task.input_ssts.iter().flat_map(|l| l.table_infos.iter()) {
         assert_eq!(s.table_ids.len(), 1);
         let e = deleted_table_keys.entry(s.table_ids[0]).or_insert(0);
         *e += s.total_key_count;
     }
     for (table_id, delete_count) in deleted_table_keys {
-        let Some(stats) = table_stats.get_mut(&table_id) else {
+        let Some(stats) = table_stats.get_mut(&table_id.table_id()) else {
             continue;
         };
         if stats.total_key_count == 0 {
