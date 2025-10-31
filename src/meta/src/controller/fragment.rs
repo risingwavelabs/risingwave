@@ -27,7 +27,6 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_meta_model::actor::{ActorModel, ActorStatus};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
@@ -45,7 +44,6 @@ use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -92,6 +90,16 @@ pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
     pub splits: Vec<SplitImpl>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct ActorInfo {
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub splits: ConnectorSplits,
+    pub worker_id: WorkerId,
+    pub vnode_bitmap: Option<VnodeBitmap>,
+    pub expr_context: ExprContext,
 }
 
 #[derive(Clone, Debug)]
@@ -250,11 +258,11 @@ impl CatalogController {
         Ok(fragment)
     }
 
-    pub fn compose_table_fragments(
+    fn compose_table_fragments(
         table_id: u32,
         state: PbState,
         ctx: Option<PbStreamContext>,
-        fragments: Vec<(fragment::Model, Vec<ActorModel>)>,
+        fragments: Vec<(fragment::Model, Vec<ActorInfo>)>,
         parallelism: StreamingParallelism,
         max_parallelism: usize,
         job_definition: Option<String>,
@@ -291,9 +299,9 @@ impl CatalogController {
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn compose_fragment(
+    fn compose_fragment(
         fragment: fragment::Model,
-        actors: Vec<ActorModel>,
+        actors: Vec<ActorInfo>,
         job_definition: Option<String>,
     ) -> MetaResult<(
         Fragment,
@@ -336,10 +344,9 @@ impl CatalogController {
                 )
             }
 
-            let ActorModel {
+            let ActorInfo {
                 actor_id,
                 fragment_id,
-                status,
                 worker_id,
                 splits,
                 vnode_bitmap,
@@ -355,7 +362,6 @@ impl CatalogController {
                 actor_id as _,
                 PbActorStatus {
                     location: PbActorLocation::from_worker(worker_id as u32),
-                    state: PbActorState::from(status) as _,
                 },
             );
 
@@ -831,7 +837,7 @@ impl CatalogController {
         &self,
         fragment_ids: &[FragmentId],
         timezone: Option<String>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorModel>>> {
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorInfo>>> {
         let guard = self.env.shared_actor_infos().read_guard();
         let stream_context = StreamContext { timezone };
         let pb_expr_context = stream_context.to_expr_context();
@@ -846,10 +852,9 @@ impl CatalogController {
             let actors = fragment_info
                 .actors
                 .iter()
-                .map(|(actor_id, actor_info)| ActorModel {
+                .map(|(actor_id, actor_info)| ActorInfo {
                     actor_id: *actor_id as _,
                     fragment_id: *fragment_id,
-                    status: ActorStatus::Running,
                     splits: ConnectorSplits::from(&PbConnectorSplits {
                         splits: actor_info.splits.iter().map(ConnectorSplit::from).collect(),
                     }),
@@ -872,7 +877,7 @@ impl CatalogController {
         &self,
         fragments: Vec<fragment::Model>,
         timezone: Option<String>,
-    ) -> MetaResult<Vec<(fragment::Model, Vec<ActorModel>)>> {
+    ) -> MetaResult<Vec<(fragment::Model, Vec<ActorInfo>)>> {
         let fragment_ids: Vec<_> = fragments.iter().map(|f| f.fragment_id).collect();
         let mut actor_map = self.collect_fragment_actor_map(&fragment_ids, timezone)?;
         fragments
@@ -968,7 +973,6 @@ impl CatalogController {
                         actor_id: *actor_id as _,
                         fragment_id: *fragment_id as _,
                         worker_id: actor.worker_id,
-                        status: ActorStatus::Running,
                     })
             })
             .collect_vec();
@@ -1656,7 +1660,6 @@ mod tests {
     use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
-    use risingwave_meta_model::actor::{ActorModel, ActorStatus};
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::{
         ActorId, ConnectorSplits, ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId,
@@ -1668,6 +1671,7 @@ mod tests {
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{MergeNode, PbStreamNode, PbUnionNode};
 
+    use super::ActorInfo;
     use crate::MetaResult;
     use crate::controller::catalog::CatalogController;
     use crate::model::{Fragment, StreamActor};
@@ -1795,10 +1799,9 @@ mod tests {
                     }],
                 });
 
-                ActorModel {
+                ActorInfo {
                     actor_id: actor_id as ActorId,
                     fragment_id: TEST_FRAGMENT_ID,
-                    status: ActorStatus::Running,
                     splits: actor_splits,
                     worker_id: 0,
                     vnode_bitmap: actor_bitmaps
@@ -1841,6 +1844,11 @@ mod tests {
             CatalogController::compose_fragment(fragment.clone(), actors.clone(), None).unwrap();
 
         assert_eq!(pb_actor_status.len(), actor_count as usize);
+        assert!(
+            pb_actor_status
+                .values()
+                .all(|actor_status| actor_status.location.is_some())
+        );
         assert_eq!(pb_actor_splits.len(), actor_count as usize);
 
         let pb_actors = pb_fragment.actors.clone();
@@ -1858,17 +1866,16 @@ mod tests {
     }
 
     fn check_actors(
-        actors: Vec<ActorModel>,
+        actors: Vec<ActorInfo>,
         actor_upstreams: &FragmentActorUpstreams,
         pb_actors: Vec<StreamActor>,
         pb_actor_splits: HashMap<u32, PbConnectorSplits>,
         stream_node: &PbStreamNode,
     ) {
         for (
-            ActorModel {
+            ActorInfo {
                 actor_id,
                 fragment_id,
-                status,
                 splits,
                 worker_id: _,
                 vnode_bitmap,
@@ -1905,8 +1912,6 @@ mod tests {
                     );
                 }
             });
-
-            assert_eq!(status, ActorStatus::Running);
 
             assert_eq!(
                 splits,
