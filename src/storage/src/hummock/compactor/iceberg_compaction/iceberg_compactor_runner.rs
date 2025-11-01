@@ -157,15 +157,15 @@ impl IcebergCompactionPlanRunner {
     /// ```text
     /// catalog: "glue"
     /// table: "my_db.my_table"
-    /// task_type: SmallDataFileCompaction
+    /// task_type: SmallFiles
     /// plan_index: 0
     ///
     /// → unique_ident: "glue-my_db.my_table-small-plan-0"
     /// ```
     pub fn unique_ident(&self) -> String {
         let task_type_str = match self.task_type {
-            TaskType::SmallDataFileCompaction => "small",
-            TaskType::FullCompaction => "full",
+            TaskType::SmallFiles => "small_files",
+            TaskType::Full => "full",
             _ => "unknown",
         };
         format!(
@@ -481,7 +481,7 @@ pub async fn create_plan_runners(
     })?;
 
     let planning_config = match parsed_task_type {
-        TaskType::SmallDataFileCompaction => {
+        TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
                 .max_parallelism(config.max_parallelism as usize)
@@ -502,7 +502,7 @@ pub async fn create_plan_runners(
 
             CompactionPlanningConfig::SmallFiles(config)
         }
-        TaskType::FullCompaction => {
+        TaskType::Full => {
             let config = FullCompactionConfigBuilder::default()
                 .max_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
