@@ -225,15 +225,37 @@ impl<K, R> ChangeBuffer<K, R> {
     }
 }
 
+/// The kind of output for [`ChangeBuffer::into_chunk`] and [`ChangeBuffer::into_chunks`].
+/// Can be [`UPSERT`] or [`RETRACT`].
+pub type OutputKind = bool;
+pub mod output_kind {
+    use super::OutputKind;
+    /// For updates, only keep the new row with `Insert` operation.
+    ///
+    /// The output chunk can only be used in streams with `StreamKind::Upsert`. Refer to it for
+    /// more details.
+    pub const UPSERT: OutputKind = true;
+    /// For updates, keep both the old and new row with `UpdateDelete` and `UpdateInsert` operation.
+    pub const RETRACT: OutputKind = false;
+}
+use output_kind::*;
+
 impl<K, R> ChangeBuffer<K, R>
 where
     K: private::Key,
     R: private::Row + Row,
 {
     /// Consume the buffer and produce a single compacted chunk.
-    pub fn into_chunk(self, data_types: Vec<DataType>) -> Option<StreamChunk> {
+    pub fn into_chunk<const KIND: OutputKind>(
+        self,
+        data_types: Vec<DataType>,
+    ) -> Option<StreamChunk> {
         let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
         for record in self.into_records() {
+            let record = match KIND {
+                UPSERT => record.into_upsert(),
+                RETRACT => record,
+            };
             let none = builder.append_record(record);
             debug_assert!(none.is_none());
         }
@@ -241,10 +263,18 @@ where
     }
 
     /// Consume the buffer and produce a list of compacted chunks with the given size at most.
-    pub fn into_chunks(self, data_types: Vec<DataType>, chunk_size: usize) -> Vec<StreamChunk> {
+    pub fn into_chunks<const KIND: OutputKind>(
+        self,
+        data_types: Vec<DataType>,
+        chunk_size: usize,
+    ) -> Vec<StreamChunk> {
         let mut res = Vec::new();
         let mut builder = StreamChunkBuilder::new(chunk_size, data_types);
         for record in self.into_records() {
+            let record = match KIND {
+                UPSERT => record.into_upsert(),
+                RETRACT => record,
+            };
             if let Some(chunk) = builder.append_record(record) {
                 res.push(chunk);
             }
