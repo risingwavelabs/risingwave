@@ -1230,6 +1230,9 @@ PulsarProperties:
       contains a generated suffix in the subscription name.
       The subscription name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
     required: false
+  - name: pulsar.read_compacted
+    field_type: bool
+    required: false
 TestSourceProperties:
   fields:
   - name: properties

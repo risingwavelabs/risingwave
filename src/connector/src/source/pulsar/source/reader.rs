@@ -218,6 +218,7 @@ impl SplitReader for PulsarBrokerReader {
                     builder.with_options(pulsar::ConsumerOptions {
                         durable: Some(false),
                         start_message_id: Some(start_message_id),
+                        read_compacted: props.consumer_options.read_compacted,
                         ..Default::default()
                     })
                 }
