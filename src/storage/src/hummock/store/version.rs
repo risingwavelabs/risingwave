@@ -1001,12 +1001,9 @@ impl HummockVersionReader {
             }
 
             if level.level_type == LevelType::Nonoverlapping {
-                let mut table_infos = prune_nonoverlapping_ssts(
-                    &level.table_infos,
-                    user_key_range_ref,
-                    table_id.table_id(),
-                )
-                .peekable();
+                let mut table_infos =
+                    prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref, table_id)
+                        .peekable();
 
                 if table_infos.peek().is_none() {
                     continue;

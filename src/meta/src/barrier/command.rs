@@ -781,9 +781,7 @@ impl CommandContext {
         let mut mv_log_store_truncate_epoch = HashMap::new();
         // TODO: may collect cross db snapshot backfill
         let mut update_truncate_epoch =
-            |table_id: TableId, truncate_epoch| match mv_log_store_truncate_epoch
-                .entry(table_id.table_id)
-            {
+            |table_id: TableId, truncate_epoch| match mv_log_store_truncate_epoch.entry(table_id) {
                 Entry::Occupied(mut entry) => {
                     let prev_truncate_epoch = entry.get_mut();
                     if truncate_epoch < *prev_truncate_epoch {

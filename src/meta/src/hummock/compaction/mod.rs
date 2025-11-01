@@ -101,7 +101,7 @@ impl CompactStatus {
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn CompactionSelector>,
-        table_id_to_options: &HashMap<u32, TableOption>,
+        table_id_to_options: &HashMap<TableId, TableOption>,
         developer_config: Arc<CompactionDeveloperConfig>,
         table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
         state_table_info: &HummockVersionStateTableInfo,

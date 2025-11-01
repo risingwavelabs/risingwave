@@ -412,11 +412,15 @@ impl MetadataManager {
         self.cluster_controller.get_streaming_cluster_info().await
     }
 
-    pub async fn get_all_table_options(&self) -> MetaResult<HashMap<u32, TableOption>> {
+    pub async fn get_all_table_options(&self) -> MetaResult<HashMap<TableId, TableOption>> {
         self.catalog_controller
             .get_all_table_options()
             .await
-            .map(|tops| tops.into_iter().map(|(id, opt)| (id as u32, opt)).collect())
+            .map(|tops| {
+                tops.into_iter()
+                    .map(|(id, opt)| (TableId::new(id.try_into().unwrap()), opt))
+                    .collect()
+            })
     }
 
     pub async fn get_table_name_type_mapping(&self) -> MetaResult<HashMap<u32, (String, String)>> {
@@ -430,9 +434,12 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn get_created_table_ids(&self) -> MetaResult<Vec<u32>> {
+    pub async fn get_created_table_ids(&self) -> MetaResult<Vec<TableId>> {
         let table_ids = self.catalog_controller.get_created_table_ids().await?;
-        Ok(table_ids.into_iter().map(|id| id as u32).collect())
+        Ok(table_ids
+            .into_iter()
+            .map(|id| TableId::new(id.try_into().unwrap()))
+            .collect())
     }
 
     pub async fn get_table_associated_source_id(

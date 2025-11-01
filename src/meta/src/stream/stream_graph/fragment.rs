@@ -816,12 +816,12 @@ impl StreamFragmentGraph {
     }
 
     /// Fit the internal tables' `table_id`s according to the given mapping.
-    pub fn fit_internal_table_ids_with_mapping(&mut self, mut matches: HashMap<u32, Table>) {
+    pub fn fit_internal_table_ids_with_mapping(&mut self, mut matches: HashMap<TableId, Table>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
-                    let target = matches.remove(&table.id).unwrap_or_else(|| {
+                    let target = matches.remove(&table.id.into()).unwrap_or_else(|| {
                         panic!("no matching table for table {}({})", table.id, table.name)
                     });
                     table.id = target.id;

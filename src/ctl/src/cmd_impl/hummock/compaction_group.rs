@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 
 use comfy_table::{Row, Table};
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
@@ -162,7 +161,7 @@ pub fn build_compaction_config_vec(
 pub async fn split_compaction_group(
     context: &CtlContext,
     group_id: CompactionGroupId,
-    table_ids_to_new_group: &[StateTableId],
+    table_ids_to_new_group: &[u32],
     partition_vnode_count: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;

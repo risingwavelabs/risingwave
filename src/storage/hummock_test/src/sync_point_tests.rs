@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use foyer::Hint;
-use risingwave_common::catalog::TableId;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
@@ -236,7 +235,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_manager_ref.clone(),
         worker_id as _,
     ));
-    let existing_table_id: u32 = 1;
+    let existing_table_id = 1.into();
 
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
@@ -268,7 +267,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     ));
 
     let mut local = storage
-        .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+        .new_local(NewLocalOptions::for_test(existing_table_id))
         .await;
 
     // 1. add sstables
@@ -460,7 +459,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {
-        table_id: TableId::from(existing_table_id),
+        table_id: existing_table_id,
         cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };

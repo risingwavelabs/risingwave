@@ -25,6 +25,7 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
     register_int_gauge_with_registry,
 };
+use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
@@ -1115,7 +1116,7 @@ pub async fn refresh_fragment_info_metrics(
                 .cloned()
                 .unwrap_or_else(|| ("unknown".to_owned(), "unknown".to_owned()));
             let compaction_group_id = table_compaction_group_id_mapping
-                .get(&(table_id as u32))
+                .get(&(TableId::new(table_id.try_into().unwrap())))
                 .map(|cg_id| cg_id.to_string())
                 .unwrap_or_else(|| "unknown".to_owned());
             meta_metrics

@@ -914,7 +914,7 @@ pub fn start_compactor(
 
                                     if enable_check_compaction_result && need_check_task {
                                         let compact_table_ids = compact_task.build_compact_table_ids();
-                                        match compaction_catalog_manager_ref.acquire(compact_table_ids).await {
+                                        match compaction_catalog_manager_ref.acquire(compact_table_ids.into_iter().collect()).await {
                                             Ok(compaction_catalog_agent_ref) =>  {
                                                 match check_compaction_result(&compact_task, context.clone(), compaction_catalog_agent_ref).await
                                                 {
@@ -1050,7 +1050,7 @@ pub fn start_shared_compactor(
                             task: dispatch_task,
                         } = request.into_inner();
                         let table_id_to_catalog = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
-                            acc.insert(table.id, table);
+                            acc.insert(table.id.into(), table);
                             acc
                         });
 

@@ -277,6 +277,12 @@ impl From<TableId> for u32 {
     }
 }
 
+impl From<&TableId> for u32 {
+    fn from(id: &TableId) -> Self {
+        id.table_id
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
     pub retention_seconds: Option<u32>, // second

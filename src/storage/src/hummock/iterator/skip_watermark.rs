@@ -41,7 +41,7 @@ pub struct SkipWatermarkIterator<I, S> {
     /// The stats of skipped key-value pairs for each table.
     skipped_entry_table_stats: TableStatsMap,
     /// The id of table currently undergoing processing.
-    last_table_id: Option<u32>,
+    last_table_id: Option<TableId>,
     /// The stats of table currently undergoing processing.
     last_table_stats: TableStats,
 }
@@ -79,11 +79,12 @@ impl<I: HummockIterator<Direction = Forward>, S: SkipWatermarkState> SkipWaterma
                 break;
             }
 
-            if self.last_table_id.is_none_or(|last_table_id| {
-                last_table_id != self.inner.key().user_key.table_id.table_id
-            }) {
+            if self
+                .last_table_id
+                .is_none_or(|last_table_id| last_table_id != self.inner.key().user_key.table_id)
+            {
                 self.add_last_table_stats();
-                self.last_table_id = Some(self.inner.key().user_key.table_id.table_id);
+                self.last_table_id = Some(self.inner.key().user_key.table_id);
             }
             self.last_table_stats.total_key_count -= 1;
             self.last_table_stats.total_key_size -= self.inner.key().encoded_len() as i64;
@@ -292,7 +293,7 @@ impl PkPrefixSkipWatermarkState {
     }
 
     pub fn from_safe_epoch_watermarks(
-        safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
+        safe_epoch_watermarks: BTreeMap<TableId, TableWatermarks>,
     ) -> Self {
         let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
         Self::new(watermarks)
@@ -323,7 +324,7 @@ impl NonPkPrefixSkipWatermarkState {
     }
 
     pub fn from_safe_epoch_watermarks(
-        safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
+        safe_epoch_watermarks: BTreeMap<TableId, TableWatermarks>,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> Self {
         let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
@@ -346,9 +347,7 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
                     .is_none_or(|last_table_id| last_table_id != key_table_id.table_id())
                 {
                     self.last_table_id = Some(key_table_id.table_id());
-                    self.last_serde = self
-                        .compaction_catalog_agent_ref
-                        .watermark_serde(table_id.table_id());
+                    self.last_serde = self.compaction_catalog_agent_ref.watermark_serde(*table_id);
                 }
             }
 
@@ -387,7 +386,7 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
             .watermarks
             .iter()
             .flat_map(|(table_id, read_watermarks)| {
-                let watermark_serde = self.compaction_catalog_agent_ref.watermark_serde(table_id.table_id()).map(|(_pk_serde, watermark_serde, _watermark_col_idx_in_pk)| watermark_serde);
+                let watermark_serde = self.compaction_catalog_agent_ref.watermark_serde(*table_id).map(|(_pk_serde, watermark_serde, _watermark_col_idx_in_pk)| watermark_serde);
 
                 read_watermarks
                     .vnode_watermarks
@@ -720,8 +719,7 @@ mod tests {
                     vnode_watermarks: BTreeMap::default(),
                 };
 
-                let compaction_catalog_agent_ref =
-                    CompactionCatalogAgent::for_test(vec![TABLE_ID.into()]);
+                let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![TABLE_ID]);
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
                     shared_buffer_batch.clone().into_forward_iter(),
@@ -760,10 +758,10 @@ mod tests {
                     FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
 
                 let table_id_to_vnode =
-                    HashMap::from_iter(once((TABLE_ID.table_id(), VirtualNode::COUNT_FOR_TEST)));
+                    HashMap::from_iter(once((TABLE_ID, VirtualNode::COUNT_FOR_TEST)));
 
                 let table_id_to_watermark_serde = HashMap::from_iter(once((
-                    TABLE_ID.table_id(),
+                    TABLE_ID,
                     Some((
                         pk_serde.clone(),
                         watermark_col_serde.clone(),
@@ -825,10 +823,10 @@ mod tests {
                     FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
 
                 let table_id_to_vnode =
-                    HashMap::from_iter(once((TABLE_ID.table_id(), VirtualNode::COUNT_FOR_TEST)));
+                    HashMap::from_iter(once((TABLE_ID, VirtualNode::COUNT_FOR_TEST)));
 
                 let table_id_to_watermark_serde = HashMap::from_iter(once((
-                    TABLE_ID.table_id(),
+                    TABLE_ID,
                     Some((
                         pk_serde.clone(),
                         watermark_col_serde.clone(),
@@ -886,10 +884,10 @@ mod tests {
                     FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
 
                 let table_id_to_vnode =
-                    HashMap::from_iter(once((TABLE_ID.table_id(), VirtualNode::COUNT_FOR_TEST)));
+                    HashMap::from_iter(once((TABLE_ID, VirtualNode::COUNT_FOR_TEST)));
 
                 let table_id_to_watermark_serde = HashMap::from_iter(once((
-                    TABLE_ID.table_id(),
+                    TABLE_ID,
                     Some((
                         pk_serde.clone(),
                         watermark_col_serde.clone(),
@@ -947,10 +945,10 @@ mod tests {
                     FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
 
                 let table_id_to_vnode =
-                    HashMap::from_iter(once((TABLE_ID.table_id(), VirtualNode::COUNT_FOR_TEST)));
+                    HashMap::from_iter(once((TABLE_ID, VirtualNode::COUNT_FOR_TEST)));
 
                 let table_id_to_watermark_serde = HashMap::from_iter(once((
-                    TABLE_ID.table_id(),
+                    TABLE_ID,
                     Some((
                         pk_serde.clone(),
                         watermark_col_serde.clone(),
@@ -1121,10 +1119,10 @@ mod tests {
                 FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
 
             let table_id_to_vnode =
-                HashMap::from_iter(once((TABLE_ID.table_id(), VirtualNode::COUNT_FOR_TEST)));
+                HashMap::from_iter(once((TABLE_ID, VirtualNode::COUNT_FOR_TEST)));
 
             let table_id_to_watermark_serde = HashMap::from_iter(once((
-                t1_id.table_id(),
+                t1_id,
                 Some((
                     t1_pk_serde.clone(),
                     watermark_col_serde.clone(),
@@ -1212,8 +1210,8 @@ mod tests {
 
             let table_id_to_vnode = HashMap::from_iter(
                 vec![
-                    (t1_id.table_id(), VirtualNode::COUNT_FOR_TEST),
-                    (t2_id.table_id(), VirtualNode::COUNT_FOR_TEST),
+                    (t1_id, VirtualNode::COUNT_FOR_TEST),
+                    (t2_id, VirtualNode::COUNT_FOR_TEST),
                 ]
                 .into_iter(),
             );
@@ -1221,14 +1219,14 @@ mod tests {
             let table_id_to_watermark_serde = HashMap::from_iter(
                 vec![
                     (
-                        t1_id.table_id(),
+                        t1_id,
                         Some((
                             t1_pk_serde.clone(),
                             watermark_col_serde.clone(),
                             t1_watermark_col_idx_in_pk,
                         )),
                     ),
-                    (t2_id.table_id(), None),
+                    (t2_id, None),
                 ]
                 .into_iter(),
             );

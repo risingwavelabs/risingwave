@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::StreamNode;
@@ -72,9 +72,6 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Fragment id.
 type Id = u32;
-
-/// State table id.
-type TableId = u32;
 
 /// Node for a fragment in the [`Graph`].
 struct Fragment {
@@ -335,9 +332,11 @@ impl Matches {
                     );
                 }
 
-                table_matches.try_insert(ut.id, vt).unwrap_or_else(|_| {
-                    panic!("duplicated table id {} in fragment {}", ut.id, u.id)
-                });
+                table_matches
+                    .try_insert(ut.id.into(), vt)
+                    .unwrap_or_else(|_| {
+                        panic!("duplicated table id {} in fragment {}", ut.id, u.id)
+                    });
             }
         }
 
