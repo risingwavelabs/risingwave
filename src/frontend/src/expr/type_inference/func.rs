@@ -789,6 +789,23 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
+        ExprType::JsonbStripNulls => {
+            ensure_arity!("jsonb_strip_nulls", 1 <= | inputs | <= 2);
+            inputs[0].cast_implicit_mut(&DataType::Jsonb)?;
+
+            if let Some(strip_in_arrays) = inputs.get_mut(1) {
+                strip_in_arrays
+                    .cast_implicit_mut(&DataType::Boolean)
+                    .map_err(|_| {
+                        ErrorCode::BindError(format!(
+                            "Cannot cast {} to boolean for parameter strip_in_arrays",
+                            strip_in_arrays.return_type()
+                        ))
+                    })?;
+            }
+
+            Ok(Some(DataType::Jsonb))
+        }
         _ => Ok(None),
     }
 }
