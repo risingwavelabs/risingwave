@@ -578,6 +578,17 @@ impl<T: One> One for OrderedFloat<T> {
     }
 }
 
+impl OrderedFloat<f64> {
+    pub fn gamma(self) -> Self {
+        OrderedFloat(self.0.gamma())
+    }
+
+    pub fn ln_gamma(self) -> (Self, i32) {
+        let (result, sign) = self.0.ln_gamma();
+        (OrderedFloat(result), sign)
+    }
+}
+
 /// Similar to [`num_traits::Float`], but without requiring `NumCast` and `ToPrimitive`.
 #[easy_ext::ext(FloatExt)]
 pub impl<T: Float> OrderedFloat<T>
