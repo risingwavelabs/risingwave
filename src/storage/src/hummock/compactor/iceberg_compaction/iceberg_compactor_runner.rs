@@ -474,9 +474,9 @@ pub async fn create_plan_runners(
 
     let parsed_task_type = TaskType::try_from(task_type).map_err(|e| {
         HummockError::compaction_executor(anyhow::anyhow!(
-            "Invalid task type in iceberg compaction task {}: {}",
+            "Invalid task type in iceberg compaction task {} {:?}",
             task_id,
-            e
+            ?e
         ))
     })?;
 
