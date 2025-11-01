@@ -70,6 +70,10 @@ RisingWave integrates real-time stream processing and low-latency serving in a s
 ### Iceberg lakehouse ingestion, transformation, and management
 RisingWave treats Apache Iceberg™ as a first-class citizen. It directly hosts and manages the Iceberg REST catalog, allowing users to create and operate Iceberg tables through a PostgreSQL-compatible interface. RisingWave supports two write modes: Merge-on-Read (MoR) and Copy-on-Write (CoW), to suit different ingestion and query patterns. It also provides built-in table maintenance capabilities, including compaction, small-file optimization, vacuum, and snapshot cleanup, ensuring efficient and consistent data management without external tools or pipelines.
 
+_Plug: [Nimtable](https://github.com/nimtable/nimtable) is an observability tool developed by RisingWave for easily exploring and managing Iceberg tables._
+
+
+
 ## Key design decisions
 
 RisingWave is designed to be easier to use and more cost-efficient:
