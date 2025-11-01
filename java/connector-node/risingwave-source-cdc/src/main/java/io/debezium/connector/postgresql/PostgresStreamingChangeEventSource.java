@@ -20,9 +20,17 @@
 
 package io.debezium.connector.postgresql;
 
+import static io.debezium.connector.postgresql.PostgresConnectorConfig.LsnFlushTimeoutAction;
+
 import io.debezium.DebeziumException;
-import io.debezium.connector.postgresql.connection.*;
+import io.debezium.connector.postgresql.connection.LogicalDecodingMessage;
+import io.debezium.connector.postgresql.connection.Lsn;
+import io.debezium.connector.postgresql.connection.PostgresConnection;
+import io.debezium.connector.postgresql.connection.ReplicationConnection;
+import io.debezium.connector.postgresql.connection.ReplicationMessage;
 import io.debezium.connector.postgresql.connection.ReplicationMessage.Operation;
+import io.debezium.connector.postgresql.connection.ReplicationStream;
+import io.debezium.connector.postgresql.connection.WalPositionLocator;
 import io.debezium.heartbeat.Heartbeat;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
@@ -38,6 +46,11 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.postgresql.core.BaseConnection;
@@ -84,6 +97,11 @@ public class PostgresStreamingChangeEventSource
     // as this is driven by Kafka Connect. This might be a root cause of DBZ-5163.
     // This flag will ensure that LSN is flushed only if we are really in message processing mode.
     private volatile boolean lsnFlushingAllowed = false;
+
+    // Offset commit is executed in a different thread.
+    // In case of failure we are going to terminate the processing gracefully from the current
+    // thread.
+    private volatile boolean commitOffsetFailure = false;
 
     /**
      * The minimum of (number of event received since the last event sent to Kafka, number of event
@@ -139,6 +157,13 @@ public class PostgresStreamingChangeEventSource
     }
 
     @Override
+    public void close() {
+        if (connection != null) {
+            connection.close();
+        }
+    }
+
+    @Override
     public void execute(
             ChangeEventSourceContext context,
             PostgresPartition partition,
@@ -178,17 +203,15 @@ public class PostgresStreamingChangeEventSource
                 replicationStream.compareAndSet(
                         null, replicationConnection.startStreaming(walPosition));
             }
-            // for large dbs, the refresh of schema can take too much time
-            // such that the connection times out. We must enable keep
-            // alive to ensure that it doesn't time out
+
+            // Start keep alive thread to prevent connection timeout during time-consuming
+            // operations the DB side.
             ReplicationStream stream = this.replicationStream.get();
             stream.startKeepAlive(
                     Threads.newSingleThreadExecutor(
                             PostgresConnector.class,
                             connectorConfig.getLogicalName(),
                             KEEP_ALIVE_THREAD_NAME));
-
-            initSchema();
 
             // If we need to do a pre-snapshot streaming catch up, we should allow the snapshot
             // transaction to persist
@@ -226,19 +249,25 @@ public class PostgresStreamingChangeEventSource
         } catch (Throwable e) {
             errorHandler.setProducerThrowable(e);
         } finally {
-            if (replicationConnection != null) {
-                LOGGER.debug("stopping streaming...");
-                // stop the keep alive thread, this also shuts down the
-                // executor pool
-                ReplicationStream stream = replicationStream.get();
-                if (stream != null) {
-                    stream.stopKeepAlive();
-                }
-                // TODO author=Horia Chiorean date=08/11/2016 description=Ideally we'd close the
-                // stream, but it's not reliable atm (see javadoc)
-                // replicationStream.close();
-                // close the connection - this should also disconnect the current stream even if
-                // it's blocking
+            cleanUpStreamingOnStop(offsetContext);
+        }
+    }
+
+    private void cleanUpStreamingOnStop(PostgresOffsetContext offsetContext) {
+        if (replicationConnection != null) {
+            LOGGER.debug("stopping streaming...");
+            // stop the keep alive thread, this also shuts down the
+            // executor pool
+            ReplicationStream stream = replicationStream.get();
+            if (stream != null) {
+                stream.stopKeepAlive();
+            }
+            // TODO author=Horia Chiorean date=08/11/2016 description=Ideally we'd close the stream,
+            // but it's not reliable atm (see javadoc)
+            // replicationStream.close();
+            // close the connection - this should also disconnect the current stream even if it's
+            // blocking
+            if (offsetContext != null) {
                 try {
                     if (!isInPreSnapshotCatchUpStreaming(offsetContext)) {
                         connection.commit();
@@ -247,9 +276,16 @@ public class PostgresStreamingChangeEventSource
                 } catch (Exception e) {
                     LOGGER.debug("Exception while closing the connection", e);
                 }
-                replicationStream.set(null);
             }
+            replicationStream.set(null);
         }
+    }
+
+    private boolean haveNotReceivedStreamingStoppingLsn(
+            PostgresOffsetContext offsetContext, Lsn lastCompletelyProcessedLsn) {
+        return offsetContext.getStreamingStoppingLsn() == null
+                || (lastCompletelyProcessedLsn.compareTo(offsetContext.getStreamingStoppingLsn())
+                        < 0);
     }
 
     private void processMessages(
@@ -261,14 +297,10 @@ public class PostgresStreamingChangeEventSource
         LOGGER.info("Processing messages");
         int noMessageIterations = 0;
         while (context.isRunning()
-                && (offsetContext.getStreamingStoppingLsn() == null
-                        || (lastCompletelyProcessedLsn.compareTo(
-                                        offsetContext.getStreamingStoppingLsn())
-                                < 0))) {
-
+                && haveNotReceivedStreamingStoppingLsn(offsetContext, lastCompletelyProcessedLsn)
+                && !commitOffsetFailure) {
             boolean receivedMessage =
                     stream.readPending(
-                            /* patched code */
                             new ReplicationStream.ReplicationMessageProcessor() {
                                 @Override
                                 public void process(ReplicationMessage message)
@@ -306,7 +338,8 @@ public class PostgresStreamingChangeEventSource
                 noMessageIterations = 0;
                 lsnFlushingAllowed = true;
             } else {
-                dispatcher.dispatchHeartbeatEvent(partition, offsetContext);
+                dispatcher.dispatchHeartbeatEventAlsoToIncrementalSnapshot(
+                        partition, offsetContext);
                 noMessageIterations++;
                 if (noMessageIterations >= THROTTLE_NO_MESSAGE_BEFORE_PAUSE) {
                     noMessageIterations = 0;
@@ -341,22 +374,13 @@ public class PostgresStreamingChangeEventSource
             throws SQLException, InterruptedException {
 
         final Lsn lsn = stream.lastReceivedLsn();
-
+        LOGGER.trace("Processing replication message {}", message);
         if (message.isLastEventForLsn()) {
             lastCompletelyProcessedLsn = lsn;
         }
 
         // Tx BEGIN/END event
         if (message.isTransactionalMessage()) {
-            if (!connectorConfig.shouldProvideTransactionMetadata()) {
-                LOGGER.trace("Received transactional message {}", message);
-                // Don't skip on BEGIN message as it would flush LSN for the whole transaction
-                // too early
-                if (message.getOperation() == Operation.COMMIT) {
-                    commitMessage(partition, offsetContext, lsn);
-                }
-                return;
-            }
 
             offsetContext.updateWalPosition(
                     lsn,
@@ -366,6 +390,19 @@ public class PostgresStreamingChangeEventSource
                     taskContext.getSlotXmin(connection),
                     null,
                     message.getOperation());
+
+            if (!connectorConfig.shouldProvideTransactionMetadata()) {
+                LOGGER.trace("Received transactional message {}", message);
+                // Don't skip on BEGIN message as it would flush LSN for the whole transaction
+                // too early
+                if (message.getOperation() == Operation.COMMIT) {
+                    commitMessage(partition, offsetContext, lsn);
+                    dispatcher.dispatchTransactionCommittedEvent(
+                            partition, offsetContext, message.getCommitTime());
+                }
+                return;
+            }
+
             if (message.getOperation() == Operation.BEGIN) {
                 dispatcher.dispatchTransactionStartedEvent(
                         partition,
@@ -403,7 +440,7 @@ public class PostgresStreamingChangeEventSource
         // DML event
         else {
             TableId tableId = null;
-            if (message.getOperation() != Operation.NOOP) {
+            if (!message.isSkippedMessage()) {
                 tableId = PostgresSchema.parse(message.getTable());
                 Objects.requireNonNull(tableId);
             }
@@ -418,19 +455,18 @@ public class PostgresStreamingChangeEventSource
                     message.getOperation());
 
             boolean dispatched =
-                    message.getOperation() != Operation.NOOP
-                            && dispatcher.dispatchDataChangeEvent(
+                    dispatcher.dispatchDataChangeEvent(
+                            partition,
+                            tableId,
+                            new PostgresChangeRecordEmitter(
                                     partition,
+                                    offsetContext,
+                                    clock,
+                                    connectorConfig,
+                                    schema,
+                                    connection,
                                     tableId,
-                                    new PostgresChangeRecordEmitter(
-                                            partition,
-                                            offsetContext,
-                                            clock,
-                                            connectorConfig,
-                                            schema,
-                                            connection,
-                                            tableId,
-                                            message));
+                                    message));
 
             maybeWarnAboutGrowingWalBacklog(dispatched);
         }
@@ -451,7 +487,6 @@ public class PostgresStreamingChangeEventSource
 
             boolean receivedMessage =
                     stream.readPending(
-                            /* patched code */
                             new ReplicationStream.ReplicationMessageProcessor() {
                                 @Override
                                 public void process(ReplicationMessage message)
@@ -543,7 +578,7 @@ public class PostgresStreamingChangeEventSource
             LOGGER.warn(
                     "Received {} events which were all filtered out, so no offset could be committed. "
                             + "This prevents the replication slot from acknowledging the processed WAL offsets, "
-                            + "causing a growing backlog of non-removable WAL segments on the database server. "
+                            + "causing a growing backlog of non-removeable WAL segments on the database server. "
                             + "Consider to either adjust your filter configuration or enable heartbeat events "
                             + "(via the {} option) to avoid this situation.",
                     numberOfEventsSinceLastEventSentOrWalGrowingWarning,
@@ -555,41 +590,133 @@ public class PostgresStreamingChangeEventSource
 
     @Override
     public void commitOffset(Map<String, ?> partition, Map<String, ?> offset) {
-        try {
-            ReplicationStream replicationStream = this.replicationStream.get();
-            final Lsn commitLsn =
-                    Lsn.valueOf((Long) offset.get(PostgresOffsetContext.LAST_COMMIT_LSN_KEY));
-            final Lsn changeLsn =
-                    Lsn.valueOf(
-                            (Long)
-                                    offset.get(
-                                            PostgresOffsetContext
-                                                    .LAST_COMPLETELY_PROCESSED_LSN_KEY));
-            final Lsn lsn = (commitLsn != null) ? commitLsn : changeLsn;
+        ReplicationStream replicationStream = this.replicationStream.get();
+        final Lsn commitLsn =
+                Lsn.valueOf((Long) offset.get(PostgresOffsetContext.LAST_COMMIT_LSN_KEY));
+        final Lsn changeLsn =
+                Lsn.valueOf(
+                        (Long) offset.get(PostgresOffsetContext.LAST_COMPLETELY_PROCESSED_LSN_KEY));
+        final Lsn lsn = (commitLsn != null) ? commitLsn : changeLsn;
 
-            LOGGER.debug(
-                    "Received offset commit request on commit LSN '{}' and change LSN '{}'",
-                    commitLsn,
-                    changeLsn);
-            if (replicationStream != null && lsn != null) {
-                if (!lsnFlushingAllowed) {
-                    LOGGER.info(
-                            "Received offset commit request on '{}', but ignoring it. LSN flushing is not allowed yet",
-                            lsn);
-                    return;
-                }
-
-                if (LOGGER.isDebugEnabled()) {
-                    LOGGER.debug("Flushing LSN to server: {}", lsn);
-                }
-                // tell the server the point up to which we've processed data, so it can be free to
-                // recycle WAL segments
-                replicationStream.flushLsn(lsn);
-            } else {
-                LOGGER.debug("Streaming has already stopped, ignoring commit callback...");
+        LOGGER.debug(
+                "Received offset commit request on commit LSN '{}' and change LSN '{}'",
+                commitLsn,
+                changeLsn);
+        if (replicationStream != null && lsn != null) {
+            if (!lsnFlushingAllowed) {
+                LOGGER.info(
+                        "Received offset commit request on '{}', but ignoring it. LSN flushing is not allowed yet",
+                        lsn);
+                return;
             }
-        } catch (SQLException e) {
-            throw new ConnectException(e);
+
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Flushing LSN to server: {}", lsn);
+            }
+            // tell the server the point up to which we've processed data, so it can be free to
+            // recycle WAL segments
+            ExecutorService executor =
+                    Threads.newSingleThreadExecutor(
+                            PostgresStreamingChangeEventSource.class,
+                            connectorConfig.getLogicalName(),
+                            "lsn-flush");
+            Future<Void> future =
+                    executor.submit(
+                            () -> {
+                                try {
+                                    replicationStream.flushLsn(lsn);
+                                    return null;
+                                } catch (SQLException e) {
+                                    commitOffsetFailure = true;
+                                    cleanUpStreamingOnStop(null);
+                                    throw new ConnectException(e);
+                                }
+                            });
+            try {
+                future.get(connectorConfig.lsnFlushTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                shutdownExecutorGracefully(executor);
+                // Handle the timeout according to configuration
+                handleTimeout(lsn);
+            } catch (InterruptedException e) {
+                future.cancel(true);
+                shutdownExecutorGracefully(executor);
+                Thread.currentThread().interrupt();
+                LOGGER.warn(
+                        "LSN flush operation for '{}' was interrupted. Continuing without waiting for flush completion.",
+                        lsn);
+            } catch (ExecutionException e) {
+                shutdownExecutorGracefully(executor);
+                Throwable cause = e.getCause();
+                if (cause instanceof ConnectException) {
+                    throw (ConnectException) cause;
+                }
+                throw new ConnectException("LSN flush operation failed", cause);
+            } finally {
+                // Ensure executor is always shut down
+                if (!executor.isShutdown()) {
+                    shutdownExecutorGracefully(executor);
+                }
+            }
+        } else {
+            LOGGER.debug("Streaming has already stopped, ignoring commit callback...");
+        }
+    }
+
+    /**
+     * Handles the scenario when an LSN flush timeout occurs.
+     *
+     * @param lsn the LSN that failed to flush
+     */
+    private void handleTimeout(Lsn lsn) {
+        LsnFlushTimeoutAction action = connectorConfig.lsnFlushTimeoutAction();
+        long timeoutMillis = connectorConfig.lsnFlushTimeout().toMillis();
+        switch (action) {
+            case FAIL:
+                LOGGER.error(
+                        "LSN flush operation for LSN '{}' did not complete within the configured timeout of {} ms. ",
+                        lsn,
+                        timeoutMillis);
+                throw new ConnectException(
+                        String.format(
+                                "LSN flush operation timed out for LSN '%s'. "
+                                        + "Task is configured to fail on timeout as configured by lsn.flush.timeout.action configuration.",
+                                lsn));
+            case WARN:
+                LOGGER.warn(
+                        "LSN flush operation for LSN '{}' did not complete within the configured timeout of {} ms. "
+                                + "Continuing to process as configured by lsn.flush.timeout.action configuration.",
+                        lsn,
+                        timeoutMillis);
+                break;
+            case IGNORE:
+                LOGGER.debug(
+                        "LSN flush operation for LSN '{}' did not complete within the configured timeout of {} ms. "
+                                + "Continuing to process as configured by lsn.flush.timeout.action configuration.",
+                        lsn,
+                        timeoutMillis);
+                break;
+        }
+    }
+
+    /**
+     * Gracefully shuts down an executor service.
+     *
+     * @param executor the executor to shut down
+     */
+    private void shutdownExecutorGracefully(ExecutorService executor) {
+        try {
+            executor.shutdown();
+            if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
+                LOGGER.warn(
+                        "Executor did not terminate gracefully within 1 second, forcing shutdown");
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            LOGGER.warn("Interrupted while shutting down executor, forcing shutdown");
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 

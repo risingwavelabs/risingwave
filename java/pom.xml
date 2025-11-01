@@ -67,7 +67,7 @@
         <grpc.version>1.75.0</grpc.version>
         <log4j.version>2.25.1</log4j.version>
         <slf4j.version>2.0.17</slf4j.version>
-        <debezium.version>2.6.2.Final</debezium.version>
+        <debezium.version>3.2.4.Final</debezium.version>
         <jackson.version>2.19.2</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <testcontainers.version>1.21.3</testcontainers.version>
