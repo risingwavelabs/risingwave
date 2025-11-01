@@ -19,6 +19,7 @@ use super::RwPgResponse;
 use super::util::execute_with_long_running_notification;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::ICEBERG_SINK_PREFIX;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 
@@ -55,6 +56,14 @@ pub async fn handle_drop_sink(
 
         sink
     };
+
+    if sink_name.starts_with(ICEBERG_SINK_PREFIX) {
+        return Err(crate::error::ErrorCode::NotSupported(
+            "Dropping Iceberg sinks is not supported".to_string(),
+            "Please use DROP TABLE command.".to_owned(),
+        )
+        .into());
+    }
 
     let sink_id = sink.id;
 

@@ -32,7 +32,7 @@ use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroup
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::{ObjectId, StreamingParallelism};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
-use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
+use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
@@ -1399,10 +1399,13 @@ impl DdlService for DdlServiceImpl {
             fragment_graph,
             job_type,
         } = table_info.unwrap();
-        let table = table.unwrap();
+        let mut table = table.unwrap();
         let database_id = table.get_database_id();
         let schema_id = table.get_schema_id();
         let table_name = table.get_name().to_owned();
+
+        // Mark table as background creation, so that it won't block sink creation.
+        table.create_type = PbCreateType::Background as _;
 
         let stream_job =
             StreamingJob::Table(source, table, PbTableJobType::try_from(job_type).unwrap());
