@@ -3814,8 +3814,16 @@ impl Parser<'_> {
         if !self.parse_keyword(Keyword::SET) {
             return self.expected("SET after ALTER FRAGMENT");
         }
-        let rate_limit = self.parse_alter_fragment_rate_limit()?;
-        let operation = AlterFragmentOperation::AlterBackfillRateLimit { rate_limit };
+        let operation = if self.parse_keyword(Keyword::PARALLELISM) {
+            if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+                return self.expected("TO or = after ALTER FRAGMENT SET PARALLELISM");
+            }
+            let parallelism = self.parse_set_variable()?;
+            AlterFragmentOperation::SetParallelism { parallelism }
+        } else {
+            let rate_limit = self.parse_alter_fragment_rate_limit()?;
+            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit }
+        };
         Ok(Statement::AlterFragment {
             fragment_id,
             operation,
