@@ -6718,7 +6718,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c15a32b4220cf1b02132129eb34a5ea301215b7f#c15a32b4220cf1b02132129eb34a5ea301215b7f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6770,7 +6770,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c15a32b4220cf1b02132129eb34a5ea301215b7f#c15a32b4220cf1b02132129eb34a5ea301215b7f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6787,7 +6787,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-memory"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c15a32b4220cf1b02132129eb34a5ea301215b7f#c15a32b4220cf1b02132129eb34a5ea301215b7f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
 dependencies = [
  "async-trait",
  "futures",
@@ -6800,7 +6800,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c15a32b4220cf1b02132129eb34a5ea301215b7f#c15a32b4220cf1b02132129eb34a5ea301215b7f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6820,7 +6820,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=0877037ea3f3d9437f30e8db35eae5333362885c#0877037ea3f3d9437f30e8db35eae5333362885c"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=1e81f8a1ec2c2d6c6b9008438e77f26d0532effe#1e81f8a1ec2c2d6c6b9008438e77f26d0532effe"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6851,7 +6851,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c15a32b4220cf1b02132129eb34a5ea301215b7f#c15a32b4220cf1b02132129eb34a5ea301215b7f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
 dependencies = [
  "anyhow",
  "async-trait",
