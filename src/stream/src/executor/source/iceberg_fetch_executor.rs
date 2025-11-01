@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
-use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
+use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 use risingwave_storage::store::PrefetchOptions;
@@ -65,16 +65,16 @@ pub struct IcebergFetchExecutor<S: StateStore> {
 ///
 /// Currently 1 `FileScanTask` -> 1 `ChunksWithState`.
 /// Later after we support reading part of a file, we will support 1 `FileScanTask` -> n `ChunksWithState`.
-struct ChunksWithState {
+pub(crate) struct ChunksWithState {
     /// The actual data chunks read from the file
-    chunks: Vec<StreamChunk>,
+    pub chunks: Vec<StreamChunk>,
 
     /// Path to the data file, used for checkpointing and error reporting.
-    data_file_path: String,
+    pub data_file_path: String,
 
     /// The last read position in the file, used for checkpointing.
     #[expect(dead_code)]
-    last_read_pos: Datum,
+    pub last_read_pos: Datum,
 }
 
 pub(super) use state::PersistedFileScanTask;
@@ -357,13 +357,14 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         for task in batch {
             let mut chunks = vec![];
             #[for_await]
-            for chunk in scan_task_to_chunk(
+            for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 task,
                 IcebergScanOpts {
                     chunk_size: streaming_config.developer.chunk_size,
                     need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
+                    handle_delete_files: false,
                 },
                 None,
             ) {

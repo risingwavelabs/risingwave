@@ -120,6 +120,7 @@ impl StreamNode for StreamSource {
                 downstream_columns: self.downstream_columns.as_ref().map(|cols| Columns {
                     columns: cols.iter().map(|c| c.to_protobuf()).collect_vec(),
                 }),
+                refresh_mode: source_catalog.refresh_mode,
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))

@@ -16,3 +16,7 @@ mod batch_posix_fs_list;
 pub use batch_posix_fs_list::*;
 mod batch_posix_fs_fetch;
 pub use batch_posix_fs_fetch::*;
+mod batch_iceberg_list;
+pub use batch_iceberg_list::*;
+mod batch_iceberg_fetch;
+pub use batch_iceberg_fetch::*;

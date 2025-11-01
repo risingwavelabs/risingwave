@@ -300,3 +300,13 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
   ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
 }
+
+message SourceRefreshMode {
+  message SourceRefreshModeStreaming {}
+  message SourceRefreshModeManualTrigger {}
+
+  oneof refresh_mode {
+    SourceRefreshModeStreaming streaming = 1;
+    SourceRefreshModeManualTrigger manual_trigger = 2;
+  }
+}
