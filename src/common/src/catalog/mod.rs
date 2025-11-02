@@ -35,7 +35,6 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_test_utils};
-use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
@@ -230,8 +229,6 @@ impl From<SchemaId> for u32 {
     PartialEq,
     Eq,
     Ord,
-    Serialize,
-    Deserialize,
 )]
 #[display("{table_id}")]
 pub struct TableId {
