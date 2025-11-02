@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::id::JobId;
 use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
@@ -286,7 +287,7 @@ pub struct PartialActorLocation {
 #[derive(FromQueryResult, Debug, Eq, PartialEq, Clone)]
 pub struct FragmentDesc {
     pub fragment_id: FragmentId,
-    pub job_id: ObjectId,
+    pub job_id: JobId,
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     pub state_table_ids: I32Array,
@@ -369,11 +370,13 @@ where
     Ok(())
 }
 
-pub async fn ensure_job_not_canceled<C>(job_id: ObjectId, db: &C) -> MetaResult<()>
+pub async fn ensure_job_not_canceled<C>(job_id: JobId, db: &C) -> MetaResult<()>
 where
     C: ConnectionTrait,
 {
-    let count = Object::find_by_id(job_id).count(db).await?;
+    let count = Object::find_by_id(job_id.as_raw_id() as ObjectId)
+        .count(db)
+        .await?;
     if count == 0 {
         return Err(MetaError::cancelled(format!(
             "job {} might be cancelled manually or by recovery",
@@ -572,9 +575,10 @@ where
                 } else {
                     true
                 };
+                let job_id = JobId::new(oid as u32);
                 return if check_creation
                     && !matches!(
-                        StreamingJob::find_by_id(oid)
+                        StreamingJob::find_by_id(job_id)
                             .select_only()
                             .column(streaming_job::Column::JobStatus)
                             .into_tuple::<JobStatus>()
@@ -585,7 +589,7 @@ where
                     Err(MetaError::catalog_under_creation(
                         $obj_type.as_str(),
                         name,
-                        oid,
+                        job_id,
                     ))
                 } else {
                     Err(MetaError::catalog_duplicated($obj_type.as_str(), name))
@@ -933,7 +937,7 @@ pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery 
         )
 }
 
-pub async fn get_internal_tables_by_id<C>(job_id: ObjectId, db: &C) -> MetaResult<Vec<TableId>>
+pub async fn get_internal_tables_by_id<C>(job_id: JobId, db: &C) -> MetaResult<Vec<TableId>>
 where
     C: ConnectionTrait,
 {
@@ -1099,7 +1103,7 @@ where
     assert_ne!(object.obj_type, ObjectType::Database);
 
     let for_mview_filter = if object.obj_type == ObjectType::Table {
-        let table_type = Table::find_by_id(object_id)
+        let table_type = Table::find_by_id(TableId::new(object_id as _))
             .select_only()
             .column(table::Column::TableType)
             .into_tuple::<TableType>()
@@ -1145,7 +1149,7 @@ where
         .map(|(grantee, _, _, _)| *grantee)
         .collect::<HashSet<_>>();
 
-    let internal_table_ids = get_internal_tables_by_id(object_id, db).await?;
+    let internal_table_ids = get_internal_tables_by_id(JobId::new(object_id as _), db).await?;
 
     for (grantee, granted_by, action, with_grant_option) in default_privileges {
         UserPrivilege::insert(user_privilege::ActiveModel {
@@ -1163,7 +1167,7 @@ where
             for internal_table_id in &internal_table_ids {
                 UserPrivilege::insert(user_privilege::ActiveModel {
                     user_id: Set(grantee),
-                    oid: Set(*internal_table_id as _),
+                    oid: Set(internal_table_id.as_raw_id() as _),
                     granted_by: Set(granted_by),
                     action: Set(Action::Select),
                     with_grant_option: Set(with_grant_option),
@@ -1523,7 +1527,7 @@ pub fn rebuild_fragment_mapping_from_actors(
 pub async fn get_fragments_for_jobs<C>(
     db: &C,
     actor_info: &SharedActorInfos,
-    streaming_jobs: Vec<ObjectId>,
+    streaming_jobs: Vec<JobId>,
 ) -> MetaResult<(
     HashMap<SourceId, BTreeSet<FragmentId>>,
     HashSet<FragmentId>,
@@ -1776,7 +1780,7 @@ pub async fn rename_relation(
             if let Some(source_id) = associated_source_id {
                 rename_relation!(Source, source, source_id, source_id);
             }
-            rename_relation!(Table, table, table_id, object_id)
+            rename_relation!(Table, table, table_id, TableId::new(object_id as _))
         }
         ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
         ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
@@ -1829,7 +1833,7 @@ where
 
 pub async fn get_existing_job_resource_group<C>(
     txn: &C,
-    streaming_job_id: ObjectId,
+    streaming_job_id: JobId,
 ) -> MetaResult<String>
 where
     C: ConnectionTrait,
@@ -1923,7 +1927,7 @@ pub async fn rename_relation_refer(
 
     for obj in objs {
         match obj.obj_type {
-            ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
+            ObjectType::Table => rename_relation_ref!(Table, table, table_id, TableId::new(obj.oid as _)),
             ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
             ObjectType::Subscription => {
                 rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
@@ -2162,12 +2166,12 @@ pub struct StreamingJobExtraInfo {
 
 pub async fn get_streaming_job_extra_info<C>(
     txn: &C,
-    job_ids: Vec<ObjectId>,
-) -> MetaResult<HashMap<ObjectId, StreamingJobExtraInfo>>
+    job_ids: Vec<JobId>,
+) -> MetaResult<HashMap<JobId, StreamingJobExtraInfo>>
 where
     C: ConnectionTrait,
 {
-    let timezone_pairs: Vec<(ObjectId, Option<String>)> = StreamingJob::find()
+    let timezone_pairs: Vec<(JobId, Option<String>)> = StreamingJob::find()
         .select_only()
         .columns([
             streaming_job::Column::JobId,

@@ -1257,7 +1257,7 @@ impl SessionImpl {
             table.owner(),
             AclMode::Select,
             table_name.to_owned(),
-            Object::TableId(table.id.table_id()),
+            Object::TableId(table.id.as_raw_id()),
         )])?;
 
         Ok(table.clone())

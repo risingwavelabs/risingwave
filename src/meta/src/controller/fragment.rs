@@ -23,6 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::SplitImpl;
@@ -189,7 +190,7 @@ impl NotificationManager {
 
 impl CatalogController {
     pub fn prepare_fragment_models_from_fragments(
-        job_id: ObjectId,
+        job_id: JobId,
         fragments: impl Iterator<Item = &Fragment>,
     ) -> MetaResult<Vec<fragment::Model>> {
         fragments
@@ -198,7 +199,7 @@ impl CatalogController {
     }
 
     pub fn prepare_fragment_model_for_new_job(
-        job_id: ObjectId,
+        job_id: JobId,
         fragment: &Fragment,
     ) -> MetaResult<fragment::Model> {
         let vnode_count = fragment.vnode_count();
@@ -212,7 +213,11 @@ impl CatalogController {
             ..
         } = fragment;
 
-        let state_table_ids = pb_state_table_ids.clone().into();
+        let state_table_ids = pb_state_table_ids
+            .iter()
+            .map(|table_id| table_id.as_raw_id() as i32)
+            .collect_vec()
+            .into();
 
         assert!(!pb_actors.is_empty());
 
@@ -251,7 +256,7 @@ impl CatalogController {
     }
 
     pub fn compose_table_fragments(
-        table_id: u32,
+        job_id: JobId,
         state: PbState,
         ctx: Option<PbStreamContext>,
         fragments: Vec<(fragment::Model, Vec<ActorModel>)>,
@@ -271,7 +276,7 @@ impl CatalogController {
         }
 
         let table_fragments = StreamJobFragments {
-            stream_job_id: table_id.into(),
+            stream_job_id: job_id,
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
@@ -377,7 +382,7 @@ impl CatalogController {
             fragment_type_mask: fragment_type_mask.into(),
             distribution_type: pb_distribution_type,
             actors: pb_actors,
-            state_table_ids: pb_state_table_ids,
+            state_table_ids: pb_state_table_ids.into_iter().map_into().collect(),
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
             nodes: stream_node,
         };
@@ -509,10 +514,7 @@ impl CatalogController {
         Ok(select.into_tuple().all(&inner.db).await?)
     }
 
-    pub async fn get_job_fragments_by_id(
-        &self,
-        job_id: ObjectId,
-    ) -> MetaResult<StreamJobFragments> {
+    pub async fn get_job_fragments_by_id(&self, job_id: JobId) -> MetaResult<StreamJobFragments> {
         let inner = self.inner.read().await;
 
         // Load fragments matching the job from the database
@@ -769,7 +771,7 @@ impl CatalogController {
         Ok(job_states)
     }
 
-    pub async fn get_max_parallelism_by_id(&self, job_id: ObjectId) -> MetaResult<usize> {
+    pub async fn get_max_parallelism_by_id(&self, job_id: JobId) -> MetaResult<usize> {
         let inner = self.inner.read().await;
         let max_parallelism: i32 = StreamingJob::find_by_id(job_id)
             .select_only()
@@ -782,12 +784,12 @@ impl CatalogController {
     }
 
     /// Try to get internal table ids of each streaming job, used by metrics collection.
-    pub async fn get_job_internal_table_ids(&self) -> Option<Vec<(ObjectId, Vec<TableId>)>> {
+    pub async fn get_job_internal_table_ids(&self) -> Option<Vec<(JobId, Vec<TableId>)>> {
         if let Ok(inner) = self.inner.try_read()
             && let Ok(job_state_tables) = FragmentModel::find()
                 .select_only()
                 .columns([fragment::Column::JobId, fragment::Column::StateTableIds])
-                .into_tuple::<(ObjectId, I32Array)>()
+                .into_tuple::<(JobId, I32Array)>()
                 .all(&inner.db)
                 .await
         {
@@ -796,7 +798,12 @@ impl CatalogController {
                 job_internal_table_ids
                     .entry(job_id)
                     .or_insert_with(Vec::new)
-                    .extend(state_table_ids.into_inner());
+                    .extend(
+                        state_table_ids
+                            .into_inner()
+                            .into_iter()
+                            .map(|table_id| TableId::new(table_id as _)),
+                    );
             }
             return Some(job_internal_table_ids.into_iter().collect());
         }
@@ -890,7 +897,7 @@ impl CatalogController {
     }
 
     // TODO: This function is too heavy, we should avoid using it and implement others on demand.
-    pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, StreamJobFragments>> {
+    pub async fn table_fragments(&self) -> MetaResult<BTreeMap<JobId, StreamJobFragments>> {
         let inner = self.inner.read().await;
         let jobs = StreamingJob::find().all(&inner.db).await?;
 
@@ -911,7 +918,7 @@ impl CatalogController {
                 self.collect_fragment_actor_pairs(fragments, job.timezone.clone())?;
 
             table_fragments.insert(
-                job.job_id as ObjectId,
+                job.job_id,
                 Self::compose_table_fragments(
                     job.job_id as _,
                     job.job_status.into(),
@@ -1082,7 +1089,7 @@ impl CatalogController {
 
             let fragment = FragmentDistribution {
                 fragment_id: fragment_desc.fragment_id as _,
-                table_id: fragment_desc.job_id as _,
+                table_id: fragment_desc.job_id.as_raw_id(),
                 distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type)
                     as _,
                 state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
@@ -1117,14 +1124,14 @@ impl CatalogController {
 
             info.iter_over_fragments()
                 .filter(|(_, fragment)| {
-                    sink_ids.contains(&fragment.job_id)
+                    sink_ids.contains(&(fragment.job_id.as_raw_id() as _))
                         && fragment.fragment_type_mask.contains(FragmentTypeFlag::Sink)
                 })
                 .flat_map(|(_, fragment)| {
                     fragment
                         .actors
                         .keys()
-                        .map(move |actor_id| (*actor_id as _, fragment.job_id as _))
+                        .map(move |actor_id| (*actor_id as _, fragment.job_id.as_raw_id() as _))
                 })
                 .collect()
         };
@@ -1344,9 +1351,9 @@ impl CatalogController {
     /// In other words, it's the `MView` or `Sink` fragment if it exists, otherwise it's the `Source` fragment.
     pub async fn get_root_fragments(
         &self,
-        job_ids: Vec<ObjectId>,
+        job_ids: Vec<JobId>,
     ) -> MetaResult<(
-        HashMap<ObjectId, (SharedFragmentInfo, PbStreamNode)>,
+        HashMap<JobId, (SharedFragmentInfo, PbStreamNode)>,
         HashMap<ActorId, WorkerId>,
     )> {
         let inner = self.inner.read().await;
@@ -1356,7 +1363,7 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         // job_id -> fragment
-        let mut root_fragments = HashMap::<ObjectId, fragment::Model>::new();
+        let mut root_fragments = HashMap::<JobId, fragment::Model>::new();
         for fragment in all_fragments {
             let mask = FragmentTypeMask::from(fragment.fragment_type_mask);
             if mask.contains_any([FragmentTypeFlag::Mview, FragmentTypeFlag::Sink]) {
@@ -1407,7 +1414,7 @@ impl CatalogController {
 
     pub async fn get_root_fragment(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
     ) -> MetaResult<(SharedFragmentInfo, HashMap<ActorId, WorkerId>)> {
         let (mut root_fragments, actors) = self.get_root_fragments(vec![job_id]).await?;
         let (root_fragment, _) = root_fragments
@@ -1420,7 +1427,7 @@ impl CatalogController {
     /// Get the downstream fragments connected to the specified job.
     pub async fn get_downstream_fragments(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
     ) -> MetaResult<(
         Vec<(
             stream_plan::DispatcherType,
@@ -1548,7 +1555,9 @@ impl CatalogController {
         target_table: &PbTable,
         target_fragment_id: FragmentId,
     ) -> MetaResult<Vec<UpstreamSinkInfo>> {
-        let incoming_sinks = self.get_table_incoming_sinks(target_table.id as _).await?;
+        let incoming_sinks = self
+            .get_table_incoming_sinks(TableId::new(target_table.id))
+            .await?;
 
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -1578,7 +1587,7 @@ impl CatalogController {
         Ok(upstream_sink_infos)
     }
 
-    pub async fn get_mview_fragment_by_id(&self, table_id: TableId) -> MetaResult<FragmentId> {
+    pub async fn get_mview_fragment_by_id(&self, job_id: JobId) -> MetaResult<FragmentId> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1587,7 +1596,7 @@ impl CatalogController {
             .column(fragment::Column::FragmentId)
             .filter(
                 fragment::Column::JobId
-                    .eq(table_id)
+                    .eq(job_id)
                     .and(FragmentTypeMask::intersects(FragmentTypeFlag::Mview)),
             )
             .into_tuple()
@@ -1596,8 +1605,8 @@ impl CatalogController {
 
         if mview_fragment.len() != 1 {
             return Err(anyhow::anyhow!(
-                "expected exactly one mview fragment for table {}, found {}",
-                table_id,
+                "expected exactly one mview fragment for job {}, found {}",
+                job_id,
                 mview_fragment.len()
             )
             .into());
@@ -1654,12 +1663,13 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
+    use risingwave_common::id::JobId;
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
     use risingwave_meta_model::actor::{ActorModel, ActorStatus};
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::{
-        ActorId, ConnectorSplits, ExprContext, FragmentId, I32Array, ObjectId, StreamNode, TableId,
+        ActorId, ConnectorSplits, ExprContext, FragmentId, I32Array, StreamNode, TableId,
         VnodeBitmap, fragment,
     };
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
@@ -1680,9 +1690,9 @@ mod tests {
 
     const TEST_UPSTREAM_FRAGMENT_ID: FragmentId = 2;
 
-    const TEST_JOB_ID: ObjectId = 1;
+    const TEST_JOB_ID: JobId = JobId::new(1);
 
-    const TEST_STATE_TABLE_ID: TableId = 1000;
+    const TEST_STATE_TABLE_ID: TableId = TableId::new(1000);
 
     fn generate_upstream_actor_ids_for_actor(actor_id: u32) -> ActorUpstreams {
         let mut upstream_actor_ids = BTreeMap::new();
@@ -1831,7 +1841,7 @@ mod tests {
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&stream_node),
-            state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
+            state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID.as_raw_id() as _]),
             upstream_fragment_id: Default::default(),
             vnode_count: VirtualNode::COUNT_FOR_TEST as _,
             parallelism: None,
@@ -1940,7 +1950,12 @@ mod tests {
 
         assert_eq!(
             pb_state_table_ids,
-            fragment.state_table_ids.into_u32_array()
+            fragment
+                .state_table_ids
+                .into_u32_array()
+                .into_iter()
+                .map_into()
+                .collect_vec()
         );
         assert_eq!(fragment.stream_node.to_protobuf(), nodes);
     }

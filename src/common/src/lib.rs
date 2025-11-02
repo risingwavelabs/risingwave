@@ -93,6 +93,7 @@ pub mod transaction;
 pub mod types;
 pub mod vector;
 pub mod vnode_mapping;
+pub mod id;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};

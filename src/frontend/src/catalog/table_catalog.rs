@@ -565,7 +565,7 @@ impl TableCatalog {
 
     pub fn to_prost(&self) -> PbTable {
         PbTable {
-            id: self.id.table_id,
+            id: self.id.as_raw_id(),
             schema_id: self.schema_id,
             database_id: self.database_id,
             name: self.name.clone(),
@@ -619,7 +619,7 @@ impl TableCatalog {
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
             webhook_info: self.webhook_info.clone(),
-            job_id: self.job_id.map(|id| id.table_id),
+            job_id: self.job_id.map(|id| id.as_raw_id()),
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,

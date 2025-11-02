@@ -59,7 +59,6 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::catalog::TableId;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
@@ -81,7 +80,7 @@ pub(super) mod handlers {
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use thiserror_ext::AsReport;
-
+    use risingwave_common::id::JobId;
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
     use crate::rpc::await_tree::{dump_cluster_await_tree, dump_worker_node_await_tree};
@@ -326,7 +325,7 @@ pub(super) mod handlers {
         let mut fragment_to_relation_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for fragment_id in tf.fragments.keys() {
-                fragment_to_relation_map.insert(*fragment_id, relation_id as u32);
+                fragment_to_relation_map.insert(*fragment_id, relation_id.as_raw_id());
             }
         }
         let map = FragmentToRelationMap {
@@ -353,7 +352,7 @@ pub(super) mod handlers {
                 fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
             }
             map.insert(
-                id as u32,
+                id.as_raw_id(),
                 FragmentIdToActorIdMap {
                     map: fragment_id_to_actor_ids,
                 },
@@ -368,10 +367,10 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
         Path(job_id): Path<u32>,
     ) -> Result<Json<PbTableFragments>> {
-        let table_id = TableId::new(job_id);
+        let job_id = JobId::new(job_id);
         let table_fragments = srv
             .metadata_manager
-            .get_job_fragments_by_id(&table_id)
+            .get_job_fragments_by_id(job_id)
             .await
             .map_err(err)?;
         let upstream_fragments = srv

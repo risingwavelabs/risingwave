@@ -30,6 +30,7 @@ use risingwave_common::hash::{
 };
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_common::{bail, hash};
+use risingwave_common::id::JobId;
 use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
@@ -216,7 +217,7 @@ impl Scheduler {
     ///
     /// For different streaming jobs, we even out possible scheduling skew by using the streaming job id as the salt for the scheduling algorithm.
     pub fn new(
-        streaming_job_id: u32,
+        streaming_job_id: JobId,
         workers: &HashMap<u32, WorkerNode>,
         default_parallelism: NonZeroUsize,
         expected_vnode_count: usize,

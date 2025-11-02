@@ -283,7 +283,7 @@ impl TraceSpan {
                     .map(|(epoch, table_ids)| {
                         (
                             *epoch,
-                            table_ids.iter().map(|table_id| table_id.table_id).collect(),
+                            table_ids.iter().map(|table_id| table_id.as_raw_id()).collect(),
                         )
                     })
                     .collect(),

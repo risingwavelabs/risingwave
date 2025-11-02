@@ -11389,6 +11389,7 @@ dependencies = [
  "rw_iter_util",
  "rw_resource_util",
  "ryu",
+ "sea-orm",
  "serde",
  "serde_bytes",
  "serde_default",

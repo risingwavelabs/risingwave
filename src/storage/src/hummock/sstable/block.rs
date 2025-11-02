@@ -520,7 +520,7 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
-        let input_table_id = full_key.user_key.table_id.table_id();
+        let input_table_id = full_key.user_key.table_id.as_raw_id();
         match self.table_id {
             Some(current_table_id) => assert_eq!(current_table_id, input_table_id),
             None => self.table_id = Some(input_table_id),

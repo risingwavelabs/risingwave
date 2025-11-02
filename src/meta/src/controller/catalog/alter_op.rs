@@ -143,7 +143,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let dst_name: String = match object_type {
-            ObjectType::Table => Table::find_by_id(dst_object_id)
+            ObjectType::Table => Table::find_by_id(TableId::new(dst_object_id as _))
                 .select_only()
                 .column(table::Column::Name)
                 .into_tuple()
@@ -314,7 +314,7 @@ impl CatalogController {
                 return Ok(version);
             }
             ObjectType::Table => {
-                let table = Table::find_by_id(object_id)
+                let table = Table::find_by_id(TableId::new(object_id as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
@@ -354,8 +354,12 @@ impl CatalogController {
                     .select_only()
                     .column(table::Column::TableId)
                     .filter(
-                        table::Column::BelongsToJobId
-                            .is_in(table_ids.iter().cloned().chain(std::iter::once(object_id))),
+                        table::Column::BelongsToJobId.is_in(
+                            table_ids
+                                .iter()
+                                .cloned()
+                                .chain(std::iter::once(TableId::new(object_id as _))),
+                        ),
                     )
                     .into_tuple()
                     .all(&txn)
@@ -369,8 +373,12 @@ impl CatalogController {
                             SimpleExpr::Value(Value::Int(Some(new_owner))),
                         )
                         .filter(
-                            object::Column::Oid
-                                .is_in(index_ids.iter().cloned().chain(table_ids.iter().cloned())),
+                            object::Column::Oid.is_in(
+                                index_ids
+                                    .iter()
+                                    .cloned()
+                                    .chain(table_ids.iter().map(|table_id| table_id.as_raw_id() as _)),
+                            ),
                         )
                         .exec(&txn)
                         .await?;
@@ -507,7 +515,7 @@ impl CatalogController {
         let mut objects = vec![];
         match object_type {
             ObjectType::Table => {
-                let table = Table::find_by_id(object_id)
+                let table = Table::find_by_id(TableId::new(object_id as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
@@ -561,8 +569,12 @@ impl CatalogController {
                     .select_only()
                     .column(table::Column::TableId)
                     .filter(
-                        table::Column::BelongsToJobId
-                            .is_in(table_ids.iter().cloned().chain(std::iter::once(object_id))),
+                        table::Column::BelongsToJobId.is_in(
+                            table_ids
+                                .iter()
+                                .map(|table_id| table_id.as_job_id())
+                                .chain(std::iter::once(JobId::new(object_id as _))),
+                        ),
                     )
                     .into_tuple()
                     .all(&txn)
@@ -581,8 +593,12 @@ impl CatalogController {
                             SimpleExpr::Value(Value::Int(Some(new_schema))),
                         )
                         .filter(
-                            object::Column::Oid
-                                .is_in(index_ids.iter().cloned().chain(table_ids.iter().cloned())),
+                            object::Column::Oid.is_in(
+                                index_ids
+                                    .iter()
+                                    .cloned()
+                                    .chain(table_ids.iter().map(|table_id| table_id.as_raw_id() as _)),
+                            ),
                         )
                         .exec(&txn)
                         .await?;

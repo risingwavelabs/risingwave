@@ -241,8 +241,8 @@ pub struct HummockSnapshotManager {
 
 #[derive(Default)]
 struct TableChangeLogNotificationMsg {
-    updated_change_log_table_ids: HashSet<u32>,
-    deleted_table_ids: HashSet<u32>,
+    updated_change_log_table_ids: HashSet<TableId>,
+    deleted_table_ids: HashSet<TableId>,
 }
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
@@ -277,7 +277,7 @@ impl HummockSnapshotManager {
                 if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {
                     None
                 } else {
-                    Some(table_id.table_id())
+                    Some(*table_id)
                 }
             })
             .collect();
@@ -304,7 +304,7 @@ impl HummockSnapshotManager {
                     let new_value_empty = new_log.new_value.is_empty();
                     let old_value_empty = new_log.old_value.is_empty();
                     if !new_value_empty || !old_value_empty {
-                        Some(*table_id)
+                        Some(TableId::new(*table_id))
                     } else {
                         None
                     }
@@ -315,7 +315,12 @@ impl HummockSnapshotManager {
         let deleted_table_ids: HashSet<_> = deltas
             .version_deltas
             .iter()
-            .flat_map(|version_deltas| version_deltas.removed_table_ids.clone())
+            .flat_map(|version_deltas| {
+                version_deltas
+                    .removed_table_ids
+                    .iter()
+                    .map(|table_id| table_id.into())
+            })
             .collect();
         self.table_change_log_notification_sender
             .send(TableChangeLogNotificationMsg {
@@ -384,7 +389,10 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn wait_table_change_log_notification(&self, table_id: u32) -> Result<(), RwError> {
+    pub async fn wait_table_change_log_notification(
+        &self,
+        table_id: TableId,
+    ) -> Result<(), RwError> {
         let mut rx = self.table_change_log_notification_sender.subscribe();
         loop {
             rx.changed()

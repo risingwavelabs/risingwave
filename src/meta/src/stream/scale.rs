@@ -25,9 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::ActorMapping;
-use risingwave_meta_model::{
-    ObjectId, StreamingParallelism, WorkerId, fragment, fragment_relation,
-};
+use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, fragment_relation};
 use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::stream_plan::{Dispatcher, PbDispatchOutputMapping, PbDispatcher, StreamNode};
@@ -75,6 +73,7 @@ pub struct CustomActorInfo {
     pub vnode_bitmap: Option<Bitmap>,
 }
 
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::DispatcherType;
@@ -119,8 +118,8 @@ impl ScaleController {
 
     pub async fn resolve_related_no_shuffle_jobs(
         &self,
-        jobs: &[ObjectId],
-    ) -> MetaResult<HashSet<ObjectId>> {
+        jobs: &[JobId],
+    ) -> MetaResult<HashSet<JobId>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -285,7 +284,7 @@ impl ScaleController {
             newly_created_actors,
             actor_splits,
             cdc_table_snapshot_split_assignment: Default::default(),
-            cdc_table_id: None,
+            cdc_table_job_id: None,
         };
 
         Ok(reschedule)
@@ -293,7 +292,7 @@ impl ScaleController {
 
     pub async fn reschedule_inplace(
         &self,
-        policy: HashMap<ObjectId, ReschedulePolicy>,
+        policy: HashMap<JobId, ReschedulePolicy>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -456,7 +455,7 @@ impl ScaleController {
 
     async fn rerender(
         &self,
-        jobs: HashSet<ObjectId>,
+        jobs: HashSet<JobId>,
         workers: BTreeMap<WorkerId, WorkerInfo>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -493,7 +492,7 @@ impl ScaleController {
     async fn rerender_inner(
         &self,
         txn: &impl ConnectionTrait,
-        jobs: HashSet<ObjectId>,
+        jobs: HashSet<JobId>,
         workers: BTreeMap<WorkerId, WorkerInfo>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let adaptive_parallelism_strategy = {
@@ -780,14 +779,14 @@ impl ScaleController {
                 )?;
 
                 // We only handle CDC splits at this stage, so it should have been empty before.
-                debug_assert!(reschedule.cdc_table_id.is_none());
+                debug_assert!(reschedule.cdc_table_job_id.is_none());
                 debug_assert!(reschedule.cdc_table_snapshot_split_assignment.is_empty());
                 let cdc_info = if fragment_info
                     .fragment_type_mask
                     .contains(FragmentTypeFlag::StreamCdcScan)
                 {
                     let assignment = assign_cdc_table_snapshot_splits_impl(
-                        *job_id as _,
+                        *job_id,
                         actors.keys().copied().collect(),
                         self.env.meta_store_ref(),
                         None,
@@ -799,7 +798,7 @@ impl ScaleController {
                 };
 
                 if let Some((cdc_table_id, cdc_table_snapshot_split_assignment)) = cdc_info {
-                    reschedule.cdc_table_id = Some(*cdc_table_id as u32);
+                    reschedule.cdc_table_job_id = Some(*cdc_table_id);
                     reschedule.cdc_table_snapshot_split_assignment =
                         cdc_table_snapshot_split_assignment;
                 }
@@ -882,7 +881,7 @@ impl GlobalStreamManager {
             HashSet::new()
         };
 
-        let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<ObjectId>> = self
+        let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
             .metadata_manager
             .catalog_controller
             .list_streaming_job_with_database()

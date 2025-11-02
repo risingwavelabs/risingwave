@@ -148,7 +148,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let wait_checkpoint_worker = WaitCheckpointWorker {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table().state_store().clone(),
-            table_id: core.split_state_store.state_table().table_id().into(),
+            table_id: core.split_state_store.state_table().table_id(),
             metrics,
         };
         tokio::spawn(wait_checkpoint_worker.run());
@@ -658,7 +658,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
 
                             Mutation::ConnectorPropsChange(maybe_mutation) => {
-                                if let Some(new_props) = maybe_mutation.get(&source_id.table_id()) {
+                                if let Some(new_props) = maybe_mutation.get(&source_id.as_raw_id()) {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
                                         "updating source properties from {:?} to {:?}",

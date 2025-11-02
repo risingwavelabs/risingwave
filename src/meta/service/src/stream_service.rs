@@ -41,7 +41,7 @@ use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
-
+use risingwave_common::id::JobId;
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::MetaSrvEnv;
 use crate::stream::GlobalStreamManagerRef;
@@ -203,10 +203,10 @@ impl StreamManagerService for StreamServiceImpl {
 
         let canceled_jobs = self
             .stream_manager
-            .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
+            .cancel_streaming_jobs(table_ids.into_iter().map(JobId::from).collect_vec())
             .await
             .into_iter()
-            .map(|id| id.table_id)
+            .map(|id| id.as_raw_id())
             .collect_vec();
         Ok(Response::new(CancelCreatingJobsResponse {
             status: None,
@@ -226,7 +226,7 @@ impl StreamManagerService for StreamServiceImpl {
             let table_fragments = self
                 .metadata_manager
                 .catalog_controller
-                .get_job_fragments_by_id(job_id as _)
+                .get_job_fragments_by_id(job_id.into())
                 .await?;
             let mut dispatchers = self
                 .metadata_manager
@@ -237,7 +237,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .await?;
             let ctx = table_fragments.ctx.to_protobuf();
             info.insert(
-                table_fragments.stream_job_id().table_id,
+                table_fragments.stream_job_id().as_raw_id(),
                 TableFragmentInfo {
                     fragments: table_fragments
                         .fragments
@@ -668,7 +668,7 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .map(|(job_id, p)| {
                 (
-                    job_id,
+                    job_id.as_raw_id(),
                     PbCdcProgress {
                         split_total_count: p.split_total_count,
                         split_backfilled_count: p.split_backfilled_count,
@@ -687,7 +687,7 @@ fn fragment_desc_to_distribution(
 ) -> FragmentDistribution {
     FragmentDistribution {
         fragment_id: fragment_desc.fragment_id as _,
-        table_id: fragment_desc.job_id as _,
+        table_id: fragment_desc.job_id.as_raw_id(),
         distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
         state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
         upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),

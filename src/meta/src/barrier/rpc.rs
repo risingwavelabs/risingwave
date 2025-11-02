@@ -57,7 +57,7 @@ use tokio::time::{Instant, sleep};
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-
+use risingwave_common::id::JobId;
 use super::{BarrierKind, Command, TracedEpoch};
 use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::{
@@ -76,20 +76,20 @@ use crate::model::{ActorId, FragmentId, StreamActor, StreamJobActorsToCreate, Su
 use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
-fn to_partial_graph_id(job_id: Option<TableId>) -> u32 {
+fn to_partial_graph_id(job_id: Option<JobId>) -> u32 {
     job_id
-        .map(|table| {
-            assert_ne!(table.table_id, u32::MAX);
-            table.table_id
+        .map(|job_id| {
+            assert_ne!(job_id.as_raw_id(), u32::MAX);
+            job_id.as_raw_id()
         })
         .unwrap_or(u32::MAX)
 }
 
-pub(super) fn from_partial_graph_id(partial_graph_id: u32) -> Option<TableId> {
+pub(super) fn from_partial_graph_id(partial_graph_id: u32) -> Option<JobId> {
     if partial_graph_id == u32::MAX {
         None
     } else {
-        Some(TableId::new(partial_graph_id))
+        Some(JobId::new(partial_graph_id))
     }
 }
 
@@ -127,7 +127,7 @@ impl ControlStreamManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
+        inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = JobId>)>,
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
@@ -331,7 +331,7 @@ pub(super) struct WorkerNodeConnected<'a> {
 impl<'a> WorkerNodeConnected<'a> {
     pub(super) fn initialize(
         self,
-        inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
+        inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = JobId>)>,
     ) {
         for request in ControlStreamManager::collect_init_partial_graph(inflight_infos) {
             if let Err(e) = self.handle.send_request(StreamingControlStreamRequest {
@@ -497,7 +497,7 @@ impl ControlStreamManager {
     }
 
     fn collect_init_partial_graph(
-        initial_inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = TableId>)>,
+        initial_inflight_infos: impl Iterator<Item = (DatabaseId, impl Iterator<Item = JobId>)>,
     ) -> impl Iterator<Item = PbCreatePartialGraphRequest> {
         initial_inflight_infos.flat_map(|(database_id, creating_job_ids)| {
             [PbCreatePartialGraphRequest {
@@ -520,7 +520,7 @@ pub(super) struct DatabaseInitialBarrierCollector {
     node_to_collect: NodeToCollect,
     database_state: BarrierWorkerState,
     create_mview_tracker: CreateMviewProgressTracker,
-    creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl>,
+    creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl>,
     committed_epoch: u64,
     cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
 }
@@ -547,7 +547,7 @@ impl DatabaseInitialBarrierCollector {
         &self,
     ) -> (
         &BarrierWorkerState,
-        &HashMap<TableId, CreatingStreamingJobControl>,
+        &HashMap<JobId, CreatingStreamingJobControl>,
     ) {
         (&self.database_state, &self.creating_streaming_job_controls)
     }
@@ -596,13 +596,13 @@ impl ControlStreamManager {
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
-        jobs: HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
+        jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
-        background_jobs: &mut HashMap<TableId, String>,
+        background_jobs: &mut HashMap<JobId, String>,
         mv_depended_subscriptions: &mut HashMap<TableId, HashMap<SubscriptionId, u64>>,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
@@ -681,10 +681,10 @@ impl ControlStreamManager {
             .keys()
             .filter_map(|job_id| {
                 mv_depended_subscriptions
-                    .remove(job_id)
+                    .remove(&job_id.as_mv_table_id())
                     .map(|subscriptions| {
                         (
-                            *job_id,
+                            job_id.as_mv_table_id(),
                             subscriptions
                                 .into_iter()
                                 .map(|(subscription_id, retention)| {
@@ -722,8 +722,8 @@ impl ControlStreamManager {
             .keys()
             .filter_map(|job_id| {
                 state_table_log_epochs
-                    .remove(job_id)
-                    .map(|epochs| (*job_id, epochs))
+                    .remove(&job_id.as_mv_table_id())
+                    .map(|epochs| (job_id.as_mv_table_id(), epochs))
             })
             .collect();
 
@@ -740,7 +740,7 @@ impl ControlStreamManager {
             kind: BarrierKind::Initial,
         };
 
-        let mut ongoing_snapshot_backfill_jobs: HashMap<TableId, _> = HashMap::new();
+        let mut ongoing_snapshot_backfill_jobs: HashMap<JobId, _> = HashMap::new();
         for (job_id, (fragment_infos, definition)) in snapshot_backfill_jobs {
             let committed_epoch =
                 resolve_jobs_committed_epoch(state_table_committed_epochs, fragment_infos.values());
@@ -815,7 +815,7 @@ impl ControlStreamManager {
                 .expect("non-duplicated");
         }
 
-        let database_jobs: HashMap<TableId, InflightStreamingJobInfo> = {
+        let database_jobs: HashMap<JobId, InflightStreamingJobInfo> = {
             database_jobs
                 .into_iter()
                 .map(|(job_id, fragment_infos)| {
@@ -824,7 +824,7 @@ impl ControlStreamManager {
                         InflightStreamingJobInfo {
                             job_id,
                             fragment_infos,
-                            subscribers: subscribers.remove(&job_id).unwrap_or_default(),
+                            subscribers: subscribers.remove(&job_id.as_mv_table_id()).unwrap_or_default(),
                         },
                     )
                 })
@@ -880,7 +880,7 @@ impl ControlStreamManager {
             hummock_version_stats,
         );
 
-        let mut creating_streaming_job_controls: HashMap<TableId, CreatingStreamingJobControl> =
+        let mut creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl> =
             HashMap::new();
         for (job_id, (info, definition, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
@@ -995,7 +995,7 @@ impl ControlStreamManager {
     pub(super) fn inject_barrier<'a>(
         &mut self,
         database_id: DatabaseId,
-        creating_table_id: Option<TableId>,
+        creating_job_id: Option<JobId>,
         mutation: Option<Mutation>,
         barrier_info: &BarrierInfo,
         pre_applied_graph_info: impl IntoIterator<Item = &InflightFragmentInfo>,
@@ -1006,7 +1006,7 @@ impl ControlStreamManager {
             "inject_barrier_err"
         ));
 
-        let partial_graph_id = to_partial_graph_id(creating_table_id);
+        let partial_graph_id = to_partial_graph_id(creating_job_id);
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
 
@@ -1021,7 +1021,7 @@ impl ControlStreamManager {
 
         let table_ids_to_sync: HashSet<_> =
             InflightFragmentInfo::existing_table_ids(applied_graph_info)
-                .map(|table_id| table_id.table_id)
+                .map(|table_id| table_id.as_raw_id())
                 .collect();
 
         let mut node_need_collect = HashMap::new();
@@ -1137,7 +1137,7 @@ impl ControlStreamManager {
     pub(super) fn add_partial_graph(
         &mut self,
         database_id: DatabaseId,
-        creating_job_id: Option<TableId>,
+        creating_job_id: Option<JobId>,
     ) {
         let partial_graph_id = to_partial_graph_id(creating_job_id);
         self.connected_workers().for_each(|(_, node)| {
@@ -1162,7 +1162,7 @@ impl ControlStreamManager {
     pub(super) fn remove_partial_graph(
         &mut self,
         database_id: DatabaseId,
-        creating_job_ids: Vec<TableId>,
+        creating_job_ids: Vec<JobId>,
     ) {
         if creating_job_ids.is_empty() {
             return;

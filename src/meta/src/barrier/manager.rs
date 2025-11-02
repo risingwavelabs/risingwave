@@ -63,9 +63,9 @@ impl GlobalBarrierManager {
             .await?;
         for (job_id, definition, _init_at) in job_info {
             if let Entry::Vacant(e) = ddl_progress.entry(job_id as _) {
-                warn!(job_id, "background job has no ddl progress");
+                warn!(%job_id, "background job has no ddl progress");
                 e.insert(DdlProgress {
-                    id: job_id as u64,
+                    id: job_id.as_raw_id() as u64,
                     statement: definition,
                     create_type: CreateType::Background.as_str().into(),
                     progress: "0.0%".into(),

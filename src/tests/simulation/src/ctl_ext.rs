@@ -344,7 +344,7 @@ impl Cluster {
                 let mut command: Vec<String> = vec![
                     "throttle".into(),
                     "mv".into(),
-                    table_id.table_id.to_string(),
+                    table_id.as_raw_id().to_string(),
                 ];
                 if let Some(rate_limit) = rate_limit {
                     command.push(rate_limit.to_string());

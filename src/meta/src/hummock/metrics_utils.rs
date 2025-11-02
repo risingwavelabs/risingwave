@@ -20,6 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::{Itertools, enumerate};
 use prometheus::IntGauge;
 use prometheus::core::{AtomicU64, GenericCounter};
+use risingwave_common::id::{JobId, TableId};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::level::Levels;
@@ -113,13 +114,13 @@ pub fn trigger_local_table_stat(
 pub fn trigger_mv_stat(
     metrics: &MetaMetrics,
     version_stats: &HummockVersionStats,
-    mv_id_to_all_table_ids: Vec<(u32, Vec<u32>)>,
+    mv_id_to_all_table_ids: Vec<(JobId, Vec<TableId>)>,
 ) {
     metrics.materialized_view_stats.reset();
     for (mv_id, all_table_ids) in mv_id_to_all_table_ids {
         let total_size = all_table_ids
             .iter()
-            .filter_map(|&table_id| version_stats.table_stats.get(&table_id))
+            .filter_map(|&table_id| version_stats.table_stats.get(&table_id.as_raw_id()))
             .map(|stats| stats.total_key_size + stats.total_value_size)
             .sum();
 

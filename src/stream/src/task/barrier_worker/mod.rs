@@ -93,9 +93,9 @@ pub struct BarrierCompleteResult {
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
 
     /// The table IDs that should be truncated.
-    pub truncate_tables: Vec<u32>,
+    pub truncate_tables: Vec<TableId>,
     /// The table IDs that have finished refresh.
-    pub refresh_finished_tables: Vec<u32>,
+    pub refresh_finished_tables: Vec<TableId>,
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -617,6 +617,7 @@ mod await_epoch_completed_future {
 
     use futures::FutureExt;
     use futures::future::BoxFuture;
+    use risingwave_common::id::TableId;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::{
         PbCdcTableBackfillProgress, PbCreateMviewProgress,
@@ -640,8 +641,8 @@ mod await_epoch_completed_future {
         list_finished_source_ids: Vec<u32>,
         load_finished_source_ids: Vec<u32>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
-        truncate_tables: Vec<u32>,
-        refresh_finished_tables: Vec<u32>,
+        truncate_tables: Vec<TableId>,
+        refresh_finished_tables: Vec<TableId>,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -839,7 +840,7 @@ impl LocalBarrierWorker {
                         worker_id: self.actor_manager.env.worker_id(),
                         table_watermarks: table_watermarks
                             .into_iter()
-                            .map(|(key, value)| (key.table_id, value.into()))
+                            .map(|(key, value)| (key.as_raw_id(), value.into()))
                             .collect(),
                         old_value_sstables: old_value_ssts
                             .into_iter()
@@ -852,7 +853,7 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(|(table_id, adds)| {
                                 (
-                                    table_id.table_id,
+                                    table_id.as_raw_id(),
                                     PbVectorIndexAdds {
                                         adds: adds.into_iter().map(|add| add.into()).collect(),
                                     },
@@ -860,8 +861,8 @@ impl LocalBarrierWorker {
                             })
                             .collect(),
                         cdc_table_backfill_progress,
-                        truncate_tables,
-                        refresh_finished_tables,
+                        truncate_tables: truncate_tables.into_iter().map_into().collect(),
+                        refresh_finished_tables: refresh_finished_tables.into_iter().map_into().collect(),
                     },
                 )
             }

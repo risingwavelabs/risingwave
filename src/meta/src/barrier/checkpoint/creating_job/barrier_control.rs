@@ -19,12 +19,11 @@ use std::ops::{Bound, RangeBounds};
 use std::time::Instant;
 
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
-
+use risingwave_common::id::JobId;
 use crate::barrier::BarrierKind;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -41,7 +40,7 @@ struct CreatingStreamingJobEpochState {
 
 #[derive(Debug)]
 pub(super) struct CreatingStreamingJobBarrierControl {
-    table_id: TableId,
+    job_id: JobId,
     // key is prev_epoch of barrier
     inflight_barrier_queue: BTreeMap<u64, CreatingStreamingJobEpochState>,
     backfill_epoch: u64,
@@ -60,10 +59,10 @@ pub(super) struct CreatingStreamingJobBarrierControl {
 }
 
 impl CreatingStreamingJobBarrierControl {
-    pub(super) fn new(table_id: TableId, backfill_epoch: u64, is_first_committed: bool) -> Self {
-        let table_id_str = format!("{}", table_id.table_id);
+    pub(super) fn new(job_id: JobId, backfill_epoch: u64, is_first_committed: bool) -> Self {
+        let table_id_str = format!("{}", job_id);
         Self {
-            table_id,
+            job_id,
             inflight_barrier_queue: Default::default(),
             backfill_epoch,
             is_first_committed,
@@ -122,7 +121,7 @@ impl CreatingStreamingJobBarrierControl {
         debug!(
             epoch,
             ?node_to_collect,
-            table_id = self.table_id.table_id,
+            job_id = %self.job_id,
             "creating job enqueue epoch"
         );
         let is_first_commit = !self.is_first_committed;
@@ -159,7 +158,7 @@ impl CreatingStreamingJobBarrierControl {
         debug!(
             epoch,
             worker_id,
-            table_id = self.table_id.table_id,
+            job_id = %self.job_id,
             "collect barrier from worker"
         );
 

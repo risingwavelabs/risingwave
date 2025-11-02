@@ -33,7 +33,7 @@ use tokio::sync::{oneshot, watch};
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::{info, warn};
-
+use risingwave_common::id::JobId;
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::barrier::context::GlobalBarrierWorkerContext;
@@ -218,7 +218,7 @@ impl BarrierScheduler {
     }
 
     /// Try to cancel scheduled cmd for create streaming job, return true if the command exists previously and get cancelled.
-    pub fn try_cancel_scheduled_create(&self, database_id: DatabaseId, table_id: TableId) -> bool {
+    pub fn try_cancel_scheduled_create(&self, database_id: DatabaseId, job_id: JobId) -> bool {
         let queue = &mut self.inner.queue.lock();
         let Some(queue) = queue.queue.get_mut(&database_id) else {
             return false;
@@ -226,7 +226,7 @@ impl BarrierScheduler {
 
         if let Some(idx) = queue.queue.inner.iter().position(|scheduled| {
             if let Command::CreateStreamingJob { info, .. } = &scheduled.command
-                && info.stream_job_fragments.stream_job_id() == table_id
+                && info.stream_job_fragments.stream_job_id() == job_id
             {
                 true
             } else {
@@ -886,13 +886,13 @@ mod tests {
             unimplemented!()
         }
 
-        async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+        async fn finish_cdc_table_backfill(&self, _job_id: JobId) -> MetaResult<()> {
             unimplemented!()
         }
 
         async fn handle_refresh_finished_table_ids(
             &self,
-            _refresh_finished_table_ids: Vec<u32>,
+            _refresh_finished_table_ids: Vec<JobId>,
         ) -> MetaResult<()> {
             unimplemented!()
         }

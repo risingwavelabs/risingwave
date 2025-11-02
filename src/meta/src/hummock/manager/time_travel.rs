@@ -430,7 +430,7 @@ impl HummockManager {
                 Condition::any()
                     .add(
                         hummock_epoch_to_version::Column::TableId
-                            .eq(i64::from(table_id.table_id())),
+                            .eq(i64::from(table_id.as_raw_id())),
                     )
                     // for backward compatibility
                     .add(hummock_epoch_to_version::Column::TableId.eq(0)),
@@ -576,7 +576,7 @@ impl HummockManager {
             let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
                 epoch: Set(committed_epoch.try_into().unwrap()),
-                table_id: Set(table_id.table_id.into()),
+                table_id: Set(table_id.as_raw_id().into()),
                 version_id: Set(version_id.try_into().unwrap()),
             };
             batch.push(m);

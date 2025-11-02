@@ -17,14 +17,14 @@ use std::collections::HashMap;
 use sea_orm::FromJsonQueryResult;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-
+use risingwave_common::id::JobId;
 use crate::{CreateType, JobStatus, StreamingParallelism};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "streaming_job")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub job_id: i32,
+    pub job_id: JobId,
     pub job_status: JobStatus,
     pub create_type: CreateType,
     pub timezone: Option<String>,

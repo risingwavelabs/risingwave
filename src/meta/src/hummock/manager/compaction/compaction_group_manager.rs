@@ -143,7 +143,7 @@ impl HummockManager {
         self.unregister_table_ids(
             table_fragments
                 .iter()
-                .flat_map(|t| t.all_table_ids().map(TableId::new)),
+                .flat_map(|t| t.all_table_ids()),
         )
         .await
         .unwrap();
@@ -424,7 +424,7 @@ impl HummockManager {
                     .state_table_info
                     .compaction_group_member_table_ids(levels.group_id)
                     .iter()
-                    .map(|table_id| table_id.table_id)
+                    .map(|table_id| table_id.as_raw_id())
                     .collect_vec(),
                 compaction_config: Some(compaction_config),
             };
@@ -451,7 +451,7 @@ impl HummockManager {
                     let stats_size = versioning_guard
                         .version_stats
                         .table_stats
-                        .get(&table_id.table_id)
+                        .get(&table_id.as_raw_id())
                         .map(|stats| stats.total_key_size + stats.total_value_size)
                         .unwrap_or(0);
                     let table_size = std::cmp::max(stats_size, 0) as u64;
@@ -710,7 +710,7 @@ mod tests {
     use std::collections::{BTreeMap, HashSet};
 
     use itertools::Itertools;
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::id::JobId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 
     use crate::controller::SqlMetaStore;
@@ -788,23 +788,23 @@ mod tests {
     async fn test_manager() {
         let (_, compaction_group_manager, ..) = setup_compute_env(8080).await;
         let table_fragment_1 = StreamJobFragments::for_test(
-            TableId::new(10),
+            JobId::new(10),
             BTreeMap::from([(
                 1,
                 Fragment {
                     fragment_id: 1,
-                    state_table_ids: vec![10, 11, 12, 13],
+                    state_table_ids: vec![10.into(), 11.into(), 12.into(), 13.into()],
                     ..Default::default()
                 },
             )]),
         );
         let table_fragment_2 = StreamJobFragments::for_test(
-            TableId::new(20),
+            JobId::new(20),
             BTreeMap::from([(
                 2,
                 Fragment {
                     fragment_id: 2,
-                    state_table_ids: vec![20, 21, 22, 23],
+                    state_table_ids: vec![20.into(), 21.into(), 22.into(), 23.into()],
                     ..Default::default()
                 },
             )]),
@@ -825,7 +825,7 @@ mod tests {
 
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_1.stream_job_id()),
+                Some(table_fragment_1.stream_job_id().as_mv_table_id()),
                 table_fragment_1
                     .internal_table_ids()
                     .into_iter()
@@ -837,7 +837,7 @@ mod tests {
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_2.stream_job_id()),
+                Some(table_fragment_2.stream_job_id().as_mv_table_id()),
                 table_fragment_2
                     .internal_table_ids()
                     .into_iter()
@@ -856,7 +856,7 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge(&table_fragment_2.all_table_ids().map(TableId::new).collect())
+            .purge(&table_fragment_2.all_table_ids().collect())
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
@@ -870,7 +870,7 @@ mod tests {
 
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_1.stream_job_id()),
+                Some(table_fragment_1.stream_job_id().as_mv_table_id()),
                 table_fragment_1
                     .internal_table_ids()
                     .into_iter()

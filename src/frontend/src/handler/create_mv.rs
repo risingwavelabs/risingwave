@@ -378,7 +378,7 @@ It only indicates the physical clustering of the data, which may improve the per
     // during binding instead of visiting the optimized plan.
     let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
         .into_iter()
-        .map(|id| id.table_id() as ObjectId)
+        .map(|id| id.as_raw_id() as ObjectId)
         .chain(
             dependent_udfs
                 .into_iter()

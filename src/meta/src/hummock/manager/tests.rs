@@ -1440,7 +1440,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
             .state_table_info
             .compaction_group_member_table_ids(2)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -1449,7 +1449,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
             .state_table_info
             .compaction_group_member_table_ids(3)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![101]
     );
@@ -1561,7 +1561,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
             .state_table_info
             .compaction_group_member_table_ids(old_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![102]
     );
@@ -1570,7 +1570,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
             .state_table_info
             .compaction_group_member_table_ids(new_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .sorted()
             .collect_vec(),
         vec![100, 101]
@@ -1629,7 +1629,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
             .state_table_info
             .compaction_group_member_table_ids(old_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![101]
     );
@@ -1638,7 +1638,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
             .state_table_info
             .compaction_group_member_table_ids(new_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -1734,7 +1734,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
             .state_table_info
             .compaction_group_member_table_ids(right_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .sorted()
             .collect_vec(),
         vec![101, 102]
@@ -1744,7 +1744,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
             .state_table_info
             .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -2376,7 +2376,7 @@ async fn test_unregister_moved_table() {
             .state_table_info
             .compaction_group_member_table_ids(right_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![101]
     );
@@ -2385,7 +2385,7 @@ async fn test_unregister_moved_table() {
             .state_table_info
             .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -2405,7 +2405,7 @@ async fn test_unregister_moved_table() {
             .state_table_info
             .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -2504,7 +2504,7 @@ async fn test_merge_compaction_group_task_expired() {
             .state_table_info
             .compaction_group_member_table_ids(right_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .sorted()
             .collect_vec(),
         vec![101, 102]
@@ -2514,7 +2514,7 @@ async fn test_merge_compaction_group_task_expired() {
             .state_table_info
             .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );

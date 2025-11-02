@@ -530,7 +530,7 @@ mod tests {
                 while iter.is_valid() {
                     let k = iter.key().user_key.encode();
                     let h =
-                        Sstable::hash_for_bloom_filter(&k, iter.key().user_key.table_id.table_id);
+                        Sstable::hash_for_bloom_filter(&k, iter.key().user_key.table_id.as_raw_id());
                     assert!(reader.filters[idx].1.contains(&h));
                     iter.next();
                 }
