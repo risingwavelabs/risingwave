@@ -246,6 +246,68 @@ def _(outer_panels: Panels):
                 ],
             ),
             panels.subheader(
+                "Execution Rate",
+            ),
+            panels.timeseries_percentage(
+                "Fragment Execution Rate (IO)",
+                "",
+                [
+                    panels.target(
+                        f"sum by(fragment_id) ( \
+                            label_replace( \
+                                rate({metric('state_store_get_duration_sum')}[$__rate_interval]), \
+                                'operation', 'get', '', '' \
+                            ) \
+                            * on(table_id) group_left(fragment_id) table_info \
+                            or \
+                            label_replace( \
+                                rate({metric('state_store_iter_init_duration_sum')}[$__rate_interval]), \
+                                'operation', 'iter_init', '', '' \
+                            ) \
+                            * on(table_id) group_left(fragment_id) table_info \
+                            or \
+                            label_replace( \
+                                rate({metric('state_store_iter_scan_duration_sum')}[$__rate_interval]), \
+                                'operation', 'iter_scan', '', '' \
+                            ) \
+                            * on(table_id) group_left(fragment_id) table_info \
+                        )",
+                        "total_io_rate: fragment={{fragment_id}}",
+                    ),
+                    panels.target(
+                        f"sum by(fragment_id) ( \
+                            rate({metric('state_store_get_duration_sum')}[$__rate_interval]) \
+                            * on(table_id) group_left(fragment_id) table_info \
+                        )",
+                        "store_get_rate: fragment={{fragment_id}}",
+                    ),
+                    panels.target(
+                        f"sum by(fragment_id) ( \
+                            rate({metric('state_store_iter_init_duration_sum')}[$__rate_interval]) \
+                            * on(table_id) group_left(fragment_id) table_info \
+                        )",
+                        "store_iter_init_rate: fragment={{fragment_id}}",
+                    ),
+                    panels.target(
+                        f"sum by(fragment_id) ( \
+                            rate({metric('state_store_iter_scan_duration_sum')}[$__rate_interval]) \
+                            * on(table_id) group_left(fragment_id) table_info \
+                        )",
+                        "store_iter_scan_rate: fragment={{fragment_id}}",
+                    ),
+                ],
+            ),
+            panels.timeseries_percentage(
+                "Fragment Execution Rate (CPU)",
+                "",
+                [
+                    panels.target(
+                        f"sum(rate({metric('stream_actor_execution_duration')}[$__rate_interval])) by (fragment_id) / 1000000000",
+                        "fragment={{fragment_id}}",
+                    )
+                ],
+            ),
+            panels.subheader(
                 "Alerts",
                 """Alerts in the system group by type:
 - Too Many Barriers: there are too many uncommitted barriers generated. This means the streaming graph is stuck or under heavy load. Check 'Barrier Latency' panel.
