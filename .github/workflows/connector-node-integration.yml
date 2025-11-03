@@ -32,6 +32,9 @@ jobs:
           java-version: ${{ matrix.java }}
           distribution: 'adopt'
           cache: 'maven'
+      - name: Setup Rust toolchain
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: run integration tests
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: |
@@ -39,11 +42,7 @@ jobs:
 
           RISINGWAVE_ROOT=${PWD}
 
-          echo "--- build connector node"
+          echo "--- build connector node with Rust native library"
           cd ${RISINGWAVE_ROOT}/java
-          # run unit test
-          # WARN: `testOnNext_writeValidation` is skipped because it relies on Rust code to decode message,
-          #       while we don't build Rust code (`-Dno-build-rust`) here to save time
-          mvn --batch-mode --update-snapshots clean package -Dno-build-rust \
-            '-Dtest=!com.risingwave.connector.sink.SinkStreamObserverTest#testOnNext_writeValidation' \
-            -Dsurefire.failIfNoSpecifiedTests=false
+          # Build with Rust to support OpendalSchemaHistory in MySQL CDC integration tests
+          mvn --batch-mode --update-snapshots clean package
