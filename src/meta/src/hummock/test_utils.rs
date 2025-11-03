@@ -145,9 +145,10 @@ pub async fn add_test_tables(
 
 pub fn generate_test_sstables_with_table_id(
     epoch: u64,
-    table_id: u32,
+    table_id: impl Into<TableId>,
     sst_ids: Vec<u64>,
 ) -> Vec<SstableInfo> {
+    let table_id = table_id.into();
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         let object_size = 2;
@@ -197,7 +198,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<u64>) -> Vec<SstableInfo> {
                     right_exclusive: false,
                 },
                 file_size: object_size,
-                table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
+                table_ids: vec![(sst_id as u32).into(), (sst_id as u32 * 10000).into()],
                 uncompressed_file_size: object_size,
                 max_epoch: epoch,
                 sst_size: object_size,
@@ -219,7 +220,7 @@ pub async fn register_sstable_infos_to_compaction_group(
         .flat_map(|sstable_info| &sstable_info.table_ids)
         .sorted()
         .dedup()
-        .cloned()
+        .map(|table_id| table_id.table_id())
         .collect_vec();
     register_table_ids_to_compaction_group(
         compaction_group_manager_ref,
@@ -231,7 +232,7 @@ pub async fn register_sstable_infos_to_compaction_group(
 
 pub async fn register_table_ids_to_compaction_group(
     hummock_manager_ref: &HummockManager,
-    table_ids: &[u32],
+    table_ids: &[impl Into<TableId> + Copy],
     compaction_group_id: CompactionGroupId,
 ) {
     hummock_manager_ref
@@ -247,10 +248,10 @@ pub async fn register_table_ids_to_compaction_group(
 
 pub async fn unregister_table_ids_from_compaction_group(
     hummock_manager_ref: &HummockManager,
-    table_ids: &[u32],
+    table_ids: &[impl Into<TableId> + Copy],
 ) {
     hummock_manager_ref
-        .unregister_table_ids(table_ids.iter().map(|table_id| TableId::new(*table_id)))
+        .unregister_table_ids(table_ids.iter().map(|table_id| (*table_id).into()))
         .await
         .unwrap();
 }
@@ -409,7 +410,7 @@ pub fn compaction_selector_context<'a>(
     member_table_ids: &'a BTreeSet<TableId>,
     level_handlers: &'a mut [LevelHandler],
     selector_stats: &'a mut LocalSelectorStatistic,
-    table_id_to_options: &'a HashMap<u32, TableOption>,
+    table_id_to_options: &'a HashMap<TableId, TableOption>,
     developer_config: Arc<CompactionDeveloperConfig>,
     table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
     state_table_info: &'a HummockVersionStateTableInfo,
@@ -429,9 +430,9 @@ pub fn compaction_selector_context<'a>(
 
 pub async fn get_compaction_group_id_by_table_id(
     hummock_manager_ref: HummockManagerRef,
-    table_id: u32,
+    table_id: impl Into<TableId>,
 ) -> u64 {
     let version = hummock_manager_ref.get_current_version().await;
     let mapping = version.state_table_info.build_table_compaction_group_id();
-    *mapping.get(&(table_id.into())).unwrap()
+    *mapping.get(&table_id.into()).unwrap()
 }

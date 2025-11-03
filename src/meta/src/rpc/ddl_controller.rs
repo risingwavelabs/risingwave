@@ -90,9 +90,9 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
+    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -489,10 +489,10 @@ impl DdlController {
     pub async fn reschedule_streaming_job(
         &self,
         job_id: u32,
-        target: JobRescheduleTarget,
+        target: ReschedulePolicy,
         mut deferred: bool,
     ) -> MetaResult<()> {
-        tracing::info!("alter parallelism");
+        tracing::info!("altering parallelism for job {}", job_id);
         if self.barrier_manager.check_status_running().is_err() {
             tracing::info!(
                 "alter parallelism is set to deferred mode because the system is in recovery state"
@@ -508,7 +508,7 @@ impl DdlController {
     pub async fn reschedule_cdc_table_backfill(
         &self,
         job_id: u32,
-        target: JobRescheduleTarget,
+        target: ReschedulePolicy,
     ) -> MetaResult<()> {
         tracing::info!("alter CDC table backfill parallelism");
         if self.barrier_manager.check_status_running().is_err() {
@@ -1290,6 +1290,7 @@ impl DdlController {
                             table,
                             fragment_graph.table_fragment_id(),
                             self.env.id_gen_manager(),
+                            self.env.actor_id_generator(),
                         )?;
 
                     assert_eq!(
@@ -1425,7 +1426,6 @@ impl DdlController {
                         .prepare_streaming_job(
                             sink.tmp_sink_id,
                             || [&sink.new_fragment].into_iter(),
-                            &sink.actor_status,
                             &empty_downstreams,
                             true,
                             None,
@@ -2189,7 +2189,7 @@ impl DdlController {
             if self
                 .metadata_manager
                 .catalog_controller
-                .list_background_creating_jobs(true)
+                .list_background_creating_jobs(true, None)
                 .await?
                 .is_empty()
             {

@@ -102,11 +102,47 @@ t
 statement ok
 VACUUM FULL t_vacuum_test;
 
+# Check file types remaining after VACUUM FULL
+# After the first VACUUM FULL, we expect 1 data file and 1 equality delete file
+query ??
+select content, count(*) from rw_iceberg_files where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test' group by content order by content;
+----
+Data 1
+EqualityDeletes 1
+
+query ?
+select count(*) from rw_iceberg_files where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test';
+----
+2
+
+# Verify data is correct
+query ??? rowsort
+select * from t_vacuum_test;
+----
+1 alice 150
+2 bob 250
+3 charlie 300
+4 david 400
+5 eve 500
+6 frank 600
+7 grace 700
+
+# Run VACUUM FULL again to clean up the equality delete file
+statement ok
+VACUUM FULL t_vacuum_test;
+
+# After the second VACUUM FULL, only the data file should remain
+query ??
+select content, count(*) from rw_iceberg_files where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test' group by content order by content;
+----
+Data 1
+
 query ?
 select count(*) from rw_iceberg_files where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test';
 ----
 1
 
+# Verify data is still correct
 query ??? rowsort
 select * from t_vacuum_test;
 ----

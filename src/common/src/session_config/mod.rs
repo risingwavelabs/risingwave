@@ -425,6 +425,11 @@ pub struct SessionConfig {
     /// Enable locality backfill for streaming queries. Defaults to false.
     #[parameter(default = false)]
     enable_locality_backfill: bool,
+
+    /// Duration in seconds before notifying the user that a long-running DDL operation (e.g., DROP TABLE, CANCEL JOBS)
+    /// is still running. Set to 0 to disable notifications. Defaults to 30 seconds.
+    #[parameter(default = 30u32)]
+    slow_ddl_notification_secs: u32,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

@@ -901,11 +901,45 @@ pub mod range_delete_backward_compatibility_serde_struct {
     pub struct TableKey(Vec<u8>);
 
     #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(from = "UserKeySerde", into = "UserKeySerde")]
     pub struct UserKey {
         // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
         // declaration matters.
         pub table_id: TableId,
         pub table_key: TableKey,
+    }
+
+    #[derive(Deserialize, Serialize)]
+    pub struct TableIdSerde {
+        table_id: u32,
+    }
+
+    #[derive(Deserialize, Serialize)]
+    struct UserKeySerde {
+        table_id: TableIdSerde,
+        table_key: TableKey,
+    }
+
+    impl From<UserKeySerde> for UserKey {
+        fn from(value: UserKeySerde) -> Self {
+            Self {
+                table_id: TableId {
+                    table_id: value.table_id.table_id,
+                },
+                table_key: value.table_key,
+            }
+        }
+    }
+
+    impl From<UserKey> for UserKeySerde {
+        fn from(value: UserKey) -> Self {
+            Self {
+                table_id: TableIdSerde {
+                    table_id: value.table_id.table_id,
+                },
+                table_key: value.table_key,
+            }
+        }
     }
 
     impl UserKey {

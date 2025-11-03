@@ -401,10 +401,6 @@ impl CheckpointControl {
 pub(crate) struct EnterInitializing(pub(crate) HashMap<WorkerId, ResetDatabaseResponse>);
 
 impl DatabaseStatusAction<'_, EnterInitializing> {
-    pub(crate) fn control(&self) -> &CheckpointControl {
-        &*self.control
-    }
-
     pub(crate) fn enter(
         self,
         runtime_info: DatabaseRuntimeInfoSnapshot,
@@ -430,7 +426,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             job_infos,
             mut state_table_committed_epochs,
             mut state_table_log_epochs,
-            subscription_info,
+            mut mv_depended_subscriptions,
             stream_actors,
             fragment_relations,
             mut source_splits,
@@ -438,8 +434,12 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut cdc_table_snapshot_split_assignment,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            let mut builder =
-                FragmentEdgeBuilder::new(job_infos.values().flatten(), control_stream_manager);
+            let mut builder = FragmentEdgeBuilder::new(
+                job_infos
+                    .values()
+                    .flat_map(|fragment_infos| fragment_infos.values()),
+                control_stream_manager,
+            );
             builder.add_relations(&fragment_relations);
             let mut edges = builder.build();
             control_stream_manager.inject_database_initial_barrier(
@@ -451,7 +451,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &stream_actors,
                 &mut source_splits,
                 &mut background_jobs,
-                subscription_info,
+                &mut mv_depended_subscriptions,
                 false,
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_split_assignment,

@@ -35,7 +35,6 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_test_utils};
-use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
@@ -219,20 +218,7 @@ impl From<SchemaId> for u32 {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Display,
-    Default,
-    Hash,
-    PartialOrd,
-    PartialEq,
-    Eq,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
 #[display("{table_id}")]
 pub struct TableId {
     pub table_id: u32,
@@ -273,6 +259,12 @@ impl From<&u32> for TableId {
 
 impl From<TableId> for u32 {
     fn from(id: TableId) -> Self {
+        id.table_id
+    }
+}
+
+impl From<&TableId> for u32 {
+    fn from(id: &TableId) -> Self {
         id.table_id
     }
 }

@@ -14,7 +14,7 @@ byteorder = "1.5"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
-jsonwebtoken = "9"
+jsonwebtoken = { workspace = true }
 ldap3 = { version = "0.11.3", default-features = false, features = ["tls-rustls"] }
 openssl = "0.10.72"
 panic-message = "0.3"

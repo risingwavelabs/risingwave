@@ -14,11 +14,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
-use std::pin::pin;
-use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::{Either, select};
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
@@ -29,19 +26,16 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
-use tokio::time::{Instant, sleep};
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::{Reschedule, SharedFragmentInfo};
+use crate::barrier::SharedFragmentInfo;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamActor, StreamJobFragments, SubscriptionId,
-};
-use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
+use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
+use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 
 #[derive(Clone)]
@@ -53,7 +47,6 @@ pub struct MetadataManager {
 #[derive(Debug)]
 pub(crate) enum ActiveStreamingWorkerChange {
     Add(WorkerNode),
-    #[expect(dead_code)]
     Remove(WorkerNode),
     Update(WorkerNode),
 }
@@ -110,28 +103,6 @@ impl ActiveStreamingWorkerNodes {
 
     pub(crate) fn current(&self) -> &HashMap<WorkerId, WorkerNode> {
         &self.worker_nodes
-    }
-
-    pub(crate) async fn wait_changed(
-        &mut self,
-        verbose_internal: Duration,
-        verbose_timeout: Duration,
-        verbose_fn: impl Fn(&Self),
-    ) -> Option<ActiveStreamingWorkerChange> {
-        let start = Instant::now();
-        loop {
-            if let Either::Left((change, _)) =
-                select(pin!(self.changed()), pin!(sleep(verbose_internal))).await
-            {
-                break Some(change);
-            }
-
-            if start.elapsed() > verbose_timeout {
-                break None;
-            }
-
-            verbose_fn(self)
-        }
     }
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
@@ -374,33 +345,19 @@ impl MetadataManager {
         Ok(ret)
     }
 
-    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
+    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<ObjectId>> {
         let jobs = self
             .catalog_controller
-            .list_background_creating_jobs(false)
+            .list_background_creating_jobs(false, None)
             .await?;
 
-        Ok(jobs
-            .into_iter()
-            .map(|(id, _, _)| TableId::from(id as u32))
-            .collect())
+        let jobs = jobs.into_iter().map(|(id, _, _)| id).collect();
+
+        Ok(jobs)
     }
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
         self.catalog_controller.list_sources().await
-    }
-
-    pub async fn post_apply_reschedules(
-        &self,
-        reschedules: HashMap<FragmentId, Reschedule>,
-        post_updates: &JobReschedulePostUpdates,
-    ) -> MetaResult<()> {
-        // temp convert u32 to i32
-        let reschedules = reschedules.into_iter().map(|(k, v)| (k as _, v)).collect();
-
-        self.catalog_controller
-            .post_apply_reschedules(reschedules, post_updates)
-            .await
     }
 
     pub fn running_fragment_parallelisms(
@@ -455,11 +412,15 @@ impl MetadataManager {
         self.cluster_controller.get_streaming_cluster_info().await
     }
 
-    pub async fn get_all_table_options(&self) -> MetaResult<HashMap<u32, TableOption>> {
+    pub async fn get_all_table_options(&self) -> MetaResult<HashMap<TableId, TableOption>> {
         self.catalog_controller
             .get_all_table_options()
             .await
-            .map(|tops| tops.into_iter().map(|(id, opt)| (id as u32, opt)).collect())
+            .map(|tops| {
+                tops.into_iter()
+                    .map(|(id, opt)| (TableId::new(id.try_into().unwrap()), opt))
+                    .collect()
+            })
     }
 
     pub async fn get_table_name_type_mapping(&self) -> MetaResult<HashMap<u32, (String, String)>> {
@@ -473,9 +434,12 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn get_created_table_ids(&self) -> MetaResult<Vec<u32>> {
+    pub async fn get_created_table_ids(&self) -> MetaResult<Vec<TableId>> {
         let table_ids = self.catalog_controller.get_created_table_ids().await?;
-        Ok(table_ids.into_iter().map(|id| id as u32).collect())
+        Ok(table_ids
+            .into_iter()
+            .map(|id| TableId::new(id.try_into().unwrap()))
+            .collect())
     }
 
     pub async fn get_table_associated_source_id(
@@ -583,19 +547,6 @@ impl MetadataManager {
             .into_iter()
             .map(|(id, upstream)| (id as ActorId, upstream as ActorId))
             .collect())
-    }
-
-    pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
-        let table_fragments = self.catalog_controller.table_fragments().await?;
-        let mut actor_maps = HashMap::new();
-        for (_, tf) in table_fragments {
-            for actor in tf.active_actors() {
-                actor_maps
-                    .try_insert(actor.actor_id, actor)
-                    .expect("non duplicate");
-            }
-        }
-        Ok(actor_maps)
     }
 
     pub fn worker_actor_count(&self) -> MetaResult<HashMap<WorkerId, usize>> {
@@ -726,16 +677,6 @@ impl MetadataManager {
     }
 
     #[await_tree::instrument]
-    pub async fn update_actor_splits_by_split_assignment(
-        &self,
-        split_assignment: &SplitAssignment,
-    ) -> MetaResult<()> {
-        self.catalog_controller
-            .update_actor_splits(split_assignment)
-            .await
-    }
-
-    #[await_tree::instrument]
     pub async fn update_fragment_splits(
         &self,
         split_assignment: &SplitAssignment,
@@ -750,39 +691,30 @@ impl MetadataManager {
             })
             .collect();
 
+        let inner = self.catalog_controller.inner.write().await;
+
         self.catalog_controller
-            .update_fragment_splits(&fragment_splits)
+            .update_fragment_splits(&inner.db, &fragment_splits)
             .await
     }
 
     pub async fn get_mv_depended_subscriptions(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+    ) -> MetaResult<HashMap<TableId, HashMap<SubscriptionId, u64>>> {
         let database_id = database_id.map(|database_id| database_id.database_id as _);
         Ok(self
             .catalog_controller
             .get_mv_depended_subscriptions(database_id)
             .await?
             .into_iter()
-            .map(|(loaded_database_id, mv_depended_subscriptions)| {
-                if let Some(database_id) = database_id {
-                    assert_eq!(loaded_database_id, database_id);
-                }
+            .map(|(table_id, subscriptions)| {
                 (
-                    DatabaseId::new(loaded_database_id as _),
-                    mv_depended_subscriptions
+                    TableId::new(table_id as _),
+                    subscriptions
                         .into_iter()
-                        .map(|(table_id, subscriptions)| {
-                            (
-                                TableId::new(table_id as _),
-                                subscriptions
-                                    .into_iter()
-                                    .map(|(subscription_id, retention_time)| {
-                                        (subscription_id as SubscriptionId, retention_time)
-                                    })
-                                    .collect(),
-                            )
+                        .map(|(subscription_id, retention_time)| {
+                            (subscription_id as SubscriptionId, retention_time)
                         })
                         .collect(),
                 )
@@ -822,11 +754,11 @@ impl MetadataManager {
 
     pub async fn get_job_backfill_scan_types(
         &self,
-        job_id: &TableId,
+        job_id: ObjectId,
     ) -> MetaResult<HashMap<FragmentId, PbStreamScanType>> {
         let backfill_types = self
             .catalog_controller
-            .get_job_fragment_backfill_scan_type(job_id.table_id as _)
+            .get_job_fragment_backfill_scan_type(job_id)
             .await?;
         Ok(backfill_types)
     }

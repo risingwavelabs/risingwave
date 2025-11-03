@@ -22,7 +22,7 @@ arrow-55-schema = { package = "arrow-schema", version = "55" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
-bitfield-struct = "0.11"
+bitfield-struct = "0.12"
 bitflags = "2"
 byteorder = "1"
 bytes = "1"
@@ -116,7 +116,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-util = { workspace = true }
-toml = "0.8"
+toml = "0.9"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-opentelemetry = { workspace = true }
@@ -138,7 +138,7 @@ procfs = { version = "0.18", default-features = false }
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2"
-mach2 = "0.4"
+mach2 = "0.5"
 
 [dev-dependencies]
 coarsetime = "0.1"
