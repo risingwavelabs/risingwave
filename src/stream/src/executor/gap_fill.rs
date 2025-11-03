@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
 
 use futures::{StreamExt, pin_mut};
+use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::gap_fill::{
     FillStrategy, apply_interpolation_step, calculate_interpolation_step,
@@ -124,7 +125,7 @@ impl<S: StateStore> ManagedGapFillState<S> {
     }
 
     /// Scans `StateStore` for filled rows between two time points (exclusive).
-    pub async fn scan_filled_rows_between(
+    pub async fn scan_filled_rows_between_in_state(
         &self,
         start_time: &GapFillCacheKey,
         end_time: &GapFillCacheKey,
@@ -607,7 +608,7 @@ impl GapFillCacheManager {
         } else {
             // Cache doesn't cover the range, fall back to state table scan
             managed_state
-                .scan_filled_rows_between(start_time, end_time)
+                .scan_filled_rows_between_in_state(start_time, end_time)
                 .await
         }
     }
@@ -632,6 +633,20 @@ pub struct GapFillExecutor<S: StateStore> {
 
 pub struct GapFillMetrics {
     pub gap_fill_generated_rows_count: LabelGuardedIntCounter,
+}
+
+/// Configuration for gap filling operations (immutable).
+struct FillConfig<'a> {
+    time_column_index: usize,
+    fill_columns: &'a HashMap<usize, FillStrategy>,
+    metrics: &'a GapFillMetrics,
+}
+
+/// Mutable state for gap filling operations.
+struct FillState<'a, S: StateStore> {
+    managed_state: &'a mut ManagedGapFillState<S>,
+    cache_manager: &'a mut GapFillCacheManager,
+    chunk_builder: &'a mut StreamChunkBuilder,
 }
 
 impl<S: StateStore> GapFillExecutor<S> {
@@ -665,36 +680,37 @@ impl<S: StateStore> GapFillExecutor<S> {
 
     /// Generates interpolated rows between two time points (`prev_row` and `curr_row`) using a static interval.
     ///
+    /// This function uses a streaming approach, yielding chunks as they are filled rather than
+    /// accumulating all rows in memory. It also handles state table updates internally by
+    /// adding the `is_filled` flag before yielding.
+    ///
     /// # Parameters
     /// - `prev_row`: Reference to the previous row (start of the gap).
     /// - `curr_row`: Reference to the current row (end of the gap).
     /// - `interval`: The interval to use for generating each filled row (typically a time interval).
-    /// - `time_column_index`: The index of the time column in the row, used to increment time values.
-    /// - `fill_columns`: A `HashMap` mapping column indices to their respective `FillStrategy`.
-    /// - `metrics`: Metrics for tracking the number of generated rows.
+    /// - `config`: Configuration containing time column index, fill columns, and metrics.
+    /// - `state`: Mutable state containing managed state, cache manager, and chunk builder.
     ///
     /// # Fill Strategy Application
     /// For each filled row, the function applies the specified `FillStrategy` for each column:
-    /// - `FillStrategy::Previous`: Uses the value from the previous row.
-    /// - `FillStrategy::Linear`: Interpolates linearly between the previous and current row values.
-    /// - Other strategies may be supported as defined in `FillStrategy`.
+    /// - `FillStrategy::Locf`: Uses the value from the previous row.
+    /// - `FillStrategy::Null`: Fills with NULL.
+    /// - `FillStrategy::Interpolate`: Interpolates linearly between the previous and current row values.
     ///
-    /// Returns a vector of `OwnedRow` representing the filled rows between `prev_row` and `curr_row`.
-    fn generate_filled_rows_between_static(
-        prev_row: &OwnedRow,
-        curr_row: &OwnedRow,
-        interval: &risingwave_common::types::Interval,
-        time_column_index: usize,
-        fill_columns: &HashMap<usize, FillStrategy>,
-        metrics: &GapFillMetrics,
-    ) -> StreamExecutorResult<Vec<OwnedRow>> {
-        let mut filled_rows = Vec::new();
-
+    /// Yields `StreamChunk` objects as the chunk builder becomes full.
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    async fn generate_filled_rows_between_streaming<'a>(
+        prev_row: &'a OwnedRow,
+        curr_row: &'a OwnedRow,
+        interval: risingwave_common::types::Interval,
+        config: &'a FillConfig<'a>,
+        state: &'a mut FillState<'a, S>,
+    ) {
         let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
-            prev_row.datum_at(time_column_index),
-            curr_row.datum_at(time_column_index),
+            prev_row.datum_at(config.time_column_index),
+            curr_row.datum_at(config.time_column_index),
         ) else {
-            return Ok(filled_rows);
+            return Ok(());
         };
 
         let prev_time = match prev_time_scalar {
@@ -704,13 +720,13 @@ impl<S: StateStore> GapFillExecutor<S> {
                     Ok(timestamp) => timestamp,
                     Err(_) => {
                         warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(filled_rows);
+                        return Ok(());
                     }
                 }
             }
             _ => {
                 warn!("Time column is not timestamp type: {:?}", prev_time_scalar);
-                return Ok(filled_rows);
+                return Ok(());
             }
         };
 
@@ -721,46 +737,44 @@ impl<S: StateStore> GapFillExecutor<S> {
                     Ok(timestamp) => timestamp,
                     Err(_) => {
                         warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(filled_rows);
+                        return Ok(());
                     }
                 }
             }
             _ => {
                 warn!("Time column is not timestamp type: {:?}", curr_time_scalar);
-                return Ok(filled_rows);
+                return Ok(());
             }
         };
 
         if prev_time >= curr_time {
-            return Ok(filled_rows);
+            return Ok(());
         }
 
         // Calculate the number of rows to be generated and validate
-        let mut fill_time = match prev_time.checked_add(*interval) {
+        let mut fill_time = match prev_time.checked_add(interval) {
             Some(t) => t,
             None => {
-                // If the interval is so large that adding it to prev_time causes overflow,
-                // it means we shouldn't do gap fill at all.
                 warn!(
                     "Gap fill interval is too large, causing timestamp overflow. \
                      No gap filling will be performed between {:?} and {:?}.",
                     prev_time, curr_time
                 );
-                return Ok(filled_rows);
+                return Ok(());
             }
         };
 
         // Check if fill_time is already >= curr_time, which means no gap to fill
         if fill_time >= curr_time {
-            return Ok(filled_rows);
+            return Ok(());
         }
 
-        // Count the number of rows to generate
+        // Count the number of rows to generate for interpolation calculation
         let mut row_count = 0;
         let mut temp_time = fill_time;
         while temp_time < curr_time {
             row_count += 1;
-            temp_time = match temp_time.checked_add(*interval) {
+            temp_time = match temp_time.checked_add(interval) {
                 Some(t) => t,
                 None => break,
             };
@@ -771,7 +785,7 @@ impl<S: StateStore> GapFillExecutor<S> {
         let mut interpolation_states: Vec<Datum> = Vec::new();
 
         for i in 0..prev_row.len() {
-            if let Some(strategy) = fill_columns.get(&i) {
+            if let Some(strategy) = config.fill_columns.get(&i) {
                 if matches!(strategy, FillStrategy::Interpolate) {
                     let step = calculate_interpolation_step(
                         prev_row.datum_at(i),
@@ -790,12 +804,16 @@ impl<S: StateStore> GapFillExecutor<S> {
             }
         }
 
+        // Track total generated rows for metrics
+        let mut total_generated_rows = 0u64;
+
         // Generate filled rows, applying the appropriate strategy for each column
+        // Output chunks as we go to avoid keeping all rows in memory
         while fill_time < curr_time {
             let mut new_row_data = Vec::with_capacity(prev_row.len());
 
             for col_idx in 0..prev_row.len() {
-                let datum = if col_idx == time_column_index {
+                let datum = if col_idx == config.time_column_index {
                     // Time column: use the incremented timestamp
                     let fill_time_scalar = match prev_time_scalar {
                         ScalarRefImpl::Timestamp(_) => ScalarImpl::Timestamp(fill_time),
@@ -808,7 +826,7 @@ impl<S: StateStore> GapFillExecutor<S> {
                         _ => unreachable!("Time column should be Timestamp or Timestamptz"),
                     };
                     Some(fill_time_scalar)
-                } else if let Some(strategy) = fill_columns.get(&col_idx) {
+                } else if let Some(strategy) = config.fill_columns.get(&col_idx) {
                     // Apply the fill strategy for this column
                     match strategy {
                         FillStrategy::Locf => prev_row.datum_at(col_idx).to_owned_datum(),
@@ -831,15 +849,28 @@ impl<S: StateStore> GapFillExecutor<S> {
                 new_row_data.push(datum);
             }
 
-            filled_rows.push(OwnedRow::new(new_row_data));
+            let filled_row = OwnedRow::new(new_row_data);
+            total_generated_rows += 1;
 
-            fill_time = match fill_time.checked_add(*interval) {
+            // Handle state table and cache updates
+            let fill_cache_key = state.managed_state.serialize_time_to_cache_key(&filled_row);
+            let state_row = ManagedGapFillState::<S>::row_to_state_row(&filled_row, true);
+            state.managed_state.insert(&state_row);
+            state
+                .cache_manager
+                .insert(fill_cache_key, (&filled_row).into(), RowType::Filled);
+
+            // Append row to chunk builder and yield chunk if full
+            if let Some(chunk) = state.chunk_builder.append_row(Op::Insert, &filled_row) {
+                yield chunk;
+            }
+
+            fill_time = match fill_time.checked_add(interval) {
                 Some(t) => t,
                 None => {
-                    // Time overflow during iteration, stop filling
                     warn!(
                         "Gap fill stopped due to timestamp overflow after generating {} rows.",
-                        filled_rows.len()
+                        total_generated_rows
                     );
                     break;
                 }
@@ -847,11 +878,10 @@ impl<S: StateStore> GapFillExecutor<S> {
         }
 
         // Update metrics with the number of generated rows
-        metrics
+        config
+            .metrics
             .gap_fill_generated_rows_count
-            .inc_by(filled_rows.len() as u64);
-
-        Ok(filled_rows)
+            .inc_by(total_generated_rows);
     }
 }
 
@@ -975,66 +1005,52 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 if let Some((_prev_key, prev_row_data)) = prev_original {
                                     let prev_row =
                                         prev_row_data.deserialize(&schema.data_types())?;
-                                    let filled_rows = Self::generate_filled_rows_between_static(
-                                        &prev_row,
-                                        &row,
-                                        &interval,
-                                        time_column_index,
-                                        &fill_columns,
-                                        &metrics,
-                                    )?;
 
-                                    for filled_row in filled_rows {
-                                        let fill_cache_key =
-                                            managed_state.serialize_time_to_cache_key(&filled_row);
-                                        let state_row = ManagedGapFillState::<S>::row_to_state_row(
-                                            &filled_row,
-                                            true,
-                                        );
-                                        managed_state.insert(&state_row);
-                                        cache_manager.insert(
-                                            fill_cache_key,
-                                            (&filled_row).into(),
-                                            RowType::Filled,
-                                        );
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Insert, &filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
+                                    // Use streaming generation to avoid accumulating all rows in memory
+                                    let config = FillConfig {
+                                        time_column_index,
+                                        fill_columns: &fill_columns,
+                                        metrics: &metrics,
+                                    };
+                                    let mut state = FillState {
+                                        managed_state: &mut managed_state,
+                                        cache_manager: &mut cache_manager,
+                                        chunk_builder: &mut chunk_builder,
+                                    };
+                                    let fill_stream = Self::generate_filled_rows_between_streaming(
+                                        &prev_row, &row, interval, &config, &mut state,
+                                    );
+                                    pin_mut!(fill_stream);
+
+                                    #[for_await]
+                                    for chunk in fill_stream {
+                                        yield Message::Chunk(chunk?);
                                     }
                                 }
 
                                 if let Some((_next_key, next_row_data)) = next_original {
                                     let next_row =
                                         next_row_data.deserialize(&schema.data_types())?;
-                                    let filled_rows = Self::generate_filled_rows_between_static(
-                                        &row,
-                                        &next_row,
-                                        &interval,
-                                        time_column_index,
-                                        &fill_columns,
-                                        &metrics,
-                                    )?;
 
-                                    for filled_row in filled_rows {
-                                        let fill_cache_key =
-                                            managed_state.serialize_time_to_cache_key(&filled_row);
-                                        let state_row = ManagedGapFillState::<S>::row_to_state_row(
-                                            &filled_row,
-                                            true,
-                                        );
-                                        managed_state.insert(&state_row);
-                                        cache_manager.insert(
-                                            fill_cache_key,
-                                            (&filled_row).into(),
-                                            RowType::Filled,
-                                        );
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Insert, &filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
+                                    // Use streaming generation to avoid accumulating all rows in memory
+                                    let config = FillConfig {
+                                        time_column_index,
+                                        fill_columns: &fill_columns,
+                                        metrics: &metrics,
+                                    };
+                                    let mut state = FillState {
+                                        managed_state: &mut managed_state,
+                                        cache_manager: &mut cache_manager,
+                                        chunk_builder: &mut chunk_builder,
+                                    };
+                                    let fill_stream = Self::generate_filled_rows_between_streaming(
+                                        &row, &next_row, interval, &config, &mut state,
+                                    );
+                                    pin_mut!(fill_stream);
+
+                                    #[for_await]
+                                    for chunk in fill_stream {
+                                        yield Message::Chunk(chunk?);
                                     }
                                 }
                             }
@@ -1112,33 +1128,26 @@ impl<S: StateStore> GapFillExecutor<S> {
                                         prev_row_data.deserialize(&schema.data_types())?;
                                     let next_row =
                                         next_row_data.deserialize(&schema.data_types())?;
-                                    let filled_rows = Self::generate_filled_rows_between_static(
-                                        &prev_row,
-                                        &next_row,
-                                        &interval,
-                                        time_column_index,
-                                        &fill_columns,
-                                        &metrics,
-                                    )?;
 
-                                    for filled_row in filled_rows {
-                                        let fill_cache_key =
-                                            managed_state.serialize_time_to_cache_key(&filled_row);
-                                        let state_row = ManagedGapFillState::<S>::row_to_state_row(
-                                            &filled_row,
-                                            true,
-                                        );
-                                        managed_state.insert(&state_row);
-                                        cache_manager.insert(
-                                            fill_cache_key,
-                                            (&filled_row).into(),
-                                            RowType::Filled,
-                                        );
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Insert, &filled_row)
-                                        {
-                                            yield Message::Chunk(chunk);
-                                        }
+                                    // Use streaming generation to avoid accumulating all rows in memory
+                                    let config = FillConfig {
+                                        time_column_index,
+                                        fill_columns: &fill_columns,
+                                        metrics: &metrics,
+                                    };
+                                    let mut state = FillState {
+                                        managed_state: &mut managed_state,
+                                        cache_manager: &mut cache_manager,
+                                        chunk_builder: &mut chunk_builder,
+                                    };
+                                    let fill_stream = Self::generate_filled_rows_between_streaming(
+                                        &prev_row, &next_row, interval, &config, &mut state,
+                                    );
+                                    pin_mut!(fill_stream);
+
+                                    #[for_await]
+                                    for chunk in fill_stream {
+                                        yield Message::Chunk(chunk?);
                                     }
                                 }
                             }
