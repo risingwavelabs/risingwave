@@ -218,18 +218,7 @@ impl From<SchemaId> for u32 {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Display,
-    Default,
-    Hash,
-    PartialOrd,
-    PartialEq,
-    Eq,
-    Ord,
-)]
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
 #[display("{table_id}")]
 pub struct TableId {
     pub table_id: u32,
