@@ -4161,7 +4161,7 @@ fn parse_alter_fragment_set_parallelism() {
         _ => panic!("unexpected statement kind"),
     }
 
-    match verified_stmt("ALTER FRAGMENT 2 SET PARALLELISM = DEFAULT") {
+    match verified_stmt("ALTER FRAGMENT 2 SET PARALLELISM TO DEFAULT") {
         Statement::AlterFragment {
             fragment_ids,
             operation,
@@ -4177,7 +4177,7 @@ fn parse_alter_fragment_set_parallelism() {
         _ => panic!("unexpected statement kind"),
     }
 
-    match verified_stmt("ALTER FRAGMENT 1, 2,3 SET PARALLELISM = 8") {
+    match verified_stmt("ALTER FRAGMENT 1, 2, 3 SET PARALLELISM TO 8") {
         Statement::AlterFragment {
             fragment_ids,
             operation,
