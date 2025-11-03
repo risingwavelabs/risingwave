@@ -497,54 +497,57 @@ impl StreamActorManager {
                 self.runtime.spawn(may_track_hummock)
             };
 
-            let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
-                || self.env.config().developer.enable_actor_tokio_metrics
-            {
-                tracing::info!("Tokio metrics are enabled.");
+            let monitor_handle = {
+                let enable_tokio_metrics = self.env.config().developer.enable_actor_tokio_metrics
+                    || self.streaming_metrics.level >= MetricLevel::Debug;
+                if enable_tokio_metrics {
+                    tracing::info!("Tokio metrics are enabled.");
+                }
+
                 let streaming_metrics = self.streaming_metrics.clone();
+
                 let actor_monitor_task = self.runtime.spawn(async move {
-                    let metrics = streaming_metrics.new_actor_metrics(actor_id);
-                    loop {
-                        let task_metrics = monitor.cumulative();
+                    let metrics = streaming_metrics.new_actor_metrics(actor_id, fragment_id);
+                    for task_metrics in monitor.intervals() {
+                        // Always collect actor execution duration.
                         metrics
-                            .actor_execution_time
-                            .set(task_metrics.total_poll_duration.as_secs_f64());
-                        metrics
-                            .actor_fast_poll_duration
-                            .set(task_metrics.total_fast_poll_duration.as_secs_f64());
-                        metrics
-                            .actor_fast_poll_cnt
-                            .set(task_metrics.total_fast_poll_count as i64);
-                        metrics
-                            .actor_slow_poll_duration
-                            .set(task_metrics.total_slow_poll_duration.as_secs_f64());
-                        metrics
-                            .actor_slow_poll_cnt
-                            .set(task_metrics.total_slow_poll_count as i64);
-                        metrics
-                            .actor_poll_duration
-                            .set(task_metrics.total_poll_duration.as_secs_f64());
-                        metrics
-                            .actor_poll_cnt
-                            .set(task_metrics.total_poll_count as i64);
-                        metrics
-                            .actor_idle_duration
-                            .set(task_metrics.total_idle_duration.as_secs_f64());
-                        metrics
-                            .actor_idle_cnt
-                            .set(task_metrics.total_idled_count as i64);
-                        metrics
-                            .actor_scheduled_duration
-                            .set(task_metrics.total_scheduled_duration.as_secs_f64());
-                        metrics
-                            .actor_scheduled_cnt
-                            .set(task_metrics.total_scheduled_count as i64);
+                            .actor_execution_duration
+                            .inc_by(task_metrics.total_poll_duration.as_nanos() as u64);
+
+                        if enable_tokio_metrics {
+                            metrics
+                                .actor_fast_poll_duration
+                                .inc_by(task_metrics.total_fast_poll_duration.as_nanos() as u64);
+                            metrics
+                                .actor_fast_poll_cnt
+                                .inc_by(task_metrics.total_fast_poll_count);
+                            metrics
+                                .actor_slow_poll_duration
+                                .inc_by(task_metrics.total_slow_poll_duration.as_nanos() as u64);
+                            metrics
+                                .actor_slow_poll_cnt
+                                .inc_by(task_metrics.total_slow_poll_count);
+                            metrics
+                                .actor_poll_duration
+                                .inc_by(task_metrics.total_poll_duration.as_nanos() as u64);
+                            metrics.actor_poll_cnt.inc_by(task_metrics.total_poll_count);
+                            metrics
+                                .actor_idle_duration
+                                .inc_by(task_metrics.total_idle_duration.as_nanos() as u64);
+                            metrics
+                                .actor_idle_cnt
+                                .inc_by(task_metrics.total_idled_count);
+                            metrics
+                                .actor_scheduled_duration
+                                .inc_by(task_metrics.total_scheduled_duration.as_nanos() as u64);
+                            metrics
+                                .actor_scheduled_cnt
+                                .inc_by(task_metrics.total_scheduled_count);
+                        }
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }
                 });
                 Some(actor_monitor_task)
-            } else {
-                None
             };
             (handle, monitor_handle)
         }
