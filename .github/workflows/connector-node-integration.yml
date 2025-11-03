@@ -39,7 +39,9 @@ jobs:
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libopenblas-dev liblapack-dev
+          sudo apt-get install -y make build-essential cmake protobuf-compiler \
+            libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config \
+            lld libopenblas-dev liblapack-dev
       - name: run integration tests
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: |
