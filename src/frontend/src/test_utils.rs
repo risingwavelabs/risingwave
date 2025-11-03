@@ -458,7 +458,7 @@ impl CatalogWriter for MockCatalogWriter {
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
             self.catalog
                 .read()
@@ -489,7 +489,7 @@ impl CatalogWriter for MockCatalogWriter {
             )
             .into());
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
             self.catalog
                 .read()

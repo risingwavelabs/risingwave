@@ -306,7 +306,7 @@ pub(super) fn calc_new_write_limits(
                         .state_table_info
                         .compaction_group_member_table_ids(*id)
                         .iter()
-                        .map(|table_id| table_id.table_id)
+                        .map(|table_id| table_id.as_raw_id())
                         .collect(),
                     reason: group_state.reason().unwrap().to_owned(),
                 },
@@ -357,7 +357,7 @@ fn estimate_table_stats(sst: &SstableInfo) -> PbTableStatsMap {
     }
     let estimated_total_value_size = sst.uncompressed_file_size - estimated_total_key_size;
     for table_id in &sst.table_ids {
-        let e = changes.entry(table_id.table_id()).or_default();
+        let e = changes.entry(table_id.as_raw_id()).or_default();
         e.total_key_count += weighted_value(sst.total_key_count as i64);
         e.total_key_size += weighted_value(estimated_total_key_size as i64);
         e.total_value_size += weighted_value(estimated_total_value_size as i64);
@@ -686,7 +686,7 @@ mod tests {
         let changes = estimate_table_stats(&sst);
         assert_eq!(changes.len(), 3);
         for t in &sst.table_ids {
-            let stats = changes.get(&t.table_id()).unwrap();
+            let stats = changes.get(&t.as_raw_id()).unwrap();
             assert_eq!(stats.total_key_count, 6000 / 3);
             assert_eq!(stats.total_key_size, 60_000 / 2 / 3);
             assert_eq!(stats.total_value_size, (60_000 - 60_000 / 2) / 3);

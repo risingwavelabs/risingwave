@@ -250,7 +250,7 @@ impl StateTableAccessor for RemoteTableAccessor {
             .get_tables(
                 &table_ids
                     .iter()
-                    .map(|table_id| table_id.table_id())
+                    .map(|table_id| table_id.as_raw_id())
                     .collect_vec(),
                 true,
             )

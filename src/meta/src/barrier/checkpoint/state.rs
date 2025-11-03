@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use tracing::warn;
 
@@ -137,7 +138,7 @@ impl BarrierWorkerState {
         InflightDatabaseInfo,
         HashMap<TableId, u64>,
         HashSet<TableId>,
-        HashSet<TableId>,
+        HashSet<JobId>,
         bool,
     ) {
         // update the fragment_infos outside pre_apply
@@ -164,7 +165,7 @@ impl BarrierWorkerState {
                 retention_second,
             }) => {
                 self.inflight_graph_info.register_subscriber(
-                    *upstream_mv_table_id,
+                    upstream_mv_table_id.as_job_id(),
                     *subscription_id,
                     SubscriberType::Subscription(*retention_second),
                 );
@@ -179,8 +180,8 @@ impl BarrierWorkerState {
                     .keys()
                 {
                     self.inflight_graph_info.register_subscriber(
-                        *upstream_mv_table_id,
-                        info.streaming_job.id(),
+                        upstream_mv_table_id.as_job_id(),
+                        info.streaming_job.id().as_raw_id(),
                         SubscriberType::SnapshotBackfill,
                     );
                 }
@@ -211,7 +212,7 @@ impl BarrierWorkerState {
             }) => {
                 if self
                     .inflight_graph_info
-                    .unregister_subscriber(*upstream_mv_table_id, *subscription_id)
+                    .unregister_subscriber(upstream_mv_table_id.as_job_id(), *subscription_id)
                     .is_none()
                 {
                     warn!(subscription_id, %upstream_mv_table_id, "no subscription to drop");
@@ -223,8 +224,8 @@ impl BarrierWorkerState {
                     for upstream_mv_table_id in upstream_mv_table_ids {
                         assert_matches!(
                             self.inflight_graph_info.unregister_subscriber(
-                                *upstream_mv_table_id,
-                                snapshot_backfill_job_id.table_id
+                                upstream_mv_table_id.as_job_id(),
+                                snapshot_backfill_job_id.as_raw_id()
                             ),
                             Some(SubscriberType::SnapshotBackfill)
                         );

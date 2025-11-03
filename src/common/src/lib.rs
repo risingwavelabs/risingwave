@@ -84,6 +84,7 @@ pub mod field_generator;
 pub mod gap_fill_types;
 pub mod global_jvm;
 pub mod hash;
+pub mod id;
 pub mod log;
 pub mod memory;
 pub mod metrics_reader;

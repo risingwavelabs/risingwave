@@ -2356,7 +2356,7 @@ pub async fn generate_stream_graph_for_replace_table(
         table.associated_source_id = Some(source_id);
 
         let source = source.as_mut().unwrap();
-        source.id = source_id.table_id;
+        source.id = source_id.as_raw_id();
         source.associated_table_id = Some(table.id());
     }
 

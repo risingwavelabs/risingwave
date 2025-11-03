@@ -97,7 +97,7 @@ pub fn to_prost_table_stats_map(
     table_stats
         .borrow()
         .iter()
-        .map(|(t, s)| (t.table_id(), s.into()))
+        .map(|(t, s)| (t.as_raw_id(), s.into()))
         .collect()
 }
 

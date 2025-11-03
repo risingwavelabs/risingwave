@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::catalog::Database;
@@ -138,13 +139,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unimplemented!()
     }
 
-    async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+    async fn finish_cdc_table_backfill(&self, _job_id: JobId) -> MetaResult<()> {
         unimplemented!()
     }
 
     async fn handle_refresh_finished_table_ids(
         &self,
-        _refresh_finished_table_ids: Vec<u32>,
+        _refresh_finished_table_ids: Vec<JobId>,
     ) -> MetaResult<()> {
         unimplemented!()
     }
@@ -177,7 +178,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         unreachable!()
     };
     let database_id = DatabaseId::new(233);
-    let job_id = TableId::new(234);
+    let job_id = JobId::new(234);
     let worker_node = |id| WorkerNode {
         id,
         r#type: PbWorkerType::ComputeNode as i32,

@@ -446,7 +446,7 @@ impl MetaClient {
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropMaterializedViewRequest {
-            table_id: table_id.table_id(),
+            table_id: table_id.as_raw_id(),
             cascade,
         };
 
@@ -788,7 +788,7 @@ impl MetaClient {
     ) -> Result<WaitVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(SourceId::Id),
-            table_id: table_id.table_id(),
+            table_id: table_id.as_raw_id(),
             cascade,
         };
 

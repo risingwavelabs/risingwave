@@ -73,7 +73,7 @@ pub async fn handle_alter_parallelism(
                 }
 
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
-                table.id.table_id()
+                table.id.as_raw_id()
             }
             StatementType::ALTER_SOURCE => {
                 let (source, schema_name) =

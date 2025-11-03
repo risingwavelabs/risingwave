@@ -273,7 +273,7 @@ pub async fn handle_describe_fragments(
                         ));
                     }
                 }
-                Relation::BaseTable(t) => t.table_catalog.id.table_id,
+                Relation::BaseTable(t) => t.table_catalog.id.as_raw_id(),
                 Relation::SystemTable(_t) => {
                     bail!(ErrorCode::NotSupported(
                         "system table has no fragments to describe".to_owned(),

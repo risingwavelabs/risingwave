@@ -220,7 +220,7 @@ pub async fn register_sstable_infos_to_compaction_group(
         .flat_map(|sstable_info| &sstable_info.table_ids)
         .sorted()
         .dedup()
-        .map(|table_id| table_id.table_id())
+        .copied()
         .collect_vec();
     register_table_ids_to_compaction_group(
         compaction_group_manager_ref,

@@ -18,7 +18,8 @@ use std::task::{Context, Poll};
 
 use futures::FutureExt;
 use prometheus::{HistogramTimer, IntCounter};
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -262,7 +263,7 @@ impl DatabaseRecoveringState {
         &self,
     ) -> Option<(
         &BarrierWorkerState,
-        &HashMap<TableId, CreatingStreamingJobControl>,
+        &HashMap<JobId, CreatingStreamingJobControl>,
     )> {
         match &self.stage {
             DatabaseRecoveringStage::Resetting { .. } => None,

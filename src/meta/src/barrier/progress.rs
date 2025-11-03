@@ -17,8 +17,9 @@ use std::collections::hash_map::Entry;
 use std::mem::take;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::{CreateType, ObjectId};
+use risingwave_meta_model::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
@@ -285,7 +286,7 @@ impl Progress {
 /// 2. if `is_recovered` is true, it is a "Recovered" tracking job.
 ///    On recovery, the barrier manager will recover and start managing the job.
 pub struct TrackingJob {
-    job_id: ObjectId,
+    job_id: JobId,
     is_recovered: bool,
     source_change: Option<SourceChange>,
 }
@@ -303,7 +304,7 @@ impl std::fmt::Display for TrackingJob {
 
 impl TrackingJob {
     /// Create a new tracking job.
-    pub(crate) fn new(job_id: ObjectId, source_change: Option<SourceChange>) -> Self {
+    pub(crate) fn new(job_id: JobId, source_change: Option<SourceChange>) -> Self {
         Self {
             job_id,
             is_recovered: false,
@@ -312,7 +313,7 @@ impl TrackingJob {
     }
 
     /// Create a recovered tracking job.
-    pub(crate) fn recovered(job_id: ObjectId, source_change: Option<SourceChange>) -> Self {
+    pub(crate) fn recovered(job_id: JobId, source_change: Option<SourceChange>) -> Self {
         Self {
             job_id,
             is_recovered: true,
@@ -334,10 +335,6 @@ impl TrackingJob {
             source_manager.apply_source_change(source_change).await;
         }
         Ok(())
-    }
-
-    pub(crate) fn table_to_create(&self) -> TableId {
-        (self.job_id as u32).into()
     }
 }
 
@@ -376,9 +373,9 @@ pub(super) enum UpdateProgressResult {
 #[derive(Default, Debug)]
 pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the `TableId`.
-    progress_map: HashMap<TableId, (Progress, TrackingJob)>,
+    progress_map: HashMap<JobId, (Progress, TrackingJob)>,
 
-    actor_map: HashMap<ActorId, TableId>,
+    actor_map: HashMap<ActorId, JobId>,
 
     /// Stash of pending backfill nodes. They will start backfilling on checkpoint.
     pending_backfill_nodes: Vec<FragmentId>,
@@ -398,7 +395,7 @@ impl CreateMviewProgressTracker {
     pub fn recover(
         jobs: impl IntoIterator<
             Item = (
-                TableId,
+                JobId,
                 (String, &InflightStreamingJobInfo, BackfillOrderState),
             ),
         >,
@@ -407,7 +404,7 @@ impl CreateMviewProgressTracker {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
         let mut finished_jobs = vec![];
-        for (creating_table_id, (definition, job_info, backfill_order_state)) in jobs {
+        for (creating_job_id, (definition, job_info, backfill_order_state)) in jobs {
             let source_backfill_fragments = StreamJobFragments::source_backfill_fragments_impl(
                 job_info
                     .fragment_infos
@@ -421,8 +418,7 @@ impl CreateMviewProgressTracker {
                     finished_backfill_fragments: source_backfill_fragments,
                 })
             };
-            let tracking_job =
-                TrackingJob::recovered(creating_table_id.table_id as _, source_change);
+            let tracking_job = TrackingJob::recovered(creating_job_id, source_change);
             let actors = job_info.tracking_progress_actor_ids();
             if actors.is_empty() {
                 finished_jobs.push(tracking_job);
@@ -431,7 +427,7 @@ impl CreateMviewProgressTracker {
                 let mut backfill_upstream_types = HashMap::new();
 
                 for (actor, backfill_upstream_type) in actors {
-                    actor_map.insert(actor, creating_table_id);
+                    actor_map.insert(actor, creating_job_id);
                     states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
                     backfill_upstream_types.insert(actor, backfill_upstream_type);
                 }
@@ -449,7 +445,7 @@ impl CreateMviewProgressTracker {
                     version_stats,
                     backfill_order_state,
                 );
-                progress_map.insert(creating_table_id, (progress, tracking_job));
+                progress_map.insert(creating_job_id, (progress, tracking_job));
             }
         }
         Self {
@@ -493,18 +489,17 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub fn gen_ddl_progress(&self) -> HashMap<u32, DdlProgress> {
+    pub fn gen_ddl_progress(&self) -> HashMap<JobId, DdlProgress> {
         self.progress_map
             .iter()
-            .map(|(table_id, (x, _))| {
-                let table_id = table_id.table_id;
+            .map(|(job_id, (x, _))| {
                 let ddl_progress = DdlProgress {
-                    id: table_id as u64,
+                    id: job_id.as_raw_id() as u64,
                     statement: x.definition.clone(),
                     create_type: x.create_type.as_str().to_owned(),
                     progress: x.calculate_progress(),
                 };
-                (table_id, ddl_progress)
+                (*job_id, ddl_progress)
             })
             .collect()
     }
@@ -595,10 +590,10 @@ impl CreateMviewProgressTracker {
                 .flat_map(|resp| resp.create_mview_progress.iter()),
             version_stats,
         );
-        for table_id in command.map(Command::jobs_to_drop).into_iter().flatten() {
+        for job_id in command.map(Command::jobs_to_drop).into_iter().flatten() {
             // the cancelled command is possibly stashed in `finished_commands` and waiting
             // for checkpoint, we should also clear it.
-            self.cancel_command(table_id);
+            self.cancel_command(job_id);
         }
         if barrier_info.kind.is_checkpoint() {
             Some(take(&mut self.staging_commit_info))
@@ -619,11 +614,11 @@ impl CreateMviewProgressTracker {
         !self.staging_commit_info.finished_jobs.is_empty()
     }
 
-    pub(super) fn cancel_command(&mut self, id: TableId) {
+    pub(super) fn cancel_command(&mut self, id: JobId) {
         let _ = self.progress_map.remove(&id);
         self.staging_commit_info
             .finished_jobs
-            .retain(|x| x.table_to_create() != id);
+            .retain(|x| x.job_id != id);
         self.actor_map.retain(|_, table_id| *table_id != id);
     }
 
@@ -652,7 +647,7 @@ impl CreateMviewProgressTracker {
             if actors.is_empty() {
                 // The command can be finished immediately.
                 return Some(TrackingJob::new(
-                    info.stream_job_fragments.stream_job_id.table_id as _,
+                    info.stream_job_fragments.stream_job_id,
                     Some(SourceChange::CreateJobFinished {
                         finished_backfill_fragments: stream_job_fragments
                             .source_backfill_fragments(),
@@ -698,7 +693,7 @@ impl CreateMviewProgressTracker {
             (
                 progress,
                 TrackingJob::new(
-                    creating_job_id.table_id as _,
+                    creating_job_id,
                     Some(SourceChange::CreateJobFinished {
                         finished_backfill_fragments: table_fragments.source_backfill_fragments(),
                     }),
@@ -794,7 +789,7 @@ fn calculate_total_key_count(
             *count as u64
                 * version_stats
                     .table_stats
-                    .get(&table_id.table_id)
+                    .get(&table_id.as_raw_id())
                     .map_or(0, |stat| stat.total_key_count as u64)
         })
         .sum()

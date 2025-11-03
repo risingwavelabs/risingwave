@@ -1442,7 +1442,7 @@ impl StreamingMetrics {
 
     pub fn new_group_top_n_metrics(
         &self,
-        table_id: u32,
+        table_id: TableId,
         actor_id: ActorId,
         fragment_id: FragmentId,
     ) -> GroupTopNMetrics {
@@ -1467,7 +1467,7 @@ impl StreamingMetrics {
 
     pub fn new_append_only_group_top_n_metrics(
         &self,
-        table_id: u32,
+        table_id: TableId,
         actor_id: ActorId,
         fragment_id: FragmentId,
     ) -> GroupTopNMetrics {
@@ -1517,7 +1517,7 @@ impl StreamingMetrics {
 
     pub fn new_hash_agg_metrics(
         &self,
-        table_id: u32,
+        table_id: TableId,
         actor_id: ActorId,
         fragment_id: FragmentId,
     ) -> HashAggMetrics {
@@ -1559,7 +1559,7 @@ impl StreamingMetrics {
 
     pub fn new_agg_distinct_dedup_metrics(
         &self,
-        table_id: u32,
+        table_id: TableId,
         actor_id: ActorId,
         fragment_id: FragmentId,
     ) -> AggDistinctDedupMetrics {
@@ -1605,7 +1605,7 @@ impl StreamingMetrics {
         }
     }
 
-    pub fn new_backfill_metrics(&self, table_id: u32, actor_id: ActorId) -> BackfillMetrics {
+    pub fn new_backfill_metrics(&self, table_id: TableId, actor_id: ActorId) -> BackfillMetrics {
         let label_list: &[&str; 2] = &[&table_id.to_string(), &actor_id.to_string()];
         BackfillMetrics {
             backfill_snapshot_read_row_count: self
@@ -1635,7 +1635,7 @@ impl StreamingMetrics {
 
     pub fn new_over_window_metrics(
         &self,
-        table_id: u32,
+        table_id: TableId,
         actor_id: ActorId,
         fragment_id: FragmentId,
     ) -> OverWindowMetrics {

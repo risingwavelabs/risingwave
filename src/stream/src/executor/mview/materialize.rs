@@ -272,8 +272,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             actor_context.fragment_id,
         );
 
-        let metrics_info =
-            MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
+        let metrics_info = MetricsInfo::new(
+            metrics,
+            table_catalog.id.into(),
+            actor_context.id,
+            "Materialize",
+        );
 
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
@@ -304,8 +308,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let mv_table_id = TableId::new(self.state_table.table_id());
-        let _staging_table_id = TableId::new(self.state_table.table_id());
+        let mv_table_id = self.state_table.table_id();
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
@@ -695,7 +698,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 self.local_barrier_manager.report_refresh_finished(
                                     epoch,
                                     self.actor_context.id,
-                                    refresh_args.table_id.into(),
+                                    refresh_args.table_id,
                                     staging_table_id,
                                 );
                                 tracing::debug!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
@@ -727,7 +730,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .try_wait_epoch(
                             HummockReadEpoch::Committed(on_complete_epoch.prev),
                             TryWaitEpochOptions {
-                                table_id: staging_table_id.into(),
+                                table_id: staging_table_id,
                             },
                         )
                         .await?;
@@ -776,7 +779,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     None => unreachable!("associated_source_id is not set"),
                                 };
 
-                                if load_finish_source_id.table_id() == associated_source_id {
+                                if load_finish_source_id.as_raw_id() == associated_source_id {
                                     tracing::info!(
                                         %load_finish_source_id,
                                         "LoadFinish received, starting data replacement"

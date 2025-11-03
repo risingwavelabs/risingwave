@@ -191,7 +191,7 @@ pub fn build_graph_with_strategy(
     fragment_graph.dependent_table_ids = state
         .dependent_table_ids
         .into_iter()
-        .map(|id| id.table_id)
+        .map(|id| id.as_raw_id())
         .collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
 
