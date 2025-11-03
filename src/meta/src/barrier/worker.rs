@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::replace;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,8 +24,8 @@ use arc_swap::ArcSwap;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
-use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::system_param::{AdaptiveParallelismStrategy, PAUSE_ON_NEXT_BOOTSTRAP_KEY};
 use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
@@ -45,6 +46,7 @@ use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
     schedule,
 };
+use crate::controller::scale::WorkerInfo;
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -78,6 +80,7 @@ pub(super) struct GlobalBarrierWorker<C> {
     pub(super) context: Arc<C>,
 
     env: MetaSrvEnv,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 
     checkpoint_control: CheckpointControl,
 
@@ -111,6 +114,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         let reader = env.system_params_reader().await;
         let system_enable_per_database_isolation = reader.per_database_isolation();
+        let adaptive_parallelism_strategy = reader.adaptive_parallelism_strategy();
         // Load config will be performed in bootstrap phase.
         let periodic_barriers = PeriodicBarriers::default();
 
@@ -121,6 +125,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             system_enable_per_database_isolation,
             context,
             env,
+            adaptive_parallelism_strategy,
             checkpoint_control,
             completing_task: CompletingTask::None,
             request_rx,
@@ -339,6 +344,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             self.periodic_barriers
                                 .set_sys_checkpoint_frequency(p.checkpoint_frequency());
                             self.system_enable_per_database_isolation = p.per_database_isolation();
+                            self.adaptive_parallelism_strategy =
+                                p.adaptive_parallelism_strategy();
                         }
                     }
                 }
@@ -375,12 +382,37 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }));
                                 Self::report_collect_failure(&self.env, &error);
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
-                                match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
-                                    runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
-                                        warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
-                                    })?;
-                                    entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
-                                } _ => {
+                                match self.context.reload_database_runtime_info(database_id).await? {
+                                    Some(runtime_info) => {
+                                        runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
+                                            warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
+                                        })?;
+                                        let worker_map: BTreeMap<_, _> = self
+                                            .active_streaming_nodes
+                                            .current()
+                                            .values()
+                                            .filter(|worker| worker.is_streaming_schedulable())
+                                            .map(|worker| {
+                                                (
+                                                    worker.id as _,
+                                                    WorkerInfo {
+                                                        weight: NonZeroUsize::new(
+                                                            worker.compute_node_parallelism(),
+                                                        )
+                                                        .expect("parallelism should be non-zero"),
+                                                        resource_group: worker.resource_group(),
+                                                    },
+                                                )
+                                            })
+                                            .collect();
+                                        entering_initializing.enter(
+                                            runtime_info,
+                                            &mut self.control_stream_manager,
+                                            &worker_map,
+                                            self.adaptive_parallelism_strategy.clone(),
+                                        );
+                                    }
+                                    _ => {
                                     info!(database_id = database_id.database_id, "database removed after reloading empty runtime info");
                                     // mark ready to unblock subsequent request
                                     self.context.mark_ready(MarkReadyOptions::Database(database_id));

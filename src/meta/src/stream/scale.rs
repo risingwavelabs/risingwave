@@ -342,7 +342,7 @@ impl ScaleController {
                 (
                     id,
                     WorkerInfo {
-                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                         resource_group: worker.resource_group(),
                     },
                 )
@@ -438,7 +438,7 @@ impl ScaleController {
                 (
                     id,
                     WorkerInfo {
-                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                         resource_group: worker.resource_group(),
                     },
                 )
@@ -927,7 +927,7 @@ impl GlobalStreamManager {
                 (
                     worker.id as i32,
                     WorkerInfo {
-                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        weight: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                         resource_group: worker.resource_group(),
                     },
                 )

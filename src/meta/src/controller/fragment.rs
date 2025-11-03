@@ -70,7 +70,7 @@ use tracing::debug;
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{
-    FragmentRenderMap, load_fragment_info, resolve_streaming_job_definition,
+    RenderedGraph, load_fragment_info, resolve_streaming_job_definition,
 };
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
@@ -1162,7 +1162,7 @@ impl CatalogController {
         &self,
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<FragmentRenderMap> {
+    ) -> MetaResult<RenderedGraph> {
         let adaptive_parallelism_strategy = {
             let system_params_reader = self.env.system_params_reader().await;
             system_params_reader.adaptive_parallelism_strategy()
@@ -1180,7 +1180,10 @@ impl CatalogController {
         )
         .await?;
 
-        debug!(?database_fragment_infos, "reload all actors");
+        debug!(
+            fragments = ?database_fragment_infos.fragments,
+            "reload all actors"
+        );
 
         Ok(database_fragment_infos)
     }
