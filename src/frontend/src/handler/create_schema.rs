@@ -80,7 +80,7 @@ pub async fn handle_create_schema(
         db_owner,
         AclMode::Create,
         db_name,
-        Object::DatabaseId(db_id),
+        Object::DatabaseId(db_id.into()),
     )])?;
 
     let catalog_writer = session.catalog_writer()?;

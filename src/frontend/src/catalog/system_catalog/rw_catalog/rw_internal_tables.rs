@@ -53,7 +53,7 @@ fn read_rw_internal_tables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIntern
                 .map(|table| RwInternalTable {
                     id: table.id.as_raw_id() as i32,
                     name: table.name().into(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     job_id: table.job_id.unwrap().as_raw_id() as i32,
                     owner: table.owner as i32,
                     definition: table.create_sql(),

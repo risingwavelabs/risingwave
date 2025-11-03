@@ -176,8 +176,8 @@ impl From<&BuiltinView> for ViewCatalog {
         ViewCatalog {
             id: 0,
             name: val.name.to_owned(),
-            schema_id: 0,
-            database_id: 0,
+            schema_id: 0.into(),
+            database_id: 0.into(),
             columns: val
                 .columns
                 .iter()

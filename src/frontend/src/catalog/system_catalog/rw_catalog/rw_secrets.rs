@@ -46,7 +46,7 @@ fn read_rw_secret_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
                 .iter_secret_with_acl(current_user)
                 .map(|secret| RwSecret {
                     id: secret.id.secret_id() as i32,
-                    schema_id: secret.schema_id as i32,
+                    schema_id: secret.schema_id.as_raw_id() as i32,
                     name: secret.name.clone(),
                     owner: secret.owner as i32,
                     acl: get_acl_items(

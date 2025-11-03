@@ -36,7 +36,7 @@ pub fn handle_use_db(handler_args: HandlerArgs, database_name: ObjectName) -> Re
         owner_id,
         AclMode::Connect,
         database_name.clone(),
-        GrantObject::DatabaseId(database_id),
+        GrantObject::DatabaseId(database_id.into()),
     )])?;
 
     let mut builder = RwPgResponse::builder(StatementType::USE);

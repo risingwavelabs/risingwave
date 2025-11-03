@@ -122,8 +122,8 @@ impl BuildingFragment {
         let fragment_id = fragment.fragment_id;
         stream_graph_visitor::visit_internal_tables(fragment, |table, table_type_name| {
             table.id = table_id_gen.to_global_id(table.id).as_global_id();
-            table.schema_id = job.schema_id();
-            table.database_id = job.database_id();
+            table.schema_id = job.schema_id().as_raw_id();
+            table.database_id = job.database_id().as_raw_id();
             table.name = generate_internal_table_name_with_type(
                 &job.name(),
                 fragment_id,
@@ -204,8 +204,8 @@ impl BuildingFragment {
             NodeBody::VectorIndexWrite(node) => {
                 let table = node.table.as_mut().unwrap();
                 table.id = job_id.as_raw_id();
-                table.database_id = job.database_id();
-                table.schema_id = job.schema_id();
+                table.database_id = job.database_id().as_raw_id();
+                table.schema_id = job.schema_id().as_raw_id();
                 table.fragment_id = fragment_id;
                 #[cfg(not(debug_assertions))]
                 {

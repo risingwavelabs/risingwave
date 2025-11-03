@@ -44,7 +44,7 @@ fn read_system_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<SystemTab
             schema.iter_system_tables().map(|table| SystemTable {
                 id: table.id.as_raw_id() as i32,
                 name: table.name().to_owned(),
-                schema_id: schema.id() as i32,
+                schema_id: schema.id().as_raw_id() as i32,
                 owner: table.owner as i32,
                 definition: None,
                 acl: get_acl_items(

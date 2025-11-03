@@ -54,7 +54,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
                 .map(|table| RwTable {
                     id: table.id.as_raw_id() as i32,
                     name: table.name().to_owned(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: table.owner as i32,
                     definition: table.create_sql_purified(),
                     append_only: table.append_only,

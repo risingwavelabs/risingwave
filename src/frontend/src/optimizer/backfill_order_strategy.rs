@@ -425,7 +425,7 @@ pub mod display {
         let table_name = table_catalog.name();
         let db_id = table_catalog.database_id;
         let schema_id = table_catalog.schema_id;
-        let schema_catalog = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let schema_catalog = catalog_reader.get_schema_by_id(db_id, schema_id)?;
         let schema_name = schema_catalog.name();
         let name = format!("{}.{}", schema_name, table_name);
         Ok(name)

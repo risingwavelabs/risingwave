@@ -19,7 +19,7 @@ use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 use risingwave_pb::user::{PbAction, PbAuthInfo, PbGrantPrivilege, PbUserInfo};
 
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::SchemaId;
 use crate::user::UserId;
 
 /// `UserCatalog` is responsible for managing user's information.
@@ -37,8 +37,8 @@ pub struct UserCatalog {
 
     // User owned acl mode set, group by object id.
     // TODO: merge it after we fully migrate to sql-backend.
-    pub database_acls: HashMap<DatabaseId, AclModeSet>,
-    pub schema_acls: HashMap<SchemaId, AclModeSet>,
+    pub database_acls: HashMap<u32, AclModeSet>,
+    pub schema_acls: HashMap<u32, AclModeSet>,
     pub object_acls: HashMap<u32, AclModeSet>,
 }
 
@@ -173,7 +173,7 @@ impl UserCatalog {
     }
 
     pub fn has_schema_usage_privilege(&self, schema_id: SchemaId) -> bool {
-        self.has_privilege(&GrantObject::SchemaId(schema_id), AclMode::Usage)
+        self.has_privilege(&GrantObject::SchemaId(schema_id.into()), AclMode::Usage)
     }
 
     pub fn check_privilege_with_grant_option(

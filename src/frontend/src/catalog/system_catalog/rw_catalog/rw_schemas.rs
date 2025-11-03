@@ -39,10 +39,15 @@ fn read_rw_schema_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSchema>> {
 
     Ok(schemas
         .map(|schema| RwSchema {
-            id: schema.id() as i32,
+            id: schema.id().as_raw_id() as i32,
             name: schema.name(),
             owner: schema.owner() as i32,
-            acl: get_acl_items(&Object::SchemaId(schema.id()), false, &users, username_map),
+            acl: get_acl_items(
+                &Object::SchemaId(schema.id().as_raw_id()),
+                false,
+                &users,
+                username_map,
+            ),
         })
         .collect())
 }

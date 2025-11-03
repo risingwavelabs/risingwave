@@ -37,7 +37,7 @@ impl CatalogController {
         };
         let database = active_model.update(&txn).await?;
 
-        let obj = Object::find_by_id(database_id)
+        let obj = Object::find_by_id(database_id.as_raw_id() as ObjectId)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
@@ -61,7 +61,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let obj = Object::find_by_id(schema_id)
+        let obj = Object::find_by_id(schema_id.as_raw_id() as ObjectId)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
@@ -91,9 +91,13 @@ impl CatalogController {
         object_name: &str,
     ) -> MetaResult<NotificationVersion> {
         if object_type == ObjectType::Database {
-            return self.alter_database_name(object_id as _, object_name).await;
+            return self
+                .alter_database_name(DatabaseId::new(object_id as _), object_name)
+                .await;
         } else if object_type == ObjectType::Schema {
-            return self.alter_schema_name(object_id as _, object_name).await;
+            return self
+                .alter_schema_name(SchemaId::new(object_id as _), object_name)
+                .await;
         }
 
         let inner = self.inner.write().await;
@@ -282,7 +286,7 @@ impl CatalogController {
         let mut objects = vec![];
         match object_type {
             ObjectType::Database => {
-                let db = Database::find_by_id(object_id)
+                let db = Database::find_by_id(DatabaseId::new(object_id as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("database", object_id))?;
@@ -298,7 +302,7 @@ impl CatalogController {
                 return Ok(version);
             }
             ObjectType::Schema => {
-                let schema = Schema::find_by_id(object_id)
+                let schema = Schema::find_by_id(SchemaId::new(object_id as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("schema", object_id))?;
@@ -500,7 +504,7 @@ impl CatalogController {
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        ensure_object_id(ObjectType::Schema, new_schema, &txn).await?;
+        ensure_object_id(ObjectType::Schema, new_schema.as_raw_id() as ObjectId, &txn).await?;
 
         let obj = Object::find_by_id(object_id)
             .one(&txn)
@@ -587,10 +591,7 @@ impl CatalogController {
                     }
 
                     Object::update_many()
-                        .col_expr(
-                            object::Column::SchemaId,
-                            SimpleExpr::Value(Value::Int(Some(new_schema))),
-                        )
+                        .col_expr(object::Column::SchemaId, new_schema.into())
                         .filter(
                             object::Column::Oid.is_in(
                                 index_ids.iter().cloned().chain(
@@ -647,7 +648,7 @@ impl CatalogController {
                         &txn,
                         object_id,
                         object::Column::SchemaId,
-                        Value::Int(Some(new_schema)),
+                        new_schema.into(),
                         &mut objects,
                     )
                     .await?;
@@ -669,7 +670,7 @@ impl CatalogController {
                     &txn,
                     object_id,
                     object::Column::SchemaId,
-                    Value::Int(Some(new_schema)),
+                    new_schema.into(),
                     &mut objects,
                 )
                 .await?;
@@ -708,7 +709,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("function", object_id))?;
 
                 let mut pb_function: PbFunction = ObjectModel(function, obj).into();
-                pb_function.schema_id = new_schema as _;
+                pb_function.schema_id = new_schema.as_raw_id();
                 check_function_signature_duplicate(&pb_function, &txn).await?;
 
                 object::ActiveModel {
@@ -735,7 +736,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
 
                 let mut pb_connection: PbConnection = ObjectModel(connection, obj).into();
-                pb_connection.schema_id = new_schema as _;
+                pb_connection.schema_id = new_schema.as_raw_id();
                 check_connection_name_duplicate(&pb_connection, &txn).await?;
 
                 object::ActiveModel {
@@ -895,7 +896,7 @@ impl CatalogController {
         }
         let database = database.update(&txn).await?;
 
-        let obj = Object::find_by_id(database_id)
+        let obj = Object::find_by_id(database_id.as_raw_id() as ObjectId)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;

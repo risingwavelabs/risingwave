@@ -308,9 +308,12 @@ impl Binder {
 
                     // check CONNECT privilege for cross-db access
                     if self.database_id != database_id
-                        && !user.has_privilege(&PbObject::DatabaseId(database_id), AclMode::Connect)
+                        && !user.has_privilege(
+                            &PbObject::DatabaseId(database_id.into()),
+                            AclMode::Connect,
+                        )
                     {
-                        let db_name = self.catalog.get_database_by_id(&database_id)?.name.clone();
+                        let db_name = self.catalog.get_database_by_id(database_id)?.name.clone();
 
                         return Err(PermissionDenied(format!(
                             "permission denied for database \"{db_name}\""

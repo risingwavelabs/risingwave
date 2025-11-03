@@ -22,6 +22,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror_ext::AsReport;
 use tracing::warn;
 
+use crate::catalog::OBJECT_ID_PLACEHOLDER;
+
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
 #[display("{inner}")]
 pub struct TypedId<const N: usize> {
@@ -35,6 +37,16 @@ impl<const N: usize> TypedId<N> {
 
     pub fn as_raw_id(&self) -> u32 {
         self.inner
+    }
+
+    pub const fn placeholder() -> Self {
+        Self {
+            inner: OBJECT_ID_PLACEHOLDER,
+        }
+    }
+
+    pub fn is_placeholder(&self) -> bool {
+        self.inner == OBJECT_ID_PLACEHOLDER
     }
 
     fn from_i32(inner: i32) -> Self {
@@ -170,6 +182,8 @@ impl<'de, const N: usize> Deserialize<'de> for TypedId<N> {
 
 pub type TableId = TypedId<1>;
 pub type JobId = TypedId<2>;
+pub type DatabaseId = TypedId<3>;
+pub type SchemaId = TypedId<4>;
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {

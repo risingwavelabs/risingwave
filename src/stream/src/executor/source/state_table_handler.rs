@@ -225,8 +225,8 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
     ];
     PbTable {
         id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        schema_id: SchemaId::placeholder().as_raw_id(),
+        database_id: DatabaseId::placeholder().as_raw_id(),
         name: String::new(),
         columns,
         table_type: TableType::Internal as i32,

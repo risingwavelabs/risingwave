@@ -69,7 +69,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                 RwSource {
                     id: source.id as i32,
                     name: source.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: source.owner as i32,
                     connector: source
                         .with_properties

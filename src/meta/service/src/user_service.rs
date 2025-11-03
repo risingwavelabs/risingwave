@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model::{SchemaId, UserId};
+use risingwave_meta_model::UserId;
 use risingwave_pb::user::alter_default_privilege_request::Operation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_server::UserService;
@@ -151,14 +151,14 @@ impl UserService for UserServiceImpl {
         let req = request.into_inner();
         let operation = req.get_operation()?;
         let user_ids: Vec<_> = req.get_user_ids().iter().map(|id| *id as UserId).collect();
-        let schema_ids: Vec<_> = req.schema_ids.iter().map(|id| *id as SchemaId).collect();
+        let schema_ids: Vec<_> = req.schema_ids.iter().map(|id| id.into()).collect();
         match operation {
             Operation::GrantPrivilege(grant_privilege) => {
                 self.metadata_manager
                     .catalog_controller
                     .grant_default_privileges(
                         user_ids,
-                        req.database_id as _,
+                        req.database_id.into(),
                         schema_ids,
                         req.granted_by as _,
                         grant_privilege.actions().collect(),
@@ -177,7 +177,7 @@ impl UserService for UserServiceImpl {
                     .catalog_controller
                     .revoke_default_privileges(
                         user_ids,
-                        req.database_id as _,
+                        req.database_id.into(),
                         schema_ids,
                         revoke_privilege.actions().collect(),
                         revoke_privilege.get_object_type()?,

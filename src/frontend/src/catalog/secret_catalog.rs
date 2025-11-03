@@ -31,11 +31,11 @@ impl From<&PbSecret> for SecretCatalog {
     fn from(value: &PbSecret) -> Self {
         Self {
             id: SecretId::new(value.id),
-            database_id: value.database_id,
+            database_id: value.database_id.into(),
             owner: value.owner,
             name: value.name.clone(),
             value: value.value.clone(),
-            schema_id: value.schema_id,
+            schema_id: value.schema_id.into(),
         }
     }
 }

@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
+use risingwave_common::id::SchemaId;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
@@ -33,14 +34,14 @@ use crate::user::user_catalog::UserCatalog;
 pub fn check_schema_create_privilege(
     session: &Arc<SessionImpl>,
     new_owner: &UserCatalog,
-    schema_id: u32,
+    schema_id: SchemaId,
 ) -> Result<()> {
     if session.is_super_user() {
         return Ok(());
     }
     if !new_owner.is_super
         && !new_owner.has_privilege(
-            &grant_privilege::Object::SchemaId(schema_id),
+            &grant_privilege::Object::SchemaId(schema_id.into()),
             AclMode::Create,
         )
     {
@@ -175,7 +176,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&database.owner)?;
-                    Object::DatabaseId(database.id())
+                    Object::DatabaseId(database.id().into())
                 }
                 StatementType::ALTER_SCHEMA => {
                     let schema =
@@ -185,7 +186,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&schema.owner)?;
-                    Object::SchemaId(schema.id())
+                    Object::SchemaId(schema.id().into())
                 }
                 StatementType::ALTER_CONNECTION => {
                     let (connection, schema_name) = catalog_reader.get_connection_by_name(

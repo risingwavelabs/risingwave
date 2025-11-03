@@ -65,14 +65,14 @@ fn make_prost_privilege(
             for db in databases {
                 let database_name = Binder::resolve_database_name(db)?;
                 let database = reader.get_database_by_name(&database_name)?;
-                grant_objs.push(PbObject::DatabaseId(database.id()));
+                grant_objs.push(PbObject::DatabaseId(database.id().into()));
             }
         }
         GrantObjects::Schemas(schemas) => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::SchemaId(schema.id()));
+                grant_objs.push(PbObject::SchemaId(schema.id().into()));
             }
         }
         GrantObjects::Mviews(tables) => {
@@ -572,7 +572,7 @@ pub async fn handle_alter_default_privileges(
                 let catalog_reader = session.env().catalog_reader();
                 let reader = catalog_reader.read_guard();
                 let schemas = reader
-                    .get_database_by_id(&session.database_id())?
+                    .get_database_by_id(session.database_id())?
                     .iter_schemas()
                     .filter(|schema| !is_system_schema(&schema.name))
                     .map(|schema| schema.id())
@@ -705,7 +705,7 @@ mod tests {
                             with_grant_option: true,
                             granted_by: session.user_id(),
                         }],
-                        object: Some(PbObject::DatabaseId(session_database_id)),
+                        object: Some(PbObject::DatabaseId(session_database_id.into())),
                     },
                     PbGrantPrivilege {
                         action_with_opts: vec![
@@ -720,7 +720,7 @@ mod tests {
                                 granted_by: DEFAULT_SUPER_USER_ID,
                             }
                         ],
-                        object: Some(PbObject::DatabaseId(database_id)),
+                        object: Some(PbObject::DatabaseId(database_id.into())),
                     }
                 ]
             );
@@ -738,7 +738,7 @@ mod tests {
                 user_info
                     .grant_privileges
                     .iter()
-                    .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id)))
+                    .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id.into())))
                     .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option))
             );
         }
@@ -759,7 +759,7 @@ mod tests {
                         with_grant_option: true,
                         granted_by: session.user_id(),
                     }],
-                    object: Some(PbObject::DatabaseId(session_database_id)),
+                    object: Some(PbObject::DatabaseId(session_database_id.into())),
                 }]
             );
         }

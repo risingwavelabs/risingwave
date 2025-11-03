@@ -184,7 +184,7 @@ mod tests {
             DEFAULT_SUPER_USER_ID,
             AclMode::Create,
             "schema".to_owned(),
-            PbObject::SchemaId(schema.id()),
+            PbObject::SchemaId(schema.id().into()),
         )];
         assert!(&session.check_privileges(&check_items).is_ok());
 

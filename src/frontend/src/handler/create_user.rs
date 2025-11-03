@@ -95,7 +95,7 @@ pub async fn handle_create_user(
                 with_grant_option: true,
                 granted_by: session_user.id,
             }],
-            object: Some(Object::DatabaseId(database_id)),
+            object: Some(Object::DatabaseId(database_id.into())),
         }];
 
         for option in stmt.with_options.0 {

@@ -46,7 +46,7 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
             schema.iter_view_with_acl(current_user).map(|view| RwView {
                 id: view.id as i32,
                 name: view.name().to_owned(),
-                schema_id: schema.id() as i32,
+                schema_id: schema.id().as_raw_id() as i32,
                 owner: view.owner as i32,
                 definition: view.create_sql(schema.name()),
                 acl: get_acl_items(&Object::ViewId(view.id), false, &users, username_map),
