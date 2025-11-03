@@ -646,9 +646,9 @@ impl InflightDatabaseInfo {
                         visit_stream_node_mut(&mut info.nodes, |node| {
                             if let NodeBody::Merge(m) = node
                                 && let Some(new_upstream_fragment_id) =
-                                    replace_map.get(&m.upstream_fragment_id)
+                                    replace_map.get(&m.upstream_fragment_id.into())
                             {
-                                if !remaining_fragment_ids.remove(&m.upstream_fragment_id) {
+                                if !remaining_fragment_ids.remove(&m.upstream_fragment_id.into()) {
                                     if cfg!(debug_assertions) {
                                         panic!(
                                             "duplicate upstream fragment: {:?} {:?}",
@@ -658,7 +658,7 @@ impl InflightDatabaseInfo {
                                         warn!(?m, ?replace_map, "duplicate upstream fragment");
                                     }
                                 }
-                                m.upstream_fragment_id = *new_upstream_fragment_id;
+                                m.upstream_fragment_id = new_upstream_fragment_id.as_raw_id();
                             }
                         });
                         if cfg!(debug_assertions) {
@@ -708,8 +708,8 @@ impl InflightDatabaseInfo {
                                     let current_upstream_fragment_ids = u
                                         .init_upstreams
                                         .iter()
-                                        .map(|upstream| upstream.upstream_fragment_id)
-                                        .collect::<HashSet<_>>();
+                                        .map(|upstream| upstream.upstream_fragment_id.into())
+                                        .collect::<HashSet<FragmentId>>();
                                     for drop_fragment_id in &drop_upstream_fragment_ids {
                                         if !current_upstream_fragment_ids.contains(drop_fragment_id)
                                         {
@@ -722,7 +722,7 @@ impl InflightDatabaseInfo {
                                 }
                                 u.init_upstreams.retain(|upstream| {
                                     !drop_upstream_fragment_ids
-                                        .contains(&upstream.upstream_fragment_id)
+                                        .contains(&upstream.upstream_fragment_id.into())
                                 });
                                 removed = true;
                             }

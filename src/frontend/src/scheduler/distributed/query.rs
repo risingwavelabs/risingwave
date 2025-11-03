@@ -564,7 +564,7 @@ pub(crate) mod tests {
             append_only: false,
             owner: DEFAULT_SUPER_USER_ID,
             retention_seconds: None,
-            fragment_id: 0,        // FIXME
+            fragment_id: 0.into(), // FIXME
             dml_fragment_id: None, // FIXME
             vnode_col_index: None,
             row_id_index: None,
@@ -716,10 +716,11 @@ pub(crate) mod tests {
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
         let mapping =
             WorkerSlotMapping::new_uniform(std::iter::once(WorkerSlotId::new(0, 0)), vnode_count);
-        worker_node_manager.insert_streaming_fragment_mapping(0, mapping.clone());
-        worker_node_manager.set_serving_fragment_mapping(vec![(0, mapping)].into_iter().collect());
+        worker_node_manager.insert_streaming_fragment_mapping(0.into(), mapping.clone());
+        worker_node_manager
+            .set_serving_fragment_mapping(vec![(0.into(), mapping)].into_iter().collect());
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
-        catalog.write().insert_table_id_mapping(table_id, 0);
+        catalog.write().insert_table_id_mapping(table_id, 0.into());
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
         let fragmenter = BatchPlanFragmenter::new(

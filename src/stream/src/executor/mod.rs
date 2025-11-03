@@ -790,7 +790,7 @@ impl Mutation {
                 dropped_sink_fragments,
             }) => PbMutation::Stop(PbStopMutation {
                 actors: dropped_actors.iter().copied().collect(),
-                dropped_sink_fragments: dropped_sink_fragments.iter().copied().collect(),
+                dropped_sink_fragments: dropped_sink_fragments.iter().map_into().collect(),
             }),
             Mutation::Update(UpdateMutation {
                 dispatchers,
@@ -869,7 +869,7 @@ impl Mutation {
                         upstream_mv_table_id: *table_id,
                     })
                     .collect(),
-                backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
+                backfill_nodes_to_pause: backfill_nodes_to_pause.iter().map_into().collect(),
                 actor_cdc_table_snapshot_splits:
                     build_pb_actor_cdc_table_snapshot_splits_with_generation(
                         actor_cdc_table_snapshot_splits.clone(),
@@ -877,7 +877,7 @@ impl Mutation {
                     .into(),
                 new_upstream_sinks: new_upstream_sinks
                     .iter()
-                    .map(|(k, v)| (*k, v.clone()))
+                    .map(|(k, v)| (k.into(), v.clone()))
                     .collect(),
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
@@ -945,7 +945,7 @@ impl Mutation {
             }
             Mutation::StartFragmentBackfill { fragment_ids } => {
                 PbMutation::StartFragmentBackfill(StartFragmentBackfillMutation {
-                    fragment_ids: fragment_ids.iter().copied().collect(),
+                    fragment_ids: fragment_ids.iter().map_into().collect(),
                 })
             }
             Mutation::RefreshStart {
@@ -972,7 +972,7 @@ impl Mutation {
         let mutation = match prost {
             PbMutation::Stop(stop) => Mutation::Stop(StopMutation {
                 dropped_actors: stop.actors.iter().copied().collect(),
-                dropped_sink_fragments: stop.dropped_sink_fragments.iter().copied().collect(),
+                dropped_sink_fragments: stop.dropped_sink_fragments.iter().map_into().collect(),
             }),
 
             PbMutation::Update(update) => Mutation::Update(UpdateMutation {
@@ -984,7 +984,7 @@ impl Mutation {
                 merges: update
                     .merge_update
                     .iter()
-                    .map(|u| ((u.actor_id, u.upstream_fragment_id), u.clone()))
+                    .map(|u| ((u.actor_id, u.upstream_fragment_id.into()), u.clone()))
                     .collect(),
                 vnode_bitmaps: update
                     .actor_vnode_bitmap_update
@@ -1064,7 +1064,7 @@ impl Mutation {
                          }| { (*upstream_mv_table_id, *subscriber_id) },
                     )
                     .collect(),
-                backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
+                backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().map_into().collect(),
                 actor_cdc_table_snapshot_splits:
                     build_actor_cdc_table_snapshot_splits_with_generation(
                         add.actor_cdc_table_snapshot_splits
@@ -1074,7 +1074,7 @@ impl Mutation {
                 new_upstream_sinks: add
                     .new_upstream_sinks
                     .iter()
-                    .map(|(k, v)| (*k, v.clone()))
+                    .map(|(k, v)| (k.into(), v.clone()))
                     .collect(),
             }),
 
@@ -1134,7 +1134,7 @@ impl Mutation {
                     fragment_ids: start_fragment_backfill
                         .fragment_ids
                         .iter()
-                        .copied()
+                        .map_into()
                         .collect(),
                 }
             }
@@ -1874,6 +1874,7 @@ impl DispatchBarrierBuffer {
             // When update upstream fragment, added_actors will not be empty.
             let upstream_fragment_id =
                 if let Some(new_upstream_fragment_id) = update.new_upstream_fragment_id {
+                    let new_upstream_fragment_id = new_upstream_fragment_id.into();
                     self.curr_upstream_fragment_id = new_upstream_fragment_id;
                     new_upstream_fragment_id
                 } else {

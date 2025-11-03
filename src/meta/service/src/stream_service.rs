@@ -140,7 +140,7 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Fragment => {
                 self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id as _, request.rate)
+                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
                     .await?
             }
             ThrottleTarget::Unspecified => {
@@ -151,7 +151,7 @@ impl StreamManagerService for StreamServiceImpl {
         let request_id = if request.kind() == ThrottleTarget::Fragment {
             self.metadata_manager
                 .catalog_controller
-                .get_fragment_streaming_job_id(request.id as _)
+                .get_fragment_streaming_job_id(request.id.into())
                 .await?
         } else {
             request.id as _
@@ -242,7 +242,7 @@ impl StreamManagerService for StreamServiceImpl {
                         .fragments
                         .into_iter()
                         .map(|(id, fragment)| FragmentInfo {
-                            id,
+                            id: id.as_raw_id(),
                             actors: fragment
                                 .actors
                                 .into_iter()
@@ -359,7 +359,7 @@ impl StreamManagerService for StreamServiceImpl {
         let fragment_desc = self
             .metadata_manager
             .catalog_controller
-            .get_fragment_desc_by_id(req.fragment_id as i32)
+            .get_fragment_desc_by_id(req.fragment_id.into())
             .await?;
         let distribution =
             fragment_desc.map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams));
@@ -437,7 +437,7 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {
                 actor_id: actor_location.actor_id as _,
-                fragment_id: actor_location.fragment_id as _,
+                fragment_id: actor_location.fragment_id.as_raw_id(),
                 worker_id: actor_location.worker_id as _,
             })
             .collect_vec();
@@ -557,7 +557,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .map(move |split| list_actor_splits_response::ActorSplit {
                         actor_id: actor_id as _,
                         source_id: source_id as _,
-                        fragment_id: fragment_id as _,
+                        fragment_id: fragment_id.as_raw_id(),
                         split_id: split.id().to_string(),
                         fragment_type: fragment_type.into(),
                     })
@@ -765,11 +765,11 @@ fn fragment_desc_to_distribution(
     upstreams: Vec<FragmentId>,
 ) -> FragmentDistribution {
     FragmentDistribution {
-        fragment_id: fragment_desc.fragment_id as _,
+        fragment_id: fragment_desc.fragment_id,
         table_id: fragment_desc.job_id,
         distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
         state_table_ids: fragment_desc.state_table_ids.0,
-        upstream_fragment_ids: upstreams.into_iter().map(|id| id as _).collect(),
+        upstream_fragment_ids: upstreams,
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,
         vnode_count: fragment_desc.vnode_count as _,

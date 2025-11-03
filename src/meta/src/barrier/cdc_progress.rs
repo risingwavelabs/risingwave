@@ -138,7 +138,7 @@ impl CdcTableBackfillTracker {
 
     pub fn add_fragment_table_mapping(
         &self,
-        fragment_ids: impl Iterator<Item = u32>,
+        fragment_ids: impl Iterator<Item = FragmentId>,
         job_id: JobId,
     ) {
         self.inner
@@ -168,7 +168,7 @@ impl CdcTableBackfillTracker {
 struct CdcTableBackfillTrackerInner {
     cdc_progress: HashMap<JobId, CdcProgress>,
     next_generation: u64,
-    fragment_id_to_job_id: HashMap<u32, JobId>,
+    fragment_id_to_job_id: HashMap<FragmentId, JobId>,
 }
 
 impl CdcTableBackfillTrackerInner {
@@ -202,7 +202,7 @@ impl CdcTableBackfillTrackerInner {
     }
 
     fn update_split_progress(&mut self, progress: &PbCdcTableBackfillProgress) -> Vec<JobId> {
-        let Some(job_id) = self.fragment_id_to_job_id.get(&progress.fragment_id) else {
+        let Some(job_id) = self.fragment_id_to_job_id.get(&progress.fragment_id.into()) else {
             tracing::warn!(
                 fragment_id = progress.fragment_id,
                 "CDC table mapping not found."
@@ -255,7 +255,11 @@ impl CdcTableBackfillTrackerInner {
         }
     }
 
-    fn add_fragment_job_mapping(&mut self, fragment_ids: impl Iterator<Item = u32>, job_id: JobId) {
+    fn add_fragment_job_mapping(
+        &mut self,
+        fragment_ids: impl Iterator<Item = FragmentId>,
+        job_id: JobId,
+    ) {
         for fragment_id in fragment_ids {
             self.fragment_id_to_job_id.insert(fragment_id, job_id);
         }
@@ -349,7 +353,7 @@ async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<JobId
 
 async fn load_cdc_fragment_table_mapping(
     meta_store: &SqlMetaStore,
-) -> MetaResult<HashMap<u32, JobId>> {
+) -> MetaResult<HashMap<FragmentId, JobId>> {
     use risingwave_common::catalog::FragmentTypeMask;
     use risingwave_meta_model::prelude::Fragment as FragmentModel;
     let fragment_jobs: Vec<(FragmentId, JobId)> = FragmentModel::find()
@@ -361,10 +365,7 @@ async fn load_cdc_fragment_table_mapping(
         .into_tuple()
         .all(&meta_store.conn)
         .await?;
-    Ok(fragment_jobs
-        .into_iter()
-        .map(|(k, v)| (u32::try_from(k).unwrap(), v))
-        .collect())
+    Ok(fragment_jobs.into_iter().collect())
 }
 
 #[cfg(test)]
@@ -387,7 +388,10 @@ mod test {
         let table_id = 123.into();
         let split_count = 10;
         tracker.track_new_job(table_id, split_count);
-        tracker.add_fragment_table_mapping(vec![11, 12, 13].into_iter(), table_id);
+        tracker.add_fragment_table_mapping(
+            vec![11.into(), 12.into(), 13.into()].into_iter(),
+            table_id,
+        );
         let generation = tracker.next_generation(vec![table_id].into_iter());
         assert_eq!(generation, 2);
         assert_init_state(&tracker, table_id, generation, split_count);

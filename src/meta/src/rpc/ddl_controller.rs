@@ -1207,15 +1207,7 @@ impl DdlController {
 
         // unregister fragments and actors from source manager.
         // FIXME: need also unregister source backfill fragments.
-        let dropped_source_fragments = removed_source_fragments
-            .into_iter()
-            .map(|(source_id, fragments)| {
-                (
-                    source_id,
-                    fragments.into_iter().map(|id| id as u32).collect(),
-                )
-            })
-            .collect();
+        let dropped_source_fragments = removed_source_fragments;
         self.source_manager
             .apply_source_change(SourceChange::DropMv {
                 dropped_source_fragments,
@@ -2354,7 +2346,7 @@ pub fn refill_upstream_sink_union_in_table(
             let init_upstreams = upstream_sink_infos
                 .iter()
                 .map(|info| PbUpstreamSinkInfo {
-                    upstream_fragment_id: info.sink_fragment_id,
+                    upstream_fragment_id: info.sink_fragment_id.into(),
                     sink_output_schema: info.sink_output_fields.clone(),
                     project_exprs: info.project_exprs.clone(),
                 })

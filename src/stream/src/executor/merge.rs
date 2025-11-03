@@ -189,8 +189,8 @@ impl MergeExecutor {
 
         Self::new(
             actor_ctx,
-            514,
-            1919,
+            514.into(),
+            1919.into(),
             upstream,
             local_barrier_manager,
             metrics.into(),
@@ -285,6 +285,7 @@ impl MergeExecutor {
                     {
                         let new_upstream_fragment_id = update
                             .new_upstream_fragment_id
+                            .map(Into::into)
                             .unwrap_or(self.upstream_fragment_id);
                         let removed_upstream_actor_id: HashSet<_> =
                             if update.new_upstream_fragment_id.is_some() {
@@ -683,9 +684,9 @@ mod tests {
                     &barrier_test_env.local_barrier_manager,
                     metrics.clone(),
                     actor_id,
-                    fragment_id,
+                    fragment_id.into(),
                     &helper_make_local_actor(upstream_actor_id),
-                    upstream_fragment_id,
+                    upstream_fragment_id.into(),
                 )
                 .await
             }))
@@ -693,7 +694,7 @@ mod tests {
             .unwrap();
 
         let merge_updates = maplit::hashmap! {
-            (actor_id, upstream_fragment_id) => MergeUpdate {
+            (actor_id, upstream_fragment_id.into()) => MergeUpdate {
                 actor_id,
                 upstream_fragment_id,
                 new_upstream_fragment_id: None,
@@ -719,8 +720,8 @@ mod tests {
 
         let mut merge = MergeExecutor::new(
             actor_ctx,
-            fragment_id,
-            upstream_fragment_id,
+            fragment_id.into(),
+            upstream_fragment_id.into(),
             upstream,
             barrier_test_env.local_barrier_manager.clone(),
             metrics.clone(),
@@ -897,7 +898,7 @@ mod tests {
                 &test_env.local_barrier_manager,
                 addr.into(),
                 (0, 0),
-                (0, 0),
+                (0.into(), 0.into()),
                 Arc::new(StreamingMetrics::unused()),
             )
             .await

@@ -18,6 +18,7 @@ use std::sync::Arc;
 use anyhow::bail;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, is_backfill_table};
+use risingwave_common::id::{FragmentId, JobId, TableId};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
@@ -151,9 +152,9 @@ impl TableFunctionToInternalBackfillProgressRule {
         ))
     }
 
-    fn build_u32_expr(id: u32) -> ExprImpl {
+    fn build_u32_expr(id: impl Into<u32>) -> ExprImpl {
         ExprImpl::Literal(Box::new(Literal::new(
-            Some(ScalarImpl::Int32(id as i32)),
+            Some(ScalarImpl::Int32(id.into() as i32)),
             DataType::Int32,
         )))
     }

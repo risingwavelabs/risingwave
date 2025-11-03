@@ -165,7 +165,7 @@ impl NotificationManager {
     ) {
         let fragment_ids = fragment_mappings
             .iter()
-            .map(|mapping| mapping.fragment_id)
+            .map(|mapping| mapping.fragment_id.into())
             .collect_vec();
         if fragment_ids.is_empty() {
             return;
@@ -1162,12 +1162,12 @@ impl CatalogController {
             );
 
             let fragment = FragmentDistribution {
-                fragment_id: fragment_desc.fragment_id as _,
+                fragment_id: fragment_desc.fragment_id,
                 table_id: fragment_desc.job_id,
                 distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type)
                     as _,
                 state_table_ids: fragment_desc.state_table_ids.0,
-                upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
+                upstream_fragment_ids: upstreams,
                 fragment_type_mask: fragment_desc.fragment_type_mask as _,
                 parallelism: parallelism as _,
                 vnode_count: fragment_desc.vnode_count as _,
@@ -1523,7 +1523,7 @@ impl CatalogController {
 
         let root_fragment_to_jobs: HashMap<_, _> = root_fragments
             .iter()
-            .map(|(job_id, fragment)| (fragment.fragment_id as u32, *job_id))
+            .map(|(job_id, fragment)| (fragment.fragment_id, *job_id))
             .collect();
 
         for fragment in root_fragment_to_jobs.keys() {
@@ -1603,10 +1603,8 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let downstream_fragment_nodes: HashMap<_, _> = downstream_fragment_nodes
-            .into_iter()
-            .map(|(id, node)| (id as u32, node))
-            .collect();
+        let downstream_fragment_nodes: HashMap<_, _> =
+            downstream_fragment_nodes.into_iter().collect();
 
         let mut downstream_fragments = vec![];
 
@@ -1614,7 +1612,7 @@ impl CatalogController {
 
         let fragment_map: HashMap<_, _> = downstream_fragment_relations
             .iter()
-            .map(|model| (model.target_fragment_id as u32, model.dispatcher_type))
+            .map(|model| (model.target_fragment_id, model.dispatcher_type))
             .collect();
 
         for fragment_id in fragment_map.keys() {
@@ -1668,7 +1666,7 @@ impl CatalogController {
 
     pub async fn load_backfill_fragment_ids(
         &self,
-    ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, u32)>>> {
+    ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
         let inner = self.inner.read().await;
         let fragments: Vec<(FragmentId, StreamNode)> = FragmentModel::find()
             .select_only()
@@ -1686,7 +1684,7 @@ impl CatalogController {
                 source_fragment_ids
                     .entry(source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
-                    .insert((fragment_id, upstream_source_fragment_id));
+                    .insert((fragment_id, upstream_source_fragment_id.into()));
             }
         }
         Ok(source_fragment_ids)
@@ -1823,9 +1821,9 @@ mod tests {
 
     type FragmentActorUpstreams = HashMap<crate::model::ActorId, ActorUpstreams>;
 
-    const TEST_FRAGMENT_ID: FragmentId = 1;
+    const TEST_FRAGMENT_ID: FragmentId = FragmentId::new(1);
 
-    const TEST_UPSTREAM_FRAGMENT_ID: FragmentId = 2;
+    const TEST_UPSTREAM_FRAGMENT_ID: FragmentId = FragmentId::new(2);
 
     const TEST_JOB_ID: JobId = JobId::new(1);
 
@@ -1849,7 +1847,7 @@ mod tests {
         for upstream_fragment_id in actor_upstream_actor_ids.keys() {
             input.push(PbStreamNode {
                 node_body: Some(PbNodeBody::Merge(Box::new(MergeNode {
-                    upstream_fragment_id: *upstream_fragment_id as _,
+                    upstream_fragment_id: upstream_fragment_id.as_raw_id(),
                     ..Default::default()
                 }))),
                 ..Default::default()
@@ -2051,7 +2049,7 @@ mod tests {
                         actor_upstreams
                             .get(&(actor_id as _))
                             .unwrap()
-                            .contains_key(&m.upstream_fragment_id)
+                            .contains_key(&m.upstream_fragment_id.into())
                     );
                 }
             });
@@ -2079,7 +2077,7 @@ mod tests {
             nodes,
         } = pb_fragment;
 
-        assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);
+        assert_eq!(fragment_id, TEST_FRAGMENT_ID);
         assert_eq!(fragment_type_mask, fragment.fragment_type_mask.into());
         assert_eq!(
             pb_distribution_type,

@@ -125,6 +125,8 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            fragment_id: FragmentId,
+            dml_fragment_id: FragmentId,
         }
         View {
             schema_id: SchemaId,
@@ -137,6 +139,9 @@ for_all_wrapped_id_fields! (
         }
         AlterDatabaseParamRequest {
             database_id: DatabaseId,
+        }
+        AlterFragmentParallelismRequest {
+            fragment_ids: FragmentId,
         }
         AlterParallelismRequest {
             table_id: JobId,
@@ -267,17 +272,41 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
         }
         FragmentDistribution {
+            fragment_id: FragmentId,
+            upstream_fragment_ids: FragmentId,
             table_id: JobId,
             state_table_ids: TableId,
         }
+        FragmentIdToActorIdMap {
+            map: FragmentId,
+        }
+        FragmentToRelationMap {
+            fragment_to_relation_map: FragmentId,
+        }
+        FragmentWorkerSlotMapping {
+            fragment_id: FragmentId,
+        }
+        GetFragmentByIdRequest {
+            fragment_id: FragmentId,
+        }
+        GetFragmentVnodesRequest {
+            fragment_id: FragmentId,
+        }
         GetServerlessStreamingJobsStatusResponse.Status {
             table_id: TableId,
+        }
+        ListActorSplitsResponse.ActorSplit {
+            fragment_id: FragmentId,
+        }
+        ListActorStatesResponse {
+            fragment_id: FragmentId,
         }
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
         ListRateLimitsResponse.RateLimitInfo {
             job_id: JobId,
+            fragment_id: FragmentId,
         }
         ListStreamingJobStatesResponse.StreamingJobState {
             table_id: JobId,
@@ -303,6 +332,8 @@ for_all_wrapped_id_fields! (
             table_id: JobId,
         }
         TableFragments.Fragment {
+            fragment_id: FragmentId,
+            upstream_fragment_ids: FragmentId,
             state_table_ids: TableId,
             table_id: JobId,
         }
@@ -382,6 +413,8 @@ for_all_wrapped_id_fields! (
         }
         GetStreamRequest.Get {
             database_id: DatabaseId,
+            up_fragment_id: FragmentId,
+            down_fragment_id: FragmentId,
         }
     }
     user {

@@ -376,7 +376,8 @@ fn clone_fragment(
 ) -> Fragment {
     let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
         .to_global_id(0)
-        .as_global_id();
+        .as_global_id()
+        .into();
     let actor_id_gen = GlobalActorIdGen::new(actor_id_counter, fragment.actors.len() as _);
     Fragment {
         fragment_id,
@@ -623,7 +624,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
             .to_prost()
         })
         .collect();
-    merge.upstream_fragment_id = upstream_table_fragment_id;
+    merge.upstream_fragment_id = upstream_table_fragment_id.as_raw_id();
     Ok((new_sink_fragment, new_sink_columns, new_log_store_table))
 }
 
@@ -851,7 +852,7 @@ impl StreamFragmentGraph {
         self.fragments
             .values()
             .filter(|b| b.job_id.is_some())
-            .map(|b| b.fragment_id)
+            .map(|b| b.fragment_id.into())
             .exactly_one()
             .expect("require exactly 1 materialize/sink/cdc source node when creating the streaming job")
     }
@@ -863,7 +864,7 @@ impl StreamFragmentGraph {
             .filter(|b| {
                 FragmentTypeMask::from(b.fragment_type_mask).contains(FragmentTypeFlag::Dml)
             })
-            .map(|b| b.fragment_id)
+            .map(|b| b.fragment_id.into())
             .at_most_one()
             .expect("require at most 1 dml node when creating the streaming job")
     }
@@ -1003,7 +1004,7 @@ impl StreamFragmentGraph {
     pub fn collect_backfill_mapping(&self) -> HashMap<u32, Vec<FragmentId>> {
         let mut mapping = HashMap::new();
         for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id();
+            let fragment_id = fragment_id.as_global_id().into();
             let fragment_mask = fragment.fragment_type_mask;
             let candidates = [FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan];
             let has_some_scan = candidates
@@ -1040,7 +1041,7 @@ impl StreamFragmentGraph {
     /// a fragment <-> actor mapping
     pub fn create_fragment_backfill_ordering(&self) -> FragmentBackfillOrder {
         let mapping = self.collect_backfill_mapping();
-        let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut fragment_ordering: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
 
         // 1. Add backfill dependencies
         for (rel_id, downstream_rel_ids) in &self.backfill_order.order {
@@ -1069,18 +1070,19 @@ impl StreamFragmentGraph {
         // 2. Add dependencies: all backfill fragments should run before LocalityProvider fragments
         let locality_provider_dependencies = self.find_locality_provider_dependencies();
 
-        let backfill_fragments: HashSet<u32> = mapping.values().flatten().copied().collect();
+        let backfill_fragments: HashSet<FragmentId> = mapping.values().flatten().copied().collect();
 
         // Calculate LocalityProvider root fragments (zero indegree)
         // Root fragments are those that appear as keys but never appear as downstream dependencies
-        let all_locality_provider_fragments: HashSet<u32> =
+        let all_locality_provider_fragments: HashSet<FragmentId> =
             locality_provider_dependencies.keys().copied().collect();
-        let downstream_locality_provider_fragments: HashSet<u32> = locality_provider_dependencies
-            .values()
-            .flatten()
-            .copied()
-            .collect();
-        let locality_provider_root_fragments: Vec<u32> = all_locality_provider_fragments
+        let downstream_locality_provider_fragments: HashSet<FragmentId> =
+            locality_provider_dependencies
+                .values()
+                .flatten()
+                .copied()
+                .collect();
+        let locality_provider_root_fragments: Vec<FragmentId> = all_locality_provider_fragments
             .difference(&downstream_locality_provider_fragments)
             .copied()
             .collect();
@@ -1111,7 +1113,7 @@ impl StreamFragmentGraph {
         let mut mapping: HashMap<FragmentId, Vec<TableId>> = HashMap::new();
 
         for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id();
+            let fragment_id = fragment_id.as_global_id().into();
 
             // Check if this fragment contains a LocalityProvider node
             if let Some(node) = fragment.node.as_ref() {
@@ -1156,7 +1158,7 @@ impl StreamFragmentGraph {
 
         // First, identify all fragments that contain LocalityProvider nodes
         for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id();
+            let fragment_id = fragment_id.as_global_id().into();
             let has_locality_provider = self.fragment_has_locality_provider(fragment);
 
             if has_locality_provider {
@@ -1224,7 +1226,7 @@ impl StreamFragmentGraph {
 
         // Check all downstream fragments
         for &downstream_id in self.get_downstreams(current_fragment_id).keys() {
-            let downstream_fragment_id = downstream_id.as_global_id();
+            let downstream_fragment_id = downstream_id.as_global_id().into();
 
             // If the downstream fragment is a LocalityProvider, add it to results
             if locality_provider_fragments.contains(&downstream_fragment_id) {
@@ -1855,7 +1857,7 @@ impl CompleteStreamFragmentGraph {
             .collect();
 
         Fragment {
-            fragment_id: inner.fragment_id,
+            fragment_id: inner.fragment_id.into(),
             fragment_type_mask: inner.fragment_type_mask.into(),
             distribution_type,
             actors,

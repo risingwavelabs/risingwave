@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-pub use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+pub use risingwave_common::id::{DatabaseId, FragmentId, SchemaId, TableId};
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
@@ -94,7 +94,6 @@ pub type CompactionGroupId = i64;
 pub type CompactionTaskId = i64;
 pub type HummockSstableObjectId = i64;
 
-pub type FragmentId = i32;
 pub type ActorId = i32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
@@ -348,18 +347,6 @@ impl From<Vec<u32>> for I32Array {
 impl I32Array {
     pub fn into_u32_array(self) -> Vec<u32> {
         self.0.into_iter().map(|id| id as _).collect()
-    }
-}
-
-derive_from_json_struct!(ActorUpstreamActors, BTreeMap<FragmentId, Vec<ActorId>>);
-
-impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
-    fn from(val: BTreeMap<u32, Vec<u32>>) -> Self {
-        let mut map = BTreeMap::new();
-        for (k, v) in val {
-            map.insert(k as _, v.into_iter().map(|a| a as _).collect());
-        }
-        Self(map)
     }
 }
 

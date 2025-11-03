@@ -223,7 +223,7 @@ impl CreatingStreamingJobStatus {
                             StartFragmentBackfillMutation {
                                 fragment_ids: pending_backfill_nodes
                                     .into_iter()
-                                    .map(|fragment_id| fragment_id as _)
+                                    .map(|fragment_id| fragment_id.as_raw_id())
                                     .collect(),
                             },
                         ))

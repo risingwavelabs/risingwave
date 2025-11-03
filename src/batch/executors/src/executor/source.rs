@@ -145,7 +145,7 @@ impl SourceExecutor {
         let source_ctx = Arc::new(SourceContext::new(
             u32::MAX,
             self.source_id,
-            u32::MAX,
+            u32::MAX.into(),
             "NA".to_owned(), // source name was not passed in batch plan
             self.metrics,
             SourceCtrlOpts {

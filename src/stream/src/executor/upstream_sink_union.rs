@@ -459,7 +459,7 @@ impl UpstreamSinkBarrierManager {
             .map(|e| build_non_strict_from_prost(e, self.build_input_ctx.eval_error_report.clone()))
             .try_collect()
             .map_err(|err| anyhow::anyhow!(err))?;
-        let upstream_fragment_id = info.get_upstream_fragment_id();
+        let upstream_fragment_id = info.get_upstream_fragment_id().into();
         self.new_sink_input_impl(UpstreamFragmentInfo {
             upstream_fragment_id,
             upstream_actors: pb_upstream_info.get_upstream_actors().clone(),
@@ -583,7 +583,7 @@ mod tests {
         let test_expr = build_from_pretty("$1:int8");
 
         let mut input = SinkHandlerInput::new(
-            1919, // from MergeExecutor::for_test()
+            1919.into(), // from MergeExecutor::for_test()
             Box::new(merge),
             vec![test_expr],
         )
@@ -632,7 +632,8 @@ mod tests {
             10,
             Some(barrier_rx),
         );
-        let input = SinkHandlerInput::new(actor_id, Box::new(merge), vec![]).boxed_input();
+        let input = SinkHandlerInput::new(FragmentId::new(actor_id as _), Box::new(merge), vec![])
+            .boxed_input();
         (input, tx, barrier_tx)
     }
 
@@ -709,7 +710,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let actor_id = 2;
-        let fragment_id = 0; // from ActorContext::for_test
+        let fragment_id = 0.into(); // from ActorContext::for_test
         let upstream_fragment_id = 11;
         let upstream_actor_id = 101;
 
@@ -733,7 +734,7 @@ mod tests {
         let b3 = Barrier::new_test_barrier(test_epoch(3));
         let b4 =
             Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Stop(StopMutation {
-                dropped_sink_fragments: HashSet::from([upstream_fragment_id]),
+                dropped_sink_fragments: HashSet::from([upstream_fragment_id.into()]),
                 ..Default::default()
             }));
         for barrier in [&b1, &b2, &b3, &b4] {

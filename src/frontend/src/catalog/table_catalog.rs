@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
     StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
@@ -589,8 +590,8 @@ impl TableCatalog {
                 .collect_vec(),
             append_only: self.append_only,
             owner: self.owner,
-            fragment_id: self.fragment_id,
-            dml_fragment_id: self.dml_fragment_id,
+            fragment_id: self.fragment_id.into(),
+            dml_fragment_id: self.dml_fragment_id.map(Into::into),
             vnode_col_index: self.vnode_col_index.map(|i| i as _),
             row_id_index: self.row_id_index.map(|i| i as _),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
@@ -824,8 +825,8 @@ impl From<PbTable> for TableCatalog {
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             append_only: tb.append_only,
             owner: tb.owner,
-            fragment_id: tb.fragment_id,
-            dml_fragment_id: tb.dml_fragment_id,
+            fragment_id: tb.fragment_id.into(),
+            dml_fragment_id: tb.dml_fragment_id.map(Into::into),
             vnode_col_index: tb.vnode_col_index.map(|x| x as usize),
             row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
@@ -999,7 +1000,7 @@ mod tests {
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 retention_seconds: Some(300),
-                fragment_id: 0,
+                fragment_id: 0.into(),
                 dml_fragment_id: None,
                 vnode_col_index: None,
                 row_id_index: None,

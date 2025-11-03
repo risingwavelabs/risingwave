@@ -223,7 +223,7 @@ impl ScaleController {
             .map(|(upstream_fragment, _)| {
                 (
                     *upstream_fragment,
-                    prev_fragment_info.fragment_id as DispatcherId,
+                    prev_fragment_info.fragment_id.as_raw_id() as DispatcherId,
                 )
             })
             .collect();
@@ -601,17 +601,12 @@ impl ScaleController {
         let all_related_fragment_ids: HashSet<_> = fragment_ids
             .iter()
             .copied()
-            .chain(
-                all_upstream_fragments
-                    .values()
-                    .flatten()
-                    .map(|(id, _)| *id as i32),
-            )
+            .chain(all_upstream_fragments.values().flatten().map(|(id, _)| *id))
             .chain(
                 all_downstream_fragments
                     .values()
                     .flatten()
-                    .map(|(id, _)| *id as i32),
+                    .map(|(id, _)| *id),
             )
             .collect();
 
@@ -682,7 +677,7 @@ impl ScaleController {
                     .chain(downstream_fragments.keys().copied())
                     .map(|fragment_id| {
                         all_prev_fragments
-                            .get(&(fragment_id as i32))
+                            .get(&fragment_id)
                             .map(|fragment| {
                                 (
                                     fragment_id,
@@ -709,10 +704,10 @@ impl ScaleController {
 
                 for downstream_fragment_id in downstream_fragments.keys() {
                     let target_fragment_actors =
-                        match all_rendered_fragments.get(&(*downstream_fragment_id as i32)) {
+                        match all_rendered_fragments.get(downstream_fragment_id) {
                             None => {
                                 let external_fragment = all_prev_fragments
-                                    .get(&(*downstream_fragment_id as i32))
+                                    .get(downstream_fragment_id)
                                     .ok_or_else(|| {
                                         MetaError::from(anyhow!(
                                             "fragment {} not found in previous state",

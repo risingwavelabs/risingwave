@@ -503,7 +503,7 @@ async fn test_graph_builder() -> MetaResult<()> {
             NodeBody::Merge(merge_node) => {
                 assert!(
                     new_fragment_relation().any(|(upstream_fragment_id, fragment_id)| {
-                        upstream_fragment_id == merge_node.upstream_fragment_id
+                        upstream_fragment_id.as_raw_id() == merge_node.upstream_fragment_id
                             && fragment_id == fragment.fragment_id
                     })
                 );

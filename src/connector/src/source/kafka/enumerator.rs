@@ -26,6 +26,7 @@ use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
+use risingwave_common::id::FragmentId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 use crate::connector_common::read_kafka_log_level;
@@ -78,7 +79,7 @@ pub struct KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
-    async fn drop_consumer_groups(&self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
+    async fn drop_consumer_groups(&self, fragment_ids: Vec<FragmentId>) -> ConnectorResult<()> {
         let admin = Box::pin(SHARED_KAFKA_ADMIN.try_get_with_by_ref(
             &self.properties.connection,
             async {
@@ -210,11 +211,11 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         Ok(ret)
     }
 
-    async fn on_drop_fragments(&mut self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
+    async fn on_drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> ConnectorResult<()> {
         self.drop_consumer_groups(fragment_ids).await
     }
 
-    async fn on_finish_backfill(&mut self, fragment_ids: Vec<u32>) -> ConnectorResult<()> {
+    async fn on_finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> ConnectorResult<()> {
         self.drop_consumer_groups(fragment_ids).await
     }
 }

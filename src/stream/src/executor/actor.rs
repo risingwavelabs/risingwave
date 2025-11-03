@@ -46,7 +46,7 @@ use crate::task::{ActorId, FragmentId, LocalBarrierManager, StreamEnvironment};
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
-    pub fragment_id: u32,
+    pub fragment_id: FragmentId,
     pub vnode_count: usize,
     pub mview_definition: String,
 
@@ -77,7 +77,7 @@ impl ActorContext {
     pub fn for_test(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
-            fragment_id: 0,
+            fragment_id: 0.into(),
             vnode_count: VirtualNode::COUNT_FOR_TEST,
             mview_definition: "".to_owned(),
             cur_mem_val: Arc::new(0.into()),
@@ -122,7 +122,11 @@ impl ActorContext {
                 .iter()
                 .copied()
                 .collect(),
-            initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
+            initial_upstream_actors: stream_actor
+                .fragment_upstreams
+                .iter()
+                .map(|(k, v)| (k.into(), v.clone()))
+                .collect(),
             meta_client,
             streaming_config,
             stream_env,

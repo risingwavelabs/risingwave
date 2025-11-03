@@ -170,7 +170,7 @@ impl NotificationServiceImpl {
             .all()
             .iter()
             .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
-                fragment_id: *fragment_id,
+                fragment_id: fragment_id.as_raw_id(),
                 mapping: Some(mapping.to_protobuf()),
             })
             .collect()

@@ -56,7 +56,7 @@ pub async fn handle_explain_analyze_stream_job(
     let fragments = net::get_fragments(meta_client, job_id.into()).await?;
     let fragment_parallelisms = fragments
         .iter()
-        .map(|f| (f.id, f.actors.len()))
+        .map(|f| (f.id.into(), f.actors.len()))
         .collect::<HashMap<_, _>>();
     let (root_node, dispatcher_fragment_ids, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
@@ -162,6 +162,8 @@ mod bind {
 mod net {
     use std::collections::HashSet;
 
+    use itertools::Itertools;
+    use risingwave_common::id::FragmentId;
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::id::JobId;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
@@ -205,7 +207,7 @@ mod net {
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &HashSet<ExecutorId>,
-        dispatcher_fragment_ids: &HashSet<u32>,
+        dispatcher_fragment_ids: &HashSet<FragmentId>,
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
         let dispatcher_fragment_ids = dispatcher_fragment_ids.iter().copied().collect::<Vec<_>>();
@@ -216,7 +218,7 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.iter().map_into().collect(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -237,7 +239,7 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.iter().map_into().collect(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -348,14 +350,15 @@ mod metrics {
             }
 
             for fragment_id in dispatch_fragment_ids {
-                let Some(total_output_throughput) =
-                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
+                let Some(total_output_throughput) = metrics
+                    .dispatch_fragment_output_row_count
+                    .get(&fragment_id.as_raw_id())
                 else {
                     continue;
                 };
                 let Some(total_output_pending_ns) = metrics
                     .dispatch_fragment_output_blocking_duration_ns
-                    .get(fragment_id)
+                    .get(&fragment_id.as_raw_id())
                 else {
                     continue;
                 };
@@ -594,7 +597,7 @@ mod graph {
     /// This is an internal struct used ONLY for explain analyze stream job.
     pub(super) struct StreamNode {
         operator_id: OperatorId,
-        fragment_id: u32,
+        fragment_id: FragmentId,
         identity: NodeBodyDiscriminants,
         actor_ids: HashSet<u32>,
         dependencies: Vec<u64>,
@@ -616,7 +619,7 @@ mod graph {
     }
 
     impl StreamNode {
-        fn new_for_dispatcher(fragment_id: u32) -> Self {
+        fn new_for_dispatcher(fragment_id: FragmentId) -> Self {
             StreamNode {
                 operator_id: operator_id_for_dispatch(fragment_id),
                 fragment_id,
@@ -635,7 +638,10 @@ mod graph {
         HashSet<FragmentId>,
         HashMap<OperatorId, StreamNode>,
     ) {
-        let job_fragment_ids = fragments.iter().map(|f| f.id).collect::<HashSet<_>>();
+        let job_fragment_ids = fragments
+            .iter()
+            .map(|f| f.id.into())
+            .collect::<HashSet<FragmentId>>();
 
         // Finds root nodes of the graph
         fn find_root_nodes(stream_nodes: &HashMap<u64, StreamNode>) -> HashSet<u64> {
@@ -651,8 +657,8 @@ mod graph {
         // Recursively extracts stream node info, and builds an adjacency list between stream nodes
         // and their dependencies
         fn extract_stream_node_info(
-            fragment_id: u32,
-            fragment_id_to_merge_operator_id: &mut HashMap<u32, OperatorId>,
+            fragment_id: FragmentId,
+            fragment_id_to_merge_operator_id: &mut HashMap<FragmentId, OperatorId>,
             operator_id_to_stream_node: &mut HashMap<OperatorId, StreamNode>,
             node: &PbStreamNode,
             actor_ids: &HashSet<u32>,
@@ -669,7 +675,7 @@ mod graph {
                     ..
                 }) = merge_node
             {
-                fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
+                fragment_id_to_merge_operator_id.insert(upstream_fragment_id.into(), operator_id);
             }
             let dependencies = &node.input;
             let dependency_ids = dependencies
@@ -711,7 +717,7 @@ mod graph {
             let actor_ids = actors.iter().map(|actor| actor.id).collect::<HashSet<_>>();
             let node = actors[0].node.as_ref().expect("should have stream node");
             extract_stream_node_info(
-                fragment.id,
+                fragment.id.into(),
                 &mut fragment_id_to_merge_operator_id,
                 &mut operator_id_to_stream_node,
                 node,
@@ -862,9 +868,10 @@ mod graph {
 mod utils {
     use risingwave_common::operator::unique_operator_id;
 
+    use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::OperatorId;
 
-    pub(super) fn operator_id_for_dispatch(fragment_id: u32) -> OperatorId {
+    pub(super) fn operator_id_for_dispatch(fragment_id: FragmentId) -> OperatorId {
         unique_operator_id(fragment_id, u32::MAX as u64)
     }
 }

@@ -25,8 +25,8 @@ use crate::controller::id::{
 pub(super) struct GlobalId<const TYPE: IdCategoryType>(u32);
 
 impl<const TYPE: IdCategoryType> GlobalId<TYPE> {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
+    pub fn new(id: impl Into<u32>) -> Self {
+        Self(id.into())
     }
 
     pub fn as_global_id<T: From<u32>>(&self) -> T {

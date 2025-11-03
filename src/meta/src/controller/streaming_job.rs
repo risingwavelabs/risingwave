@@ -478,7 +478,7 @@ impl CatalogController {
                         .get(&state_table_id)
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
                     assert_eq!(table.id, state_table_id.as_raw_id());
-                    assert_eq!(table.fragment_id, fragment_id as u32);
+                    assert_eq!(table.fragment_id, fragment_id.as_raw_id());
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
@@ -528,7 +528,7 @@ impl CatalogController {
             if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
                 Table::update(table::ActiveModel {
                     table_id: Set(table.id),
-                    dml_fragment_id: Set(table.dml_fragment_id.map(|id| id as _)),
+                    dml_fragment_id: Set(table.dml_fragment_id),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -1322,9 +1322,9 @@ impl CatalogController {
                 visit_stream_node_mut(&mut stream_node, |body| {
                     if let PbNodeBody::Merge(m) = body
                         && let Some(new_fragment_id) =
-                            fragment_replace_map.get(&m.upstream_fragment_id)
+                            fragment_replace_map.get(&m.upstream_fragment_id.into())
                     {
-                        m.upstream_fragment_id = *new_fragment_id;
+                        m.upstream_fragment_id = new_fragment_id.as_raw_id();
                     }
                 });
                 fragment::ActiveModel {
@@ -1602,7 +1602,7 @@ impl CatalogController {
             !fragments.is_empty(),
             "source id should be used by at least one fragment"
         );
-        let fragment_ids = fragments.iter().map(|(id, _, _)| *id as u32).collect_vec();
+        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
 
         for (id, fragment_type_mask, stream_node) in fragments {
             fragment::ActiveModel {
@@ -1636,14 +1636,14 @@ impl CatalogController {
 
     fn get_fragment_actors_from_running_info(
         &self,
-        fragment_ids: impl Iterator<Item = u32>,
+        fragment_ids: impl Iterator<Item = FragmentId>,
     ) -> HashMap<FragmentId, Vec<ActorId>> {
         let mut fragment_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
 
         let info = self.env.shared_actor_infos().read_guard();
 
         for fragment_id in fragment_ids {
-            let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id as _).unwrap();
+            let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id).unwrap();
             fragment_actors
                 .entry(fragment_id as _)
                 .or_default()
@@ -1702,7 +1702,7 @@ impl CatalogController {
             )));
         }
 
-        let fragment_ids: HashSet<u32> = fragments.iter().map(|(id, _, _)| *id as u32).collect();
+        let fragment_ids: HashSet<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
@@ -1760,7 +1760,7 @@ impl CatalogController {
         .await?;
 
         let fragment_actors =
-            self.get_fragment_actors_from_running_info(std::iter::once(fragment_id as u32));
+            self.get_fragment_actors_from_running_info(std::iter::once(fragment_id));
 
         txn.commit().await?;
 
@@ -2396,7 +2396,7 @@ impl CatalogController {
 
                 if let Some(rate_limit) = rate_limit {
                     rate_limits.push(RateLimitInfo {
-                        fragment_id: fragment_id as u32,
+                        fragment_id,
                         job_id,
                         fragment_type_mask: fragment_type_mask as u32,
                         rate_limit,

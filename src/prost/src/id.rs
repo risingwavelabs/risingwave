@@ -16,6 +16,7 @@ use std::any::type_name;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Formatter;
 use std::num::TryFromIntError;
+use std::ops::Add;
 use std::str::FromStr;
 
 use sea_orm::sea_query::{ArrayType, ValueTypeErr};
@@ -212,10 +213,19 @@ impl<'de, const N: usize> Deserialize<'de> for TypedId<N> {
     }
 }
 
+impl<const N: usize> Add<u32> for TypedId<N> {
+    type Output = Self;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        Self(self.0.checked_add(rhs).unwrap())
+    }
+}
+
 pub type TableId = TypedId<1>;
 pub type JobId = TypedId<2>;
 pub type DatabaseId = TypedId<3>;
 pub type SchemaId = TypedId<4>;
+pub type FragmentId = TypedId<5>;
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {

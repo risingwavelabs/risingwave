@@ -49,7 +49,7 @@ impl CdcTableBackfillState {
                 split_id_start_inclusive,
                 split_id_end_inclusive,
                 generation,
-                fragment_id,
+                fragment_id: fragment_id.as_raw_id(),
             },
             CdcTableBackfillState::Finish {
                 fragment_id,
@@ -63,7 +63,7 @@ impl CdcTableBackfillState {
                 split_id_start_inclusive,
                 split_id_end_inclusive,
                 generation,
-                fragment_id,
+                fragment_id: fragment_id.as_raw_id(),
             },
         }
     }
