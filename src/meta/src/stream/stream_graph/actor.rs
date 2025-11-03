@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorAlignmentId, IsSingleton, VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{ActorId, JobId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_meta_model::WorkerId;
@@ -884,7 +884,7 @@ impl ActorGraphBuilder {
                                         .or_default();
                                     no_shuffle_actors.extend(
                                         upstream_new_no_shuffle.into_iter().map(
-                                            |(upstream_actor_id, actor_id)| {
+                                            |(upstream_actor_id, actor_id)| -> (ActorId, ActorId) {
                                                 (
                                                     upstream_actor_id.as_global_id(),
                                                     actor_id.as_global_id(),

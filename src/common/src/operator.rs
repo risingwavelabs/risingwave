@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::id::FragmentId;
+use risingwave_common::id::{ActorId, FragmentId};
 
 /// Generate a globally unique operator id.
 pub fn unique_operator_id(fragment_id: FragmentId, operator_id: u64) -> u64 {
@@ -21,9 +21,9 @@ pub fn unique_operator_id(fragment_id: FragmentId, operator_id: u64) -> u64 {
 }
 
 /// Generate a globally unique executor id.
-pub fn unique_executor_id(actor_id: u32, operator_id: u64) -> u64 {
+pub fn unique_executor_id(actor_id: ActorId, operator_id: u64) -> u64 {
     assert!(operator_id <= u32::MAX as u64);
-    ((actor_id as u64) << 32) + operator_id
+    ((actor_id.as_raw_id() as u64) << 32) + operator_id
 }
 
 /// Decompose a unique executor id into actor id and operator id.
@@ -39,8 +39,11 @@ pub fn unique_operator_id_into_parts(unique_operator_id: u64) -> (u32, u32) {
     (fragment_id, operator_id)
 }
 
-pub fn unique_executor_id_from_unique_operator_id(actor_id: u32, unique_operator_id: u64) -> u64 {
+pub fn unique_executor_id_from_unique_operator_id(
+    actor_id: ActorId,
+    unique_operator_id: u64,
+) -> u64 {
     // keep only low-32 bits
     let unique_operator_id = unique_operator_id & 0xFFFFFFFF;
-    ((actor_id as u64) << 32) + unique_operator_id
+    ((actor_id.as_raw_id() as u64) << 32) + unique_operator_id
 }

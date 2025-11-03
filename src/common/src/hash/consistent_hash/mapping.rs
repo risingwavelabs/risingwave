@@ -25,11 +25,9 @@ use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 use super::bitmap::VnodeBitmapExt;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::hash::VirtualNode;
+pub use crate::id::ActorId;
 use crate::util::compress::compress_data;
 use crate::util::iter_util::ZipEqDebug;
-
-// TODO: find a better place for this.
-pub type ActorId = u32;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct ActorAlignmentId(u64);

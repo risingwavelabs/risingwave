@@ -201,15 +201,15 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     // two actors on two singleton fragments
     let new_actor = |actor_id| StreamActor {
         actor_id,
-        fragment_id: actor_id.into(),
+        fragment_id: actor_id.as_raw_id().into(),
         vnode_bitmap: None,
         mview_definition: "".to_owned(),
         expr_context: None,
     };
     let table1 = TableId::new(1);
     let table2 = TableId::new(2);
-    let actor1 = new_actor(1);
-    let actor2 = new_actor(2);
+    let actor1 = new_actor(1.into());
+    let actor2 = new_actor(2.into());
     let initial_epoch = test_epoch(100);
 
     tx.send(BarrierWorkerRuntimeInfoSnapshot {

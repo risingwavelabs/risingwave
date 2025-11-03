@@ -581,6 +581,7 @@ mod graph {
         unique_executor_id_from_unique_operator_id, unique_operator_id,
         unique_operator_id_into_parts,
     };
+    use risingwave_pb::id::ActorId;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::stream_plan::stream_node::{NodeBody, NodeBodyDiscriminants};
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
@@ -597,7 +598,7 @@ mod graph {
         operator_id: OperatorId,
         fragment_id: FragmentId,
         identity: NodeBodyDiscriminants,
-        actor_ids: HashSet<u32>,
+        actor_ids: HashSet<ActorId>,
         dependencies: Vec<u64>,
     }
 
@@ -659,7 +660,7 @@ mod graph {
             fragment_id_to_merge_operator_id: &mut HashMap<FragmentId, OperatorId>,
             operator_id_to_stream_node: &mut HashMap<OperatorId, StreamNode>,
             node: &PbStreamNode,
-            actor_ids: &HashSet<u32>,
+            actor_ids: &HashSet<ActorId>,
         ) {
             let identity = node
                 .node_body

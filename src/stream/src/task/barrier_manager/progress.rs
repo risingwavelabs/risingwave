@@ -109,7 +109,7 @@ impl DatabaseManagedBarrierState {
                 .or_default()
                 .insert(actor, state);
         } else {
-            warn!(?epoch, actor, ?state, "ignore create mview progress");
+            warn!(?epoch, %actor, ?state, "ignore create mview progress");
         }
     }
 
@@ -129,7 +129,7 @@ impl DatabaseManagedBarrierState {
                 .or_default()
                 .insert(actor, state);
         } else {
-            warn!(?epoch, actor, ?state, "ignore CDC table backfill progress");
+            warn!(?epoch, %actor, ?state, "ignore CDC table backfill progress");
         }
     }
 }
@@ -194,10 +194,10 @@ impl CreateMviewProgressReporter {
 
     #[cfg(test)]
     pub fn for_test(barrier_manager: LocalBarrierManager) -> Self {
-        Self::new(barrier_manager, 0)
+        Self::new(barrier_manager, 0.into())
     }
 
-    pub fn actor_id(&self) -> u32 {
+    pub fn actor_id(&self) -> ActorId {
         self.backfill_actor_id
     }
 
@@ -248,7 +248,7 @@ impl CreateMviewProgressReporter {
             None => {}
         };
         tracing::debug!(
-            actor_id = self.backfill_actor_id,
+            actor_id = %self.backfill_actor_id,
             ?epoch,
             consumed_epoch,
             current_consumed_rows,
@@ -313,7 +313,7 @@ impl CreateMviewProgressReporter {
             return;
         }
         tracing::debug!(
-            actor_id = self.backfill_actor_id,
+            actor_id = %self.backfill_actor_id,
             ?epoch,
             current_consumed_rows,
             buffered_rows,

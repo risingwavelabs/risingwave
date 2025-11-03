@@ -117,8 +117,9 @@ impl SplitEnumerator for MqttSplitEnumerator {
                     Ok(Op::Nop)
                 } else {
                     tracing::debug!("build new mqtt client for {}", broker_url);
-                    let (new_client, event_loop) =
-                        properties.common.build_client(context.info.source_id, 0)?;
+                    let (new_client, event_loop) = properties
+                        .common
+                        .build_client(0.into(), context.info.source_id as _)?;
                     let new_connection_check = Arc::new(MqttConnectionCheck::new(
                         new_client,
                         event_loop,

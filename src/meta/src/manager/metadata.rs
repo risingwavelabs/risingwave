@@ -388,11 +388,6 @@ impl MetadataManager {
             .get_root_fragments(upstream_table_ids.iter().map(|id| id.as_job_id()).collect())
             .await?;
 
-        let actors = actors
-            .into_iter()
-            .map(|(actor, worker)| (actor as u32, worker))
-            .collect();
-
         Ok((upstream_root_fragments, actors))
     }
 
@@ -461,11 +456,6 @@ impl MetadataManager {
             .catalog_controller
             .get_downstream_fragments(job_id)
             .await?;
-
-        let actors = actors
-            .into_iter()
-            .map(|(actor, worker)| (actor as u32, worker))
-            .collect();
 
         Ok((fragments, actors))
     }

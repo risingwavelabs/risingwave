@@ -51,7 +51,7 @@ async fn test_merger_sum_aggr() {
     };
 
     let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-    let mut next_actor_id = 0;
+    let mut next_actor_id = 0.into();
     let next_actor_id = &mut next_actor_id;
     let mut actors = HashSet::new();
     let mut gen_next_actor_id = || {
@@ -91,7 +91,7 @@ async fn test_merger_sum_aggr() {
                     .unwrap();
             let consumer = SenderConsumer {
                 input: aggregator.boxed(),
-                channel: Output::new(233, tx),
+                channel: Output::new(233.into(), tx),
             };
 
             let actor = Actor::new(
@@ -124,7 +124,7 @@ async fn test_merger_sum_aggr() {
         let (actor_future, channel) = make_actor(rx);
         outputs.push(channel);
         actor_futures.push(actor_future);
-        inputs.push(Output::new(233, tx));
+        inputs.push(Output::new(233.into(), tx));
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -152,7 +152,7 @@ async fn test_merger_sum_aggr() {
                     DispatchOutputMapping::Simple(vec![0]),
                     0,
                 ))],
-                0,
+                0.into(),
                 0.into(),
                 local_barrier_manager.clone(),
                 metrics,

@@ -543,7 +543,9 @@ fn render_actors(
 
         let assigner = AssignerBuilder::new(job_id).build();
 
-        let actors = (0..actual_parallelism).collect_vec();
+        let actors = (0..(actual_parallelism as u32))
+            .map_into::<ActorId>()
+            .collect_vec();
         let vnodes = (0..vnode_count).collect_vec();
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
@@ -569,10 +571,8 @@ fn render_actors(
 
                 let entry_fragment_id = entry_fragment.fragment_id;
 
-                let empty_actor_splits: HashMap<_, _> = actors
-                    .iter()
-                    .map(|actor_id| (*actor_id as u32, vec![]))
-                    .collect();
+                let empty_actor_splits: HashMap<_, _> =
+                    actors.iter().map(|actor_id| (*actor_id, vec![])).collect();
 
                 let splits = fragment_splits_map
                     .get(&entry_fragment_id)
@@ -621,13 +621,13 @@ fn render_actors(
                         DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
                     };
 
-                    let actor_id = actor_id_base + actor_idx as u32;
+                    let actor_id = actor_idx + actor_id_base;
 
                     let splits = if let Some(source_id) = fragment_source_ids.get(&fragment_id) {
                         assert_eq!(shared_source_id, Some(*source_id));
 
                         fragment_splits
-                            .get(&(actor_idx as u32))
+                            .get(&(actor_idx))
                             .cloned()
                             .unwrap_or_default()
                     } else {
@@ -985,7 +985,7 @@ mod tests {
         }
     }
 
-    type ActorState = (u32, WorkerId, Option<Vec<usize>>, Vec<String>);
+    type ActorState = (ActorId, WorkerId, Option<Vec<usize>>, Vec<String>);
 
     fn collect_actor_state(fragment: &InflightFragmentInfo) -> Vec<ActorState> {
         let base = fragment.actors.keys().copied().min().unwrap_or_default();
@@ -994,7 +994,7 @@ mod tests {
             .actors
             .iter()
             .map(|(&actor_id, info)| {
-                let idx = actor_id - base;
+                let idx = actor_id.as_raw_id() - base.as_raw_id();
                 let vnode_indices = info.vnode_bitmap.as_ref().map(|bitmap| {
                     bitmap
                         .iter()
@@ -1007,7 +1007,7 @@ mod tests {
                     .iter()
                     .map(|split| split.id().to_string())
                     .collect::<Vec<_>>();
-                (idx, info.worker_id, vnode_indices, splits)
+                (idx.into(), info.worker_id, vnode_indices, splits)
             })
             .collect();
 

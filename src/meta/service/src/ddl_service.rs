@@ -1580,7 +1580,7 @@ fn add_auto_schema_change_fail_event_log(
         .with_guarded_label_values(&[&table_id.to_string(), &table_name])
         .inc();
     let event = event_log::EventAutoSchemaChangeFail {
-        table_id: table_id.as_raw_id(),
+        table_id,
         table_name,
         cdc_table_id,
         upstream_ddl,

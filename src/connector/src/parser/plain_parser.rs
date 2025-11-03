@@ -174,7 +174,7 @@ impl PlainParser {
                                 }
                             };
                             self.source_ctx.on_cdc_auto_schema_change_failure(
-                                self.source_ctx.source_id.as_raw_id(),
+                                self.source_ctx.source_id,
                                 table_name,
                                 cdc_table_id,
                                 "".to_owned(), // upstream_ddl is not available in this context
