@@ -32,6 +32,9 @@ create table t_non_append_only(v int) with (retention_seconds = 5);
 statement ok
 insert into t_non_append_only values(1);
 
+statement ok
+flush;
+
 query I
 select * from t_non_append_only;
 ----
