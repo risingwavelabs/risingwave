@@ -130,7 +130,13 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     uncompressed_file_size: sst.uncompressed_file_size as _,
                     range_tombstone_count: sst.range_tombstone_count as _,
                     bloom_filter_kind: sst.bloom_filter_kind as _,
-                    table_ids: json!(sst.table_ids).into(),
+                    table_ids: json!(
+                        sst.table_ids
+                            .iter()
+                            .map(|table_id| table_id.table_id)
+                            .collect_vec()
+                    )
+                    .into(),
                     sst_size: sst.sst_size as _,
                 });
             }
