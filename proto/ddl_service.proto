@@ -314,6 +314,8 @@ message AlterParallelismResponse {}
 
 message AlterFragmentParallelismRequest {
   repeated uint32 fragment_ids = 1;
+
+  // When `parallelism` is `None`, it indicates resetting to the job's parallelism.
   optional meta.TableParallelism parallelism = 2;
 }
 
