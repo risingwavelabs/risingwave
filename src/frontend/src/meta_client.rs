@@ -187,6 +187,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
+
+    fn cluster_id(&self) -> &str;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -470,5 +472,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.0.refresh(request).await
+    }
+
+    fn cluster_id(&self) -> &str {
+        self.0.cluster_id()
     }
 }

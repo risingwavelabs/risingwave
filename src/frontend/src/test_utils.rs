@@ -1267,6 +1267,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
         Ok(RefreshResponse { status: None })
     }
+
+    fn cluster_id(&self) -> &str {
+        "test-cluster-uuid"
+    }
 }
 
 #[cfg(test)]
