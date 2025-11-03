@@ -38,8 +38,8 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus, RefreshRequest,
-    RefreshResponse, TableParallelism as PbTableParallelism,
+    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
+    RefreshRequest, RefreshResponse,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;

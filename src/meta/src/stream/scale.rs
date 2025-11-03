@@ -421,12 +421,32 @@ impl ScaleController {
                 }
             };
 
-            for fragment_id in entry_fragment_ids {
-                let fragment = fragment::ActiveModel {
-                    fragment_id: Set(fragment_id),
-                    parallelism: Set(Some(parallelism.clone())),
-                    ..Default::default()
-                };
+            let fragments = Fragment::find()
+                .filter(fragment::Column::FragmentId.is_in(entry_fragment_ids))
+                .all(&txn)
+                .await?;
+
+            debug_assert!(
+                fragments
+                    .iter()
+                    .map(|fragment| fragment.parallelism.as_ref())
+                    .all_equal(),
+                "entry fragments in the same ensemble should share the same parallelism"
+            );
+
+            if fragments
+                .first()
+                .and_then(|fragment| fragment.parallelism.as_ref())
+                .is_some_and(|current| current == parallelism)
+            {
+                continue;
+            }
+
+            let desired_parallelism = parallelism.clone();
+
+            for fragment in fragments {
+                let mut fragment = fragment.into_active_model();
+                fragment.parallelism = Set(Some(desired_parallelism.clone()));
                 fragment.update(&txn).await?;
             }
 
