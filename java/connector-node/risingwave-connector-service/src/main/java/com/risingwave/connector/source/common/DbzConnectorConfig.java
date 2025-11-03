@@ -17,6 +17,7 @@ package com.risingwave.connector.source.common;
 import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
+import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -148,14 +149,18 @@ public class DbzConnectorConfig {
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
+
+            // Enable schema history for all MySQL CDC modes to handle schema changes properly
+            mysqlProps.setProperty(OpendalSchemaHistory.SOURCE_ID, String.valueOf(sourceId));
+            mysqlProps.setProperty(OpendalSchemaHistory.MAX_RECORDS_PER_FILE_CONFIG, "2048");
+
             if (isCdcBackfill) {
                 // disable snapshot locking at all
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
-
                 // If cdc backfill enabled, the source only emit incremental changes, so we must
                 // rewind to the given offset and continue binlog reading from there
                 if (null != startOffset && !startOffset.isBlank()) {
-                    mysqlProps.setProperty("snapshot.mode", "recovery");
+                    mysqlProps.setProperty("snapshot.mode", "custom");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 } else {
@@ -166,10 +171,11 @@ public class DbzConnectorConfig {
                 // if snapshot phase is finished and offset is specified, we will continue binlog
                 // reading from the given offset
                 if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    // 'snapshot.mode=recovery' must be configured if binlog offset is
-                    // specified. It only snapshots the schemas, not the data, and continue binlog
-                    // reading from the specified offset
-                    mysqlProps.setProperty("snapshot.mode", "recovery");
+                    // 'snapshot.mode=no_data' is used when binlog offset is specified.
+                    // Since we use persistent schema history, we only need to snapshot schema when
+                    // no offset is passed, restore directly from schema history when offset is
+                    // available.
+                    mysqlProps.setProperty("snapshot.mode", "custom");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }
@@ -325,6 +331,18 @@ public class DbzConnectorConfig {
         for (var entry : otherProps.entrySet()) {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
+
+        // // Special handling for test environment: override schema history for MySQL tests
+        // if (source == SourceTypeE.MYSQL && otherProps.containsKey("schema.history.internal")) {
+        //     String testSchemaHistory = otherProps.get("schema.history.internal");
+        //     if (testSchemaHistory.contains("MemorySchemaHistory")) {
+        //         LOG.info(
+        //                 "Test environment detected: overriding schema history to {}",
+        //                 testSchemaHistory);
+        //         dbzProps.put("schema.history.internal", testSchemaHistory);
+        //     }
+        // }
+
         LOG.info("Final Debezium properties: {}", dbzProps);
 
         this.sourceId = sourceId;
