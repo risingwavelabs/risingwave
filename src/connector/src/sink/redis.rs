@@ -331,6 +331,10 @@ impl Sink for RedisSink {
             .filter(|(k, _)| self.pk_indices.contains(k))
             .map(|(_, v)| (v.name.clone(), v.data_type.clone()))
             .collect();
+        tracing::error!(
+            "test:for bug: {:?}",
+            self.format_desc.options.get(REDIS_VALUE_TYPE)
+        );
         if matches!(
             self.format_desc.encode,
             super::catalog::SinkEncode::Template
@@ -439,6 +443,7 @@ impl Sink for RedisSink {
                     TemplateStringEncoder::check_string_format(value_format, &all_map)?;
                 }
                 Some(REDIS_VALUE_TYPE_STREAM) => {
+                    tracing::error!("test:for bug");
                     risingwave_common::license::Feature::RedisSinkStream
                         .check_available()
                         .map_err(|e| anyhow::anyhow!(e))?;
