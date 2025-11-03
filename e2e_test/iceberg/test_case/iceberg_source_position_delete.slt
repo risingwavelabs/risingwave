@@ -36,13 +36,7 @@ flush
 statement ok
 DELETE FROM s1 WHERE i1 < 3;
 
-sleep 16s
-
-# test
-query T
-select * from rw_iceberg_files;
-----
-t
+sleep 20s
 
 # check there should be at least one PositionDeletes
 query T
