@@ -31,14 +31,14 @@ struct RwActorInfo {
 
 #[system_catalog(table, "rw_catalog.rw_actor_infos")]
 async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorInfo>> {
-    let table_ids = reader
+    let job_ids = reader
         .meta_client
         .list_streaming_job_states()
         .await?
         .into_iter()
         .map(|fragment| fragment.table_id)
         .collect_vec();
-    let table_fragments = reader.meta_client.list_table_fragments(&table_ids).await?;
+    let table_fragments = reader.meta_client.list_table_fragments(&job_ids).await?;
     Ok(table_fragments
         .into_iter()
         .flat_map(|(_, fragment_info)| {

@@ -198,7 +198,7 @@ impl CatalogController {
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
                 object_id: table_id.as_raw_id(),
-                referenced_object_id: sink_id as _,
+                referenced_object_id: sink_id.as_raw_id() as _,
             }
         }));
 
@@ -315,7 +315,7 @@ impl CatalogController {
                 .await?;
             for (sink_id, name, definition) in sink_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: (sink_id as u32).into(),
+                    id: sink_id.as_job_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),

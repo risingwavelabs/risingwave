@@ -132,7 +132,7 @@ impl CatalogController {
 
         for obj in &removed_objects {
             if obj.obj_type == ObjectType::Sink {
-                let sink = Sink::find_by_id(obj.oid)
+                let sink = Sink::find_by_id(SinkId::new(obj.oid as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
@@ -429,7 +429,7 @@ async fn report_drop_object(
 ) {
     let connector_name = {
         match object_type {
-            ObjectType::Sink => Sink::find_by_id(object_id)
+            ObjectType::Sink => Sink::find_by_id(SinkId::new(object_id as _))
                 .select_only()
                 .column(sink::Column::Properties)
                 .into_tuple::<Property>()

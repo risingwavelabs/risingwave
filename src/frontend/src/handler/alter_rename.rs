@@ -156,10 +156,7 @@ pub async fn handle_rename_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::SinkId(sink_id.sink_id),
-            &new_sink_name,
-        )
+        .alter_name(sink_id.into(), &new_sink_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SINK))

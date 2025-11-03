@@ -834,7 +834,7 @@ impl Mutation {
                     .iter()
                     .map(|(sink_id, add_columns)| {
                         (
-                            sink_id.sink_id,
+                            *sink_id,
                             PbSinkAddColumns {
                                 fields: add_columns.iter().map(|field| field.to_prost()).collect(),
                             },
@@ -1027,7 +1027,7 @@ impl Mutation {
                     .iter()
                     .map(|(sink_id, add_columns)| {
                         (
-                            SinkId::new(*sink_id),
+                            *sink_id,
                             add_columns.fields.iter().map(Field::from_prost).collect(),
                         )
                     })

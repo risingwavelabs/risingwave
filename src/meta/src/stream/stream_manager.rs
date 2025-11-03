@@ -22,10 +22,10 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SinkId};
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
-use risingwave_meta_model::{ObjectId, StreamingParallelism, fragment};
+use risingwave_meta_model::{StreamingParallelism, fragment};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::expr::PbExprNode;
 use risingwave_pb::meta::table_fragments::ActorStatus;
@@ -66,7 +66,7 @@ pub struct CreateStreamingJobOption {
 
 #[derive(Debug, Clone)]
 pub struct UpstreamSinkInfo {
-    pub sink_id: ObjectId,
+    pub sink_id: SinkId,
     pub sink_fragment_id: FragmentId,
     pub sink_output_fields: Vec<PbField>,
     // for backwards compatibility
@@ -188,7 +188,7 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 
 #[derive(Debug, Clone)]
 pub struct AutoRefreshSchemaSinkContext {
-    pub tmp_sink_id: JobId,
+    pub tmp_sink_id: SinkId,
     pub original_sink: PbSink,
     pub original_fragment: Fragment,
     pub new_schema: Vec<PbColumnCatalog>,

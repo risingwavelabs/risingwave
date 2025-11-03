@@ -34,7 +34,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
-use risingwave_common::id::{DatabaseId, JobId, SchemaId, WorkerId};
+use risingwave_common::id::{DatabaseId, JobId, SchemaId, SinkId, WorkerId};
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
@@ -809,13 +809,13 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn compact_iceberg_table(&self, sink_id: u32) -> Result<u64> {
+    pub async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
         let request = CompactIcebergTableRequest { sink_id };
         let resp = self.inner.compact_iceberg_table(request).await?;
         Ok(resp.task_id)
     }
 
-    pub async fn expire_iceberg_table_snapshots(&self, sink_id: u32) -> Result<()> {
+    pub async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()> {
         let request = ExpireIcebergTableSnapshotsRequest { sink_id };
         let _resp = self.inner.expire_iceberg_table_snapshots(request).await?;
         Ok(())
@@ -837,7 +837,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<WaitVersion> {
+    pub async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<WaitVersion> {
         let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp
@@ -1117,10 +1117,10 @@ impl MetaClient {
 
     pub async fn list_table_fragments(
         &self,
-        table_ids: &[JobId],
+        job_ids: &[JobId],
     ) -> Result<HashMap<JobId, TableFragmentInfo>> {
         let request = ListTableFragmentsRequest {
-            table_ids: table_ids.to_vec(),
+            table_ids: job_ids.to_vec(),
         };
         let resp = self.inner.list_table_fragments(request).await?;
         Ok(resp.table_fragments)
@@ -1442,13 +1442,13 @@ impl MetaClient {
 
     pub async fn alter_sink_props(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
-            object_id: sink_id,
+            object_id: sink_id.as_raw_id(),
             changed_props: changed_props.into_iter().collect(),
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
@@ -1461,21 +1461,21 @@ impl MetaClient {
 
     pub async fn alter_iceberg_table_props(
         &self,
-        table_id: u32,
-        sink_id: u32,
+        table_id: TableId,
+        sink_id: SinkId,
         source_id: u32,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
-            object_id: table_id,
+            object_id: table_id.as_raw_id(),
             changed_props: changed_props.into_iter().collect(),
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::IcebergTable as i32,
             extra_options: Some(ExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds {
-                sink_id: sink_id as i32,
+                sink_id,
                 source_id: source_id as i32,
             })),
         };
@@ -1720,7 +1720,7 @@ impl MetaClient {
 
     pub async fn add_sink_fail_evet(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         sink_name: String,
         connector: String,
         error: String,
