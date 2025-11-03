@@ -74,7 +74,7 @@ async fn get_object_store() -> Arc<ObjectStoreImpl> {
         .clone()
 }
 
-/// Initialize STATE_STORE_URL and DATA_DIRECTORY for integration tests.
+/// Initialize `STATE_STORE_URL` and `DATA_DIRECTORY` for integration tests.
 /// Must be called before any schema history operations if compute node is not running.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_initObjectStoreForTest(
