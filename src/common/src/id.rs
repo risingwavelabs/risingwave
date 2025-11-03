@@ -15,11 +15,10 @@
 use std::any::type_name;
 use std::num::TryFromIntError;
 
-use bitflags::__private::serde::{Deserializer, Serializer};
 use parse_display::Display;
 use sea_orm::sea_query::{ArrayType, ValueTypeErr};
 use sea_orm::{ColIdx, ColumnType, DbErr, QueryResult, TryGetError};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror_ext::AsReport;
 use tracing::warn;
 

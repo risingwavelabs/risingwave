@@ -631,12 +631,12 @@ pub(crate) struct MonitoredStateStoreGetStats {
     pub get_duration: Instant,
     pub get_key_size: usize,
     pub get_value_size: usize,
-    pub table_id: u32,
+    pub table_id: TableId,
     pub metrics: Arc<MonitoredStorageMetrics>,
 }
 
 impl MonitoredStateStoreGetStats {
-    pub(crate) fn new(table_id: u32, metrics: Arc<MonitoredStorageMetrics>) -> Self {
+    pub(crate) fn new(table_id: TableId, metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             get_duration: Instant::now(),
             get_key_size: 0,
@@ -647,7 +647,7 @@ impl MonitoredStateStoreGetStats {
     }
 
     pub(crate) fn report(&self) {
-        thread_local!(static LOCAL_GET_METRICS: RefCell<HashMap<u32, LocalGetMetrics>> = RefCell::new(HashMap::default()));
+        thread_local!(static LOCAL_GET_METRICS: RefCell<HashMap<TableId, LocalGetMetrics>> = RefCell::new(HashMap::default()));
         LOCAL_GET_METRICS.with_borrow_mut(|local_metrics| {
             let table_metrics = local_metrics.entry(self.table_id).or_insert_with(|| {
                 let table_label = self.table_id.to_string();

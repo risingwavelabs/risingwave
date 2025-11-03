@@ -119,8 +119,7 @@ impl<S, E> MonitoredStateStore<S, E> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<O>> {
-        let mut stats =
-            MonitoredStateStoreGetStats::new(table_id.as_raw_id(), self.storage_metrics.clone());
+        let mut stats = MonitoredStateStoreGetStats::new(table_id, self.storage_metrics.clone());
 
         let value = on_key_value_future
             .instrument_await("store_on_key_value".verbose())
