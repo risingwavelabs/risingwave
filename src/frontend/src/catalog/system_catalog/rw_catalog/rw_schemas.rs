@@ -41,12 +41,7 @@ fn read_rw_schema_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSchema>> {
             id: schema.id().as_raw_id() as i32,
             name: schema.name(),
             owner: schema.owner() as i32,
-            acl: get_acl_items(
-                schema.id(),
-                false,
-                &users,
-                username_map,
-            ),
+            acl: get_acl_items(schema.id(), false, &users, username_map),
         })
         .collect())
 }

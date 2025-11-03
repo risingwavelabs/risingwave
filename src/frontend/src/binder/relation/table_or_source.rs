@@ -308,10 +308,7 @@ impl Binder {
 
                     // check CONNECT privilege for cross-db access
                     if self.database_id != database_id
-                        && !user.has_privilege(
-                            database_id,
-                            AclMode::Connect,
-                        )
+                        && !user.has_privilege(database_id, AclMode::Connect)
                     {
                         let db_name = self.catalog.get_database_by_id(database_id)?.name.clone();
 

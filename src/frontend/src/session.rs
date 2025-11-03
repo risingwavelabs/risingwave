@@ -1612,8 +1612,7 @@ impl SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let has_privilege =
-                user.has_privilege(database_id, AclMode::Connect);
+            let has_privilege = user.has_privilege(database_id, AclMode::Connect);
             if !user.is_super && database_owner != user.id && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,

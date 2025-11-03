@@ -58,12 +58,7 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
                     owner: table.owner as i32,
                     definition: table.create_sql(),
                     append_only: table.append_only,
-                    acl: get_acl_items(
-                        table.id,
-                        true,
-                        &users,
-                        username_map,
-                    ),
+                    acl: get_acl_items(table.id, true, &users, username_map),
                     initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),

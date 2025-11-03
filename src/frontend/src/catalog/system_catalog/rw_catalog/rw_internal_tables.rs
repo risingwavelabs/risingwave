@@ -56,12 +56,7 @@ fn read_rw_internal_tables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIntern
                     job_id: table.job_id.unwrap().as_raw_id() as i32,
                     owner: table.owner as i32,
                     definition: table.create_sql(),
-                    acl: get_acl_items(
-                        table.id,
-                        true,
-                        &users,
-                        username_map,
-                    ),
+                    acl: get_acl_items(table.id, true, &users, username_map),
                     initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),

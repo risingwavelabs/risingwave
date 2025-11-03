@@ -274,12 +274,7 @@ pub async fn handle_rename_schema(
 
         // To rename a schema you must also have the CREATE privilege for the database.
         if let Some(user) = user_reader.get_user_by_name(&session.user_name()) {
-            if !user.is_super
-                && !user.has_privilege(
-                    db_id,
-                    AclMode::Create,
-                )
-            {
+            if !user.is_super && !user.has_privilege(db_id, AclMode::Create) {
                 return Err(ErrorCode::PermissionDenied(
                     "Do not have CREATE privilege on the current database".to_owned(),
                 )

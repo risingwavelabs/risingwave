@@ -44,12 +44,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDatabases>> {
             id: db.id().as_raw_id() as i32,
             name: db.name().into(),
             owner: db.owner() as i32,
-            acl: get_acl_items(
-                db.id(),
-                false,
-                &users,
-                username_map,
-            ),
+            acl: get_acl_items(db.id(), false, &users, username_map),
             resource_group: db.resource_group.clone(),
             barrier_interval_ms: db.barrier_interval_ms.map(|v| v as i32),
             checkpoint_frequency: db.checkpoint_frequency.map(|v| v as i64),

@@ -46,12 +46,7 @@ fn read_system_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<SystemTab
                 schema_id: schema.id().as_raw_id() as i32,
                 owner: table.owner as i32,
                 definition: None,
-                acl: get_acl_items(
-                    table.id,
-                    false,
-                    &users,
-                    username_map,
-                ),
+                acl: get_acl_items(table.id, false, &users, username_map),
             })
         })
         .collect())

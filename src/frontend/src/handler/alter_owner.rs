@@ -38,12 +38,7 @@ pub fn check_schema_create_privilege(
     if session.is_super_user() {
         return Ok(());
     }
-    if !new_owner.is_super
-        && !new_owner.has_privilege(
-            schema_id,
-            AclMode::Create,
-        )
-    {
+    if !new_owner.is_super && !new_owner.has_privilege(schema_id, AclMode::Create) {
         return Err(PermissionDenied(
             "Require new owner to have create privilege on the object.".to_owned(),
         )
