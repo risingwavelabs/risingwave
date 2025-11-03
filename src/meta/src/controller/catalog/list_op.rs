@@ -19,8 +19,22 @@ use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
 
 impl CatalogController {
-    pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
-        self.inner.read().await.list_time_travel_table_ids().await
+    pub async fn list_time_travel_table_ids(
+        &self,
+    ) -> MetaResult<Vec<risingwave_common::catalog::TableId>> {
+        self.inner
+            .read()
+            .await
+            .list_time_travel_table_ids()
+            .await
+            .map(|table_ids| {
+                table_ids
+                    .into_iter()
+                    .map(|table_id| {
+                        risingwave_common::catalog::TableId::new(table_id.try_into().unwrap())
+                    })
+                    .collect()
+            })
     }
 
     pub async fn list_stream_job_desc_for_telemetry(

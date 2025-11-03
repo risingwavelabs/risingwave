@@ -154,11 +154,8 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         assert!(payload.iter().all(|imm| imm.has_old_value()));
     }
     // Local memory compaction looks at all key ranges.
-    let existing_table_ids: HashSet<u32> = payload
-        .iter()
-        .map(|imm| imm.table_id.table_id)
-        .dedup()
-        .collect();
+    let existing_table_ids: HashSet<TableId> =
+        payload.iter().map(|imm| imm.table_id).dedup().collect();
     assert!(!existing_table_ids.is_empty());
 
     let compaction_catalog_agent_ref = compaction_catalog_manager_ref
@@ -168,7 +165,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         .table_ids()
         .collect::<HashSet<_>>();
     payload.retain(|imm| {
-        let ret = existing_table_ids.contains(&imm.table_id.table_id);
+        let ret = existing_table_ids.contains(&imm.table_id);
         if !ret {
             error!(
                 "can not find table {:?}, it may be removed by meta-service",
@@ -279,7 +276,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             let compaction_executor = context.compaction_executor.clone();
             let mut forward_iters = Vec::with_capacity(payload.len());
             for imm in &payload {
-                if !existing_table_ids.contains(&imm.table_id.table_id) {
+                if !existing_table_ids.contains(&imm.table_id) {
                     continue;
                 }
                 forward_iters.push(imm.clone().into_forward_iter());
@@ -463,12 +460,12 @@ pub async fn merge_imms_in_memory(
 ///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
 fn generate_splits(
     payload: &Vec<ImmutableMemtable>,
-    existing_table_ids: &HashSet<u32>,
+    existing_table_ids: &HashSet<TableId>,
     storage_opts: &StorageOpts,
-) -> (Vec<KeyRange>, u64, BTreeMap<u32, u32>) {
+) -> (Vec<KeyRange>, u64, BTreeMap<TableId, u32>) {
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
-    let mut table_size_infos: HashMap<u32, u64> = HashMap::default();
+    let mut table_size_infos: HashMap<TableId, u64> = HashMap::default();
     let mut table_vnode_partition = BTreeMap::default();
     for imm in payload {
         let data_size = {
@@ -477,7 +474,7 @@ fn generate_splits(
         };
         compact_data_size += data_size;
         size_and_start_user_keys.push((data_size, imm.start_user_key()));
-        let v = table_size_infos.entry(imm.table_id.table_id).or_insert(0);
+        let v = table_size_infos.entry(imm.table_id).or_insert(0);
         *v += data_size;
     }
     size_and_start_user_keys.sort_by(|a, b| a.1.cmp(&b.1));
@@ -553,7 +550,7 @@ impl SharedBufferCompactRunner {
         key_range: KeyRange,
         context: CompactorContext,
         sub_compaction_sstable_size: usize,
-        table_vnode_partition: BTreeMap<u32, u32>,
+        table_vnode_partition: BTreeMap<TableId, u32>,
         use_block_based_filter: bool,
         object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
@@ -687,8 +684,11 @@ mod tests {
             ..Default::default()
         };
         let payload = vec![imm1, imm2, imm3, imm4, imm5];
-        let (splits, _sstable_capacity, vnodes) =
-            generate_splits(&payload, &HashSet::from_iter([1, 2]), &storage_opts);
+        let (splits, _sstable_capacity, vnodes) = generate_splits(
+            &payload,
+            &HashSet::from_iter([1.into(), 2.into()]),
+            &storage_opts,
+        );
         assert_eq!(
             splits.len(),
             storage_opts.share_buffers_sync_parallelism as usize

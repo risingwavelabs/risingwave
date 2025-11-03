@@ -2682,7 +2682,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 11.into(),
             object_id: 1.into(),
-            table_ids: vec![existing_table_id.table_id],
+            table_ids: vec![existing_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -2710,8 +2710,7 @@ async fn test_commit_multi_epoch() {
     .await;
 
     let cg_id =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id.table_id())
-            .await;
+        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id).await;
 
     {
         let version = test_env.manager.get_current_version().await;
@@ -2738,7 +2737,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 22.into(),
             object_id: 2.into(),
-            table_ids: vec![existing_table_id.table_id],
+            table_ids: vec![existing_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -2786,7 +2785,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 33.into(),
             object_id: 3.into(),
-            table_ids: vec![new_table_id.table_id],
+            table_ids: vec![new_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -2816,8 +2815,7 @@ async fn test_commit_multi_epoch() {
     let new_cg_id = {
         let version = test_env.manager.get_current_version().await;
         let new_cg_id =
-            get_compaction_group_id_by_table_id(test_env.manager.clone(), new_table_id.table_id())
-                .await;
+            get_compaction_group_id_by_table_id(test_env.manager.clone(), new_table_id).await;
 
         let new_cg = version.levels.get(&new_cg_id).unwrap();
         let sub_levels = &new_cg.l0.sub_levels;
@@ -2839,7 +2837,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 44.into(),
             object_id: 4.into(),
-            table_ids: vec![new_table_id.table_id],
+            table_ids: vec![new_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -2884,7 +2882,7 @@ async fn test_commit_multi_epoch() {
         SstableInfoInner {
             sst_id: 55.into(),
             object_id: 5.into(),
-            table_ids: vec![existing_table_id.table_id, new_table_id.table_id],
+            table_ids: vec![existing_table_id, new_table_id],
             file_size: 100,
             sst_size: 100,
             key_range: KeyRange {
@@ -3007,7 +3005,7 @@ async fn test_commit_with_large_size() {
     let sst1_epoch1: SstableInfo = SstableInfoInner {
         sst_id: 11.into(),
         object_id: 1.into(),
-        table_ids: vec![existing_table_id.table_id],
+        table_ids: vec![existing_table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
@@ -3017,7 +3015,7 @@ async fn test_commit_with_large_size() {
     let sst1_epoch2: SstableInfo = SstableInfoInner {
         sst_id: 12.into(),
         object_id: 2.into(),
-        table_ids: vec![existing_table_id.table_id],
+        table_ids: vec![existing_table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
@@ -3027,7 +3025,7 @@ async fn test_commit_with_large_size() {
     let sst1_epoch3: SstableInfo = SstableInfoInner {
         sst_id: 13.into(),
         object_id: 3.into(),
-        table_ids: vec![existing_table_id.table_id],
+        table_ids: vec![existing_table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
@@ -3049,8 +3047,7 @@ async fn test_commit_with_large_size() {
     .await;
 
     let cg_id =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id.table_id())
-            .await;
+        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id).await;
 
     let l0_sub_levels = test_env
         .manager
@@ -3144,7 +3141,7 @@ async fn test_commit_with_truncate_tables() {
     let sst1_table1: SstableInfo = SstableInfoInner {
         sst_id: 11.into(),
         object_id: 1.into(),
-        table_ids: vec![table_id_1.table_id],
+        table_ids: vec![table_id_1],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3154,7 +3151,7 @@ async fn test_commit_with_truncate_tables() {
     let sst1_table2: SstableInfo = SstableInfoInner {
         sst_id: 12.into(),
         object_id: 2.into(),
-        table_ids: vec![table_id_2.table_id],
+        table_ids: vec![table_id_2],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3164,7 +3161,7 @@ async fn test_commit_with_truncate_tables() {
     let sst1_table3: SstableInfo = SstableInfoInner {
         sst_id: 13.into(),
         object_id: 3.into(),
-        table_ids: vec![table_id_3.table_id],
+        table_ids: vec![table_id_3],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3195,12 +3192,9 @@ async fn test_commit_with_truncate_tables() {
     )
     .await;
 
-    let cg_id_1 =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_1.table_id()).await;
-    let cg_id_2 =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_2.table_id()).await;
-    let cg_id_3 =
-        get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_3.table_id()).await;
+    let cg_id_1 = get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_1).await;
+    let cg_id_2 = get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_2).await;
+    let cg_id_3 = get_compaction_group_id_by_table_id(test_env.manager.clone(), table_id_3).await;
 
     // Verify all tables exist in version after epoch1
     {
@@ -3234,7 +3228,7 @@ async fn test_commit_with_truncate_tables() {
     let sst2_table1: SstableInfo = SstableInfoInner {
         sst_id: 21.into(),
         object_id: 4.into(),
-        table_ids: vec![table_id_1.table_id],
+        table_ids: vec![table_id_1],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3244,7 +3238,7 @@ async fn test_commit_with_truncate_tables() {
     let sst2_table2: SstableInfo = SstableInfoInner {
         sst_id: 22.into(),
         object_id: 5.into(),
-        table_ids: vec![table_id_2.table_id],
+        table_ids: vec![table_id_2],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3254,7 +3248,7 @@ async fn test_commit_with_truncate_tables() {
     let sst2_table3: SstableInfo = SstableInfoInner {
         sst_id: 23.into(),
         object_id: 6.into(),
-        table_ids: vec![table_id_3.table_id],
+        table_ids: vec![table_id_3],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3305,7 +3299,7 @@ async fn test_commit_with_truncate_tables() {
     let sst3_table1: SstableInfo = SstableInfoInner {
         sst_id: 31.into(),
         object_id: 7.into(),
-        table_ids: vec![table_id_1.table_id],
+        table_ids: vec![table_id_1],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3315,7 +3309,7 @@ async fn test_commit_with_truncate_tables() {
     let sst3_table2: SstableInfo = SstableInfoInner {
         sst_id: 32.into(),
         object_id: 8.into(),
-        table_ids: vec![table_id_2.table_id],
+        table_ids: vec![table_id_2],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3325,7 +3319,7 @@ async fn test_commit_with_truncate_tables() {
     let sst3_table3: SstableInfo = SstableInfoInner {
         sst_id: 33.into(),
         object_id: 9.into(),
-        table_ids: vec![table_id_3.table_id],
+        table_ids: vec![table_id_3],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3424,7 +3418,7 @@ async fn test_commit_with_truncate_tables() {
         for sub_level in &cg1.l0.sub_levels {
             for sst_info in &sub_level.table_infos {
                 assert!(
-                    !sst_info.table_ids.contains(&table_id_1.table_id),
+                    !sst_info.table_ids.contains(&table_id_1),
                     "SST {} should not contain table_id_1 after truncation",
                     sst_info.object_id
                 );
@@ -3442,7 +3436,7 @@ async fn test_commit_with_truncate_tables() {
         let mut found_table2_ssts = 0;
         for sub_level in &cg2.l0.sub_levels {
             for sst_info in &sub_level.table_infos {
-                if sst_info.table_ids.contains(&table_id_2.table_id) {
+                if sst_info.table_ids.contains(&table_id_2) {
                     found_table2_ssts += 1;
                 }
             }
@@ -3457,7 +3451,7 @@ async fn test_commit_with_truncate_tables() {
         for sub_level in &cg3.l0.sub_levels {
             for sst_info in &sub_level.table_infos {
                 assert!(
-                    !sst_info.table_ids.contains(&table_id_3.table_id),
+                    !sst_info.table_ids.contains(&table_id_3),
                     "SST {} should not contain table_id_3 after truncation",
                     sst_info.object_id
                 );
@@ -3489,7 +3483,7 @@ async fn test_commit_with_truncate_tables() {
     let sst5_table1: SstableInfo = SstableInfoInner {
         sst_id: 51.into(),
         object_id: 10.into(),
-        table_ids: vec![table_id_1.table_id],
+        table_ids: vec![table_id_1],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3499,7 +3493,7 @@ async fn test_commit_with_truncate_tables() {
     let sst5_table3: SstableInfo = SstableInfoInner {
         sst_id: 53.into(),
         object_id: 11.into(),
-        table_ids: vec![table_id_3.table_id],
+        table_ids: vec![table_id_3],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
@@ -3529,7 +3523,7 @@ async fn test_commit_with_truncate_tables() {
         assert_eq!(last_sub_level_ssts.len(), 1);
         assert_eq!(last_sst.object_id, sst5_table1.object_id);
         assert!(
-            last_sst.table_ids.contains(&table_id_1.table_id),
+            last_sst.table_ids.contains(&table_id_1),
             "New SST should contain table_id_1"
         );
 
@@ -3561,7 +3555,7 @@ async fn test_commit_with_truncate_tables() {
         assert_eq!(last_sub_level_ssts.len(), 1);
         assert_eq!(last_sst.object_id, sst5_table3.object_id);
         assert!(
-            last_sst.table_ids.contains(&table_id_3.table_id),
+            last_sst.table_ids.contains(&table_id_3),
             "New SST should contain table_id_3"
         );
 
@@ -3601,7 +3595,7 @@ async fn test_commit_with_truncate_tables() {
             for sub_level in &cg.l0.sub_levels {
                 for sst_info in &sub_level.table_infos {
                     assert!(
-                        !sst_info.table_ids.contains(&table_id.table_id),
+                        !sst_info.table_ids.contains(&table_id),
                         "SST {} should not contain table_id {:?} after truncation",
                         sst_info.object_id,
                         table_id
