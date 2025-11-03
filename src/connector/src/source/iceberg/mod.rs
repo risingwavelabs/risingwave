@@ -673,7 +673,7 @@ pub async fn scan_task_to_chunk_with_deletes(
     let data_file_path = data_file_scan_task.data_file_path.clone();
     let data_sequence_number = data_file_scan_task.sequence_number;
 
-    tracing::info!(
+    tracing::debug!(
         "scan_task_to_chunk_with_deletes: data_file={}, handle_delete_files={}, total_delete_files={}",
         data_file_path,
         handle_delete_files,
@@ -759,7 +759,7 @@ pub async fn scan_task_to_chunk_with_deletes(
     };
 
     // Build equality delete predicates
-    let equality_deletes: Option<(Vec<i32>, HashSet<Vec<Datum>>)> = if handle_delete_files {
+    let equality_deletes: Option<(Vec<String>, HashSet<Vec<Datum>>)> = if handle_delete_files {
         let equality_delete_tasks: Vec<_> = data_file_scan_task
             .deletes
             .iter()
@@ -773,6 +773,14 @@ pub async fn scan_task_to_chunk_with_deletes(
 
             if !equality_ids.is_empty() {
                 let mut delete_key_set: HashSet<Vec<Datum>> = HashSet::new();
+
+                let delete_schema = equality_delete_tasks[0].schema();
+                let delete_name_vec = equality_ids
+                    .iter()
+                    .filter_map(|id| delete_schema.name_by_field_id(*id))
+                    .map(|s| s.to_owned())
+                    .collect_vec();
+                let _ = delete_schema;
 
                 // Read all equality delete files and build the delete key set
                 for delete_task in equality_delete_tasks {
@@ -792,17 +800,21 @@ pub async fn scan_task_to_chunk_with_deletes(
                         // Build delete keys from equality columns
                         for row_idx in 0..delete_chunk.capacity() {
                             let mut key = Vec::with_capacity(equality_ids.len());
-                            for field_id in &equality_ids {
-                                let col = delete_chunk.column_at(*field_id as usize);
+                            for field_name in &delete_name_vec {
+                                let col_idx = record_batch
+                                    .schema()
+                                    .column_with_name(field_name)
+                                    .map(|(idx, _)| idx)
+                                    .unwrap();
+                                let col = delete_chunk.column_at(col_idx);
                                 key.push(col.value_at(row_idx).to_owned_datum());
                             }
                             delete_key_set.insert(key);
                         }
                     }
                 }
-                Some((equality_ids, delete_key_set))
+                Some((delete_name_vec, delete_key_set))
             } else {
-                tracing::warn!("No valid equality field names found");
                 None
             }
         } else {
@@ -861,12 +873,12 @@ pub async fn scan_task_to_chunk_with_deletes(
         }
 
         // Apply equality deletes
-        if let Some((ref equality_ids, ref delete_key_set)) = equality_deletes {
+        if let Some((ref delete_name_vec, ref delete_key_set)) = equality_deletes {
             let (columns, _) = chunk.into_parts();
 
             let mut deleted_count = 0;
 
-            let lookup_key: HashSet<Vec<DatumRef<'_>>> = delete_key_set
+            let to_remove_keys: HashSet<Vec<DatumRef<'_>>> = delete_key_set
                 .iter()
                 .map(|key| {
                     key.iter()
@@ -878,14 +890,18 @@ pub async fn scan_task_to_chunk_with_deletes(
             // Check each row against the delete set
             for (row_idx, item) in visibility.iter_mut().enumerate().take(batch_num_rows) {
                 if *item {
-                    let mut row_key = Vec::with_capacity(equality_ids.len());
-
-                    for col_idx in equality_ids {
-                        let datum = columns[*col_idx as usize].value_at(row_idx);
+                    let mut row_key = Vec::with_capacity(delete_name_vec.len());
+                    for field_name in delete_name_vec {
+                        let col_idx = record_batch
+                            .schema()
+                            .column_with_name(field_name)
+                            .map(|(idx, _)| idx)
+                            .unwrap();
+                        let datum = columns[col_idx].value_at(row_idx);
                         row_key.push(datum);
                     }
 
-                    if lookup_key.contains(&row_key) {
+                    if to_remove_keys.contains(&row_key) {
                         *item = false;
                         deleted_count += 1;
                     }

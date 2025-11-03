@@ -649,7 +649,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             &self.schema.data_types(),
                         );
 
-                        tracing::debug!(table_id = %refresh_args.table_id, "yielding to delete chunk: {}", to_delete_chunk.to_pretty());
                         yield Message::Chunk(to_delete_chunk);
                     }
 
