@@ -1027,7 +1027,7 @@ pub enum GroupDeltaCommon<T> {
     GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
-    TruncateTables(Vec<u32>),
+    TruncateTables(HashSet<TableId>),
 }
 
 pub type GroupDelta = GroupDeltaCommon<SstableInfo>;
@@ -1058,7 +1058,13 @@ where
                     .collect(),
             ),
             Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
-                GroupDeltaCommon::TruncateTables(pb_truncate_tables.table_ids)
+                GroupDeltaCommon::TruncateTables(
+                    pb_truncate_tables
+                        .table_ids
+                        .iter()
+                        .map(Into::into)
+                        .collect(),
+                )
             }
 
             None => panic!("delta_type is not set"),
@@ -1093,7 +1099,9 @@ where
                 })),
             },
             GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables { table_ids })),
+                delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
+                    table_ids: table_ids.iter().map(Into::into).collect(),
+                })),
             },
         }
     }
@@ -1124,7 +1132,7 @@ where
             },
             GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
-                    table_ids: table_ids.clone(),
+                    table_ids: table_ids.iter().map(Into::into).collect(),
                 })),
             },
         }
@@ -1157,7 +1165,13 @@ where
                     .collect(),
             ),
             Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
-                GroupDeltaCommon::TruncateTables(pb_truncate_tables.table_ids.clone())
+                GroupDeltaCommon::TruncateTables(
+                    pb_truncate_tables
+                        .table_ids
+                        .iter()
+                        .map(Into::into)
+                        .collect(),
+                )
             }
             None => panic!("delta_type is not set"),
         }

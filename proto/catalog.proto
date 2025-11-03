@@ -163,6 +163,7 @@ enum SinkType {
   SINK_TYPE_APPEND_ONLY = 1;
   SINK_TYPE_FORCE_APPEND_ONLY = 2;
   SINK_TYPE_UPSERT = 3;
+  SINK_TYPE_RETRACT = 4;
 }
 
 // Similar to `StreamSourceInfo`, and may replace `SinkType` later.

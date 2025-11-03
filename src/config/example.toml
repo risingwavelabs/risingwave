@@ -10,7 +10,7 @@ grpc_max_reset_stream = 200
 
 [server.heap_profiling]
 enable_auto = true
-threshold_auto = 0.8999999761581421
+threshold_auto = 0.9
 dir = "./"
 
 [meta]
@@ -211,7 +211,7 @@ connect_timeout_secs = 5
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
-shared_buffer_flush_ratio = 0.800000011920929
+shared_buffer_flush_ratio = 0.8
 shared_buffer_min_batch_flush_size_mb = 800
 imm_merge_threshold = 0
 write_conflict_detection_enabled = true

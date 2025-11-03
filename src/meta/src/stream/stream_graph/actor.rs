@@ -743,7 +743,7 @@ impl ActorGraphBuilder {
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = GlobalActorIdGen::new(env.id_gen_manager(), actor_len);
+        let id_gen = GlobalActorIdGen::new(env.actor_id_generator(), actor_len);
 
         // Build the actor graph and get the final state.
         let ActorGraphBuildStateInner {

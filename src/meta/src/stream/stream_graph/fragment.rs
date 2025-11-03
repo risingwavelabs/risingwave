@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
+use std::sync::atomic::AtomicU32;
 
 use anyhow::{Context, anyhow};
 use enum_as_inner::EnumAsInner;
@@ -349,11 +350,15 @@ impl StreamFragmentEdge {
     }
 }
 
-fn clone_fragment(fragment: &Fragment, id_generator_manager: &IdGeneratorManager) -> Fragment {
+fn clone_fragment(
+    fragment: &Fragment,
+    id_generator_manager: &IdGeneratorManager,
+    actor_id_counter: &AtomicU32,
+) -> Fragment {
     let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
         .to_global_id(0)
         .as_global_id();
-    let actor_id_gen = GlobalActorIdGen::new(id_generator_manager, fragment.actors.len() as _);
+    let actor_id_gen = GlobalActorIdGen::new(actor_id_counter, fragment.actors.len() as _);
     Fragment {
         fragment_id,
         fragment_type_mask: fragment.fragment_type_mask,
@@ -432,6 +437,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
     upstream_table: &PbTable,
     upstream_table_fragment_id: FragmentId,
     id_generator_manager: &IdGeneratorManager,
+    actor_id_counter: &AtomicU32,
 ) -> MetaResult<(Fragment, Vec<PbColumnCatalog>, Option<PbTable>)> {
     let mut new_sink_columns = sink.columns.clone();
     fn extend_sink_columns(
@@ -456,7 +462,11 @@ pub fn rewrite_refresh_schema_sink_fragment(
         name.clone()
     });
 
-    let mut new_sink_fragment = clone_fragment(original_sink_fragment, id_generator_manager);
+    let mut new_sink_fragment = clone_fragment(
+        original_sink_fragment,
+        id_generator_manager,
+        actor_id_counter,
+    );
     let sink_node = &mut new_sink_fragment.nodes;
     let PbNodeBody::Sink(sink_node_body) = sink_node.node_body.as_mut().unwrap() else {
         return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());
@@ -488,11 +498,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
     // following logic in <StreamSink as Explain>::distill
     sink_node.identity = {
         let sink_type = SinkType::from_proto(sink.sink_type());
-        let sink_type_str = if sink_type.is_append_only() {
-            "append-only"
-        } else {
-            "upsert"
-        };
+        let sink_type_str = sink_type.type_str();
         let column_names = new_sink_columns
             .iter()
             .map(|col| {
@@ -501,7 +507,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
                     .to_string()
             })
             .join(", ");
-        let downstream_pk = if sink_type.is_upsert() {
+        let downstream_pk = if !sink_type.is_append_only() {
             let downstream_pk = sink
                 .downstream_pk
                 .iter()
@@ -810,12 +816,12 @@ impl StreamFragmentGraph {
     }
 
     /// Fit the internal tables' `table_id`s according to the given mapping.
-    pub fn fit_internal_table_ids_with_mapping(&mut self, mut matches: HashMap<u32, Table>) {
+    pub fn fit_internal_table_ids_with_mapping(&mut self, mut matches: HashMap<TableId, Table>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
-                    let target = matches.remove(&table.id).unwrap_or_else(|| {
+                    let target = matches.remove(&table.id.into()).unwrap_or_else(|| {
                         panic!("no matching table for table {}({})", table.id, table.name)
                     });
                     table.id = target.id;

@@ -97,7 +97,7 @@ where
         } else {
             Bound::Included(&table_end)
         },
-    ) && info.table_ids.binary_search(&table_id.table_id()).is_ok()
+    ) && info.table_ids.binary_search(&table_id).is_ok()
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
