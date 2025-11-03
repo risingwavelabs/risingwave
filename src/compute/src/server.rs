@@ -37,12 +37,13 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common::{DATA_DIRECTORY, GIT_SHA, RW_VERSION, STATE_STORE_URL};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::iceberg::GLOBAL_ICEBERG_SCAN_METRICS;
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
+use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -83,7 +84,6 @@ use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
-
 /// Bootstraps the compute-node.
 ///
 /// Returns when the `shutdown` token is triggered.
@@ -106,7 +106,7 @@ pub async fn compute_node_serve(
     // Initialize all the configs
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
-
+    register_jvm_builder();
     // Initialize operator lru cache global sequencer args.
     init_global_sequencer_args(
         config
@@ -137,6 +137,7 @@ pub async fn compute_node_serve(
     .await;
 
     let state_store_url = system_params.state_store();
+    let data_directory = system_params.data_directory();
 
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
@@ -204,7 +205,23 @@ pub async fn compute_node_serve(
             .build()
             .ok(),
     };
+    // Store the state_store_url in a static OnceLock for later use in JNI crate
+    // Check the return value and if the variable is set, assert that the value is the same.
+    if let Err(existing_url) = STATE_STORE_URL.set(state_store_url.to_owned()) {
+        assert_eq!(
+            existing_url, state_store_url,
+            "STATE_STORE_URL already set with different value"
+        );
+    }
 
+    // Store the data_directory in a static OnceLock for later use in JNI crate
+    // To be extra safe, check the return value and if the variable is set, assert that the value is the same
+    if let Err(existing_dir) = DATA_DIRECTORY.set(data_directory.to_owned()) {
+        assert_eq!(
+            existing_dir, data_directory,
+            "DATA_DIRECTORY already set with different value"
+        );
+    }
     LicenseManager::get().refresh(system_params.license_key());
     let state_store = StateStoreImpl::new(
         state_store_url,

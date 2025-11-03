@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use anyhow::Context;
-use risingwave_jni_core::jvm_runtime::{JVM, execute_with_jni_env};
+use risingwave_common::global_jvm::JVM;
+use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_jni_core::{call_method, call_static_method};
 
 pub fn commit_cdc_offset(source_id: u64, encoded_offset: String) -> anyhow::Result<()> {

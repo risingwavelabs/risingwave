@@ -413,6 +413,18 @@ macro_rules! for_all_plain_native_methods {
 
                 static native boolean iteratorNext(long pointer);
 
+                public static native void initObjectStoreForTest(String stateStoreUrl, String dataDirectory);
+
+                public static native void putObject(String objectName, byte[] data);
+
+                public static native String getObjectStoreType();
+
+                public static native void deleteObjects(String dir);
+
+                public static native byte[] getObject(String objectName);
+
+                public static native String[] listObject(String dir);
+
                 static native void iteratorClose(long pointer);
 
                 static native long newStreamChunkFromPayload(byte[] streamChunkPayload);
@@ -869,6 +881,11 @@ mod tests {
                 defaultVnodeCount                        ()I,
                 iteratorNewStreamChunk                   (J)J,
                 iteratorNext                             (J)Z,
+                putObject                                (Ljava/lang/String;[B)V,
+                getObjectStoreType                       ()Ljava/lang/String;,
+                deleteObjects                            (Ljava/lang/String;)V,
+                getObject                                (Ljava/lang/String;)[B,
+                listObject                               (Ljava/lang/String;)[Ljava/lang/String;,
                 iteratorClose                            (J)V,
                 newStreamChunkFromPayload                ([B)J,
                 newStreamChunkFromPretty                 (Ljava/lang/String;)J,
