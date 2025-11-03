@@ -739,7 +739,7 @@ fn gen_table_plan_inner(
         .get_database_and_schema_id_for_create(schema_name)?;
 
     let session = context.session_ctx().clone();
-    let retention_seconds = context.with_options().retention_seconds();
+    let _retention_seconds = context.with_options().retention_seconds();
 
     let source_node: PlanRef = LogicalSource::new(
         source_catalog.clone().map(Rc::new),
