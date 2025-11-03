@@ -74,6 +74,29 @@ async fn get_object_store() -> Arc<ObjectStoreImpl> {
         .clone()
 }
 
+/// Initialize STATE_STORE_URL and DATA_DIRECTORY for integration tests.
+/// Must be called before any schema history operations if compute node is not running.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_initObjectStoreForTest(
+    env: EnvParam<'_>,
+    state_store_url: JString<'_>,
+    data_directory: JString<'_>,
+) {
+    execute_and_catch(env, move |env| {
+        let state_store_url_str = env.get_string(&state_store_url).map_err(|e| anyhow!(e))?;
+        let state_store_url_str: Cow<'_, str> = (&state_store_url_str).into();
+
+        let data_directory_str = env.get_string(&data_directory).map_err(|e| anyhow!(e))?;
+        let data_directory_str: Cow<'_, str> = (&data_directory_str).into();
+
+        // Set the global variables (only if not already set)
+        let _ = STATE_STORE_URL.set(state_store_url_str.to_string());
+        let _ = DATA_DIRECTORY.set(data_directory_str.to_string());
+
+        Ok(())
+    });
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
     env: EnvParam<'_>,
