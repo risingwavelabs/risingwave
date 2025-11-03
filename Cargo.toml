@@ -146,7 +146,7 @@ aws-smithy-types = { version = "1.3", default-features = false, features = [
 ] }
 aws-types = "1.3"
 axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
-axum-extra = "0.9"
+axum-extra = "0.12"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.7", features = ["async_futures"] }
