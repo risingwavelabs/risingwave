@@ -53,17 +53,17 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for LocalityProvider<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        let mut key_columns = self.locality_columns.clone();
+        let mut stream_key = self.locality_columns.clone();
         if let Some(input_stream_key) = self.input.stream_key() {
             for col in input_stream_key {
-                if !key_columns.contains(&col) {
-                    key_columns.push(*col);
+                if !stream_key.contains(col) {
+                    stream_key.push(*col);
                 }
             }
         } else {
             return None;
         }
-        Some(key_columns)
+        Some(stream_key)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
