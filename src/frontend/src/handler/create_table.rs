@@ -777,13 +777,29 @@ fn gen_table_plan_inner(
         .into());
     }
 
-    // if !append_only && retention_seconds.is_some() {
-    //     return Err(ErrorCode::NotSupported(
-    //         "Defining retention seconds on table requires the table to be append only.".to_owned(),
-    //         "Use the key words `APPEND ONLY`".to_owned(),
-    //     )
-    //     .into());
-    // }
+    if !append_only && retention_seconds.is_some() {
+        if session
+            .config()
+            .unsafe_enable_storage_retention_for_non_append_only_tables()
+        {
+            tracing::warn!(
+                "Storage retention is enabled for non-append-only table {}. This may lead to stream inconsistency.",
+                table_name
+            );
+            const NOTICE: &str = "Storage retention is enabled for non-append-only table. \
+                                  This may lead to stream inconsistency and unrecoverable \
+                                  node failure if there is any row INSERT/UPDATE/DELETE operation \
+                                  corresponding to the TTLed primary keys";
+            session.notice_to_user(NOTICE);
+        } else {
+            return Err(ErrorCode::NotSupported(
+                "Defining retention seconds on table requires the table to be append only."
+                    .to_owned(),
+                "Use the key words `APPEND ONLY`".to_owned(),
+            )
+            .into());
+        }
+    }
 
     let materialize =
         plan_root.gen_table_plan(context, table_name, database_id, schema_id, info, props)?;

@@ -430,6 +430,12 @@ pub struct SessionConfig {
     /// is still running. Set to 0 to disable notifications. Defaults to 30 seconds.
     #[parameter(default = 30u32)]
     slow_ddl_notification_secs: u32,
+
+    /// Unsafe: Enable storage retention for non-append-only tables.
+    /// Enabling this can lead to streaming inconsistency and node panic 
+    /// if there is any row INSERT/UPDATE/DELETE operation corresponding to the primary key of the TTLed rows.
+    #[parameter(default = false)]
+    unsafe_enable_storage_retention_for_non_append_only_tables: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

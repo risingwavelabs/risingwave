@@ -1,6 +1,3 @@
-statement error
-create table t(v int) with (retention_seconds = 5);
-
 statement ok
 create table t(v int) APPEND ONLY with (retention_seconds = 5);
 
@@ -23,6 +20,26 @@ select * from i;
 ----
 1
 
+statement error
+create table t_non_append_only(v int) with (retention_seconds = 5);
+
+statement ok
+set unsafe_enable_storage_retention_for_non_append_only_tables to true;
+
+statement ok
+create table t_non_append_only(v int) with (retention_seconds = 5);
+
+statement ok
+insert into t_non_append_only values(1);
+
+query I
+select * from t_non_append_only;
+----
+1
+
+statement ok
+flush;
+
 statement ok
 select pg_sleep(10);
 
@@ -34,5 +51,12 @@ query I
 select * from i;
 ----
 
+query I
+select * from t_non_append_only;
+----
+
 statement ok
 drop table t;
+
+statement ok
+drop table t_non_append_only;
