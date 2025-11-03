@@ -41,6 +41,7 @@ use crate::controller::scale::{
     FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
     find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
 };
+use crate::error::bail_invalid_parameter;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
     ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, StreamContext,
@@ -357,7 +358,7 @@ impl ScaleController {
 
     pub async fn reschedule_fragment_inplace(
         &self,
-        policy: HashMap<risingwave_meta_model::FragmentId, ParallelismPolicy>,
+        policy: HashMap<risingwave_meta_model::FragmentId, Option<StreamingParallelism>>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if policy.is_empty() {
@@ -394,37 +395,53 @@ impl ScaleController {
         for ensemble in find_fragment_no_shuffle_dags_detailed(&txn, &fragment_id_list).await? {
             let entry_fragment_ids = ensemble.entry_fragments().collect_vec();
 
-            let parallelisms = entry_fragment_ids
+            let desired_parallelism = match entry_fragment_ids
                 .iter()
-                .filter_map(|fragment_id| policy.get(fragment_id))
+                .filter_map(|fragment_id| policy.get(fragment_id).cloned())
                 .dedup()
-                .collect_vec();
-
-            let parallelism = match parallelisms.as_slice() {
+                .collect_vec()
+                .as_slice()
+            {
                 [] => {
-                    bail!(
-                        "no reschedule policy specified for fragments in the no-shuffle ensemble: {:?}",
+                    bail_invalid_parameter!(
+                        "none of the entry fragments {:?} were included in the reschedule request; \
+                         provide at least one entry fragment id",
                         entry_fragment_ids
                     );
                 }
-                [policy] => &policy.parallelism,
-                _ => {
+                [parallelism] => parallelism.clone(),
+                parallelisms => {
                     bail!(
                         "conflicting reschedule policies for fragments in the same no-shuffle ensemble: {:?}",
                         parallelisms
-                            .iter()
-                            .map(|policy| &policy.parallelism)
-                            .collect_vec()
                     );
                 }
             };
 
-            for fragment_id in entry_fragment_ids {
-                let fragment = fragment::ActiveModel {
-                    fragment_id: Set(fragment_id),
-                    parallelism: Set(Some(parallelism.clone())),
-                    ..Default::default()
-                };
+            let fragments = Fragment::find()
+                .filter(fragment::Column::FragmentId.is_in(entry_fragment_ids))
+                .all(&txn)
+                .await?;
+
+            debug_assert!(
+                fragments
+                    .iter()
+                    .map(|fragment| fragment.parallelism.as_ref())
+                    .all_equal(),
+                "entry fragments in the same ensemble should share the same parallelism"
+            );
+
+            let current_parallelism = fragments
+                .first()
+                .and_then(|fragment| fragment.parallelism.clone());
+
+            if current_parallelism == desired_parallelism {
+                continue;
+            }
+
+            for fragment in fragments {
+                let mut fragment = fragment.into_active_model();
+                fragment.parallelism = Set(desired_parallelism.clone());
                 fragment.update(&txn).await?;
             }
 

@@ -43,7 +43,8 @@ use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
-    SchemaId, SecretId, SinkId, SourceId, SubscriptionId, UserId, ViewId, WorkerId,
+    SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
+    WorkerId,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
@@ -80,8 +81,9 @@ use crate::manager::{
     NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
-    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, StreamContext,
-    StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation,
+    FragmentId as CatalogFragmentId, StreamContext, StreamJobFragments, StreamJobFragmentsToCreate,
+    TableParallelism,
 };
 use crate::stream::cdc::{
     is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
@@ -516,6 +518,24 @@ impl DdlController {
         }
         self.stream_manager
             .reschedule_cdc_table_backfill(job_id, target)
+            .await
+    }
+
+    pub async fn reschedule_fragments(
+        &self,
+        fragment_targets: HashMap<FragmentId, Option<StreamingParallelism>>,
+    ) -> MetaResult<()> {
+        tracing::info!(
+            "altering parallelism for fragments {:?}",
+            fragment_targets.keys()
+        );
+        let fragment_targets = fragment_targets
+            .into_iter()
+            .map(|(fragment_id, parallelism)| (fragment_id as CatalogFragmentId, parallelism))
+            .collect();
+
+        self.stream_manager
+            .reschedule_fragments(fragment_targets)
             .await
     }
 

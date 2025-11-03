@@ -1177,6 +1177,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn alter_fragment_parallelism(
+        &self,
+        _fragment_ids: Vec<u32>,
+        _parallelism: Option<PbTableParallelism>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn get_cluster_recovery_status(&self) -> RpcResult<RecoveryStatus> {
         Ok(RecoveryStatus::StatusRunning)
     }

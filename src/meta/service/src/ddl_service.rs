@@ -1041,6 +1041,52 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AlterParallelismResponse {}))
     }
 
+    async fn alter_fragment_parallelism(
+        &self,
+        request: Request<AlterFragmentParallelismRequest>,
+    ) -> Result<Response<AlterFragmentParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let fragment_ids = req.fragment_ids;
+        if fragment_ids.is_empty() {
+            return Err(Status::invalid_argument(
+                "at least one fragment id must be provided",
+            ));
+        }
+
+        let parallelism = match req.parallelism {
+            Some(parallelism) => {
+                let streaming_parallelism = match parallelism.get_parallelism()? {
+                    Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                        StreamingParallelism::Fixed(*parallelism as _)
+                    }
+                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => {
+                        StreamingParallelism::Adaptive
+                    }
+                    _ => bail_unavailable!(),
+                };
+                Some(streaming_parallelism)
+            }
+            None => None,
+        };
+
+        let fragment_targets = fragment_ids
+            .into_iter()
+            .map(|fragment_id| {
+                (
+                    fragment_id as risingwave_meta_model::FragmentId,
+                    parallelism.clone(),
+                )
+            })
+            .collect();
+
+        self.ddl_controller
+            .reschedule_fragments(fragment_targets)
+            .await?;
+
+        Ok(Response::new(AlterFragmentParallelismResponse {}))
+    }
+
     /// Auto schema change for cdc sources,
     /// called by the source parser when a schema change is detected.
     async fn auto_schema_change(

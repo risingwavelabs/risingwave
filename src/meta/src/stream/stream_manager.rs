@@ -820,7 +820,50 @@ impl GlobalStreamManager {
             }
         };
 
-        let fragment_policy = HashMap::from([(cdc_fragment_id, parallelism_policy.clone())]);
+        let fragment_policy = HashMap::from([(
+            cdc_fragment_id,
+            Some(parallelism_policy.parallelism.clone()),
+        )]);
+
+        let commands = self
+            .scale_controller
+            .reschedule_fragment_inplace(fragment_policy, workers)
+            .await?;
+
+        let _source_pause_guard = self.source_manager.pause_tick().await;
+
+        for (database_id, command) in commands {
+            self.barrier_scheduler
+                .run_command(database_id, command)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn reschedule_fragments(
+        &self,
+        fragment_targets: HashMap<FragmentId, Option<StreamingParallelism>>,
+    ) -> MetaResult<()> {
+        if fragment_targets.is_empty() {
+            return Ok(());
+        }
+
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
+        let workers = self
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await?
+            .into_iter()
+            .filter(|w| w.is_streaming_schedulable())
+            .map(|worker| (worker.id as i32, worker))
+            .collect();
+
+        let fragment_policy = fragment_targets
+            .into_iter()
+            .map(|(fragment_id, parallelism)| (fragment_id as _, parallelism))
+            .collect();
 
         let commands = self
             .scale_controller
