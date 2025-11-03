@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::gap_fill_types::FillStrategy;
+use risingwave_common::gap_fill::FillStrategy;
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::EowcGapFillNode;
 use risingwave_storage::StateStore;

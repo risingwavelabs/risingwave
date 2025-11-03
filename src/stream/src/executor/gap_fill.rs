@@ -17,12 +17,12 @@ use std::ops::Bound;
 
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::Op;
-use risingwave_common::gap_fill_types::FillStrategy;
+use risingwave_common::gap_fill::{
+    FillStrategy, apply_interpolation_step, calculate_interpolation_step,
+};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
-use risingwave_common::types::{
-    CheckedAdd, Datum, Decimal, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
-};
+use risingwave_common::types::{CheckedAdd, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common_estimate_size::EstimateSize;
@@ -663,71 +663,6 @@ impl<S: StateStore> GapFillExecutor<S> {
         }
     }
 
-    /// Calculates the step size for interpolation between two values.
-    ///
-    /// # Parameters
-    /// - `d1`: The starting value as a `Datum`.
-    /// - `d2`: The ending value as a `Datum`.
-    /// - `steps`: The number of steps to interpolate between `d1` and `d2`.
-    ///
-    /// # Returns
-    /// Returns a `Datum` representing the step size for each interpolation step,
-    /// or `None` if the input values are not compatible or `steps` is zero.
-    ///
-    /// # Calculation
-    /// For supported types, computes `(d2 - d1) / steps` and returns the result as a `Datum`.
-    fn calculate_step(d1: Datum, d2: Datum, steps: usize) -> Datum {
-        let (Some(s1), Some(s2)) = (d1, d2) else {
-            return None;
-        };
-        if steps == 0 {
-            debug_assert!(
-                steps != 0,
-                "GapFillExecutor::calculate_step called with steps == 0, which may indicate a logic error."
-            );
-            return None;
-        }
-        match (ScalarRefImpl::from(&s1), ScalarRefImpl::from(&s2)) {
-            (ScalarRefImpl::Int16(v1), ScalarRefImpl::Int16(v2)) => {
-                Some(ScalarImpl::Int16((v2 - v1) / steps as i16))
-            }
-            (ScalarRefImpl::Int32(v1), ScalarRefImpl::Int32(v2)) => {
-                Some(ScalarImpl::Int32((v2 - v1) / steps as i32))
-            }
-            (ScalarRefImpl::Int64(v1), ScalarRefImpl::Int64(v2)) => {
-                Some(ScalarImpl::Int64((v2 - v1) / steps as i64))
-            }
-            (ScalarRefImpl::Float32(v1), ScalarRefImpl::Float32(v2)) => {
-                Some(ScalarImpl::Float32((v2 - v1) / steps as f32))
-            }
-            (ScalarRefImpl::Float64(v1), ScalarRefImpl::Float64(v2)) => {
-                Some(ScalarImpl::Float64((v2 - v1) / steps as f64))
-            }
-            (ScalarRefImpl::Decimal(v1), ScalarRefImpl::Decimal(v2)) => {
-                Some(ScalarImpl::Decimal((v2 - v1) / Decimal::from(steps)))
-            }
-            _ => None,
-        }
-    }
-
-    /// Mutates the `current` datum by adding the value of `step` to it.
-    /// This function is used during the interpolation process in gap filling,
-    /// where it incrementally updates the datum to generate intermediate values
-    /// between known data points.
-    fn apply_step(current: &mut Datum, step: &ScalarImpl) {
-        if let Some(curr) = current.as_mut() {
-            match (curr, step) {
-                (ScalarImpl::Int16(v1), &ScalarImpl::Int16(v2)) => *v1 += v2,
-                (ScalarImpl::Int32(v1), &ScalarImpl::Int32(v2)) => *v1 += v2,
-                (ScalarImpl::Int64(v1), &ScalarImpl::Int64(v2)) => *v1 += v2,
-                (ScalarImpl::Float32(v1), &ScalarImpl::Float32(v2)) => *v1 += v2,
-                (ScalarImpl::Float64(v1), &ScalarImpl::Float64(v2)) => *v1 += v2,
-                (ScalarImpl::Decimal(v1), &ScalarImpl::Decimal(v2)) => *v1 = *v1 + v2,
-                _ => (),
-            }
-        }
-    }
-
     /// Generates interpolated rows between two time points (`prev_row` and `curr_row`) using a static interval.
     ///
     /// # Parameters
@@ -838,9 +773,9 @@ impl<S: StateStore> GapFillExecutor<S> {
         for i in 0..prev_row.len() {
             if let Some(strategy) = fill_columns.get(&i) {
                 if matches!(strategy, FillStrategy::Interpolate) {
-                    let step = Self::calculate_step(
-                        prev_row.datum_at(i).to_owned_datum(),
-                        curr_row.datum_at(i).to_owned_datum(),
+                    let step = calculate_interpolation_step(
+                        prev_row.datum_at(i),
+                        curr_row.datum_at(i),
                         row_count + 1,
                     );
                     interpolation_steps.push(step.clone());
@@ -881,7 +816,7 @@ impl<S: StateStore> GapFillExecutor<S> {
                         FillStrategy::Interpolate => {
                             // Apply interpolation step and update cumulative value
                             if let Some(step) = &interpolation_steps[col_idx] {
-                                Self::apply_step(&mut interpolation_states[col_idx], step);
+                                apply_interpolation_step(&mut interpolation_states[col_idx], step);
                                 interpolation_states[col_idx].clone()
                             } else {
                                 // If interpolation step is None, fill with NULL

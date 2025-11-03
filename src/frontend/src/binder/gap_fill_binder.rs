@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::gap_fill_types::FillStrategy;
+use risingwave_common::gap_fill::FillStrategy;
 
 use crate::expr::InputRef;
 
