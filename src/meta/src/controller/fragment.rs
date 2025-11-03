@@ -565,7 +565,7 @@ impl CatalogController {
             .remove(&job_id);
 
         Self::compose_table_fragments(
-            job_id as _,
+            job_id,
             job_info.job_status.into(),
             job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_actors,
@@ -948,7 +948,7 @@ impl CatalogController {
             table_fragments.insert(
                 job.job_id,
                 Self::compose_table_fragments(
-                    job.job_id as _,
+                    job.job_id,
                     job.job_status.into(),
                     job.timezone.map(|tz| PbStreamContext { timezone: tz }),
                     fragment_actors,
@@ -1087,7 +1087,7 @@ impl CatalogController {
 
         let fragment_ids = fragments.iter().map(|f| f.fragment_id).collect_vec();
 
-        let job_parallelisms: HashMap<ObjectId, StreamingParallelism> = if fragments.is_empty() {
+        let job_parallelisms: HashMap<JobId, StreamingParallelism> = if fragments.is_empty() {
             HashMap::new()
         } else {
             let job_ids = fragments.iter().map(|f| f.job_id).unique().collect_vec();
