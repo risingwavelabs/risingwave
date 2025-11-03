@@ -170,7 +170,7 @@ impl RefreshManager {
 
         if table.optional_associated_source_id
             != Some(OptionalAssociatedSourceId::AssociatedSourceId(
-            associated_source_id.as_raw_id(),
+                associated_source_id.as_raw_id(),
             ))
         {
             return Err(MetaError::invalid_parameter(format!(

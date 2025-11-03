@@ -28,9 +28,9 @@ use itertools::Itertools;
 use risingwave_common::hash::{
     ActorAlignmentId, ActorAlignmentMapping, ActorMapping, VnodeCountCompat,
 };
+use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_common::{bail, hash};
-use risingwave_common::id::JobId;
 use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;

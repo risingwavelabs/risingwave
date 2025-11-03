@@ -20,12 +20,13 @@ use std::sync::Arc;
 use anyhow::Context;
 use futures::future::try_join_all;
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::{DatabaseId};
+use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_common::must_match;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
 use tokio::task::JoinHandle;
-use risingwave_common::id::JobId;
+
 use crate::barrier::checkpoint::CheckpointControl;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::GlobalBarrierWorkerContext;
@@ -63,13 +64,8 @@ pub(super) struct CompleteBarrierTask {
     pub(super) notifiers: Vec<Notifier>,
     /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`)))
     #[expect(clippy::type_complexity)]
-    pub(super) epoch_infos: HashMap<
-        DatabaseId,
-        (
-            Option<(CommandContext, HistogramTimer)>,
-            Vec<(JobId, u64)>,
-        ),
-    >,
+    pub(super) epoch_infos:
+        HashMap<DatabaseId, (Option<(CommandContext, HistogramTimer)>, Vec<(JobId, u64)>)>,
     /// Source IDs that have finished listing data and need `ListFinish` commands
     pub(super) list_finished_source_ids: Vec<u32>,
     /// Source IDs that have finished loading data and need `LoadFinish` commands

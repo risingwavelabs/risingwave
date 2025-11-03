@@ -306,7 +306,7 @@ pub struct NonPkPrefixSkipWatermarkState {
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 
     last_serde: Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
-    last_table_id: Option<u32>,
+    last_table_id: Option<TableId>,
 }
 
 impl NonPkPrefixSkipWatermarkState {
@@ -344,9 +344,9 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
             {
                 if self
                     .last_table_id
-                    .is_none_or(|last_table_id| last_table_id != key_table_id.as_raw_id())
+                    .is_none_or(|last_table_id| last_table_id != key_table_id)
                 {
-                    self.last_table_id = Some(key_table_id.as_raw_id());
+                    self.last_table_id = Some(key_table_id);
                     self.last_serde = self.compaction_catalog_agent_ref.watermark_serde(*table_id);
                 }
             }

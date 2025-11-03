@@ -140,13 +140,9 @@ impl HummockManager {
         &self,
         table_fragments: &[crate::model::StreamJobFragments],
     ) {
-        self.unregister_table_ids(
-            table_fragments
-                .iter()
-                .flat_map(|t| t.all_table_ids()),
-        )
-        .await
-        .unwrap();
+        self.unregister_table_ids(table_fragments.iter().flat_map(|t| t.all_table_ids()))
+            .await
+            .unwrap();
     }
 
     /// Unregisters stale members and groups

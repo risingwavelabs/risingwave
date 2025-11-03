@@ -387,12 +387,7 @@ impl MetadataManager {
     )> {
         let (upstream_root_fragments, actors) = self
             .catalog_controller
-            .get_root_fragments(
-                upstream_table_ids
-                    .iter()
-                    .map(|id| id.as_job_id())
-                    .collect(),
-            )
+            .get_root_fragments(upstream_table_ids.iter().map(|id| id.as_job_id()).collect())
             .await?;
 
         let actors = actors
@@ -549,14 +544,14 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn update_backfill_rate_limit_by_table_id(
+    pub async fn update_backfill_rate_limit_by_job_id(
         &self,
-        table_id: TableId,
+        job_id: JobId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
-            .update_backfill_rate_limit_by_job_id(table_id.as_raw_id() as _, rate_limit)
+            .update_backfill_rate_limit_by_job_id(job_id, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()
@@ -571,7 +566,7 @@ impl MetadataManager {
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
-            .update_sink_rate_limit_by_job_id(sink_id as _, rate_limit)
+            .update_sink_rate_limit_by_job_id(sink_id, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()
@@ -579,14 +574,14 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn update_dml_rate_limit_by_table_id(
+    pub async fn update_dml_rate_limit_by_job_id(
         &self,
-        table_id: TableId,
+        job_id: JobId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
-            .update_dml_rate_limit_by_job_id(table_id.as_raw_id() as _, rate_limit)
+            .update_dml_rate_limit_by_job_id(job_id, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()

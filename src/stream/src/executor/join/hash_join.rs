@@ -942,9 +942,10 @@ pub struct JoinHashMapPostCommit<'a, K: HashKey, S: StateStore, E: JoinEncoding>
     inner: &'a mut JoinHashMapInner<K, E>,
 }
 
+use risingwave_common::catalog::TableId;
 use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
-use risingwave_common::catalog::TableId;
+
 use super::*;
 use crate::executor::prelude::{Stream, try_stream};
 

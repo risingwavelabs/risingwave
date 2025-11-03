@@ -24,6 +24,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::Database;
@@ -33,7 +34,7 @@ use tokio::sync::{oneshot, watch};
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::{info, warn};
-use risingwave_common::id::JobId;
+
 use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::barrier::context::GlobalBarrierWorkerContext;

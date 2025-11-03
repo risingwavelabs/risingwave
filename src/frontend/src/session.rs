@@ -1288,7 +1288,7 @@ impl SessionImpl {
 
     pub fn list_change_log_epochs(
         &self,
-        table_id: u32,
+        table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {

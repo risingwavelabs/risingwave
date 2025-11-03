@@ -59,6 +59,7 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
+    use risingwave_common::id::JobId;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
@@ -80,7 +81,7 @@ pub(super) mod handlers {
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use thiserror_ext::AsReport;
-    use risingwave_common::id::JobId;
+
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
     use crate::rpc::await_tree::{dump_cluster_await_tree, dump_worker_node_await_tree};

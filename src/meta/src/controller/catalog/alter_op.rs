@@ -374,10 +374,9 @@ impl CatalogController {
                         )
                         .filter(
                             object::Column::Oid.is_in(
-                                index_ids
-                                    .iter()
-                                    .cloned()
-                                    .chain(table_ids.iter().map(|table_id| table_id.as_raw_id() as _)),
+                                index_ids.iter().cloned().chain(
+                                    table_ids.iter().map(|table_id| table_id.as_raw_id() as _),
+                                ),
                             ),
                         )
                         .exec(&txn)
@@ -594,10 +593,9 @@ impl CatalogController {
                         )
                         .filter(
                             object::Column::Oid.is_in(
-                                index_ids
-                                    .iter()
-                                    .cloned()
-                                    .chain(table_ids.iter().map(|table_id| table_id.as_raw_id() as _)),
+                                index_ids.iter().cloned().chain(
+                                    table_ids.iter().map(|table_id| table_id.as_raw_id() as _),
+                                ),
                             ),
                         )
                         .exec(&txn)

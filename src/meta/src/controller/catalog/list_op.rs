@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::catalog::FragmentTypeMask;
-use sea_orm::prelude::DateTime;
 use risingwave_common::id::JobId;
+use sea_orm::prelude::DateTime;
+
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
 

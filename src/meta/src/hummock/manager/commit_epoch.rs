@@ -490,7 +490,7 @@ fn on_handle_add_new_table(
         if let Some(info) = state_table_info.info().get(table_id) {
             return Err(Error::CompactionGroup(format!(
                 "table {} already exist {:?}",
-                table_id.as_raw_id(), info,
+                table_id, info,
             )));
         }
         table_compaction_group_mapping.insert(*table_id, compaction_group_id);

@@ -615,10 +615,7 @@ impl CatalogController {
             .await?)
     }
 
-    pub async fn get_streaming_job_status(
-        &self,
-        streaming_job_id: JobId,
-    ) -> MetaResult<JobStatus> {
+    pub async fn get_streaming_job_status(&self, streaming_job_id: JobId) -> MetaResult<JobStatus> {
         let inner = self.inner.read().await;
         let status = StreamingJob::find_by_id(streaming_job_id)
             .select_only()

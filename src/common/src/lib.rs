@@ -84,6 +84,7 @@ pub mod field_generator;
 pub mod gap_fill_types;
 pub mod global_jvm;
 pub mod hash;
+pub mod id;
 pub mod log;
 pub mod memory;
 pub mod metrics_reader;
@@ -93,7 +94,6 @@ pub mod transaction;
 pub mod types;
 pub mod vector;
 pub mod vnode_mapping;
-pub mod id;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};

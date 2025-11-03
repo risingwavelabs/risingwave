@@ -1927,7 +1927,9 @@ pub async fn rename_relation_refer(
 
     for obj in objs {
         match obj.obj_type {
-            ObjectType::Table => rename_relation_ref!(Table, table, table_id, TableId::new(obj.oid as _)),
+            ObjectType::Table => {
+                rename_relation_ref!(Table, table, table_id, TableId::new(obj.oid as _))
+            }
             ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
             ObjectType::Subscription => {
                 rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)

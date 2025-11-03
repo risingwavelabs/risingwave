@@ -626,9 +626,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name
-            .values()
-            .filter(|v| v.is_internal_table() && has_access_to_object(user, v.id.as_raw_id(), v.owner))
+        self.table_by_name.values().filter(|v| {
+            v.is_internal_table() && has_access_to_object(user, v.id.as_raw_id(), v.owner)
+        })
     }
 
     /// Iterate all non-internal tables, including user tables, materialized views and indices.

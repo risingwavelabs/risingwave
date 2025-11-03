@@ -1093,7 +1093,8 @@ impl CatalogController {
 
         if job_type != ObjectType::Index {
             updated_user_info =
-                grant_default_privileges_automatically(&txn, job_id.as_raw_id() as ObjectId).await?;
+                grant_default_privileges_automatically(&txn, job_id.as_raw_id() as ObjectId)
+                    .await?;
         }
         txn.commit().await?;
 
@@ -1347,11 +1348,14 @@ impl CatalogController {
                 })
             }
             StreamingJobType::Source => {
-                let (source, source_obj) = Source::find_by_id(original_job_id.as_raw_id() as ObjectId)
-                    .find_also_related(Object)
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("object", original_job_id))?;
+                let (source, source_obj) =
+                    Source::find_by_id(original_job_id.as_raw_id() as ObjectId)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("object", original_job_id)
+                        })?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Source(
                         ObjectModel(source, source_obj.unwrap()).into(),
@@ -1639,7 +1643,7 @@ impl CatalogController {
     // return the actor_ids to be applied
     pub async fn mutate_fragments_by_job_id(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
         // returns true if the mutation is applied
         mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> MetaResult<bool>,
         // error message when no relevant fragments is found
@@ -1753,7 +1757,7 @@ impl CatalogController {
     // return the actor_ids to be applied
     pub async fn update_backfill_rate_limit_by_job_id(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_backfill_rate_limit =
@@ -1797,7 +1801,7 @@ impl CatalogController {
     // return the actor_ids to be applied
     pub async fn update_sink_rate_limit_by_job_id(
         &self,
-        job_id: ObjectId,
+        sink_id: SinkId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_sink_rate_limit =
@@ -1820,13 +1824,17 @@ impl CatalogController {
                 found
             };
 
-        self.mutate_fragments_by_job_id(job_id, update_sink_rate_limit, "sink node not found")
-            .await
+        self.mutate_fragments_by_job_id(
+            JobId::new(sink_id as _),
+            update_sink_rate_limit,
+            "sink node not found",
+        )
+        .await
     }
 
     pub async fn update_dml_rate_limit_by_job_id(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let update_dml_rate_limit =

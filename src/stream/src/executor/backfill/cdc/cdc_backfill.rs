@@ -102,7 +102,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         properties: BTreeMap<String, String>,
     ) -> Self {
         let pk_indices = external_table.pk_indices();
-        let upstream_table_id = external_table.table_id().as_raw_id();
+        let upstream_table_id = external_table.table_id();
         let state_impl = CdcBackfillState::new(
             upstream_table_id,
             state_table,

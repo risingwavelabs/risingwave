@@ -22,6 +22,7 @@ use std::ops::Bound::{Excluded, Unbounded};
 
 use barrier_control::CreatingStreamingJobBarrierControl;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
@@ -34,7 +35,7 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
-use risingwave_common::id::JobId;
+
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;

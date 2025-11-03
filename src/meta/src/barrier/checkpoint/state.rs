@@ -212,10 +212,7 @@ impl BarrierWorkerState {
             }) => {
                 if self
                     .inflight_graph_info
-                    .unregister_subscriber(
-                        upstream_mv_table_id.as_job_id(),
-                        *subscription_id,
-                    )
+                    .unregister_subscriber(upstream_mv_table_id.as_job_id(), *subscription_id)
                     .is_none()
                 {
                     warn!(subscription_id, %upstream_mv_table_id, "no subscription to drop");

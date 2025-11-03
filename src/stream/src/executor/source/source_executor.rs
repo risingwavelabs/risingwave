@@ -658,7 +658,8 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
 
                             Mutation::ConnectorPropsChange(maybe_mutation) => {
-                                if let Some(new_props) = maybe_mutation.get(&source_id.as_raw_id()) {
+                                if let Some(new_props) = maybe_mutation.get(&source_id.as_raw_id())
+                                {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
                                         "updating source properties from {:?} to {:?}",

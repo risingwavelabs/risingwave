@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::JobId;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
 use serde::{Deserialize, Serialize};
-use risingwave_common::id::JobId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default, Serialize, Deserialize)]
 #[sea_orm(table_name = "cdc_table_snapshot_splits")]

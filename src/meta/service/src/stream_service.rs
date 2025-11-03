@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::SplitMetaData;
@@ -41,7 +42,7 @@ use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
-use risingwave_common::id::JobId;
+
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::MetaSrvEnv;
 use crate::stream::GlobalStreamManagerRef;
@@ -120,17 +121,17 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Mv => {
                 self.metadata_manager
-                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::CdcTable => {
                 self.metadata_manager
-                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::TableDml => {
                 self.metadata_manager
-                    .update_dml_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::Sink => {
@@ -639,7 +640,7 @@ impl StreamManagerService for StreamServiceImpl {
         self.metadata_manager
             .catalog_controller
             .mutate_fragments_by_job_id(
-                job_id as _,
+                job_id.into(),
                 |_mask, stream_node| {
                     let mut visited = false;
                     visit_stream_node_mut(stream_node, |body| {

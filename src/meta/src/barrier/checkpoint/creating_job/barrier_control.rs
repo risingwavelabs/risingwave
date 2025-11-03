@@ -19,11 +19,12 @@ use std::ops::{Bound, RangeBounds};
 use std::time::Instant;
 
 use prometheus::HistogramTimer;
+use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
-use risingwave_common::id::JobId;
+
 use crate::barrier::BarrierKind;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::rpc::metrics::GLOBAL_META_METRICS;

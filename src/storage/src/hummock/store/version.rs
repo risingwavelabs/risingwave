@@ -641,10 +641,9 @@ impl HummockVersionReader {
         }
 
         // 2. order guarantee: imm -> sst
-        let dist_key_hash = read_options
-            .prefix_hint
-            .as_ref()
-            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref(), table_id.as_raw_id()));
+        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+            Sstable::hash_for_bloom_filter(dist_key.as_ref(), table_id.as_raw_id())
+        });
 
         // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
         // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.

@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::catalog::Database;
@@ -35,7 +36,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::yield_now;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use risingwave_common::id::JobId;
+
 use crate::MetaResult;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::GlobalBarrierWorkerContext;

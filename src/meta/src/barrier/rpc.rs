@@ -27,6 +27,7 @@ use futures::future::{BoxFuture, join_all};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
@@ -57,7 +58,7 @@ use tokio::time::{Instant, sleep};
 use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use risingwave_common::id::JobId;
+
 use super::{BarrierKind, Command, TracedEpoch};
 use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::{
@@ -824,7 +825,9 @@ impl ControlStreamManager {
                         InflightStreamingJobInfo {
                             job_id,
                             fragment_infos,
-                            subscribers: subscribers.remove(&job_id.as_mv_table_id()).unwrap_or_default(),
+                            subscribers: subscribers
+                                .remove(&job_id.as_mv_table_id())
+                                .unwrap_or_default(),
                         },
                     )
                 })

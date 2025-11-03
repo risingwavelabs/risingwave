@@ -17,10 +17,11 @@ pub mod progress;
 
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use risingwave_common::id::TableId;
+
 use crate::error::{IntoUnexpectedExit, StreamError};
 use crate::executor::exchange::permit::{self, channel_from_config};
 use crate::executor::{Barrier, BarrierInner};

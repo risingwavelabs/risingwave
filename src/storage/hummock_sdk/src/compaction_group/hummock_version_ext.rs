@@ -818,13 +818,11 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         let left_group_id_table_ids = self
             .state_table_info
             .compaction_group_member_table_ids(left_group_id)
-            .iter()
-            .map(|table_id| table_id.as_raw_id());
+            .iter();
         let right_group_id_table_ids = self
             .state_table_info
             .compaction_group_member_table_ids(right_group_id)
-            .iter()
-            .map(|table_id| table_id.as_raw_id());
+            .iter();
 
         assert!(
             left_group_id_table_ids

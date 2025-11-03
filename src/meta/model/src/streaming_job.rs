@@ -14,10 +14,11 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::id::JobId;
 use sea_orm::FromJsonQueryResult;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use risingwave_common::id::JobId;
+
 use crate::{CreateType, JobStatus, StreamingParallelism};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]

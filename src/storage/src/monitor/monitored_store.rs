@@ -104,8 +104,8 @@ impl<S, E> MonitoredStateStore<S, E> {
         let monitored = MonitoredStateStoreIter {
             inner: iter_stream,
             stats: MonitoredStateStoreIterStats {
-                inner: Stat::new(table_id.as_raw_id(), &self.storage_metrics, iter_init_duration),
-                table_id: table_id.as_raw_id(),
+                inner: Stat::new(table_id, &self.storage_metrics, iter_init_duration),
+                table_id,
                 metrics: self.storage_metrics.clone(),
             },
             _phantom: PhantomData,

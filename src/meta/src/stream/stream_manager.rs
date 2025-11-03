@@ -796,7 +796,7 @@ impl GlobalStreamManager {
                     fragment::Column::FragmentId,
                     fragment::Column::FragmentTypeMask,
                 ])
-                .filter(fragment::Column::JobId.eq(job_id.as_raw_id() as i32))
+                .filter(fragment::Column::JobId.eq(job_id))
                 .into_tuple()
                 .all(&inner.db)
                 .await?;

@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use std::sync::Arc;
+
 use risingwave_common::id::TableId;
+
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
 
