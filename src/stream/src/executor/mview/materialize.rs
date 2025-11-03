@@ -410,15 +410,23 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 self.metrics
                                     .materialize_input_row_count
                                     .inc_by(chunk.cardinality() as u64);
+
                                 // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
                                 // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false,
-                                // and the conflict behavior is overwrite.
-                                let do_not_handle_conflict = !self.state_table.is_consistent_op()
+                                // and the conflict behavior is overwrite. We can rely on the state table to overwrite the conflicting rows in the storage,
+                                // while outputting inconsistent changes to downstream which no one will subscribe to.
+                                let optimized_conflict_behavior = if let ConflictBehavior::Overwrite =
+                                    self.conflict_behavior
+                                    && !self.state_table.is_consistent_op()
                                     && self.version_column_indices.is_empty()
-                                    && self.conflict_behavior == ConflictBehavior::Overwrite;
+                                {
+                                    ConflictBehavior::NoCheck
+                                } else {
+                                    self.conflict_behavior
+                                };
 
-                                match self.conflict_behavior {
-                                    checked_conflict_behaviors!() if !do_not_handle_conflict => {
+                                match optimized_conflict_behavior {
+                                    checked_conflict_behaviors!() => {
                                         if chunk.cardinality() == 0 {
                                             // empty chunk
                                             continue;
@@ -510,10 +518,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             None => continue,
                                         }
                                     }
-                                    ConflictBehavior::IgnoreConflict => unreachable!(),
-                                    ConflictBehavior::NoCheck
-                                    | ConflictBehavior::Overwrite
-                                    | ConflictBehavior::DoUpdateIfNotNull => {
+                                    ConflictBehavior::NoCheck => {
                                         self.state_table.write_chunk(chunk.clone());
                                         self.state_table.try_flush().await?;
 
@@ -1392,22 +1397,34 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
                 }
 
+                Op::UpdateDelete
+                    if matches!(
+                        conflict_behavior,
+                        ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull
+                    ) =>
+                {
+                    // For `UpdateDelete`s, we skip processing them but directly handle the following `UpdateInsert`
+                    // instead. This is because...
+                    //
+                    // - For `Overwrite`, we only care about the new row.
+                    // - For `DoUpdateIfNotNull`, we don't want the whole row to be deleted, but instead perform
+                    //   column-wise replacement when handling the `UpdateInsert`.
+                    //
+                    // However, for `IgnoreConflict`, we still need to delete the old row first, otherwise the row
+                    // cannot be updated at all.
+                }
+
                 Op::Delete | Op::UpdateDelete => {
-                    match conflict_behavior {
-                        checked_conflict_behaviors!() => {
-                            if let Some(old_row) = self.get_expected(&key) {
-                                let old_row_deserialized =
-                                    row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                change_buffer.delete(key.clone(), old_row_deserialized);
-                                // put a None into the cache to represent deletion
-                                self.lru_cache.put(key, None);
-                            } else {
-                                // delete a non-existent value
-                                // this is allowed in the case of mview conflict, so ignore
-                            };
-                        }
-                        _ => unreachable!(),
-                    };
+                    if let Some(old_row) = self.get_expected(&key) {
+                        let old_row_deserialized =
+                            row_serde.deserializer.deserialize(old_row.row.clone())?;
+                        change_buffer.delete(key.clone(), old_row_deserialized);
+                        // put a None into the cache to represent deletion
+                        self.lru_cache.put(key, None);
+                    } else {
+                        // delete a non-existent value
+                        // this is allowed in the case of mview conflict, so ignore
+                    }
                 }
             }
         }
