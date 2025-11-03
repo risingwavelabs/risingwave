@@ -16,7 +16,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::is_system_schema;
 use risingwave_pb::ddl_service::alter_name_request;
-use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -277,7 +276,7 @@ pub async fn handle_rename_schema(
         if let Some(user) = user_reader.get_user_by_name(&session.user_name()) {
             if !user.is_super
                 && !user.has_privilege(
-                    &grant_privilege::Object::DatabaseId(db_id.into()),
+                    db_id,
                     AclMode::Create,
                 )
             {

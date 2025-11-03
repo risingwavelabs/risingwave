@@ -1163,7 +1163,7 @@ impl SessionImpl {
             schema.owner(),
             AclMode::Create,
             schema_name,
-            Object::SchemaId(schema.id().into()),
+            schema.id(),
         )])?;
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
@@ -1257,7 +1257,7 @@ impl SessionImpl {
             table.owner(),
             AclMode::Select,
             table_name.to_owned(),
-            Object::TableId(table.id.as_raw_id()),
+            table.id,
         )])?;
 
         Ok(table.clone())
@@ -1613,7 +1613,7 @@ impl SessionManagerImpl {
                 )));
             }
             let has_privilege =
-                user.has_privilege(&Object::DatabaseId(database_id.into()), AclMode::Connect);
+                user.has_privilege(database_id, AclMode::Connect);
             if !user.is_super && database_owner != user.id && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,

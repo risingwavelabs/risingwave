@@ -65,14 +65,14 @@ fn make_prost_privilege(
             for db in databases {
                 let database_name = Binder::resolve_database_name(db)?;
                 let database = reader.get_database_by_name(&database_name)?;
-                grant_objs.push(PbObject::DatabaseId(database.id().into()));
+                grant_objs.push(database.id().into());
             }
         }
         GrantObjects::Schemas(schemas) => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::SchemaId(schema.id().into()));
+                grant_objs.push(schema.id().into());
             }
         }
         GrantObjects::Mviews(tables) => {
@@ -96,7 +96,7 @@ fn make_prost_privilege(
                         .into());
                     }
                 }
-                grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
+                grant_objs.push(table.id().into());
             }
         }
         GrantObjects::Tables(tables) => {
@@ -113,7 +113,7 @@ fn make_prost_privilege(
                     Ok((table, _)) => {
                         match table.table_type() {
                             TableType::Table => {
-                                grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
+                                grant_objs.push(table.id().into());
                                 continue;
                             }
                             _ => {
@@ -279,7 +279,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_all_mvs().for_each(|mview| {
-                    grant_objs.push(PbObject::TableId(mview.id().as_raw_id()));
+                    grant_objs.push(mview.id().into());
                 });
             }
         }
@@ -288,7 +288,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_user_table().for_each(|table| {
-                    grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
+                    grant_objs.push(table.id().into());
                 });
             }
         }
@@ -705,7 +705,7 @@ mod tests {
                             with_grant_option: true,
                             granted_by: session.user_id(),
                         }],
-                        object: Some(PbObject::DatabaseId(session_database_id.into())),
+                        object: Some(session_database_id.into()),
                     },
                     PbGrantPrivilege {
                         action_with_opts: vec![
@@ -720,7 +720,7 @@ mod tests {
                                 granted_by: DEFAULT_SUPER_USER_ID,
                             }
                         ],
-                        object: Some(PbObject::DatabaseId(database_id.into())),
+                        object: Some(database_id.into()),
                     }
                 ]
             );
@@ -738,7 +738,7 @@ mod tests {
                 user_info
                     .grant_privileges
                     .iter()
-                    .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id.into())))
+                    .filter(|gp| gp.object == Some(database_id.into()))
                     .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option))
             );
         }
@@ -759,7 +759,7 @@ mod tests {
                         with_grant_option: true,
                         granted_by: session.user_id(),
                     }],
-                    object: Some(PbObject::DatabaseId(session_database_id.into())),
+                    object: Some(session_database_id.into()),
                 }]
             );
         }

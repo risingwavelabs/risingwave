@@ -302,14 +302,14 @@ impl Binder {
                     if user.is_super || user.id == item.owner {
                         return Ok(());
                     }
-                    if !user.has_privilege(&item.object, item.mode) {
+                    if !user.has_privilege(item.object, item.mode) {
                         return Err(PermissionDenied(item.error_message()).into());
                     }
 
                     // check CONNECT privilege for cross-db access
                     if self.database_id != database_id
                         && !user.has_privilege(
-                            &PbObject::DatabaseId(database_id.into()),
+                            database_id,
                             AclMode::Connect,
                         )
                     {
@@ -349,7 +349,7 @@ impl Binder {
                 table_catalog.owner,
                 AclMode::Select,
                 table_catalog.name.clone(),
-                PbObject::TableId(table_id.as_raw_id()),
+                table_id,
             ),
             table_catalog.database_id,
         )?;

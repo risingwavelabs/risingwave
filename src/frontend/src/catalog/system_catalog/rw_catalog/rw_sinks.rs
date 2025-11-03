@@ -95,7 +95,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     connection_id: sink.connection_id.map(|id| id.connection_id() as i32),
                     definition: sink.create_sql(),
                     acl: get_acl_items(
-                        &Object::SinkId(sink.id.sink_id),
+                        Object::SinkId(sink.id.sink_id),
                         false,
                         &users,
                         username_map,

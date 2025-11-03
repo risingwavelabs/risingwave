@@ -804,12 +804,12 @@ mod tests {
         assert_eq!(user_1.name, "test_user_1_new".to_owned());
 
         let conn_with_option = make_privilege(
-            PbObject::DatabaseId(TEST_DATABASE_ID.into()),
+            TEST_DATABASE_ID.into(),
             &[PbAction::Connect],
             true,
         );
         let create_without_option = make_privilege(
-            PbObject::DatabaseId(TEST_DATABASE_ID.into()),
+            TEST_DATABASE_ID.into(),
             &[PbAction::Create],
             false,
         );
@@ -853,13 +853,13 @@ mod tests {
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 2);
         assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID.into()))
+            == Some(TEST_DATABASE_ID.into())
             && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID as u32));
 
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_2.len(), 1);
         assert!(privilege_2.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID.into()))
+            == Some(TEST_DATABASE_ID.into())
             && gp.action_with_opts[0].granted_by == user_1.user_id as u32
             && gp.action_with_opts[0].with_grant_option));
 
@@ -922,7 +922,7 @@ mod tests {
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 1);
         assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID.into()))
+            == Some(TEST_DATABASE_ID.into())
             && gp.action_with_opts[0].action == PbAction::Connect as i32));
 
         // revoke grant option for referred privilege in cascade mode.
@@ -938,13 +938,13 @@ mod tests {
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 1);
         assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID.into()))
+            == Some(TEST_DATABASE_ID.into())
             && gp.action_with_opts[0].action == PbAction::Connect as i32
             && !gp.action_with_opts[0].with_grant_option));
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_2.len(), 1);
         assert!(privilege_2.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID.into()))
+            == Some(TEST_DATABASE_ID.into())
             && gp.action_with_opts[0].action == PbAction::Connect as i32
             && !gp.action_with_opts[0].with_grant_option));
 

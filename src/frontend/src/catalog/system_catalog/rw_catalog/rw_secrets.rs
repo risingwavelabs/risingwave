@@ -50,7 +50,7 @@ fn read_rw_secret_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
                     name: secret.name.clone(),
                     owner: secret.owner as i32,
                     acl: get_acl_items(
-                        &GrantObject::SecretId(secret.id.secret_id()),
+                        GrantObject::SecretId(secret.id.secret_id()),
                         false,
                         &users,
                         username_map,

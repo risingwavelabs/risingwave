@@ -17,7 +17,6 @@ use std::collections::HashSet;
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{ExprError, Result, capture_context, function};
 use risingwave_pb::user::Action;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
@@ -93,7 +92,7 @@ fn has_database_privilege_impl(
     has_privilege_impl_captured(
         user_name,
         &OwnedGrantObject {
-            object: Object::DatabaseId(database_oid.as_raw_id()),
+            object: database_oid.into(),
             owner: database_owner as u32,
         },
         &actions,
@@ -140,7 +139,7 @@ fn has_schema_privilege_impl(
     has_privilege_impl_captured(
         user_name,
         &OwnedGrantObject {
-            object: Object::SchemaId(schema_oid.as_raw_id()),
+            object: schema_oid.into(),
             owner: schema_owner as u32,
         },
         &actions,

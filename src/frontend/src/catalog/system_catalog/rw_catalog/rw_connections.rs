@@ -56,7 +56,7 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                     type_: conn.connection_type().into(),
                     provider: "".to_owned(),
                     acl: get_acl_items(
-                        &GrantObject::ConnectionId(conn.id),
+                        GrantObject::ConnectionId(conn.id),
                         false,
                         &users,
                         username_map,

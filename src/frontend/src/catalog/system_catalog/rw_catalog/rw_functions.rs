@@ -63,7 +63,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
                     language: function.language.clone(),
                     link: function.link.clone(),
                     acl: get_acl_items(
-                        &Object::FunctionId(function.id.function_id()),
+                        Object::FunctionId(function.id.function_id()),
                         false,
                         &users,
                         username_map,

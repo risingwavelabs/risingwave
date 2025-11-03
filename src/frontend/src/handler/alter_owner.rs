@@ -18,7 +18,6 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
 use risingwave_common::id::SchemaId;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -41,7 +40,7 @@ pub fn check_schema_create_privilege(
     }
     if !new_owner.is_super
         && !new_owner.has_privilege(
-            &grant_privilege::Object::SchemaId(schema_id.into()),
+            schema_id,
             AclMode::Create,
         )
     {

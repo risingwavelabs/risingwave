@@ -56,7 +56,7 @@ fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSub
                     owner: subscription.owner.user_id as i32,
                     definition: subscription.definition.clone(),
                     acl: get_acl_items(
-                        &Object::SubscriptionId(subscription.id.subscription_id),
+                        Object::SubscriptionId(subscription.id.subscription_id),
                         false,
                         &users,
                         username_map,

@@ -200,3 +200,17 @@ impl TableId {
         JobId::new(self.inner)
     }
 }
+
+macro_rules! impl_into_grant_object {
+    ($type_name:ident) => {
+        impl From<$type_name> for risingwave_pb::user::grant_privilege::Object {
+            fn from(value: $type_name) -> Self {
+                risingwave_pb::user::grant_privilege::Object::$type_name(value.inner)
+            }
+        }
+    };
+}
+
+impl_into_grant_object!(DatabaseId);
+impl_into_grant_object!(TableId);
+impl_into_grant_object!(SchemaId);

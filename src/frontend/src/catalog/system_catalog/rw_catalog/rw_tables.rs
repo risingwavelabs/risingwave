@@ -14,7 +14,6 @@
 
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -60,7 +59,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
                     append_only: table.append_only,
                     refreshable: table.refreshable,
                     acl: get_acl_items(
-                        &GrantObject::TableId(table.id.as_raw_id()),
+                        table.id,
                         true,
                         &users,
                         username_map,
