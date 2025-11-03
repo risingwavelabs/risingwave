@@ -23,6 +23,7 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -452,7 +453,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             left,
             right,
             task_id: task.task_id,
-            metrics: context.compactor_metrics.clone(),
+            metrics: context.compactor_metrics,
             compression_algorithm,
         }
     }
@@ -634,7 +635,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
 pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     last_key: FullKey<Vec<u8>>,
     compaction_statistics: CompactionStatistics,
-    last_table_id: Option<u32>,
+    last_table_id: Option<TableId>,
     last_table_stats: TableStats,
     builder: CapacitySplitTableBuilder<F>,
     task_config: TaskConfig,
@@ -740,13 +741,13 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
                 self.last_key_is_delete = true;
             }
 
-            if self.last_table_id != Some(self.last_key.user_key.table_id.table_id) {
+            if self.last_table_id != Some(self.last_key.user_key.table_id) {
                 if let Some(last_table_id) = self.last_table_id.take() {
                     self.compaction_statistics
                         .delta_drop_stat
                         .insert(last_table_id, std::mem::take(&mut self.last_table_stats));
                 }
-                self.last_table_id = Some(self.last_key.user_key.table_id.table_id);
+                self.last_table_id = Some(self.last_key.user_key.table_id);
             }
 
             if drop {
@@ -754,7 +755,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
 
                 let should_count = match self.task_config.stats_target_table_ids.as_ref() {
                     Some(target_table_ids) => {
-                        target_table_ids.contains(&self.last_key.user_key.table_id.table_id)
+                        target_table_ids.contains(&self.last_key.user_key.table_id)
                     }
                     None => true,
                 };

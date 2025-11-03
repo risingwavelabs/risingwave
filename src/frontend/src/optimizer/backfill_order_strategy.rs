@@ -232,7 +232,7 @@ pub mod auto {
 }
 
 mod fixed {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     use risingwave_common::bail;
     use risingwave_common::catalog::ObjectId;
@@ -243,16 +243,65 @@ mod fixed {
     use crate::optimizer::backfill_order_strategy::common::{
         bind_backfill_relation_id_by_name, has_cycle,
     };
+    use crate::optimizer::plan_node::{StreamPlanNodeType, StreamPlanRef};
     use crate::session::SessionImpl;
+
+    /// Collect all relation IDs (tables and sources) that are scanned in the plan.
+    fn collect_scanned_relation_ids(plan: StreamPlanRef) -> HashSet<ObjectId> {
+        let mut relation_ids = HashSet::new();
+
+        fn visit(plan: StreamPlanRef, relation_ids: &mut HashSet<ObjectId>) {
+            match plan.node_type() {
+                StreamPlanNodeType::StreamTableScan => {
+                    let table_scan = plan.as_stream_table_scan().expect("table scan");
+                    let relation_id = table_scan.core().table_catalog.id().into();
+                    relation_ids.insert(relation_id);
+                }
+                StreamPlanNodeType::StreamSourceScan => {
+                    let source_scan = plan.as_stream_source_scan().expect("source scan");
+                    let relation_id = source_scan.source_catalog().id;
+                    relation_ids.insert(relation_id);
+                }
+                _ => {}
+            }
+
+            // Recursively visit all inputs
+            for child in plan.inputs() {
+                visit(child, relation_ids);
+            }
+        }
+
+        visit(plan, &mut relation_ids);
+        relation_ids
+    }
 
     pub(super) fn plan_fixed_strategy(
         session: &SessionImpl,
         orders: Vec<(ObjectName, ObjectName)>,
+        plan: StreamPlanRef,
     ) -> Result<HashMap<ObjectId, Uint32Vector>> {
+        // Collect all scanned relation IDs from the plan
+        let scanned_relation_ids = collect_scanned_relation_ids(plan);
+
         let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
         for (start_name, end_name) in orders {
-            let start_relation_id = bind_backfill_relation_id_by_name(session, start_name)?;
-            let end_relation_id = bind_backfill_relation_id_by_name(session, end_name)?;
+            let start_relation_id = bind_backfill_relation_id_by_name(session, start_name.clone())?;
+            let end_relation_id = bind_backfill_relation_id_by_name(session, end_name.clone())?;
+
+            // Validate that both relations are present in the query plan
+            if !scanned_relation_ids.contains(&start_relation_id) {
+                bail!(
+                    "Table or source '{}' specified in backfill_order is not used in the query",
+                    start_name
+                );
+            }
+            if !scanned_relation_ids.contains(&end_relation_id) {
+                bail!(
+                    "Table or source '{}' specified in backfill_order is not used in the query",
+                    end_name
+                );
+            }
+
             order
                 .entry(start_relation_id)
                 .or_default()
@@ -348,14 +397,14 @@ mod common {
                 if let Some((relation_id, _schema_name)) = result? {
                     return Ok(relation_id);
                 }
-                Err(CatalogError::NotFound("table", rel_name.to_owned()).into())
+                Err(CatalogError::NotFound("table", rel_name.clone()).into())
             }
         }
     }
 
     fn bind_table(schema_catalog: &SchemaCatalog, name: &String) -> crate::error::Result<ObjectId> {
         if let Some(table) = schema_catalog.get_created_table_by_name(name) {
-            Ok(table.id().table_id)
+            Ok(table.id().as_raw_id())
         } else if let Some(source) = schema_catalog.get_source_by_name(name) {
             Ok(source.id)
         } else {
@@ -423,7 +472,7 @@ pub fn plan_backfill_order(
     let order = match backfill_order_strategy {
         BackfillOrderStrategy::Default | BackfillOrderStrategy::None => Default::default(),
         BackfillOrderStrategy::Auto => plan_auto_strategy(session, plan),
-        BackfillOrderStrategy::Fixed(orders) => plan_fixed_strategy(session, orders)?,
+        BackfillOrderStrategy::Fixed(orders) => plan_fixed_strategy(session, orders, plan)?,
     };
     Ok(BackfillOrder { order })
 }
@@ -435,7 +484,6 @@ pub fn explain_backfill_order_in_dot_format(
     plan: StreamPlanRef,
 ) -> Result<String> {
     let order = plan_backfill_order(session, backfill_order_strategy, plan)?;
-    let dot_formatted_backfill_order =
-        display::print_backfill_order_in_dot_format(session, order.clone())?;
+    let dot_formatted_backfill_order = display::print_backfill_order_in_dot_format(session, order)?;
     Ok(dot_formatted_backfill_order)
 }

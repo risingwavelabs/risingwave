@@ -42,7 +42,7 @@ use crate::util::value_encoding as plain;
 mod new_serde {
     use super::*;
     use crate::array::{ListRef, ListValue, MapRef, MapValue, StructRef, StructValue};
-    use crate::types::{MapType, ScalarImpl, StructType, data_types};
+    use crate::types::{ListType, MapType, ScalarImpl, StructType, data_types};
 
     // --- serialize ---
 
@@ -73,12 +73,12 @@ mod new_serde {
     }
 
     // Copy of `plain` but call `new_` for the elements.
-    fn new_serialize_list(inner_type: &DataType, value: ListRef<'_>, buf: &mut impl BufMut) {
+    fn new_serialize_list(list_type: &ListType, value: ListRef<'_>, buf: &mut impl BufMut) {
         let elems = value.iter();
         buf.put_u32_le(elems.len() as u32);
 
         elems.for_each(|field_value| {
-            new_serialize_datum(inner_type, field_value, buf);
+            new_serialize_datum(list_type.elem(), field_value, buf);
         });
     }
 
@@ -104,7 +104,7 @@ mod new_serde {
     ) {
         match value {
             ScalarRefImpl::Struct(s) => new_serialize_struct(data_type.as_struct(), s, buf),
-            ScalarRefImpl::List(l) => new_serialize_list(data_type.as_list_element_type(), l, buf),
+            ScalarRefImpl::List(l) => new_serialize_list(data_type.as_list(), l, buf),
             ScalarRefImpl::Map(m) => new_serialize_map(data_type.as_map(), m, buf),
 
             _ => plain::serialize_scalar(value, buf),
@@ -138,11 +138,12 @@ mod new_serde {
     }
 
     // Copy of `plain` but call `new_` for the elements.
-    fn new_deserialize_list(item_type: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
+    fn new_deserialize_list(list_type: &ListType, data: &mut &[u8]) -> Result<ScalarImpl> {
+        let elem_type = list_type.elem();
         let len = data.get_u32_le();
-        let mut builder = item_type.create_array_builder(len as usize);
+        let mut builder = elem_type.create_array_builder(len as usize);
         for _ in 0..len {
-            builder.append(new_inner_deserialize_datum(data, item_type)?);
+            builder.append(new_inner_deserialize_datum(data, elem_type)?);
         }
         Ok(ScalarImpl::List(ListValue::new(builder.finish())))
     }
@@ -172,7 +173,7 @@ mod new_serde {
     pub fn new_deserialize_scalar(ty: &DataType, data: &mut &[u8]) -> Result<ScalarImpl> {
         Ok(match ty {
             DataType::Struct(struct_def) => new_deserialize_struct(struct_def, data)?,
-            DataType::List(item_type) => new_deserialize_list(item_type, data)?,
+            DataType::List(list_type) => new_deserialize_list(list_type, data)?,
             DataType::Map(map_type) => new_deserialize_map(map_type, data)?,
             data_types::simple!() => plain::deserialize_value(ty, data)?,
         })

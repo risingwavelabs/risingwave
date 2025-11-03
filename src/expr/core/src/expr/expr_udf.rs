@@ -128,7 +128,7 @@ impl UserDefinedFunction {
         }
 
         let output = self.arrow_convert.from_record_batch(&arrow_output)?;
-        let output = output.uncompact(input.visibility().clone());
+        let output = output.expand_vis(input.visibility().clone());
 
         let Some(array) = output.columns().first() else {
             bail!("UDF returned no columns");

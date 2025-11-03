@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::env;
+use std::hint::black_box;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
     DataType, Date, Datum, Interval, ScalarImpl, StructType, Time, Timestamp,
@@ -123,7 +124,7 @@ fn bench_encoding(c: &mut Criterion) {
         ),
         Case::new(
             "List of Bool (len = 100)",
-            DataType::List(Box::new(DataType::Boolean)),
+            DataType::Boolean.list(),
             ScalarImpl::List(ListValue::from_iter([true; 100])),
         ),
     ];

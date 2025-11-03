@@ -283,6 +283,11 @@ impl Binder {
                     Ok(FunctionCall::new_unchecked(ExprType::QuoteNullable, vec![input], DataType::Varchar).into())
                 })),
                 ("string_to_array", raw_call(ExprType::StringToArray)),
+                ("get_bit", raw_call(ExprType::GetBit)),
+                ("get_byte", raw_call(ExprType::GetByte)),
+                ("set_bit", raw_call(ExprType::SetBit)),
+                ("set_byte", raw_call(ExprType::SetByte)),
+                ("bit_count", raw_call(ExprType::BitCount)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
                 ("convert_from", raw_call(ExprType::ConvertFrom)),
@@ -336,7 +341,7 @@ impl Binder {
                 ("arraycontained", raw_call(ExprType::ArrayContained)),
                 ("array_flatten", guard_by_len(|_binder, [input]| {
                     input.ensure_array_type().map_err(|_| ErrorCode::BindError("array_flatten expects `any[][]` input".into()))?;
-                    let return_type = input.return_type().into_list_element_type();
+                    let return_type = input.return_type().into_list_elem();
                     if !return_type.is_array() {
                         return Err(ErrorCode::BindError("array_flatten expects `any[][]` input".into()).into());
                     }
@@ -429,6 +434,46 @@ impl Binder {
                 ("inner_product", raw_call(ExprType::InnerProduct)),
                 ("vector_norm", raw_call(ExprType::L2Norm)),
                 ("l2_normalize", raw_call(ExprType::L2Normalize)),
+                ("subvector", guard_by_len(|_, [vector_expr, start_expr, len_expr]| {
+                    let dimensions = if let DataType::Vector(length) = vector_expr.return_type() {
+                        length as i32
+                    } else {
+                        return Err(ErrorCode::BindError("subvector expects `vector(dim)` input".into()).into());
+                    };
+                    let start = start_expr
+                        .try_fold_const()
+                        .transpose()?
+                        .and_then(|datum| match datum {
+                            Some(ScalarImpl::Int32(v)) => Some(v),
+                            _ => None,
+                        })
+                        .ok_or_else(|| ErrorCode::ExprError("`start` must be an Int32 constant".into()))?;
+
+                    let len = len_expr
+                        .try_fold_const()
+                        .transpose()?
+                        .and_then(|datum| match datum {
+                            Some(ScalarImpl::Int32(v)) => Some(v),
+                            _ => None,
+                        })
+                        .ok_or_else(|| ErrorCode::ExprError("`count` must be an Int32 constant".into()))?;
+                    if len < 1 || len > DataType::VEC_MAX_SIZE as i32 {
+                        return Err(ErrorCode::InvalidParameterValue(format!("Invalid vector size: expected 1..={}, got {}", DataType::VEC_MAX_SIZE, len)).into());
+                    }
+
+                    let end = start + len - 1;
+
+                    if start < 1 || end > dimensions {
+                        return Err(ErrorCode::InvalidParameterValue(format!(
+                                "vector slice range out of bounds: start={}, end={}, valid range is [1, {}]",
+                                start,
+                                end,
+                                dimensions
+                            )).into());
+                    }
+
+                    Ok(FunctionCall::new_unchecked(ExprType::Subvector, vec![vector_expr, start_expr, len_expr], DataType::Vector(len as usize)).into())
+                })),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
@@ -471,7 +516,7 @@ impl Binder {
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
-                        return Ok(ExprImpl::literal_null(DataType::List(Box::new(DataType::Varchar))));
+                        return Ok(ExprImpl::literal_null(DataType::Varchar.list()));
                     };
 
                     let paths = if bool {
@@ -754,7 +799,7 @@ impl Binder {
         static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
             let mut tree = BKTree::new(metrics::Levenshtein);
 
-            // TODO: Also hint other functinos, e.g., Agg or UDF.
+            // TODO: Also hint other functions, e.g., Agg or UDF.
             for k in HANDLES.keys() {
                 tree.add(*k);
             }

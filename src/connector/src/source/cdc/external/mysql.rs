@@ -344,13 +344,26 @@ pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
     pool: mysql_async::Pool,
+    mysql_version: (u8, u8),
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut conn = self.pool.get_conn().await?;
 
-        let sql = "SHOW MASTER STATUS".to_owned();
+        // Choose SQL command based on MySQL version
+        let sql = if self.is_mysql_8_4_or_later() {
+            "SHOW BINARY LOG STATUS"
+        } else {
+            "SHOW MASTER STATUS"
+        };
+
+        tracing::debug!(
+            "Using SQL command: {} for MySQL version {}.{}",
+            sql,
+            self.mysql_version.0,
+            self.mysql_version.1
+        );
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
         let row = rs
             .iter_mut()
@@ -398,7 +411,33 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+    /// Get MySQL version from the connection
+    async fn get_mysql_version(pool: &mysql_async::Pool) -> ConnectorResult<(u8, u8)> {
+        let mut conn = pool.get_conn().await?;
+        let result: Option<String> = conn.query_first("SELECT VERSION()").await?;
+
+        if let Some(version_str) = result {
+            let parts: Vec<&str> = version_str.split('.').collect();
+            if parts.len() >= 2 {
+                let major_version = parts[0]
+                    .parse::<u8>()
+                    .context("Failed to parse major version")?;
+                let minor_version = parts[1]
+                    .parse::<u8>()
+                    .context("Failed to parse minor version")?;
+                return Ok((major_version, minor_version));
+            }
+        }
+        Err(anyhow!("Failed to get MySQL version").into())
+    }
+
+    /// Check if MySQL version is 8.4 or later
+    fn is_mysql_8_4_or_later(&self) -> bool {
+        let (major, minor) = self.mysql_version;
+        major > 8 || (major == 8 && minor >= 4)
+    }
+
+    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
         let mut opts_builder = mysql_async::OptsBuilder::default()
             .user(Some(config.username))
             .pass(Some(config.password))
@@ -425,10 +464,19 @@ impl MySqlExternalTableReader {
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
+        // Get MySQL version
+        let mysql_version = Self::get_mysql_version(&pool).await?;
+        tracing::info!(
+            "MySQL version detected: {}.{}",
+            mysql_version.0,
+            mysql_version.1
+        );
+
         Ok(Self {
             rw_schema,
             field_names,
             pool,
+            mysql_version,
         })
     }
 
@@ -474,25 +522,11 @@ impl MySqlExternalTableReader {
                 order_key,
             )
         };
-
         let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
-        if start_pk_row.is_none() {
-            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
-            let row_stream = rs_stream.map(|row| {
-                // convert mysql row into OwnedRow
-                let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
-            });
-            pin_mut!(row_stream);
-            #[for_await]
-            for row in row_stream {
-                let row = row?;
-                yield row;
-            }
-        } else {
+        if let Some(start_pk_row) = start_pk_row {
             let field_map = self
                 .rw_schema
                 .fields
@@ -503,7 +537,7 @@ impl MySqlExternalTableReader {
             // fill in start primary key params
             let params: Vec<_> = primary_keys
                 .iter()
-                .zip_eq_fast(start_pk_row.unwrap().into_iter())
+                .zip_eq_fast(start_pk_row.into_iter())
                 .map(|(pk, datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
@@ -518,6 +552,15 @@ impl MySqlExternalTableReader {
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Decimal => Value::from(value.into_decimal().to_string()),
+                            DataType::Timestamptz => {
+                                // Convert timestamptz to NaiveDateTime for MySQL TIMESTAMP comparison
+                                // MySQL expects NaiveDateTime for TIMESTAMP parameters
+                                let ts = value.into_timestamptz();
+                                let datetime_utc = ts.to_datetime_utc();
+                                let naive_datetime = datetime_utc.naive_utc();
+                                Value::from(naive_datetime)
+                            }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
                         ConnectorResult::Ok((pk.to_lowercase(), val))
@@ -544,7 +587,20 @@ impl MySqlExternalTableReader {
                 let row = row?;
                 yield row;
             }
-        };
+        } else {
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
+            let row_stream = rs_stream.map(|row| {
+                // convert mysql row into OwnedRow
+                let mut row = row?;
+                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+            });
+            pin_mut!(row_stream);
+            #[for_await]
+            for row in row_stream {
+                let row = row?;
+                yield row;
+            }
+        }
         drop(conn);
     }
 
@@ -673,7 +729,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_mysql_table_reader() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
             ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
             ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),
@@ -693,7 +749,9 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema).unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema)
+            .await
+            .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 

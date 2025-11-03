@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::SplitMetaData;
@@ -36,7 +37,6 @@ use risingwave_pb::meta::list_table_fragments_response::{
 };
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::table_fragments::PbState;
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -120,17 +120,17 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Mv => {
                 self.metadata_manager
-                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::CdcTable => {
                 self.metadata_manager
-                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::TableDml => {
                 self.metadata_manager
-                    .update_dml_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::Sink => {
@@ -203,10 +203,10 @@ impl StreamManagerService for StreamServiceImpl {
 
         let canceled_jobs = self
             .stream_manager
-            .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
+            .cancel_streaming_jobs(table_ids.into_iter().map(JobId::from).collect_vec())
             .await
             .into_iter()
-            .map(|id| id.table_id)
+            .map(|id| id.as_raw_id())
             .collect_vec();
         Ok(Response::new(CancelCreatingJobsResponse {
             status: None,
@@ -226,7 +226,7 @@ impl StreamManagerService for StreamServiceImpl {
             let table_fragments = self
                 .metadata_manager
                 .catalog_controller
-                .get_job_fragments_by_id(job_id as _)
+                .get_job_fragments_by_id(job_id.into())
                 .await?;
             let mut dispatchers = self
                 .metadata_manager
@@ -237,7 +237,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .await?;
             let ctx = table_fragments.ctx.to_protobuf();
             info.insert(
-                table_fragments.stream_job_id().table_id,
+                table_fragments.stream_job_id().as_raw_id(),
                 TableFragmentInfo {
                     fragments: table_fragments
                         .fragments
@@ -320,17 +320,14 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListFragmentDistributionRequest>,
     ) -> Result<Response<ListFragmentDistributionResponse>, Status> {
-        let fragment_descs = self
+        let distributions = self
             .metadata_manager
             .catalog_controller
-            .list_fragment_descs()
-            .await?;
-        let distributions = fragment_descs
+            .list_fragment_descs(false)
+            .await?
             .into_iter()
-            .map(|(fragment_desc, upstreams)| {
-                fragment_desc_to_distribution(fragment_desc, upstreams)
-            })
-            .collect_vec();
+            .map(|(dist, _)| dist)
+            .collect();
 
         Ok(Response::new(ListFragmentDistributionResponse {
             distributions,
@@ -341,17 +338,14 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListCreatingFragmentDistributionRequest>,
     ) -> Result<Response<ListCreatingFragmentDistributionResponse>, Status> {
-        let fragment_descs = self
+        let distributions = self
             .metadata_manager
             .catalog_controller
-            .list_creating_fragment_descs()
-            .await?;
-        let distributions = fragment_descs
+            .list_fragment_descs(true)
+            .await?
             .into_iter()
-            .map(|(fragment_desc, upstreams)| {
-                fragment_desc_to_distribution(fragment_desc, upstreams)
-            })
-            .collect_vec();
+            .map(|(dist, _)| dist)
+            .collect();
 
         Ok(Response::new(ListCreatingFragmentDistributionResponse {
             distributions,
@@ -380,14 +374,12 @@ impl StreamManagerService for StreamServiceImpl {
         let actor_locations = self
             .metadata_manager
             .catalog_controller
-            .list_actor_locations()
-            .await?;
+            .list_actor_locations()?;
         let states = actor_locations
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {
                 actor_id: actor_location.actor_id as _,
                 fragment_id: actor_location.fragment_id as _,
-                state: PbActorState::from(actor_location.status) as _,
                 worker_id: actor_location.worker_id as _,
             })
             .collect_vec();
@@ -425,14 +417,30 @@ impl StreamManagerService for StreamServiceImpl {
         let SourceManagerRunningInfo {
             source_fragments,
             backfill_fragments,
-            mut actor_splits,
         } = self.stream_manager.source_manager.get_running_info().await;
 
-        let source_actors = self
-            .metadata_manager
-            .catalog_controller
-            .list_source_actors()
-            .await?;
+        let mut actor_splits = self.env.shared_actor_infos().list_assignments();
+
+        let source_actors: HashMap<_, _> = {
+            let all_fragment_ids: HashSet<_> = backfill_fragments
+                .values()
+                .flat_map(|set| set.iter().flat_map(|&(id1, id2)| [id1, id2]))
+                .chain(source_fragments.values().flatten().copied())
+                .collect();
+
+            let guard = self.env.shared_actor_info.read_guard();
+            guard
+                .iter_over_fragments()
+                .filter(|(frag_id, _)| all_fragment_ids.contains(frag_id))
+                .flat_map(|(fragment_id, fragment_info)| {
+                    fragment_info
+                        .actors
+                        .keys()
+                        .copied()
+                        .map(|actor_id| (actor_id, *fragment_id))
+                })
+                .collect()
+        };
 
         let is_shared_source = self
             .metadata_manager
@@ -630,7 +638,7 @@ impl StreamManagerService for StreamServiceImpl {
         self.metadata_manager
             .catalog_controller
             .mutate_fragments_by_job_id(
-                job_id as _,
+                job_id.into(),
                 |_mask, stream_node| {
                     let mut visited = false;
                     visit_stream_node_mut(stream_node, |body| {
@@ -659,7 +667,7 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .map(|(job_id, p)| {
                 (
-                    job_id,
+                    job_id.as_raw_id(),
                     PbCdcProgress {
                         split_total_count: p.split_total_count,
                         split_backfilled_count: p.split_backfilled_count,
@@ -678,7 +686,7 @@ fn fragment_desc_to_distribution(
 ) -> FragmentDistribution {
     FragmentDistribution {
         fragment_id: fragment_desc.fragment_id as _,
-        table_id: fragment_desc.job_id as _,
+        table_id: fragment_desc.job_id.as_raw_id(),
         distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
         state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
         upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),

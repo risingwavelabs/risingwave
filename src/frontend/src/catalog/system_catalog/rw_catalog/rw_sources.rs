@@ -89,7 +89,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                         .ok()
                         .map(|row_encode| row_encode.as_str_name().into()),
                     append_only: source.append_only,
-                    associated_table_id: source.associated_table_id.map(|id| id.table_id as i32),
+                    associated_table_id: source.associated_table_id.map(|id| id.as_raw_id() as i32),
                     connection_id: source.connection_id.map(|id| id as i32),
                     definition: source.create_sql_purified(),
                     acl: get_acl_items(&Object::SourceId(source.id), false, &users, username_map),
@@ -136,7 +136,7 @@ pub fn serialize_props_with_secret(
             .unwrap()
             .find_map(|schema| schema.get_secret_by_id(&SecretId(v.secret_id)));
         let secret_name = secret
-            .map(|s| s.name.to_owned())
+            .map(|s| s.name.clone())
             .unwrap_or("not found".to_owned());
         result.insert(
             k,

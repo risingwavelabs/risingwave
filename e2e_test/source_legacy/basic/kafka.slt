@@ -114,7 +114,7 @@ from
 query T
 show sinks
 ----
-si
+public.si
 
 statement ok
 create table s7 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (

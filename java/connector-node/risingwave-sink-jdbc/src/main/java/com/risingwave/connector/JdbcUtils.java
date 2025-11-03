@@ -19,6 +19,7 @@ import com.risingwave.connector.jdbc.MySqlDialectFactory;
 import com.risingwave.connector.jdbc.PostgresDialectFactory;
 import com.risingwave.connector.jdbc.RedShiftDialectFactory;
 import com.risingwave.connector.jdbc.SnowflakeDialectFactory;
+import com.risingwave.connector.jdbc.SqlServerDialectFactory;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -39,6 +40,8 @@ public abstract class JdbcUtils {
             return Optional.of(new RedShiftDialectFactory());
         } else if (jdbcUrl.startsWith("jdbc:snowflake")) {
             return Optional.of(new SnowflakeDialectFactory());
+        } else if (jdbcUrl.startsWith("jdbc:sqlserver")) {
+            return Optional.of(new SqlServerDialectFactory());
         } else {
             return Optional.empty();
         }

@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorAlignmentId, IsSingleton, VnodeCount, VnodeCountCompat};
+use risingwave_common::id::JobId;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_meta_model::WorkerId;
@@ -627,7 +628,7 @@ impl ActorGraphBuilder {
     /// Create a new actor graph builder with the given "complete" graph. Returns an error if the
     /// graph is failed to be scheduled.
     pub fn new(
-        streaming_job_id: u32,
+        streaming_job_id: JobId,
         resource_group: String,
         fragment_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
@@ -743,7 +744,7 @@ impl ActorGraphBuilder {
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = GlobalActorIdGen::new(env.id_gen_manager(), actor_len);
+        let id_gen = GlobalActorIdGen::new(env.actor_id_generator(), actor_len);
 
         // Build the actor graph and get the final state.
         let ActorGraphBuildStateInner {
@@ -974,14 +975,14 @@ impl ActorGraphBuilder {
             EitherFragment::Existing(existing_fragment) => existing_fragment
                 .actors
                 .iter()
-                .map(|a| {
-                    let actor_id = GlobalActorId::new(a.actor_id);
+                .map(|(actor_id, actor_info)| {
+                    let actor_id = GlobalActorId::new(*actor_id);
                     let alignment_id = match &distribution {
                         Distribution::Singleton(worker_id) => {
                             ActorAlignmentId::new_single(*worker_id as u32)
                         }
                         Distribution::Hash(mapping) => mapping
-                            .get_matched(a.vnode_bitmap.as_ref().unwrap())
+                            .get_matched(actor_info.vnode_bitmap.as_ref().unwrap())
                             .unwrap(),
                     };
 

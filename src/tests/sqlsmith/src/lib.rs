@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(if_let_guard)]
 #![feature(box_patterns)]
 #![feature(register_tool)]
@@ -75,7 +74,7 @@ pub fn mview_sql_gen<R: Rng>(
     name: &str,
     config: &Configuration,
 ) -> (String, Table) {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables, config.clone());
     let (mview, table) = r#gen.gen_mview_stmt(name);
     (mview.to_string(), table)
 }
@@ -86,7 +85,7 @@ pub fn differential_sql_gen<R: Rng>(
     name: &str,
     config: &Configuration,
 ) -> Result<(String, String, Table)> {
-    let mut r#gen = SqlGenerator::new_for_mview(rng, tables.clone(), config.clone());
+    let mut r#gen = SqlGenerator::new_for_mview(rng, tables, config.clone());
     let (stream, table) = r#gen.gen_mview_stmt(name);
     let batch = match stream {
         Statement::CreateView { ref query, .. } => query.to_string(),
@@ -176,7 +175,7 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                 columns.iter().map(|c| c.clone().into()).collect(),
                 pk_indices,
                 *append_only,
-                source_watermarks.to_vec(),
+                source_watermarks.clone(),
             )
         }
         _ => panic!(

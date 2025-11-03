@@ -22,7 +22,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use super::StreamPlanRef;
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Order, RequiredDist};
 
 pub(crate) fn derive_columns(
     input_schema: &Schema,
@@ -79,16 +79,29 @@ pub(crate) fn derive_columns(
 /// Derive the pk and the stream key for tables and sinks.
 pub(crate) fn derive_pk(
     input: StreamPlanRef,
+    user_distributed_by: RequiredDist,
     user_order_by: Order,
     columns: &[ColumnCatalog],
 ) -> (Vec<ColumnOrder>, Vec<usize>) {
     // Note(congyi): avoid pk duplication
-    let stream_key = input
-        .expect_stream_key()
-        .iter()
-        .copied()
-        .unique()
-        .collect_vec();
+
+    // Add distribution key columns to stream key
+    let mut stream_key = match user_distributed_by {
+        RequiredDist::PhysicalDist(distribution) => distribution.dist_column_indices().to_vec(),
+        RequiredDist::ShardByKey(_) => {
+            unreachable!("Right now, it is not possible to have ShardByKey here")
+        }
+        RequiredDist::AnyShard | RequiredDist::Any => vec![],
+    };
+
+    // Deduplicate: only add keys from input that aren't already in stream_key
+    let mut seen: HashSet<usize> = stream_key.iter().copied().collect();
+    for key in input.expect_stream_key().iter().copied() {
+        if seen.insert(key) {
+            stream_key.push(key);
+        }
+    }
+
     let schema = input.schema();
 
     // Assert the uniqueness of column names and IDs, including hidden columns.
@@ -108,8 +121,15 @@ pub(crate) fn derive_pk(
     let mut pk = vec![];
 
     let func_dep = input.functional_dependency();
-    let user_order_by =
-        func_dep.minimize_order_key(user_order_by, input.distribution().dist_column_indices());
+    let user_order_by = func_dep.minimize_order_key(
+        user_order_by,
+        // The plan could be `SomeShard` in some cases. Ignore the requirement on distribution key
+        // when minimizing the order key.
+        input
+            .distribution()
+            .dist_column_indices_opt()
+            .unwrap_or(&[]),
+    );
 
     for order in &user_order_by.column_orders {
         let idx = order.column_index;

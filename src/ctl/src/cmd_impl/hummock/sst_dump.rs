@@ -367,7 +367,7 @@ fn print_table_column(
     humm_val: HummockValue<&[u8]>,
     table_data: &TableData,
 ) -> anyhow::Result<()> {
-    let table_id = full_key.user_key.table_id.table_id();
+    let table_id = full_key.user_key.table_id.as_raw_id();
 
     print!("\t\t table: id={}, ", table_id);
     let table_catalog = match table_data.get(&table_id) {

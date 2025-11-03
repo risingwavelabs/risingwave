@@ -184,7 +184,7 @@ impl StreamCdcTableScan {
             .to_internal_table_prost();
 
         // We need to pass the id of upstream source job here
-        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
+        let upstream_source_id = self.core.cdc_table_desc.source_id.as_raw_id();
 
         // filter upstream source chunk by the value of `_rw_table_name` column
         let filter_expr =
@@ -235,7 +235,7 @@ impl StreamCdcTableScan {
             stream_key: vec![], // not used
             stream_kind: PbStreamKind::AppendOnly as _,
             identity: "Exchange".to_owned(),
-            fields: cdc_source_schema.clone(),
+            fields: cdc_source_schema,
             node_body: Some(PbNodeBody::Exchange(Box::new(ExchangeNode {
                 strategy: Some(strategy),
             }))),

@@ -324,7 +324,7 @@ impl LogicalScan {
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::TableScan::new(
-            self.required_col_idx().to_vec(),
+            self.required_col_idx().clone(),
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
@@ -342,11 +342,11 @@ impl LogicalScan {
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
-            self.output_col_idx().to_vec(),
+            self.output_col_idx().clone(),
             self.table().clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             predicate,
             self.as_of(),
         )
@@ -359,7 +359,7 @@ impl LogicalScan {
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.predicate().clone(),
             self.as_of(),
         )
@@ -718,7 +718,16 @@ impl ToStream for LogicalScan {
             let order_satisfied_index = self.indexes_satisfy_order(&required_order);
             for index in order_satisfied_index {
                 if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
-                    return Some(index_scan.into());
+                    // The selected index's distribution key must be the subset the locality columns.
+                    // Because index's stream key is [distribution key] + [primary table's primary key].
+                    // For streaming queries, we have to ensure any updates ordering (U-/U+) isn't disturbed
+                    // after the later shuffle introduced by the locality operator,
+                    // so we have to ensure the distribution key of the index scan is the subset of the locality columns.
+                    if let Some(dist_key) = index_scan.distribution_key()
+                        && dist_key.iter().all(|k| columns.contains(k))
+                    {
+                        return Some(index_scan.into());
+                    }
                 }
             }
         }

@@ -18,8 +18,6 @@ use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_common::error::error_request_copy;
 use thiserror_ext::AsReport;
 
-use crate::pg_server::BoxedError;
-
 /// ErrorOrNoticeMessage defines messages that can appear in ErrorResponse and NoticeResponse.
 pub struct ErrorOrNoticeMessage<'a> {
     pub severity: Severity,
@@ -29,9 +27,9 @@ pub struct ErrorOrNoticeMessage<'a> {
 
 impl<'a> ErrorOrNoticeMessage<'a> {
     /// Create a Postgres error message from an error, with the error code and message extracted from the error.
-    pub fn error(error: &BoxedError) -> Self {
+    pub fn error(error: &(dyn std::error::Error + 'static)) -> Self {
         let message = error.to_report_string_pretty();
-        let error_code = error_request_copy::<PostgresErrorCode>(&**error)
+        let error_code = error_request_copy::<PostgresErrorCode>(error)
             .filter(|e| e.is_error()) // should not be warning or success
             .unwrap_or(PostgresErrorCode::InternalError);
 

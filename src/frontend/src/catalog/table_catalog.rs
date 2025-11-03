@@ -98,6 +98,8 @@ pub struct TableCatalog {
     pub pk: Vec<ColumnOrder>,
 
     /// `pk_indices` of the corresponding materialize operator's output.
+    /// For the backward compatibility, we should use `stream_key()` method to get the stream key.
+    /// never use this field directly.
     pub stream_key: Vec<usize>,
 
     /// Type of the table. Used to distinguish user-created tables, materialized views, index
@@ -212,8 +214,10 @@ pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
 pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(Default))]
 pub enum TableType {
     /// Tables created by `CREATE TABLE`.
+    #[cfg_attr(test, default)]
     Table,
     /// Tables created by `CREATE MATERIALIZED VIEW`.
     MaterializedView,
@@ -223,13 +227,6 @@ pub enum TableType {
     VectorIndex,
     /// Internal tables for executors.
     Internal,
-}
-
-#[cfg(test)]
-impl Default for TableType {
-    fn default() -> Self {
-        Self::Table
-    }
 }
 
 impl TableType {
@@ -452,6 +449,29 @@ impl TableCatalog {
             .collect()
     }
 
+    /// Derive the stream key, which must include all distribution keys.
+    /// For backward compatibility, if distribution key is not in stream key(e.g. indexes created in old versions),
+    /// we need to add them to stream key.
+    pub fn stream_key(&self) -> Vec<usize> {
+        // if distribution key is not in stream key, we need to add them to stream key
+        if self
+            .distribution_key
+            .iter()
+            .any(|dist_key| !self.stream_key.contains(dist_key))
+        {
+            let mut new_stream_key = self.distribution_key.clone();
+            let mut seen: HashSet<usize> = self.distribution_key.iter().copied().collect();
+            for &key in &self.stream_key {
+                if seen.insert(key) {
+                    new_stream_key.push(key);
+                }
+            }
+            new_stream_key
+        } else {
+            self.stream_key.clone()
+        }
+    }
+
     /// Get a [`TableDesc`] of the table.
     ///
     /// Note: this must be called on existing tables, otherwise it will fail to get the vnode count
@@ -464,7 +484,7 @@ impl TableCatalog {
         TableDesc {
             table_id: self.id,
             pk: self.pk.clone(),
-            stream_key: self.stream_key.clone(),
+            stream_key: self.stream_key(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             append_only: self.append_only,
@@ -534,15 +554,18 @@ impl TableCatalog {
     }
 
     /// Get the total vnode count of the table.
-    ///
-    /// Panics if it's called on an incomplete (and not yet persisted) table catalog.
     pub fn vnode_count(&self) -> usize {
-        self.vnode_count.value()
+        if self.id().is_placeholder() {
+            0
+        } else {
+            // Panics if it's called on an incomplete (and not yet persisted) table catalog.
+            self.vnode_count.value()
+        }
     }
 
     pub fn to_prost(&self) -> PbTable {
         PbTable {
-            id: self.id.table_id,
+            id: self.id.as_raw_id(),
             schema_id: self.schema_id,
             database_id: self.database_id,
             name: self.name.clone(),
@@ -553,7 +576,7 @@ impl TableCatalog {
                 .map(|c| c.to_protobuf())
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
-            stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
+            stream_key: self.stream_key().iter().map(|x| *x as _).collect(),
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
@@ -596,7 +619,7 @@ impl TableCatalog {
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
             webhook_info: self.webhook_info.clone(),
-            job_id: self.job_id.map(|id| id.table_id),
+            job_id: self.job_id.map(|id| id.as_raw_id()),
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
@@ -609,7 +632,7 @@ impl TableCatalog {
         }
     }
 
-    /// Get columns excluding hidden columns and generated golumns.
+    /// Get columns excluding hidden columns and generated columns.
     pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
         self.columns
             .iter()

@@ -97,7 +97,7 @@ pub struct SourceExecutor<S: StateStore> {
     is_shared_non_cdc: bool,
 
     /// Local barrier manager for reporting source load finished events
-    barrier_manager: LocalBarrierManager,
+    _barrier_manager: LocalBarrierManager,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -120,7 +120,7 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
-            barrier_manager,
+            _barrier_manager: barrier_manager,
         }
     }
 
@@ -148,7 +148,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let wait_checkpoint_worker = WaitCheckpointWorker {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table().state_store().clone(),
-            table_id: core.split_state_store.state_table().table_id().into(),
+            table_id: core.split_state_store.state_table().table_id(),
             metrics,
         };
         tokio::spawn(wait_checkpoint_worker.run());
@@ -225,20 +225,6 @@ impl<S: StateStore> SourceExecutor<S> {
         (column_ids, source_ctx)
     }
 
-    /// Check if this is a batch refreshable source.
-    fn is_batch_source(&self) -> bool {
-        self.stream_source_core.is_batch_source
-    }
-
-    /// Refresh splits
-    fn refresh_batch_splits(&mut self) -> StreamExecutorResult<Vec<SplitImpl>> {
-        debug_assert!(self.is_batch_source());
-        let core = &self.stream_source_core;
-        let mut split = core.get_batch_split();
-        split.refresh();
-        Ok(vec![split.into()])
-    }
-
     fn is_auto_schema_change_enable(&self) -> bool {
         self.actor_ctx
             .streaming_config
@@ -287,12 +273,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     {
                         should_rebuild_stream = true;
                     }
-                }
-                ApplyMutationAfterBarrier::RefreshBatchSplits(splits) => {
-                    // Just override the latest split info with the refreshed splits. No need to check.
-                    self.stream_source_core.latest_split_info =
-                        splits.into_iter().map(|s| (s.id(), s)).collect();
-                    should_rebuild_stream = true;
                 }
                 ApplyMutationAfterBarrier::ConnectorPropsChange => {
                     should_rebuild_stream = true;
@@ -410,7 +390,7 @@ impl<S: StateStore> SourceExecutor<S> {
         GLOBAL_ERROR_METRICS.user_source_error.report([
             e.variant_name().to_owned(),
             core.source_id.to_string(),
-            core.source_name.to_owned(),
+            core.source_name.clone(),
             self.actor_ctx.fragment_id.to_string(),
         ]);
 
@@ -433,8 +413,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let reader_stream_builder = self.stream_reader_builder(source_desc.clone());
-        let reader_stream =
-            reader_stream_builder.into_retry_stream(Some(target_state.clone()), false);
+        let reader_stream = reader_stream_builder.into_retry_stream(Some(target_state), false);
 
         stream.replace_data_stream(reader_stream);
 
@@ -623,8 +602,6 @@ impl<S: StateStore> SourceExecutor<S> {
             .source_split_change_count
             .with_guarded_label_values(&self.get_metric_labels());
 
-        let mut is_refreshing = false;
-
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -646,23 +623,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let epoch = barrier.epoch;
-
-                    // NOTE: We rely on CompleteBarrierTask, which is only for checkpoint barrier,
-                    // so we wait for a checkpoint barrier here.
-                    if barrier.is_checkpoint() && self.is_batch_source() && is_refreshing {
-                        let batch_split = self.stream_source_core.get_batch_split();
-                        if batch_split.finished() {
-                            tracing::info!(?epoch, "emitting load finish");
-                            self.barrier_manager.report_source_load_finished(
-                                epoch,
-                                self.actor_ctx.id,
-                                source_id.table_id(),
-                                source_id.table_id(),
-                            );
-                            is_refreshing = false;
-                        }
-                    }
-
                     let mut split_change = None;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
@@ -698,7 +658,8 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
 
                             Mutation::ConnectorPropsChange(maybe_mutation) => {
-                                if let Some(new_props) = maybe_mutation.get(&source_id.table_id()) {
+                                if let Some(new_props) = maybe_mutation.get(&source_id.as_raw_id())
+                                {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
                                         "updating source properties from {:?} to {:?}",
@@ -742,36 +703,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
-                                }
-                            }
-                            Mutation::RefreshStart {
-                                table_id: _,
-                                associated_source_id,
-                            } if *associated_source_id == source_id => {
-                                debug_assert!(self.is_batch_source());
-                                is_refreshing = true;
-
-                                // Similar to split_change, we need to update the split info, and rebuild source reader.
-
-                                // For batch sources, trigger re-enumeration of splits to detect file changes
-                                if let Ok(new_splits) = self.refresh_batch_splits() {
-                                    tracing::info!(
-                                        actor_id = self.actor_ctx.id,
-                                         %associated_source_id,
-                                        new_splits_count = new_splits.len(),
-                                        "RefreshStart triggered split re-enumeration"
-                                    );
-                                    split_change = Some((
-                                        &source_desc,
-                                        &mut stream,
-                                        ApplyMutationAfterBarrier::RefreshBatchSplits(new_splits),
-                                    ));
-                                } else {
-                                    tracing::warn!(
-                                        actor_id = self.actor_ctx.id,
-                                        %associated_source_id,
-                                        "Failed to refresh splits during RefreshStart"
-                                    );
                                 }
                             }
                             _ => {}
@@ -872,7 +803,6 @@ enum ApplyMutationAfterBarrier<'a> {
         should_trim_state: bool,
         split_change_count: &'a LabelGuardedMetric<GenericCounter<AtomicU64>>,
     },
-    RefreshBatchSplits(Vec<SplitImpl>),
     ConnectorPropsChange,
 }
 
@@ -1085,7 +1015,6 @@ mod tests {
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_owned(),
-            is_batch_source: false,
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();
@@ -1174,7 +1103,6 @@ mod tests {
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_owned(),
-            is_batch_source: false,
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();

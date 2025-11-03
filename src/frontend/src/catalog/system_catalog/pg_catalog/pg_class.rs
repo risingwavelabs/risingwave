@@ -20,7 +20,7 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
-/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+/// similar to a table. Ref: `https://www.postgresql.org/docs/current/catalog-pg-class.html`
 #[derive(Fields)]
 struct PgClass {
     #[primary_key]
@@ -52,7 +52,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
             schema
                 .iter_user_table()
                 .map(|table| PgClass {
-                    oid: table.id.table_id as i32,
+                    oid: table.id.as_raw_id() as i32,
                     relname: table.name.clone(),
                     relnamespace: table.schema_id as i32,
                     relowner: table.owner as i32,
@@ -66,7 +66,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 })
                 .chain(schema.iter_all_mvs().map(|mview| PgClass {
-                    oid: mview.id.table_id as i32,
+                    oid: mview.id.as_raw_id() as i32,
                     relname: mview.name.clone(),
                     relnamespace: mview.schema_id as i32,
                     relowner: mview.owner as i32,
@@ -80,7 +80,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_system_tables().map(|table| PgClass {
-                    oid: table.id.table_id as i32,
+                    oid: table.id.as_raw_id() as i32,
                     relname: table.name.clone(),
                     relnamespace: schema.id() as i32,
                     relowner: table.owner as i32,

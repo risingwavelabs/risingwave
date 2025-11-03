@@ -66,7 +66,7 @@ impl CursorDataChunkStream {
         formats: &Vec<Format>,
         session: Arc<SessionImpl>,
     ) {
-        let columns_type = fields.iter().map(|f| f.data_type().clone()).collect();
+        let columns_type = fields.iter().map(|f| f.data_type()).collect();
         match self {
             CursorDataChunkStream::LocalDataChunk(data_chunk) => {
                 let data_chunk = mem::take(data_chunk).unwrap();
@@ -129,7 +129,7 @@ impl Cursor {
 
     pub fn get_fields(&mut self) -> Vec<Field> {
         match self {
-            Cursor::Subscription(cursor) => cursor.fields_manager.get_output_fields().clone(),
+            Cursor::Subscription(cursor) => cursor.fields_manager.get_output_fields(),
             Cursor::Query(cursor) => cursor.fields.clone(),
         }
     }
@@ -484,7 +484,7 @@ impl SubscriptionCursor {
                     // Initiate a new batch query to continue fetching
                     match Self::get_next_rw_timestamp(
                         *seek_timestamp,
-                        &self.dependent_table_id,
+                        self.dependent_table_id,
                         *expected_timestamp,
                         handler_args.clone(),
                         &self.subscription,
@@ -652,7 +652,7 @@ impl SubscriptionCursor {
                         session
                             .env
                             .hummock_snapshot_manager()
-                            .wait_table_change_log_notification(self.dependent_table_id.table_id()),
+                            .wait_table_change_log_notification(self.dependent_table_id),
                     )
                     .await
                     {
@@ -688,7 +688,7 @@ impl SubscriptionCursor {
 
     fn get_next_rw_timestamp(
         seek_timestamp: u64,
-        table_id: &TableId,
+        table_id: TableId,
         expected_timestamp: Option<u64>,
         handler_args: HandlerArgs,
         dependent_subscription: &SubscriptionCatalog,
@@ -701,7 +701,7 @@ impl SubscriptionCursor {
         )?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = session.list_change_log_epochs(table_id.table_id(), seek_timestamp, 2)?;
+        let new_epochs = session.list_change_log_epochs(table_id, seek_timestamp, 2)?;
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {
@@ -762,7 +762,7 @@ impl SubscriptionCursor {
     ) -> Result<BatchQueryPlanResult> {
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
-        let context = OptimizerContext::from_handler_args(handler_args.clone());
+        let context = OptimizerContext::from_handler_args(handler_args);
         let version_id = {
             let version = session.env.hummock_snapshot_manager.acquire();
             let version = version.version();
@@ -988,10 +988,11 @@ impl SubscriptionCursor {
             out_fields,
             out_names,
         );
-        let schema = plan_root.schema().clone();
+        let schema = plan_root.schema();
         let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
-            QueryMode::Auto => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
-            QueryMode::Local => (plan_root.gen_batch_local_plan()?, QueryMode::Local),
+            QueryMode::Auto | QueryMode::Local => {
+                (plan_root.gen_batch_local_plan()?, QueryMode::Local)
+            }
             QueryMode::Distributed => (
                 plan_root.gen_batch_distributed_plan()?,
                 QueryMode::Distributed,
@@ -1003,7 +1004,6 @@ impl SubscriptionCursor {
             schema,
             stmt_type: StatementType::SELECT,
             dependent_relations: vec![],
-            read_storage_tables: HashSet::from_iter([table_catalog.id]),
         })
     }
 
@@ -1146,14 +1146,14 @@ impl CursorManager {
     }
 
     pub async fn get_periodic_cursor_metrics(&self) -> PeriodicCursorMetrics {
-        let mut subsription_cursor_nums = 0;
-        let mut invalid_subsription_cursor_nums = 0;
+        let mut subscription_cursor_nums = 0;
+        let mut invalid_subscription_cursor_nums = 0;
         let mut subscription_cursor_last_fetch_duration = HashMap::new();
         for (_, cursor) in self.cursor_map.lock().await.iter() {
             if let Cursor::Subscription(subscription_cursor) = cursor {
-                subsription_cursor_nums += 1;
+                subscription_cursor_nums += 1;
                 if matches!(subscription_cursor.state, State::Invalid) {
-                    invalid_subsription_cursor_nums += 1;
+                    invalid_subscription_cursor_nums += 1;
                 } else {
                     let fetch_duration =
                         subscription_cursor.last_fetch.elapsed().as_millis() as f64;
@@ -1165,8 +1165,8 @@ impl CursorManager {
             }
         }
         PeriodicCursorMetrics {
-            subsription_cursor_nums,
-            invalid_subsription_cursor_nums,
+            subscription_cursor_nums,
+            invalid_subscription_cursor_nums,
             subscription_cursor_last_fetch_duration,
         }
     }

@@ -96,7 +96,7 @@ fn make_prost_privilege(
                         .into());
                     }
                 }
-                grant_objs.push(PbObject::TableId(table.id().table_id));
+                grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
             }
         }
         GrantObjects::Tables(tables) => {
@@ -113,7 +113,7 @@ fn make_prost_privilege(
                     Ok((table, _)) => {
                         match table.table_type() {
                             TableType::Table => {
-                                grant_objs.push(PbObject::TableId(table.id().table_id));
+                                grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
                                 continue;
                             }
                             _ => {
@@ -279,7 +279,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_all_mvs().for_each(|mview| {
-                    grant_objs.push(PbObject::TableId(mview.id().table_id));
+                    grant_objs.push(PbObject::TableId(mview.id().as_raw_id()));
                 });
             }
         }
@@ -288,7 +288,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_user_table().for_each(|table| {
-                    grant_objs.push(PbObject::TableId(table.id().table_id));
+                    grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
                 });
             }
         }
@@ -382,10 +382,9 @@ fn bind_user_from_idents(session: &SessionImpl, names: Vec<Ident>) -> Result<Vec
         if let Some(user) = reader.get_user_by_name(&name.real_value()) {
             users.insert(user.id);
         } else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                format!("User \"{name}\" does not exist").to_owned(),
-            )
-            .into());
+            return Err(
+                ErrorCode::InvalidInputSyntax(format!("User \"{name}\" does not exist")).into(),
+            );
         }
     }
     Ok(users.into_iter().collect())
@@ -465,9 +464,9 @@ pub async fn handle_grant_privilege(
 
         // We remark that the user name is always case-sensitive.
         if reader.get_user_by_name(&granted_by.real_value()).is_none() {
-            return Err(ErrorCode::InvalidInputSyntax(
-                format!("Grantor \"{granted_by}\" does not exist").to_owned(),
-            )
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Grantor \"{granted_by}\" does not exist"
+            ))
             .into());
         }
     }
@@ -505,9 +504,9 @@ pub async fn handle_revoke_privilege(
         if let Some(user) = reader.get_user_by_name(&granted_by.real_value()) {
             granted_by_id = Some(user.id);
         } else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                format!("Grantor \"{granted_by}\" does not exist").to_owned(),
-            )
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Grantor \"{granted_by}\" does not exist"
+            ))
             .into());
         }
     }

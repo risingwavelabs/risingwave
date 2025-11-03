@@ -15,7 +15,9 @@
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
 
-use super::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
+use super::unified::json::{
+    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+};
 use super::unified::kv_event::KvEvent;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
@@ -74,6 +76,7 @@ impl PlainParser {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                BigintUnsignedHandlingMode::Long,
                 false,
             )?,
         ));
@@ -171,7 +174,7 @@ impl PlainParser {
                                 }
                             };
                             self.source_ctx.on_cdc_auto_schema_change_failure(
-                                self.source_ctx.source_id.table_id,
+                                self.source_ctx.source_id.as_raw_id(),
                                 table_name,
                                 cdc_table_id,
                                 "".to_owned(), // upstream_ddl is not available in this context

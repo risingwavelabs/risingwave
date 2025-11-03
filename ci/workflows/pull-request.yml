@@ -89,7 +89,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
@@ -151,7 +151,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "meta backup test"
@@ -522,7 +522,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 22
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"

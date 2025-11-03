@@ -25,12 +25,13 @@ use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{Context, anyhow};
 use iceberg::io::{
-    AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
-    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
+    ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
+    GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
 use risingwave_common::bail;
+use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 use serde_with::serde_as;
@@ -69,6 +70,13 @@ pub struct IcebergCommon {
     #[serde(rename = "azblob.endpoint_url")]
     pub azblob_endpoint_url: Option<String>,
 
+    #[serde(rename = "adlsgen2.account_name")]
+    pub adlsgen2_account_name: Option<String>,
+    #[serde(rename = "adlsgen2.account_key")]
+    pub adlsgen2_account_key: Option<String>,
+    #[serde(rename = "adlsgen2.endpoint")]
+    pub adlsgen2_endpoint: Option<String>,
+
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
@@ -82,11 +90,6 @@ pub struct IcebergCommon {
     /// URI of iceberg catalog, only applicable in rest catalog.
     #[serde(rename = "catalog.uri")]
     pub catalog_uri: Option<String>,
-    #[serde(rename = "database.name")]
-    pub database_name: Option<String>,
-    /// Full name of table, must include schema name.
-    #[serde(rename = "table.name")]
-    pub table_name: String,
     /// Credential for accessing iceberg catalog, only applicable in rest catalog.
     /// A credential to exchange for a token in the `OAuth2` client credentials flow.
     #[serde(rename = "catalog.credential")]
@@ -146,6 +149,10 @@ pub struct IcebergCommon {
     /// - Multiple headers can be specified, separated by a ';'.
     #[serde(rename = "catalog.header")]
     pub header: Option<String>,
+
+    /// Enable vended credentials for iceberg REST catalog.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub vended_credentials: Option<bool>,
 }
 
 impl EnforceSecret for IcebergCommon {
@@ -156,12 +163,54 @@ impl EnforceSecret for IcebergCommon {
         "catalog.credential",
         "catalog.token",
         "catalog.oauth2_server_uri",
+        "adlsgen2.account_key",
+        "adlsgen2.client_secret",
     };
+}
+
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
+#[serde(deny_unknown_fields)]
+pub struct IcebergTableIdentifier {
+    #[serde(rename = "database.name")]
+    pub database_name: Option<String>,
+    /// Full name of table, must include schema name when database is provided.
+    #[serde(rename = "table.name")]
+    pub table_name: String,
+}
+
+impl IcebergTableIdentifier {
+    pub fn database_name(&self) -> Option<&str> {
+        self.database_name.as_deref()
+    }
+
+    pub fn table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    pub fn to_table_ident(&self) -> ConnectorResult<TableIdent> {
+        let ret = if let Some(database_name) = &self.database_name {
+            TableIdent::from_strs(vec![database_name, &self.table_name])
+        } else {
+            TableIdent::from_strs(vec![&self.table_name])
+        };
+
+        Ok(ret.context("Failed to create table identifier")?)
+    }
 }
 
 impl IcebergCommon {
     pub fn catalog_type(&self) -> &str {
-        self.catalog_type.as_deref().unwrap_or("storage")
+        let catalog_type: &str = self.catalog_type.as_deref().unwrap_or("storage");
+        if self.vended_credentials() && catalog_type == "rest" {
+            "rest_rust"
+        } else {
+            catalog_type
+        }
+    }
+
+    pub fn vended_credentials(&self) -> bool {
+        self.vended_credentials.unwrap_or(false)
     }
 
     pub fn catalog_name(&self) -> String {
@@ -172,8 +221,20 @@ impl IcebergCommon {
     }
 
     pub fn headers(&self) -> ConnectorResult<HashMap<String, String>> {
+        let mut headers = HashMap::new();
+        let user_agent = match Deployment::current() {
+            Deployment::Ci => "RisingWave(CI)".to_owned(),
+            Deployment::Cloud => "RisingWave(Cloud)".to_owned(),
+            Deployment::Other => "RisingWave(OSS)".to_owned(),
+        };
+        if self.vended_credentials() {
+            headers.insert(
+                "X-Iceberg-Access-Delegation".to_owned(),
+                "vended-credentials".to_owned(),
+            );
+        }
+        headers.insert("User-Agent".to_owned(), user_agent);
         if let Some(header) = &self.header {
-            let mut headers = HashMap::new();
             for pair in header.split(';') {
                 let mut parts = pair.split('=');
                 if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
@@ -182,10 +243,8 @@ impl IcebergCommon {
                     bail!("Invalid header format: {}", pair);
                 }
             }
-            Ok(headers)
-        } else {
-            Ok(HashMap::new())
         }
+        Ok(headers)
     }
 
     pub fn enable_config_load(&self) -> bool {
@@ -245,6 +304,17 @@ impl IcebergCommon {
 
                 if catalog_type != "rest" && catalog_type != "rest_rust" {
                     bail!("azblob unsupported in {} catalog", &catalog_type);
+                }
+            }
+
+            if let (Some(account_name), Some(account_key)) = (
+                self.adlsgen2_account_name.as_ref(),
+                self.adlsgen2_account_key.as_ref(),
+            ) {
+                iceberg_configs.insert(ADLS_ACCOUNT_NAME.to_owned(), account_name.clone());
+                iceberg_configs.insert(ADLS_ACCOUNT_KEY.to_owned(), account_key.clone());
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("adlsgen2 unsupported in {} catalog", &catalog_type);
                 }
             }
 
@@ -355,8 +425,8 @@ impl IcebergCommon {
                 java_catalog_configs.insert(format!("header.{}", header_name), header_value);
             }
 
-            match self.catalog_type.as_deref() {
-                Some("rest") => {
+            match self.catalog_type() {
+                "rest" => {
                     if let Some(credential) = &self.credential {
                         java_catalog_configs.insert("credential".to_owned(), credential.clone());
                     }
@@ -397,7 +467,7 @@ impl IcebergCommon {
                         }
                     }
                 }
-                Some("glue") => {
+                "glue" => {
                     if !enable_config_load {
                         java_catalog_configs.insert(
                             "client.credentials-provider".to_owned(),
@@ -440,16 +510,6 @@ impl IcebergCommon {
 }
 
 impl IcebergCommon {
-    pub fn full_table_name(&self) -> ConnectorResult<TableIdent> {
-        let ret = if let Some(database_name) = &self.database_name {
-            TableIdent::from_strs(vec![database_name, &self.table_name])
-        } else {
-            TableIdent::from_strs(vec![&self.table_name])
-        };
-
-        Ok(ret.context("Failed to create table identifier")?)
-    }
-
     /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
     pub async fn create_catalog(
         &self,
@@ -643,6 +703,7 @@ impl IcebergCommon {
     /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
     pub async fn load_table(
         &self,
+        table: &IcebergTableIdentifier,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<Table> {
         let catalog = self
@@ -650,8 +711,8 @@ impl IcebergCommon {
             .await
             .context("Unable to load iceberg catalog")?;
 
-        let table_id = self
-            .full_table_name()
+        let table_id = table
+            .to_table_ident()
             .context("Unable to parse table name")?;
 
         catalog.load_table(&table_id).await.map_err(Into::into)

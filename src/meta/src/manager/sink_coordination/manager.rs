@@ -125,8 +125,7 @@ impl SinkCoordinatorManager {
         metadata_manager: MetadataManager,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
-        let subscriber =
-            new_committed_epoch_subscriber(hummock_manager.clone(), metadata_manager.clone());
+        let subscriber = new_committed_epoch_subscriber(hummock_manager, metadata_manager);
         Self::start_worker_with_spawn_worker(move |param, manager_request_stream| {
             tokio::spawn(CoordinatorWorker::run(
                 param,
@@ -464,7 +463,7 @@ mod tests {
             sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
-            downstream_pk: vec![],
+            downstream_pk: None,
             sink_type: SinkType::AppendOnly,
             format_desc: None,
             db_name: "test".into(),
@@ -664,7 +663,7 @@ mod tests {
             sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
-            downstream_pk: vec![],
+            downstream_pk: None,
             sink_type: SinkType::AppendOnly,
             format_desc: None,
             db_name: "test".into(),
@@ -801,7 +800,7 @@ mod tests {
             sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
-            downstream_pk: vec![],
+            downstream_pk: None,
             sink_type: SinkType::AppendOnly,
             format_desc: None,
             db_name: "test".into(),
@@ -893,7 +892,7 @@ mod tests {
             sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
-            downstream_pk: vec![],
+            downstream_pk: None,
             sink_type: SinkType::AppendOnly,
             format_desc: None,
             db_name: "test".into(),
@@ -1001,7 +1000,7 @@ mod tests {
             sink_name: "test".into(),
             properties: Default::default(),
             columns: vec![],
-            downstream_pk: vec![],
+            downstream_pk: None,
             sink_type: SinkType::AppendOnly,
             format_desc: None,
             db_name: "test".into(),

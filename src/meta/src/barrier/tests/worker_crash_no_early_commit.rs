@@ -19,6 +19,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::catalog::Database;
@@ -38,7 +40,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::MetaResult;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::GlobalBarrierWorkerContext;
-use crate::barrier::info::InflightStreamingJobInfo;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::worker::GlobalBarrierWorker;
@@ -124,6 +125,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unreachable!()
     }
 
+    async fn handle_list_finished_source_ids(
+        &self,
+        _list_finished_source_ids: Vec<u32>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
+
     async fn handle_load_finished_source_ids(
         &self,
         _load_finished_source_ids: Vec<u32>,
@@ -131,13 +139,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unimplemented!()
     }
 
-    async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+    async fn finish_cdc_table_backfill(&self, _job_id: JobId) -> MetaResult<()> {
         unimplemented!()
     }
 
     async fn handle_refresh_finished_table_ids(
         &self,
-        _refresh_finished_table_ids: Vec<u32>,
+        _refresh_finished_table_ids: Vec<JobId>,
     ) -> MetaResult<()> {
         unimplemented!()
     }
@@ -170,7 +178,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         unreachable!()
     };
     let database_id = DatabaseId::new(233);
-    let job_id = TableId::new(234);
+    let job_id = JobId::new(234);
     let worker_node = |id| WorkerNode {
         id,
         r#type: PbWorkerType::ComputeNode as i32,
@@ -209,43 +217,46 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             database_id,
             HashMap::from_iter([(
                 job_id,
-                InflightStreamingJobInfo {
-                    job_id,
-                    fragment_infos: HashMap::from_iter([
-                        (
-                            actor1.fragment_id,
-                            InflightFragmentInfo {
-                                fragment_id: actor1.fragment_id,
-                                distribution_type: DistributionType::Single,
-                                nodes: Default::default(),
-                                actors: HashMap::from_iter([(
-                                    actor1.actor_id as _,
-                                    InflightActorInfo {
-                                        worker_id: worker1.id as _,
-                                        vnode_bitmap: None,
-                                    },
-                                )]),
-                                state_table_ids: HashSet::from_iter([table1]),
-                            },
-                        ),
-                        (
-                            actor2.fragment_id,
-                            InflightFragmentInfo {
-                                fragment_id: actor2.fragment_id,
-                                distribution_type: DistributionType::Single,
-                                nodes: Default::default(),
-                                actors: HashMap::from_iter([(
-                                    actor2.actor_id as _,
-                                    InflightActorInfo {
-                                        worker_id: worker2.id as _,
-                                        vnode_bitmap: None,
-                                    },
-                                )]),
-                                state_table_ids: HashSet::from_iter([table2]),
-                            },
-                        ),
-                    ]),
-                },
+                HashMap::from_iter([
+                    (
+                        actor1.fragment_id,
+                        InflightFragmentInfo {
+                            fragment_id: actor1.fragment_id,
+                            distribution_type: DistributionType::Single,
+                            fragment_type_mask: Default::default(),
+                            vnode_count: VirtualNode::COUNT_FOR_TEST,
+                            nodes: Default::default(),
+                            actors: HashMap::from_iter([(
+                                actor1.actor_id as _,
+                                InflightActorInfo {
+                                    worker_id: worker1.id as _,
+                                    vnode_bitmap: None,
+                                    splits: vec![],
+                                },
+                            )]),
+                            state_table_ids: HashSet::from_iter([table1]),
+                        },
+                    ),
+                    (
+                        actor2.fragment_id,
+                        InflightFragmentInfo {
+                            fragment_id: actor2.fragment_id,
+                            distribution_type: DistributionType::Single,
+                            fragment_type_mask: Default::default(),
+                            vnode_count: VirtualNode::COUNT_FOR_TEST,
+                            nodes: Default::default(),
+                            actors: HashMap::from_iter([(
+                                actor2.actor_id as _,
+                                InflightActorInfo {
+                                    worker_id: worker2.id as _,
+                                    vnode_bitmap: None,
+                                    splits: vec![],
+                                },
+                            )]),
+                            state_table_ids: HashSet::from_iter([table2]),
+                        },
+                    ),
+                ]),
             )]),
         )]),
         state_table_committed_epochs: HashMap::from_iter([
@@ -253,7 +264,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             (table2, initial_epoch),
         ]),
         state_table_log_epochs: Default::default(),
-        subscription_infos: Default::default(),
+        mv_depended_subscriptions: Default::default(),
         stream_actors: HashMap::from_iter([
             (actor1.actor_id as _, actor1.clone()),
             (actor2.actor_id as _, actor2.clone()),

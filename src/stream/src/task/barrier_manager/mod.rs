@@ -17,6 +17,7 @@ pub mod progress;
 
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -41,17 +42,23 @@ pub(super) enum LocalBarrierEvent {
         actor: ActorId,
         state: BackfillState,
     },
-    ReportSourceLoadFinished {
+    ReportSourceListFinished {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: u32,
         associated_source_id: u32,
     },
+    ReportSourceLoadFinished {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: TableId,
+        associated_source_id: u32,
+    },
     RefreshFinished {
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        staging_table_id: u32,
+        table_id: TableId,
+        staging_table_id: TableId,
     },
     RegisterBarrierSender {
         actor_id: ActorId,
@@ -163,11 +170,26 @@ impl LocalBarrierManager {
         rx
     }
 
-    pub fn report_source_load_finished(
+    pub fn report_source_list_finished(
         &self,
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: u32,
+        associated_source_id: u32,
+    ) {
+        self.send_event(LocalBarrierEvent::ReportSourceListFinished {
+            epoch,
+            actor_id,
+            table_id,
+            associated_source_id,
+        });
+    }
+
+    pub fn report_source_load_finished(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        table_id: TableId,
         associated_source_id: u32,
     ) {
         self.send_event(LocalBarrierEvent::ReportSourceLoadFinished {
@@ -182,8 +204,8 @@ impl LocalBarrierManager {
         &self,
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        staging_table_id: u32,
+        table_id: TableId,
+        staging_table_id: TableId,
     ) {
         self.send_event(LocalBarrierEvent::RefreshFinished {
             epoch,

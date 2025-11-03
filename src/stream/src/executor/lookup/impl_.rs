@@ -186,7 +186,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let metrics_info = MetricsInfo::new(
             ctx.streaming_metrics.clone(),
-            storage_table.table_id().table_id(),
+            storage_table.table_id(),
             ctx.id,
             "Lookup",
         );
@@ -288,7 +288,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
                     let (chunk, ops) = chunk.into_parts();
 
                     let mut builder = JoinStreamChunkBuilder::new(

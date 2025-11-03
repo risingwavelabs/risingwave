@@ -23,7 +23,18 @@ use crate::executor::prelude::*;
 /// and returns a boolean array on whether each item should be retained. And then,
 /// `FilterExecutor` will insert, delete or update element into next executor according
 /// to the result of the expression.
-pub struct FilterExecutor {
+///
+/// # Upsert mode
+///
+/// When `UPSERT` is specified, the filter executor will...
+/// - always yield `Delete` records on `Delete` (or `UpdateDelete`) input, regardless of the filter result
+/// - always yield `Delete` records on `Insert` (or `UpdateInsert`) input, if the filter result is `false`
+///
+/// This is to guarantee that the filtered-out data is correctly cleaned up, even if we
+/// don't have information about the previous data under the same primary key. Since an
+/// upsert stream is expected as the output of the filter executor in this case, we can
+/// safely yield a `Delete` record no matter if it used to exist or not.
+pub struct FilterExecutorInner<const UPSERT: bool> {
     _ctx: ActorContextRef,
     input: Executor,
 
@@ -32,7 +43,10 @@ pub struct FilterExecutor {
     expr: NonStrictExpression,
 }
 
-impl FilterExecutor {
+pub type FilterExecutor = FilterExecutorInner<false>;
+pub type UpsertFilterExecutor = FilterExecutorInner<true>;
+
+impl<const UPSERT: bool> FilterExecutorInner<UPSERT> {
     pub fn new(ctx: ActorContextRef, input: Executor, expr: NonStrictExpression) -> Self {
         Self {
             _ctx: ctx,
@@ -64,44 +78,68 @@ impl FilterExecutor {
         for (&op, res) in ops.iter().zip_eq_fast(bool_array.iter()) {
             // SAFETY: ops.len() == pred_output.len() == visibility.len()
             let res = res.unwrap_or(false);
-            match op {
-                Op::Insert | Op::Delete => {
-                    new_ops.push(op);
-                    if res {
-                        new_visibility.append(true);
-                    } else {
-                        new_visibility.append(false);
+
+            if UPSERT {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        if res {
+                            // Always emit an `Insert`.
+                            // - if the row didn't exist before, this is a new row
+                            // - if the row existed before, this is an update
+                            new_ops.push(Op::Insert);
+                            new_visibility.append(true);
+                        } else {
+                            // Always emit a `Delete`.
+                            // - if the row didn't exist before, this is a no-op
+                            // - if the row existed before, this is a deletion
+                            new_ops.push(Op::Delete);
+                            new_visibility.append(true);
+                        }
                     }
-                }
-                Op::UpdateDelete => {
-                    last_res = res;
-                }
-                Op::UpdateInsert => match (last_res, res) {
-                    (true, false) => {
+                    Op::Delete | Op::UpdateDelete => {
+                        // Always emit a `Delete` no matter what the filter result is.
+                        // - if the row didn't exist before, this is a no-op
+                        // - if the row existed before, this is a deletion
                         new_ops.push(Op::Delete);
-                        new_ops.push(Op::UpdateInsert);
-                        new_visibility.append(true);
-                        new_visibility.append(false);
-                    }
-                    (false, true) => {
-                        new_ops.push(Op::UpdateDelete);
-                        new_ops.push(Op::Insert);
-                        new_visibility.append(false);
                         new_visibility.append(true);
                     }
-                    (true, true) => {
-                        new_ops.push(Op::UpdateDelete);
-                        new_ops.push(Op::UpdateInsert);
-                        new_visibility.append(true);
-                        new_visibility.append(true);
+                }
+            } else {
+                match op {
+                    Op::Insert | Op::Delete => {
+                        new_ops.push(op);
+                        new_visibility.append(res);
                     }
-                    (false, false) => {
-                        new_ops.push(Op::UpdateDelete);
-                        new_ops.push(Op::UpdateInsert);
-                        new_visibility.append(false);
-                        new_visibility.append(false);
+                    Op::UpdateDelete => {
+                        last_res = res;
                     }
-                },
+                    Op::UpdateInsert => match (last_res, res) {
+                        (true, false) => {
+                            new_ops.push(Op::Delete);
+                            new_ops.push(Op::UpdateInsert);
+                            new_visibility.append(true);
+                            new_visibility.append(false);
+                        }
+                        (false, true) => {
+                            new_ops.push(Op::UpdateDelete);
+                            new_ops.push(Op::Insert);
+                            new_visibility.append(false);
+                            new_visibility.append(true);
+                        }
+                        (true, true) => {
+                            new_ops.push(Op::UpdateDelete);
+                            new_ops.push(Op::UpdateInsert);
+                            new_visibility.append(true);
+                            new_visibility.append(true);
+                        }
+                        (false, false) => {
+                            new_ops.push(Op::UpdateDelete);
+                            new_ops.push(Op::UpdateInsert);
+                            new_visibility.append(false);
+                            new_visibility.append(false);
+                        }
+                    },
+                }
             }
         }
 
@@ -116,21 +154,22 @@ impl FilterExecutor {
     }
 }
 
-impl Debug for FilterExecutor {
+impl<const UPSERT: bool> Debug for FilterExecutorInner<UPSERT> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FilterExecutor")
             .field("expr", &self.expr)
+            .field("upsert", &UPSERT)
             .finish()
     }
 }
 
-impl Execute for FilterExecutor {
+impl<const UPSERT: bool> Execute for FilterExecutorInner<UPSERT> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
 }
 
-impl FilterExecutor {
+impl<const UPSERT: bool> FilterExecutorInner<UPSERT> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let input = self.input.execute();
@@ -140,7 +179,7 @@ impl FilterExecutor {
             match msg {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
 
                     let pred_output = self.expr.eval_infallible(chunk.data_chunk()).await;
 
@@ -230,5 +269,50 @@ mod tests {
         );
 
         assert!(filter.next().await.unwrap().unwrap().is_stop());
+    }
+
+    #[tokio::test]
+    async fn test_upsert_filter() {
+        let chunk = StreamChunk::from_pretty(
+            " I  I
+            + 10 14
+            + 20 5
+            + 10 7
+            + 20 16
+            + 20 18
+            - 10 .
+            - 20 .
+            - 30 .
+            ",
+        );
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let pk_indices = vec![0];
+        let source =
+            MockSource::with_chunks(vec![chunk]).into_executor(schema.clone(), pk_indices.clone());
+        let test_expr = build_from_pretty("(greater_than:boolean $1:int8 10:int8)");
+        let mut filter = UpsertFilterExecutor::new(ActorContext::for_test(123), source, test_expr)
+            .boxed()
+            .execute();
+        let chunk = filter.next().await.unwrap().unwrap().into_chunk().unwrap();
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I  I
+                + 10 14
+                - 20 5
+                - 10 7
+                + 20 16
+                + 20 18
+                - 10 .
+                - 20 .
+                - 30 .
+                ",
+            )
+        );
     }
 }

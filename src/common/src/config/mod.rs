@@ -191,6 +191,10 @@ pub mod default {
             10
         }
 
+        pub fn stream_topn_cache_min_capacity() -> usize {
+            10
+        }
+
         pub fn stream_chunk_size() -> usize {
             256
         }
@@ -481,8 +485,7 @@ pub mod tests {
     ) {
         // Set the default value if it's a config name-value pair, otherwise it's a sub-section (Table) that should be recursively processed.
         if let toml::Value::Table(table) = value {
-            let section_configs: BTreeMap<String, toml::Value> =
-                table.clone().into_iter().collect();
+            let section_configs: BTreeMap<String, toml::Value> = table.into_iter().collect();
             let sub_section = if section.is_empty() {
                 name
             } else {

@@ -24,9 +24,7 @@
 #![feature(coroutines)]
 #![feature(map_try_insert)]
 #![feature(error_generic_member_access)]
-#![feature(let_chains)]
 #![feature(portable_simd)]
-#![feature(array_chunks)]
 #![feature(once_cell_try)]
 #![allow(incomplete_features)]
 #![feature(iterator_try_collect)]
@@ -41,6 +39,9 @@
 #![feature(vec_into_raw_parts)]
 #![feature(exact_div)]
 #![feature(used_with_arg)]
+#![feature(iter_array_chunks)]
+#![feature(exact_size_is_empty)]
+#![feature(debug_closure_helpers)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
@@ -80,10 +81,13 @@ pub mod catalog;
 pub mod config;
 pub mod constants;
 pub mod field_generator;
+pub mod gap_fill_types;
 pub mod global_jvm;
 pub mod hash;
+pub mod id;
 pub mod log;
 pub mod memory;
+pub mod metrics_reader;
 pub mod telemetry;
 pub mod test_utils;
 pub mod transaction;

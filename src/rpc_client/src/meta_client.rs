@@ -40,10 +40,10 @@ use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult,
@@ -60,6 +60,7 @@ use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -313,6 +314,7 @@ impl MetaClient {
                             rw_version: RW_VERSION.to_owned(),
                             total_memory_bytes: system_memory_available_bytes() as _,
                             total_cpu_cores: total_cpu_available() as _,
+                            hostname: hostname(),
                         }),
                     })
                     .await
@@ -444,7 +446,7 @@ impl MetaClient {
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropMaterializedViewRequest {
-            table_id: table_id.table_id(),
+            table_id: table_id.as_raw_id(),
             cascade,
         };
 
@@ -649,6 +651,20 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_fragment_parallelism(
+        &self,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
+    ) -> Result<()> {
+        let request = AlterFragmentParallelismRequest {
+            fragment_ids,
+            parallelism,
+        };
+
+        self.inner.alter_fragment_parallelism(request).await?;
+        Ok(())
+    }
+
     pub async fn alter_cdc_table_backfill_parallelism(
         &self,
         table_id: u32,
@@ -786,7 +802,7 @@ impl MetaClient {
     ) -> Result<WaitVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(SourceId::Id),
-            table_id: table_id.table_id(),
+            table_id: table_id.as_raw_id(),
             cascade,
         };
 
@@ -1497,7 +1513,7 @@ impl MetaClient {
     pub async fn split_compaction_group(
         &self,
         group_id: CompactionGroupId,
-        table_ids_to_new_group: &[StateTableId],
+        table_ids_to_new_group: &[u32],
         partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let req = SplitCompactionGroupRequest {
@@ -1777,6 +1793,26 @@ impl MetaClient {
         Ok(resp.cdc_progress)
     }
 
+    pub async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
+    ) -> Result<WaitVersion> {
+        let request = CreateIcebergTableRequest {
+            table_info: Some(table_job_info),
+            sink_info: Some(sink_job_info),
+            iceberg_source: Some(iceberg_source),
+            if_not_exists,
+        };
+
+        let resp = self.inner.create_iceberg_table(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         let request = ListIcebergTablesRequest {};
         let resp = self.inner.list_iceberg_tables(request).await?;
@@ -2016,7 +2052,8 @@ impl GrpcMetaClientCore {
         let session_params_client = SessionParamServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel.clone());
-        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
+        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone())
+            .max_decoding_message_size(usize::MAX);
         let event_log_client = EventLogServiceClient::new(channel.clone());
         let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
         let hosted_iceberg_catalog_service_client =
@@ -2280,7 +2317,7 @@ impl GrpcMetaClient {
         let members = match strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(20);
+                let mut members = LruCache::new(20.try_into().unwrap());
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }
@@ -2406,6 +2443,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
@@ -2445,6 +2483,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
             ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
+            ,{ ddl_client, create_iceberg_table, CreateIcebergTableRequest, CreateIcebergTableResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

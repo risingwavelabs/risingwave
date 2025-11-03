@@ -14,7 +14,6 @@
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(let_chains)]
 #![recursion_limit = "256"]
 
 use core::str::FromStr;
@@ -406,7 +405,7 @@ where
 #[allow(dead_code)]
 struct TableSchemaFromYml {
     table_name: String,
-    pk_indices: Vec<usize>,
+    pk_indices: Option<Vec<usize>>,
     columns: Vec<ColumnDescFromYml>,
 }
 
@@ -543,7 +542,7 @@ async fn main() {
 
         let connector = properties.get("connector").unwrap().clone();
         let format_desc = mock_from_legacy_type(
-            &connector.clone(),
+            &connector,
             properties.get("type").unwrap_or(&"append-only".to_owned()),
         )
         .unwrap();

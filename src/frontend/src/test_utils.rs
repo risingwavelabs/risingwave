@@ -45,6 +45,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
     alter_swap_rename_request, create_connection_request,
@@ -457,7 +458,7 @@ impl CatalogWriter for MockCatalogWriter {
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
             self.catalog
                 .read()
@@ -488,7 +489,7 @@ impl CatalogWriter for MockCatalogWriter {
             )
             .into());
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
             self.catalog
                 .read()
@@ -726,6 +727,16 @@ impl CatalogWriter for MockCatalogWriter {
         }
         self.catalog.write().update_database(&pb_database);
         Ok(())
+    }
+
+    async fn create_iceberg_table(
+        &self,
+        _table_job_info: PbTableJobInfo,
+        _sink_job_info: PbSinkJobInfo,
+        _iceberg_source: PbSource,
+        _if_not_exists: bool,
+    ) -> Result<()> {
+        todo!()
     }
 }
 
@@ -1162,6 +1173,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _kind: PbThrottleTarget,
         _id: u32,
         _rate_limit: Option<u32>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
+    async fn alter_fragment_parallelism(
+        &self,
+        _fragment_ids: Vec<u32>,
+        _parallelism: Option<PbTableParallelism>,
     ) -> RpcResult<()> {
         unimplemented!()
     }

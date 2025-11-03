@@ -223,8 +223,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node: Some(source_node),
         fragment_type_mask: FragmentTypeFlag::Source as u32,
         requires_singleton: false,
-        table_ids_cnt: 0,
-        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -293,8 +291,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node: Some(simple_agg_node),
         fragment_type_mask: 0,
         requires_singleton: false,
-        table_ids_cnt: 0,
-        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -364,7 +360,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
             // `table_id` and `table` are left empty when generated from frontend.
-            table_id: TableId::placeholder().table_id(),
+            table_id: TableId::placeholder().as_raw_id(),
             table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
             staging_table: None,
@@ -381,8 +377,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node: Some(mview_node),
         fragment_type_mask: FragmentTypeFlag::Mview as u32,
         requires_singleton: true,
-        table_ids_cnt: 0,
-        upstream_table_ids: vec![],
     });
 
     fragments
@@ -491,12 +485,13 @@ async fn test_graph_builder() -> MetaResult<()> {
             })
     };
 
-    let stream_job_fragments = StreamJobFragments::for_test(TableId::default(), graph);
+    let stream_job_fragments = StreamJobFragments::for_test(0.into(), graph);
     let actors = stream_job_fragments.actors();
-    let mview_actor_ids = stream_job_fragments.mview_actor_ids();
+    let mview_fragment_ids = stream_job_fragments.mview_fragment_ids();
+
+    assert_eq!(mview_fragment_ids.len(), 1);
 
     assert_eq!(actors.len(), 9);
-    assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
     for fragment in stream_job_fragments.fragments() {

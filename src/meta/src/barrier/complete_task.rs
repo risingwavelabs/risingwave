@@ -20,7 +20,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use futures::future::try_join_all;
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_common::must_match;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -43,7 +44,7 @@ pub(super) enum CompletingTask {
     Completing {
         #[expect(clippy::type_complexity)]
         /// `database_id` -> (`Some(database_graph_committed_epoch)`, [(`creating_job_id`, `creating_job_committed_epoch`)])
-        epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)>,
+        epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(JobId, u64)>)>,
 
         // The join handle of a spawned task that completes the barrier.
         // The return value indicate whether there is some create streaming job command
@@ -59,26 +60,23 @@ pub(super) enum CompletingTask {
 pub(super) struct CompleteBarrierTask {
     pub(super) commit_info: CommitEpochInfo,
     pub(super) finished_jobs: Vec<TrackingJob>,
-    pub(super) finished_cdc_table_backfill: Vec<TableId>,
+    pub(super) finished_cdc_table_backfill: Vec<JobId>,
     pub(super) notifiers: Vec<Notifier>,
     /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`)))
     #[expect(clippy::type_complexity)]
-    pub(super) epoch_infos: HashMap<
-        DatabaseId,
-        (
-            Option<(CommandContext, HistogramTimer)>,
-            Vec<(TableId, u64)>,
-        ),
-    >,
+    pub(super) epoch_infos:
+        HashMap<DatabaseId, (Option<(CommandContext, HistogramTimer)>, Vec<(JobId, u64)>)>,
+    /// Source IDs that have finished listing data and need `ListFinish` commands
+    pub(super) list_finished_source_ids: Vec<u32>,
     /// Source IDs that have finished loading data and need `LoadFinish` commands
     pub(super) load_finished_source_ids: Vec<u32>,
     /// Table IDs that have finished materialize refresh and need completion signaling
-    pub(super) refresh_finished_table_ids: Vec<u32>,
+    pub(super) refresh_finished_table_job_ids: Vec<JobId>,
 }
 
 impl CompleteBarrierTask {
     #[expect(clippy::type_complexity)]
-    pub(super) fn epochs_to_ack(&self) -> HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)> {
+    pub(super) fn epochs_to_ack(&self) -> HashMap<DatabaseId, (Option<u64>, Vec<(JobId, u64)>)> {
         self.epoch_infos
             .iter()
             .map(|(database_id, (command_context, creating_job_epochs))| {
@@ -108,6 +106,18 @@ impl CompleteBarrierTask {
                 .start_timer();
             let version_stats = context.commit_epoch(self.commit_info).await?;
 
+            // Handle list finished source IDs for refreshable batch sources
+            // Spawn this asynchronously to avoid deadlock during barrier collection
+            //
+            // This step is for fs-like refreshable-batch sources, which need to list the data first finishing loading. It guarantees finishing listing before loading.
+            // The other sources can skip this step.
+
+            if !self.list_finished_source_ids.is_empty() {
+                context
+                    .handle_list_finished_source_ids(self.list_finished_source_ids.clone())
+                    .await?;
+            }
+
             // Handle load finished source IDs for refreshable batch sources
             // Spawn this asynchronously to avoid deadlock during barrier collection
             if !self.load_finished_source_ids.is_empty() {
@@ -117,9 +127,9 @@ impl CompleteBarrierTask {
             }
 
             // Handle refresh finished table IDs for materialized view refresh completion
-            if !self.refresh_finished_table_ids.is_empty() {
+            if !self.refresh_finished_table_job_ids.is_empty() {
                 context
-                    .handle_refresh_finished_table_ids(self.refresh_finished_table_ids.clone())
+                    .handle_refresh_finished_table_ids(self.refresh_finished_table_job_ids.clone())
                     .await?;
             }
 
@@ -206,7 +216,7 @@ impl CompleteBarrierTask {
 pub(super) struct BarrierCompleteOutput {
     #[expect(clippy::type_complexity)]
     /// `database_id` -> (`Some(database_graph_committed_epoch)`, [(`creating_job_id`, `creating_job_committed_epoch`)])
-    pub epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)>,
+    pub epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(JobId, u64)>)>,
     pub hummock_version_stats: HummockVersionStats,
 }
 

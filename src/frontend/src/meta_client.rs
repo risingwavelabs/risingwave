@@ -38,8 +38,8 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus, RefreshRequest,
-    RefreshResponse,
+    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
+    RefreshRequest, RefreshResponse,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
@@ -130,6 +130,12 @@ pub trait FrontendMetaClient: Send + Sync {
         kind: PbThrottleTarget,
         id: u32,
         rate_limit: Option<u32>,
+    ) -> Result<()>;
+
+    async fn alter_fragment_parallelism(
+        &self,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
     ) -> Result<()>;
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
@@ -353,6 +359,16 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .apply_throttle(kind, id, rate_limit)
             .await
             .map(|_| ())
+    }
+
+    async fn alter_fragment_parallelism(
+        &self,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
+    ) -> Result<()> {
+        self.0
+            .alter_fragment_parallelism(fragment_ids, parallelism)
+            .await
     }
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {

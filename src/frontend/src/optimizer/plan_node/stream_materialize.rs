@@ -80,14 +80,14 @@ impl StreamMaterialize {
             ConflictBehavior::Overwrite
             | ConflictBehavior::IgnoreConflict
             | ConflictBehavior::DoUpdateIfNotNull => match input.stream_kind() {
-                StreamKind::AppendOnly | StreamKind::Retract => input.stream_kind(),
-                StreamKind::Upsert => StreamKind::Retract,
+                StreamKind::AppendOnly => StreamKind::AppendOnly,
+                StreamKind::Retract | StreamKind::Upsert => StreamKind::Retract,
             },
         };
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            Some(table.stream_key.clone()),
+            Some(table.stream_key()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             kind,
@@ -126,7 +126,7 @@ impl StreamMaterialize {
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<Self> {
-        let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
+        let input = Self::rewrite_input(input, user_distributed_by.clone(), table_type)?;
         // the hidden column name might refer some expr id
         let input = reorganize_elements_id(input);
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
@@ -140,15 +140,22 @@ impl StreamMaterialize {
             CreateType::Foreground
         };
 
+        // For upsert stream, use `Overwrite` conflict behavior to convert into retract stream.
+        let conflict_behavior = match input.stream_kind() {
+            StreamKind::Retract | StreamKind::AppendOnly => ConflictBehavior::NoCheck,
+            StreamKind::Upsert => ConflictBehavior::Overwrite,
+        };
+
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
             database_id,
             schema_id,
+            user_distributed_by,
             user_order_by,
             columns,
             definition,
-            ConflictBehavior::NoCheck,
+            conflict_behavior,
             vec![],
             None,
             None,
@@ -190,26 +197,27 @@ impl StreamMaterialize {
         engine: Engine,
         refreshable: bool,
     ) -> Result<Self> {
-        let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
+        let input = Self::rewrite_input(input, user_distributed_by.clone(), TableType::Table)?;
 
         let table = Self::derive_table_catalog(
             input.clone(),
             name.clone(),
             database_id,
             schema_id,
-            user_order_by.clone(),
-            columns.clone(),
-            definition.clone(),
+            user_distributed_by,
+            user_order_by,
+            columns,
+            definition,
             conflict_behavior,
             version_column_indices,
-            Some(pk_column_indices.clone()),
+            Some(pk_column_indices),
             row_id_index,
             TableType::Table,
-            Some(version.clone()),
+            Some(version),
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
             CreateType::Foreground,
-            webhook_info.clone(),
+            webhook_info,
             engine,
             refreshable,
         )?;
@@ -294,6 +302,7 @@ impl StreamMaterialize {
         name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
+        user_distributed_by: RequiredDist,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -327,7 +336,7 @@ impl StreamMaterialize {
             // No order by for create table, so stream key is identical to table pk.
             (table_pk, pk_column_indices)
         } else {
-            derive_pk(input, user_order_by, &columns)
+            derive_pk(input, user_distributed_by, user_order_by, &columns)
         };
         // assert: `stream_key` is a subset of `table_pk`
 
@@ -605,7 +614,7 @@ impl Distill for StreamMaterialize {
             .map(Pretty::from)
             .collect();
 
-        let stream_key = (table.stream_key.iter())
+        let stream_key = (table.stream_key().iter())
             .map(|&k| table.columns[k].name().to_owned())
             .map(Pretty::from)
             .collect();

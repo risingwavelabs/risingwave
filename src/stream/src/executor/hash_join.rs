@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use anyhow::Context;
+use either::Either;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
@@ -72,7 +73,7 @@ struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
-    /// The mapping from input indices of a side to output columes.
+    /// The mapping from input indices of a side to output columns.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
     /// The first field of the ith element indicates that when a watermark at the ith column of
@@ -334,10 +335,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l =
-            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r =
-            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
+        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
@@ -665,6 +664,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         self.flush_data(barrier.epoch).await?;
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+
+                    // We don't include the time post yielding barrier because the vnode update
+                    // is a one-off and rare operation.
+                    barrier_join_match_duration_ns
+                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of both sides if asked.
@@ -689,9 +693,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     ] {
                         join_cached_entry_count.set(ht.entry_count() as i64);
                     }
-
-                    barrier_join_match_duration_ns
-                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                 }
             }
             start_time = Instant::now();
@@ -964,8 +965,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 let key = key.deserialize(join_key_data_types)?;
                 tracing::warn!(target: "high_join_amplification",
                     matched_rows_len = total_matches,
-                    update_table_id = side_update.ht.table_id(),
-                    match_table_id = side_match.ht.table_id(),
+                    update_table_id = %side_update.ht.table_id(),
+                    match_table_id = %side_match.ht.table_id(),
                     join_key = ?key,
                     actor_id = ctx.id,
                     fragment_id = ctx.fragment_id,
@@ -1010,7 +1011,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         let mut entry_state_count = 0;
 
         let mut degree = 0;
-        let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
+        let mut append_only_matched_row = None;
         let mut matched_rows_to_clean = vec![];
 
         macro_rules! match_row {
@@ -1019,9 +1020,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 $degree_table:expr,
                 $matched_row:expr,
                 $matched_row_ref:expr,
-                $from_cache:literal
+                $from_cache:literal,
+                $map_output:expr,
             ) => {
-                Self::handle_match_row::<SIDE, { JOIN_OP }, { $from_cache }>(
+                Self::handle_match_row::<_, _, SIDE, { JOIN_OP }, { $from_cache }>(
                     row,
                     $matched_row,
                     $matched_row_ref,
@@ -1036,6 +1038,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     append_only_optimize,
                     &mut append_only_matched_row,
                     &mut matched_rows_to_clean,
+                    $map_output,
                 )
             };
         }
@@ -1064,7 +1067,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         match_degree_state,
                         matched_row,
                         Some(matched_row_ref),
-                        true
+                        true,
+                        Either::Left,
                     )
                     .await
                     {
@@ -1100,7 +1104,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         degree_table,
                         matched_row,
                         matched_row_ref,
-                        false
+                        false,
+                        Either::Right,
                     )
                     .await
                     {
@@ -1161,12 +1166,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
     #[inline]
     async fn handle_match_row<
         'a,
+        R: Row,  // input row type
+        RO: Row, // output row type
         const SIDE: SideTypePrimitive,
         const JOIN_OP: JoinOpPrimitive,
         const MATCHED_ROWS_FROM_CACHE: bool,
     >(
         update_row: RowRef<'a>,
-        mut matched_row: JoinRow<OwnedRow>,
+        mut matched_row: JoinRow<R>,
         mut matched_row_cache_ref: Option<&mut E::EncodedRow>,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
         match_order_key_indices: &[usize],
@@ -1177,8 +1184,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         update_row_degree: &mut u64,
         useful_state_clean_columns: &[(usize, &'a Watermark)],
         append_only_optimize: bool,
-        append_only_matched_row: &mut Option<JoinRow<OwnedRow>>,
-        matched_rows_to_clean: &mut Vec<JoinRow<OwnedRow>>,
+        append_only_matched_row: &mut Option<JoinRow<RO>>,
+        matched_rows_to_clean: &mut Vec<JoinRow<RO>>,
+        map_output: impl Fn(R) -> RO,
     ) -> Option<StreamChunk> {
         let mut need_state_clean = false;
         let mut chunk_opt = None;
@@ -1255,12 +1263,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             // Since join key contains pk and pk is unique, there should be only
             // one row if matched.
             assert!(append_only_matched_row.is_none());
-            *append_only_matched_row = Some(matched_row);
+            *append_only_matched_row = Some(matched_row.map(map_output));
         } else if need_state_clean {
             // `append_only_optimize` and `need_state_clean` won't both be true.
             // 'else' here is only to suppress compiler error, otherwise
             // `matched_row` will be moved twice.
-            matched_rows_to_clean.push(matched_row);
+            matched_rows_to_clean.push(matched_row.map(map_output));
         }
 
         chunk_opt
@@ -2385,8 +2393,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I
-                 + 3 8
-                 - 3 8",
+                 + 3 8 D
+                 - 3 8 D",
             )
         );
 
@@ -2515,8 +2523,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 "  I I
-                 + 3 8
-                 - 3 8",
+                 + 3 8 D
+                 - 3 8 D",
             )
         );
 
@@ -2816,8 +2824,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 3 8 . .
-                - 3 8 . ."
+                + 3 8 . . D
+                - 3 8 . . D"
             )
         );
 
@@ -2827,9 +2835,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 7"
+                " I I I I
+                - 2 5 . .
+                + 2 5 2 7"
             )
         );
 
@@ -2839,9 +2847,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U- 3 6 . .
-                U+ 3 6 3 10"
+                " I I I I
+                - 3 6 . .
+                + 3 6 3 10"
             )
         );
 
@@ -2900,8 +2908,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + . 8 . .
-                - . 8 . ."
+                + . 8 . . D
+                - . 8 . . D"
             )
         );
 
@@ -2911,9 +2919,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U- 2 5 . .
-                U+ 2 5 2 7"
+                " I I I I
+                - 2 5 . .
+                + 2 5 2 7"
             )
         );
 
@@ -2923,9 +2931,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U- . 6 . .
-                U+ . 6 . 10"
+                " I I I I
+                - . 6 . .
+                + . 6 . 10"
             )
         );
 
@@ -2992,8 +3000,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + . . 5 10
-                - . . 5 10"
+                + . . 5 10 D
+                - . . 5 10 D"
             )
         );
 
@@ -3064,11 +3072,11 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I I I
-                U- 2 5 2 . . .
-                U+ 2 5 2 2 5 1
-                U- 4 9 4 . . .
-                U+ 4 9 4 4 9 2"
+                " I I I I I I
+                - 2 5 2 . . .
+                + 2 5 2 2 5 1
+                - 4 9 4 . . .
+                + 4 9 4 4 9 2"
             )
         );
 
@@ -3078,11 +3086,11 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I I I
-                U- 1 4 1 . . .
-                U+ 1 4 1 1 4 4
-                U- 3 6 3 . . .
-                U+ 3 6 3 3 6 5"
+                " I I I I I I
+                - 1 4 1 . . .
+                + 1 4 1 1 4 4
+                - 3 6 3 . . .
+                + 3 6 3 3 6 5"
             )
         );
 
@@ -3212,8 +3220,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 3 8 . .
-                - 3 8 . ."
+                + 3 8 . . D
+                - 3 8 . . D"
             )
         );
 
@@ -3223,11 +3231,11 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U-  2 5 . .
-                U+  2 5 2 7
-                +  . . 4 8
-                +  . . 6 9"
+                " I I I I
+                - 2 5 . .
+                + 2 5 2 7
+                + . . 4 8
+                + . . 6 9"
             )
         );
 
@@ -3238,8 +3246,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + . . 5 10
-                - . . 5 10"
+                + . . 5 10 D
+                - . . 5 10 D"
             )
         );
 
@@ -3281,8 +3289,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                U- 1 1 . .
-                U+ 1 1 1 1"
+                - 1 1 . .
+                + 1 1 1 1"
             )
         );
 
@@ -3293,7 +3301,7 @@ mod tests {
             ",
         ));
         let chunk = hash_join.next_unwrap_ready_chunk()?;
-        let chunk = chunk.compact();
+        let chunk = chunk.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -3364,8 +3372,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + 3 8 . .
-                - 3 8 . .
+                + 3 8 . . D
+                - 3 8 . . D
                 - 1 4 . ."
             )
         );
@@ -3376,13 +3384,13 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                "  I I I I
-                U-  2 5 . .
-                U+  2 5 2 6
-                +  . . 4 8
-                +  . . 3 4" /* regression test (#2420): 3 4 should be forwarded only once
-                             * despite matching on eq join on 2
-                             * entries */
+                " I I I I
+                - 2 5 . .
+                + 2 5 2 6
+                + . . 4 8
+                + . . 3 4" /* regression test (#2420): 3 4 should be forwarded only once
+                            * despite matching on eq join on 2
+                            * entries */
             )
         );
 
@@ -3393,8 +3401,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I
-                + . . 5 10
-                - . . 5 10
+                + . . 5 10 D
+                - . . 5 10 D
                 + . . 1 2" /* regression test (#2420): 1 2 forwarded even if matches on an empty
                             * join entry */
             )

@@ -76,14 +76,11 @@ pub async fn handle_alter_owner(
         let check_owned_by_admin = |owner: &UserId| -> Result<()> {
             let user_catalog = user_reader.get_user_by_id(owner).unwrap();
             if user_catalog.is_admin {
-                return Err(PermissionDenied(
-                    format!(
-                        "Cannot change owner of {} owned by admin user {}",
-                        obj_name.real_value(),
-                        user_catalog.name
-                    )
-                    .to_owned(),
-                )
+                return Err(PermissionDenied(format!(
+                    "Cannot change owner of {} owned by admin user {}",
+                    obj_name.real_value(),
+                    user_catalog.name
+                ))
                 .into());
             }
             Ok(())
@@ -107,7 +104,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&table.owner)?;
-                    Object::TableId(table.id.table_id)
+                    Object::TableId(table.id.as_raw_id())
                 }
                 StatementType::ALTER_VIEW => {
                     let (view, schema_name) =

@@ -400,7 +400,7 @@ impl ConnectorSourceWorkerHandle {
     pub async fn discovered_splits(
         &self,
         source_id: SourceId,
-        actors: &HashSet<ActorId>,
+        actor_count: usize,
     ) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
         // XXX: when is this None? Can we remove the Option?
         let Some(mut discovered_splits) = self.splits.lock().await.splits.clone() else {
@@ -422,7 +422,7 @@ impl ConnectorSourceWorkerHandle {
             debug_assert!(self.enable_drop_split);
             debug_assert!(discovered_splits.len() == 1);
             discovered_splits =
-                fill_adaptive_split(discovered_splits.values().next().unwrap(), actors)?;
+                fill_adaptive_split(discovered_splits.values().next().unwrap(), actor_count)?;
         }
 
         Ok(discovered_splits)

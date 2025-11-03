@@ -1247,7 +1247,7 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
         let pk_indices = vec![0];
@@ -1342,7 +1342,7 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
         let pk_indices = vec![0];
@@ -1434,7 +1434,7 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
         let pk_indices = vec![0];
