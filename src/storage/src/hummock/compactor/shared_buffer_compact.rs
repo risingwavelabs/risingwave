@@ -747,7 +747,7 @@ mod tests {
         // Test with payload in wrong order (zzz, aaa, mmm) instead of sorted order (aaa, mmm, zzz)
         let payload = vec![imm1, imm2, imm3];
         let (splits, _sstable_capacity, _vnodes) =
-            generate_splits(&payload, &HashSet::from_iter([1]), &storage_opts);
+            generate_splits(&payload, &HashSet::from_iter([1.into()]), &storage_opts);
 
         // Should have multiple splits due to large data size
         assert!(
