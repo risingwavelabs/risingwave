@@ -38,12 +38,6 @@ DELETE FROM s1 WHERE i1 < 3;
 
 sleep 20s
 
-# check there should be at least one PositionDeletes
-query T
-select count(*) >= 1 from rw_iceberg_files where content = 'PositionDeletes';
-----
-t
-
 
 statement ok
 CREATE SOURCE iceberg_t1_source
@@ -58,6 +52,12 @@ WITH (
     database.name = 'demo_db',
     table.name = 'test_position_delete',
 );
+
+# check there should be at least one PositionDeletes
+query T
+select count(*) >= 1 from rw_iceberg_files where content = 'PositionDeletes';
+----
+t
 
 query I
 select * from iceberg_t1_source order by i1;
