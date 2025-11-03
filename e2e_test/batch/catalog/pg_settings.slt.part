@@ -87,6 +87,7 @@ user streaming_use_snapshot_backfill
 user synchronize_seqscans
 user timezone
 user transaction_isolation
+user unsafe_enable_storage_retention_for_non_append_only_tables
 user visibility_mode
 
 query TT
