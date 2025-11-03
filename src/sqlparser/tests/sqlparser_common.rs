@@ -4142,16 +4142,53 @@ fn parse_window_clause() {
 fn parse_alter_fragment_set_parallelism() {
     match verified_stmt("ALTER FRAGMENT 1 SET PARALLELISM TO 4") {
         Statement::AlterFragment {
-            fragment_id,
+            fragment_ids,
             operation,
         } => {
-            assert_eq!(fragment_id, 1);
+            assert_eq!(fragment_ids, vec![1]);
             match operation {
                 AlterFragmentOperation::SetParallelism { parallelism } => {
                     assert_eq!(
                         parallelism,
                         SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
                             "4".into()
+                        )))
+                    );
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    match verified_stmt("ALTER FRAGMENT 2 SET PARALLELISM = DEFAULT") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![2]);
+            match operation {
+                AlterFragmentOperation::SetParallelism { parallelism } => {
+                    assert_eq!(parallelism, SetVariableValue::Default);
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    match verified_stmt("ALTER FRAGMENT 1, 2,3 SET PARALLELISM = 8") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![1, 2, 3]);
+            match operation {
+                AlterFragmentOperation::SetParallelism { parallelism } => {
+                    assert_eq!(
+                        parallelism,
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
+                            "8".into()
                         )))
                     );
                 }

@@ -653,12 +653,12 @@ impl MetaClient {
 
     pub async fn alter_fragment_parallelism(
         &self,
-        fragment_id: u32,
-        parallelism: PbTableParallelism,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
     ) -> Result<()> {
         let request = AlterFragmentParallelismRequest {
-            fragment_id,
-            parallelism: Some(parallelism),
+            fragment_ids,
+            parallelism,
         };
 
         self.inner.alter_fragment_parallelism(request).await?;

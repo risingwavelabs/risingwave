@@ -358,7 +358,7 @@ impl ScaleController {
 
     pub async fn reschedule_fragment_inplace(
         &self,
-        policy: HashMap<risingwave_meta_model::FragmentId, ParallelismPolicy>,
+        policy: HashMap<risingwave_meta_model::FragmentId, Option<StreamingParallelism>>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if policy.is_empty() {
@@ -395,13 +395,13 @@ impl ScaleController {
         for ensemble in find_fragment_no_shuffle_dags_detailed(&txn, &fragment_id_list).await? {
             let entry_fragment_ids = ensemble.entry_fragments().collect_vec();
 
-            let parallelisms = entry_fragment_ids
+            let desired_parallelism = match entry_fragment_ids
                 .iter()
-                .filter_map(|fragment_id| policy.get(fragment_id))
+                .filter_map(|fragment_id| policy.get(fragment_id).cloned())
                 .dedup()
-                .collect_vec();
-
-            let parallelism = match parallelisms.as_slice() {
+                .collect_vec()
+                .as_slice()
+            {
                 [] => {
                     bail_invalid_parameter!(
                         "none of the entry fragments {:?} were included in the reschedule request; \
@@ -409,14 +409,11 @@ impl ScaleController {
                         entry_fragment_ids
                     );
                 }
-                [policy] => &policy.parallelism,
-                _ => {
+                [parallelism] => parallelism.clone(),
+                parallelisms => {
                     bail!(
                         "conflicting reschedule policies for fragments in the same no-shuffle ensemble: {:?}",
                         parallelisms
-                            .iter()
-                            .map(|policy| &policy.parallelism)
-                            .collect_vec()
                     );
                 }
             };
@@ -434,19 +431,17 @@ impl ScaleController {
                 "entry fragments in the same ensemble should share the same parallelism"
             );
 
-            if fragments
+            let current_parallelism = fragments
                 .first()
-                .and_then(|fragment| fragment.parallelism.as_ref())
-                .is_some_and(|current| current == parallelism)
-            {
+                .and_then(|fragment| fragment.parallelism.clone());
+
+            if current_parallelism == desired_parallelism {
                 continue;
             }
 
-            let desired_parallelism = parallelism.clone();
-
             for fragment in fragments {
                 let mut fragment = fragment.into_active_model();
-                fragment.parallelism = Set(Some(desired_parallelism.clone()));
+                fragment.parallelism = Set(desired_parallelism.clone());
                 fragment.update(&txn).await?;
             }
 

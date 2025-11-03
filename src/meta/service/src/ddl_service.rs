@@ -1047,22 +1047,41 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterFragmentParallelismResponse>, Status> {
         let req = request.into_inner();
 
-        let fragment_id = req.fragment_id;
-        let parallelism = *req.get_parallelism()?;
+        let fragment_ids = req.fragment_ids;
+        if fragment_ids.is_empty() {
+            return Err(Status::invalid_argument(
+                "at least one fragment id must be provided",
+            ));
+        }
 
-        let parallelism = match parallelism.get_parallelism()? {
-            Parallelism::Fixed(FixedParallelism { parallelism }) => {
-                StreamingParallelism::Fixed(*parallelism as _)
+        let parallelism = match req.parallelism {
+            Some(parallelism) => {
+                let streaming_parallelism = match parallelism.get_parallelism()? {
+                    Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                        StreamingParallelism::Fixed(*parallelism as _)
+                    }
+                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => {
+                        StreamingParallelism::Adaptive
+                    }
+                    _ => bail_unavailable!(),
+                };
+                Some(streaming_parallelism)
             }
-            Parallelism::Auto(_) | Parallelism::Adaptive(_) => StreamingParallelism::Adaptive,
-            _ => bail_unavailable!(),
+            None => None,
         };
 
+        let fragment_targets = fragment_ids
+            .into_iter()
+            .map(|fragment_id| {
+                (
+                    fragment_id as risingwave_meta_model::FragmentId,
+                    parallelism.clone(),
+                )
+            })
+            .collect();
+
         self.ddl_controller
-            .reschedule_fragment(
-                fragment_id,
-                ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
-            )
+            .reschedule_fragments(fragment_targets)
             .await?;
 
         Ok(Response::new(AlterFragmentParallelismResponse {}))

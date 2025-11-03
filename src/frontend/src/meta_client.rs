@@ -134,8 +134,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_fragment_parallelism(
         &self,
-        fragment_id: u32,
-        parallelism: PbTableParallelism,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
     ) -> Result<()>;
 
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
@@ -361,11 +361,11 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_fragment_parallelism(
         &self,
-        fragment_id: u32,
-        parallelism: PbTableParallelism,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
     ) -> Result<()> {
         self.0
-            .alter_fragment_parallelism(fragment_id, parallelism)
+            .alter_fragment_parallelism(fragment_ids, parallelism)
             .await
     }
 

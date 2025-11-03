@@ -123,16 +123,16 @@ pub async fn handle_alter_parallelism(
 
 pub async fn handle_alter_fragment_parallelism(
     handler_args: HandlerArgs,
-    fragment_id: u32,
+    fragment_ids: Vec<u32>,
     parallelism: SetVariableValue,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let target_parallelism = extract_table_parallelism(parallelism)?;
+    let target_parallelism = extract_fragment_parallelism(parallelism)?;
 
     session
         .env()
         .meta_client()
-        .alter_fragment_parallelism(fragment_id, target_parallelism)
+        .alter_fragment_parallelism(fragment_ids, target_parallelism)
         .await?;
 
     Ok(RwPgResponse::builder(StatementType::ALTER_FRAGMENT).into())
@@ -182,4 +182,11 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
     };
 
     Ok(target_parallelism)
+}
+
+fn extract_fragment_parallelism(parallelism: SetVariableValue) -> Result<Option<TableParallelism>> {
+    match parallelism {
+        SetVariableValue::Default => Ok(None),
+        other => extract_table_parallelism(other).map(Some),
+    }
 }

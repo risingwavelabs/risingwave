@@ -820,7 +820,10 @@ impl GlobalStreamManager {
             }
         };
 
-        let fragment_policy = HashMap::from([(cdc_fragment_id, parallelism_policy.clone())]);
+        let fragment_policy = HashMap::from([(
+            cdc_fragment_id,
+            Some(parallelism_policy.parallelism.clone()),
+        )]);
 
         let commands = self
             .scale_controller
@@ -838,28 +841,29 @@ impl GlobalStreamManager {
         Ok(())
     }
 
-    pub(crate) async fn reschedule_fragment(
+    pub(crate) async fn reschedule_fragments(
         &self,
-        fragment_id: u32,
-        target: ReschedulePolicy,
+        fragment_targets: HashMap<FragmentId, Option<StreamingParallelism>>,
     ) -> MetaResult<()> {
+        if fragment_targets.is_empty() {
+            return Ok(());
+        }
+
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let parallelism_policy = match target {
-            ReschedulePolicy::Parallelism(policy) => policy,
-            _ => bail_invalid_parameter!("fragment reschedule only supports parallelism targets"),
-        };
-
-        let worker_nodes = self
+        let workers = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
             .await?
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
-            .collect_vec();
-        let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+            .map(|worker| (worker.id as i32, worker))
+            .collect();
 
-        let fragment_policy = HashMap::from([(fragment_id as _, parallelism_policy.clone())]);
+        let fragment_policy = fragment_targets
+            .into_iter()
+            .map(|(fragment_id, parallelism)| (fragment_id as _, parallelism))
+            .collect();
 
         let commands = self
             .scale_controller

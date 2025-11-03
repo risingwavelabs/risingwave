@@ -1179,8 +1179,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn alter_fragment_parallelism(
         &self,
-        _fragment_id: u32,
-        _parallelism: PbTableParallelism,
+        _fragment_ids: Vec<u32>,
+        _parallelism: Option<PbTableParallelism>,
     ) -> RpcResult<()> {
         unimplemented!()
     }

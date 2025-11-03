@@ -313,8 +313,8 @@ message AlterParallelismRequest {
 message AlterParallelismResponse {}
 
 message AlterFragmentParallelismRequest {
-  uint32 fragment_id = 1;
-  meta.TableParallelism parallelism = 2;
+  repeated uint32 fragment_ids = 1;
+  optional meta.TableParallelism parallelism = 2;
 }
 
 message AlterFragmentParallelismResponse {}
