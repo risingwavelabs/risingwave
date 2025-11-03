@@ -377,12 +377,13 @@ impl Binder {
                     source_catalog.owner,
                     AclMode::Select,
                     source_catalog.name.clone(),
-                    PbObject::SourceId(source_catalog.id),
+                    source_catalog.id,
                 ),
                 source_catalog.database_id,
             )?;
         }
-        self.included_relations.insert(source_catalog.id.into());
+        self.included_relations
+            .insert(source_catalog.id.as_raw_id().into());
         Ok((
             Relation::Source(Box::new(BoundSource {
                 catalog: source_catalog.clone(),

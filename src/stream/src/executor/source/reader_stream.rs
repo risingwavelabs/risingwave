@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
@@ -39,7 +40,7 @@ type AutoSchemaChangeSetup = (
 pub(crate) struct StreamReaderBuilder {
     pub source_desc: SourceDesc,
     pub rate_limit: Option<u32>,
-    pub source_id: TableId,
+    pub source_id: SourceId,
     pub source_name: String,
     pub reader_stream: Option<BoxSourceChunkStream>,
 
@@ -90,19 +91,17 @@ impl StreamReaderBuilder {
                 self.actor_ctx.meta_client
             {
                 let meta_client = meta_client.clone();
-                let source_id = self.source_id;
                 Some(CdcAutoSchemaChangeFailCallback::new(
-                    move |table_id: TableId,
+                    move |source_id: SourceId,
                           table_name: String,
                           cdc_table_id: String,
                           upstream_ddl: String,
                           fail_info: String| {
                         let meta_client = meta_client.clone();
-                        let source_id = source_id;
                         tokio::spawn(async move {
                             if let Err(e) = meta_client
                                 .add_cdc_auto_schema_change_fail_event(
-                                    table_id,
+                                    source_id,
                                     table_name,
                                     cdc_table_id,
                                     upstream_ddl,

@@ -51,7 +51,7 @@ pub use table_catalog::TableCatalog;
 use crate::user::UserId;
 
 pub(crate) type ConnectionId = u32;
-pub(crate) type SourceId = u32;
+pub(crate) type SourceId = risingwave_common::id::SourceId;
 pub(crate) type SinkId = risingwave_common::id::SinkId;
 pub(crate) type SubscriptionId = u32;
 pub(crate) type ViewId = u32;

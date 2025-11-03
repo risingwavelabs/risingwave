@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
-use risingwave_common::id::{JobId, TableId, WorkerId};
+use risingwave_common::id::{JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -162,7 +162,7 @@ pub trait FrontendMetaClient: Send + Sync {
         &self,
         table_id: TableId,
         sink_id: SinkId,
-        source_id: u32,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -170,7 +170,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_source_connector_props(
         &self,
-        source_id: u32,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -426,7 +426,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         &self,
         table_id: TableId,
         sink_id: SinkId,
-        source_id: u32,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -445,7 +445,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_source_connector_props(
         &self,
-        source_id: u32,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,

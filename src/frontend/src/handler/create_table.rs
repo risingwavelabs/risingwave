@@ -891,7 +891,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let cdc_table_type = ExternalCdcTableType::from_properties(&options);
     let cdc_table_desc = CdcTableDesc {
         table_id,
-        source_id: source.id.into(), // id of cdc source streaming job
+        source_id: source.id, // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: non_generated_column_descs,
@@ -1479,7 +1479,7 @@ pub async fn handle_create_table(
     );
 
     let dependencies = shared_source_id
-        .map(|id| HashSet::from([id as ObjectId]))
+        .map(|id| HashSet::from([id.as_raw_id() as ObjectId]))
         .unwrap_or_default();
 
     // Handle engine
@@ -2360,7 +2360,7 @@ pub async fn generate_stream_graph_for_replace_table(
         table.associated_source_id = Some(source_id);
 
         let source = source.as_mut().unwrap();
-        source.id = source_id.as_raw_id();
+        source.id = source_id;
         source.associated_table_id = Some(table.id());
     }
 

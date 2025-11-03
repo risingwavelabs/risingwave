@@ -33,6 +33,7 @@ use risingwave_connector::source::{
     StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::id::SourceId;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde_json;
 use thiserror_ext::AsReport;
@@ -743,14 +744,14 @@ impl<S: StateStore> SourceExecutor<S> {
                         if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
                             let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
                             task_builder.update_task_on_chunk(
-                                &source_id,
+                                source_id,
                                 &latest_state,
                                 pulsar_message_id_col.clone(),
                             );
                         } else {
                             let offset_col = chunk.column_at(offset_idx);
                             task_builder.update_task_on_chunk(
-                                &source_id,
+                                source_id,
                                 &latest_state,
                                 offset_col.clone(),
                             );
@@ -847,7 +848,7 @@ struct WaitCheckpointTaskBuilder {
 impl WaitCheckpointTaskBuilder {
     fn update_task_on_chunk(
         &mut self,
-        source_id: &TableId,
+        source_id: SourceId,
         latest_state: &HashMap<SplitId, SplitImpl>,
         offset_col: ArrayRef,
     ) {
@@ -987,7 +988,8 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 #[cfg(test)]
 mod tests {
     use maplit::{btreemap, convert_args, hashmap};
-    use risingwave_common::catalog::{ColumnId, Field, TableId};
+    use risingwave_common::catalog::{ColumnId, Field};
+    use risingwave_common::id::SourceId;
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -1008,7 +1010,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_source_executor() {
-        let table_id = TableId::default();
+        let source_id = 0.into();
         let schema = Schema {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
@@ -1036,7 +1038,7 @@ mod tests {
         )
         .await;
         let core = StreamSourceCore::<MemoryStateStore> {
-            source_id: table_id,
+            source_id,
             column_ids,
             source_desc_builder: Some(source_desc_builder),
             latest_split_info: HashMap::new(),
@@ -1095,7 +1097,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_split_change_mutation() {
-        let table_id = TableId::default();
+        let source_id = SourceId::new(0);
         let schema = Schema {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
@@ -1124,7 +1126,7 @@ mod tests {
         .await;
 
         let core = StreamSourceCore::<MemoryStateStore> {
-            source_id: table_id,
+            source_id,
             column_ids: column_ids.clone(),
             source_desc_builder: Some(source_desc_builder),
             latest_split_info: HashMap::new(),

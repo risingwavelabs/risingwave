@@ -365,7 +365,7 @@ impl From<PbTable> for ActiveModel {
             if let Some(OptionalAssociatedSourceId::AssociatedSourceId(src_id)) =
                 pb_table.optional_associated_source_id
             {
-                Set(Some(src_id as SourceId))
+                Set(Some(src_id.into()))
             } else {
                 NotSet
             };

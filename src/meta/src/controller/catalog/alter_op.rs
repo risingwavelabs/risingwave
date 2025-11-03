@@ -156,7 +156,7 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::Source => Source::find_by_id(dst_object_id)
+            ObjectType::Source => Source::find_by_id(SourceId::new(dst_object_id as _))
                 .select_only()
                 .column(source::Column::Name)
                 .into_tuple()
@@ -232,7 +232,7 @@ impl CatalogController {
         &self,
         pb_source: PbSource,
     ) -> MetaResult<NotificationVersion> {
-        let source_id = pb_source.id as SourceId;
+        let source_id: SourceId = pb_source.id;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -326,7 +326,7 @@ impl CatalogController {
                 // associated source.
                 if let Some(associated_source_id) = table.optional_associated_source_id {
                     let src_obj = object::ActiveModel {
-                        oid: Set(associated_source_id as _),
+                        oid: Set(associated_source_id.as_raw_id() as _),
                         owner_id: Set(new_owner),
                         ..Default::default()
                     }
@@ -414,7 +414,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Source => {
-                let source = Source::find_by_id(object_id)
+                let source = Source::find_by_id(SourceId::new(object_id as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
@@ -533,7 +533,7 @@ impl CatalogController {
                 // associated source.
                 if let Some(associated_source_id) = associated_src_id {
                     let src_obj = object::ActiveModel {
-                        oid: Set(associated_source_id as _),
+                        oid: Set(associated_source_id.as_raw_id() as _),
                         schema_id: Set(Some(new_schema)),
                         ..Default::default()
                     }
@@ -629,7 +629,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Source => {
-                let source = Source::find_by_id(object_id)
+                let source = Source::find_by_id(SourceId::new(object_id as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;

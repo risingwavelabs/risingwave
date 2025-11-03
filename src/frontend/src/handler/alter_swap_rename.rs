@@ -126,8 +126,8 @@ pub async fn handle_swap_rename(
             check_swap_rename_privilege(&session, src_source.owner, target_source.owner)?;
 
             alter_swap_rename_request::Object::Source(ObjectNameSwapPair {
-                src_object_id: src_source.id,
-                dst_object_id: target_source.id,
+                src_object_id: src_source.id.as_raw_id(),
+                dst_object_id: target_source.id.as_raw_id(),
             })
         }
         StatementType::ALTER_SINK => {

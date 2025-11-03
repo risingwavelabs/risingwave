@@ -21,7 +21,7 @@ use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
-use risingwave_common::id::{JobId, SchemaId};
+use risingwave_common::id::{JobId, SchemaId, SourceId};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
@@ -181,7 +181,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()>;
 
     async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()>;
 
@@ -525,7 +525,7 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_source(source_id, cascade).await?;
         self.wait_version(version).await
     }
