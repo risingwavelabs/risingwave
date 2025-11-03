@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use num_integer::Integer;
+
 use crate::types::{Datum, DatumRef, Decimal, ScalarImpl, ScalarRefImpl};
 
 /// Strategy for filling gaps in time series data.
@@ -44,14 +46,22 @@ pub fn calculate_interpolation_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: u
     }
     match (s1, s2) {
         (ScalarRefImpl::Int16(v1), ScalarRefImpl::Int16(v2)) => {
-            Some(ScalarImpl::Int16((v2 - v1) / steps as i16))
+            // Convert to i64 to avoid overflow, then convert back
+            let diff = (v2 as i64) - (v1 as i64);
+            Some(ScalarImpl::Int16(
+                Integer::div_floor(&diff, &(steps as i64)) as i16,
+            ))
         }
         (ScalarRefImpl::Int32(v1), ScalarRefImpl::Int32(v2)) => {
-            Some(ScalarImpl::Int32((v2 - v1) / steps as i32))
+            // Convert to i64 to avoid overflow, then convert back
+            let diff = (v2 as i64) - (v1 as i64);
+            Some(ScalarImpl::Int32(
+                Integer::div_floor(&diff, &(steps as i64)) as i32,
+            ))
         }
-        (ScalarRefImpl::Int64(v1), ScalarRefImpl::Int64(v2)) => {
-            Some(ScalarImpl::Int64((v2 - v1) / steps as i64))
-        }
+        (ScalarRefImpl::Int64(v1), ScalarRefImpl::Int64(v2)) => Some(ScalarImpl::Int64(
+            Integer::div_floor(&(v2 - v1), &(steps as i64)),
+        )),
         (ScalarRefImpl::Float32(v1), ScalarRefImpl::Float32(v2)) => {
             Some(ScalarImpl::Float32((v2 - v1) / steps as f32))
         }
@@ -73,12 +83,12 @@ pub fn calculate_interpolation_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: u
 pub fn apply_interpolation_step(current: &mut Datum, step: &ScalarImpl) {
     if let Some(curr) = current.as_mut() {
         match (curr, step) {
-            (ScalarImpl::Int16(v1), ScalarImpl::Int16(v2)) => *v1 += v2,
-            (ScalarImpl::Int32(v1), ScalarImpl::Int32(v2)) => *v1 += v2,
-            (ScalarImpl::Int64(v1), ScalarImpl::Int64(v2)) => *v1 += v2,
-            (ScalarImpl::Float32(v1), ScalarImpl::Float32(v2)) => *v1 += v2,
-            (ScalarImpl::Float64(v1), ScalarImpl::Float64(v2)) => *v1 += v2,
-            (ScalarImpl::Decimal(v1), ScalarImpl::Decimal(v2)) => *v1 = *v1 + *v2,
+            (ScalarImpl::Int16(v1), &ScalarImpl::Int16(v2)) => *v1 += v2,
+            (ScalarImpl::Int32(v1), &ScalarImpl::Int32(v2)) => *v1 += v2,
+            (ScalarImpl::Int64(v1), &ScalarImpl::Int64(v2)) => *v1 += v2,
+            (ScalarImpl::Float32(v1), &ScalarImpl::Float32(v2)) => *v1 += v2,
+            (ScalarImpl::Float64(v1), &ScalarImpl::Float64(v2)) => *v1 += v2,
+            (ScalarImpl::Decimal(v1), &ScalarImpl::Decimal(v2)) => *v1 = *v1 + v2,
             _ => (),
         }
     }
