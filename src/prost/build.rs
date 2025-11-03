@@ -137,6 +137,12 @@ for_all_wrapped_id_fields! (
         ActorInfo {
             actor_id: ActorId,
         }
+        ActorLocation {
+            worker_node_id: WorkerId,
+        }
+        WorkerNode {
+            id: WorkerId,
+        }
     }
     ddl_service {
         AlterCdcTableBackfillParallelismRequest {
@@ -195,6 +201,9 @@ for_all_wrapped_id_fields! (
         }
     }
     hummock {
+        CancelCompactTask {
+            context_id: WorkerId,
+        }
         CompactTask {
             existing_table_ids: TableId,
             table_options: TableId,
@@ -202,11 +211,20 @@ for_all_wrapped_id_fields! (
             table_watermarks: TableId,
             table_schemas: TableId,
         }
+        CompactTaskAssignment {
+            context_id: WorkerId,
+        }
         CompactionGroupInfo {
             member_table_ids: TableId,
         }
         GetVersionByEpochRequest {
             table_id: TableId,
+        }
+        HummockPinnedSnapshot {
+            context_id: WorkerId,
+        }
+        HummockPinnedVersion {
+            context_id: WorkerId,
         }
         HummockVersion {
             table_watermarks: TableId,
@@ -224,6 +242,12 @@ for_all_wrapped_id_fields! (
         HummockVersionStats {
             table_stats: TableId,
         }
+        PinVersionRequest {
+            context_id: WorkerId,
+        }
+        PinnedVersionsSummary {
+            workers: WorkerId,
+        }
         ReportCompactionTaskRequest.ReportTask {
             table_stats_change: TableId,
         }
@@ -232,6 +256,9 @@ for_all_wrapped_id_fields! (
         }
         SstableInfo {
             table_ids: TableId,
+        }
+        SubscribeCompactionEventRequest.Register {
+            context_id: WorkerId,
         }
         SubscribeCompactionEventRequest.ReportTask {
             table_stats_change: TableId,
@@ -242,13 +269,33 @@ for_all_wrapped_id_fields! (
         TruncateTables {
             table_ids: TableId,
         }
+        UnpinVersionBeforeRequest {
+            context_id: WorkerId,
+        }
+        UnpinVersionRequest {
+            context_id: WorkerId,
+        }
         WriteLimits.WriteLimit {
             table_ids: TableId,
         }
     }
+    iceberg_compaction {
+        SubscribeIcebergCompactionEventRequest.Register {
+            context_id: WorkerId,
+        }
+    }
     meta {
+        ActivateWorkerNodeRequest {
+            node_id: WorkerId,
+        }
+        ActorCountPerParallelism {
+            worker_id_to_actor_count: WorkerId,
+        }
         ActorIds {
             ids: ActorId,
+        }
+        AddWorkerNodeResponse {
+            node_id: WorkerId,
         }
         CancelCreatingJobsRequest.CreatingJobIds {
             job_ids: JobId,
@@ -274,6 +321,9 @@ for_all_wrapped_id_fields! (
         }
         EventLog.EventDirtyStreamJobClear {
             id: JobId,
+        }
+        EventLog.EventWorkerNodePanic {
+            worker_id: WorkerId,
         }
         EventLog.GlobalRecoverySuccess {
             running_database_ids: DatabaseId,
@@ -318,6 +368,9 @@ for_all_wrapped_id_fields! (
         GetServingVnodeMappingsResponse {
             fragment_to_table: FragmentId,
         }
+        HeartbeatRequest {
+            node_id: WorkerId,
+        }
         ListActorSplitsResponse.ActorSplit {
             actor_id: ActorId,
             fragment_id: FragmentId,
@@ -325,6 +378,7 @@ for_all_wrapped_id_fields! (
         ListActorStatesResponse.ActorState {
             actor_id: ActorId,
             fragment_id: FragmentId,
+            worker_id: WorkerId,
         }
         ListCdcProgressResponse {
             cdc_progress: JobId,
@@ -359,6 +413,9 @@ for_all_wrapped_id_fields! (
         SetSyncLogStoreAlignedRequest {
             job_id: JobId,
         }
+        SubscribeRequest {
+            worker_id: WorkerId,
+        }
         TableFragments {
             table_id: JobId,
             fragments: FragmentId,
@@ -370,6 +427,12 @@ for_all_wrapped_id_fields! (
             state_table_ids: TableId,
             table_id: JobId,
         }
+        UpdateWorkerNodeSchedulabilityRequest {
+            worker_ids: WorkerId,
+        }
+        WorkerReschedule {
+            worker_actor_diff: WorkerId,
+        }
     }
     monitor_service {
         GetProfileStatsRequest {
@@ -378,6 +441,10 @@ for_all_wrapped_id_fields! (
         GetProfileStatsResponse {
             dispatch_fragment_output_row_count: FragmentId,
             dispatch_fragment_output_blocking_duration_ns: FragmentId,
+        }
+        StackTraceResponse {
+            barrier_worker_state: WorkerId,
+            jvm_stack_traces: WorkerId,
         }
     }
     plan_common {
@@ -389,6 +456,11 @@ for_all_wrapped_id_fields! (
         }
         VectorIndexReaderDesc {
             table_id: TableId,
+        }
+    }
+    recursive {
+        ComplexRecursiveMessage {
+            node_id: WorkerId,
         }
     }
     source {
@@ -501,6 +573,7 @@ for_all_wrapped_id_fields! (
             refresh_finished_tables: TableId,
             table_watermarks: TableId,
             vector_index_adds: TableId,
+            worker_id: WorkerId,
         }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
@@ -570,12 +643,11 @@ for_all_wrapped_id_fields! (
 
 fn check_declared_wrapped_fields_sorted() {
     let wrapped_fields = wrapped_fields();
-    assert!(
-        wrapped_fields
-            .iter()
-            .map(|(type_name, _)| type_name)
-            .is_sorted()
-    );
+    if let Some(i) =
+        (0..wrapped_fields.len() - 1).find(|i| wrapped_fields[*i].0 >= wrapped_fields[*i + 1].0)
+    {
+        panic!("types not sorted: first {}", wrapped_fields[i + 1].0)
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

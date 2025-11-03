@@ -22,6 +22,7 @@ use iceberg::transaction::Transaction;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::bail;
+use risingwave_common::id::WorkerId;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{IcebergConfig, should_enable_iceberg_cow};
@@ -48,10 +49,11 @@ use crate::rpc::metrics::MetaMetrics;
 
 pub type IcebergCompactionManagerRef = std::sync::Arc<IcebergCompactionManager>;
 
-type CompactorChangeTx = UnboundedSender<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
+type CompactorChangeTx =
+    UnboundedSender<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
 type CompactorChangeRx =
-    UnboundedReceiver<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
+    UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
 #[derive(Debug, Clone)]
 struct CommitInfo {
@@ -343,7 +345,7 @@ impl IcebergCompactionManager {
 
     pub fn add_compactor_stream(
         &self,
-        context_id: u32,
+        context_id: WorkerId,
         req_stream: Streaming<SubscribeIcebergCompactionEventRequest>,
     ) {
         self.compactor_streams_change_tx
@@ -354,7 +356,7 @@ impl IcebergCompactionManager {
     pub fn iceberg_compaction_event_loop(
         iceberg_compaction_manager: Arc<Self>,
         compactor_streams_change_rx: UnboundedReceiver<(
-            u32,
+            WorkerId,
             Streaming<SubscribeIcebergCompactionEventRequest>,
         )>,
     ) -> Vec<(JoinHandle<()>, Sender<()>)> {

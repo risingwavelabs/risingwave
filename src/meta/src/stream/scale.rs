@@ -914,7 +914,7 @@ impl GlobalStreamManager {
             })
             .map(|worker| {
                 (
-                    worker.id as i32,
+                    worker.id,
                     WorkerInfo {
                         parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                         resource_group: worker.resource_group(),
@@ -1063,21 +1063,21 @@ impl GlobalStreamManager {
                                 continue;
                             }
 
-                            tracing::info!(worker = worker.id, "worker activated notification received");
+                            tracing::info!(worker = %worker.id, "worker activated notification received");
 
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 
                             match prev_worker {
                                 Some(prev_worker) if prev_worker.compute_node_parallelism() != worker.compute_node_parallelism()  => {
-                                    tracing::info!(worker = worker.id, "worker parallelism changed");
+                                    tracing::info!(worker = %worker.id, "worker parallelism changed");
                                     should_trigger = true;
                                 }
                                 Some(prev_worker) if  prev_worker.resource_group() != worker.resource_group()  => {
-                                    tracing::info!(worker = worker.id, "worker label changed");
+                                    tracing::info!(worker = %worker.id, "worker label changed");
                                     should_trigger = true;
                                 }
                                 None => {
-                                    tracing::info!(worker = worker.id, "new worker joined");
+                                    tracing::info!(worker = %worker.id, "new worker joined");
                                     should_trigger = true;
                                 }
                                 _ => {}
@@ -1093,10 +1093,10 @@ impl GlobalStreamManager {
 
                             match worker_cache.remove(&worker.id) {
                                 Some(prev_worker) => {
-                                    tracing::info!(worker = prev_worker.id, "worker removed from stream manager cache");
+                                    tracing::info!(worker = %prev_worker.id, "worker removed from stream manager cache");
                                 }
                                 None => {
-                                    tracing::warn!(worker = worker.id, "worker not found in stream manager cache, but it was removed");
+                                    tracing::warn!(worker = %worker.id, "worker not found in stream manager cache, but it was removed");
                                 }
                             }
                         }

@@ -655,7 +655,7 @@ impl StreamJobFragments {
     pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.worker_id() as WorkerId;
+            let node_id = actor_status.worker_id();
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
@@ -675,11 +675,11 @@ impl StreamJobFragments {
                 fragment.fragment_id,
                 &fragment.nodes,
                 fragment.actors.iter().map(move |actor| {
-                    let worker_id = self
+                    let worker_id: WorkerId = self
                         .actor_status
                         .get(&actor.actor_id)
                         .expect("should exist")
-                        .worker_id() as WorkerId;
+                        .worker_id();
                     (actor, worker_id)
                 }),
             )

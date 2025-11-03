@@ -363,7 +363,7 @@ impl CatalogController {
             pb_actor_status.insert(
                 actor_id as _,
                 PbActorStatus {
-                    location: PbActorLocation::from_worker(worker_id as u32),
+                    location: PbActorLocation::from_worker(worker_id),
                 },
             );
 
@@ -1944,7 +1944,7 @@ mod tests {
                     actor_id: actor_id.into(),
                     fragment_id: TEST_FRAGMENT_ID,
                     splits: actor_splits,
-                    worker_id: 0,
+                    worker_id: 0.into(),
                     vnode_bitmap: actor_bitmaps
                         .remove(&actor_id.into())
                         .map(|bitmap| bitmap.to_protobuf())

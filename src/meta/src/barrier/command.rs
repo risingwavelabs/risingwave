@@ -260,8 +260,7 @@ impl StreamJobFragments {
                                         .actor_status
                                         .get(&actor.actor_id)
                                         .expect("should exist")
-                                        .worker_id()
-                                        as WorkerId,
+                                        .worker_id(),
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
                                     splits: fragment_splits
                                         .remove(&actor.actor_id)
@@ -1444,7 +1443,7 @@ impl Command {
                                         .location
                                         .as_ref()
                                         .unwrap()
-                                        .worker_node_id as _,
+                                        .worker_node_id,
                                 )
                             }),
                             graph_info.job_subscribers(sink.original_sink.id.into()),

@@ -438,7 +438,7 @@ impl StreamManagerService for StreamServiceImpl {
             .map(|actor_location| list_actor_states_response::ActorState {
                 actor_id: actor_location.actor_id,
                 fragment_id: actor_location.fragment_id,
-                worker_id: actor_location.worker_id as _,
+                worker_id: actor_location.worker_id,
             })
             .collect_vec();
 

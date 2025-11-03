@@ -139,7 +139,8 @@ pub struct HummockManager {
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
     // and is maintained in memory. All event_streams are consumed through a separate event loop
-    compactor_streams_change_tx: UnboundedSender<(u32, Streaming<SubscribeCompactionEventRequest>)>,
+    compactor_streams_change_tx:
+        UnboundedSender<(HummockContextId, Streaming<SubscribeCompactionEventRequest>)>,
 
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
@@ -180,7 +181,7 @@ impl HummockManager {
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
@@ -205,7 +206,7 @@ impl HummockManager {
         compactor_manager: CompactorManagerRef,
         config: risingwave_pb::hummock::CompactionConfig,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> HummockManagerRef {
@@ -232,7 +233,7 @@ impl HummockManager {
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: CompactionGroupManager,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {

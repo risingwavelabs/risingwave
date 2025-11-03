@@ -206,7 +206,7 @@ impl DiagnoseCommand {
                 {
                     None
                 } else {
-                    match worker_actor_count.get(&(worker_node.id as _)) {
+                    match worker_actor_count.get(&worker_node.id) {
                         None => Some(0),
                         Some(c) => Some(*c),
                     }

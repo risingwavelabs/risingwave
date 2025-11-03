@@ -19,7 +19,7 @@ use std::time::Duration;
 use rand::seq::IndexedRandom;
 use risingwave_common::bail;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
-use risingwave_common::id::FragmentId;
+use risingwave_common::id::{FragmentId, WorkerId};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
@@ -29,11 +29,11 @@ use crate::error::{BatchError, Result};
 pub struct WorkerNodeManager {
     inner: RwLock<WorkerNodeManagerInner>,
     /// Temporarily make worker invisible from serving cluster.
-    worker_node_mask: Arc<RwLock<HashSet<u32>>>,
+    worker_node_mask: Arc<RwLock<HashSet<WorkerId>>>,
 }
 
 struct WorkerNodeManagerInner {
-    worker_nodes: HashMap<u32, WorkerNode>,
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
     /// fragment vnode mapping info for streaming
     streaming_fragment_vnode_mapping: HashMap<FragmentId, WorkerSlotMapping>,
     /// fragment vnode mapping info for serving
@@ -275,11 +275,11 @@ impl WorkerNodeManager {
         }
     }
 
-    fn worker_node_mask(&self) -> RwLockReadGuard<'_, HashSet<u32>> {
+    fn worker_node_mask(&self) -> RwLockReadGuard<'_, HashSet<WorkerId>> {
         self.worker_node_mask.read().unwrap()
     }
 
-    pub fn mask_worker_node(&self, worker_node_id: u32, duration: Duration) {
+    pub fn mask_worker_node(&self, worker_node_id: WorkerId, duration: Duration) {
         tracing::info!(
             "Mask worker node {} for {:?} temporarily",
             worker_node_id,
@@ -300,7 +300,7 @@ impl WorkerNodeManager {
         });
     }
 
-    pub fn worker_node(&self, worker_id: u32) -> Option<WorkerNode> {
+    pub fn worker_node(&self, worker_id: WorkerId) -> Option<WorkerNode> {
         self.inner.read().unwrap().worker_node(worker_id)
     }
 }
@@ -312,7 +312,7 @@ impl WorkerNodeManagerInner {
             .cloned()
     }
 
-    fn worker_node(&self, worker_id: u32) -> Option<WorkerNode> {
+    fn worker_node(&self, worker_id: WorkerId) -> Option<WorkerNode> {
         self.worker_nodes.get(&worker_id).cloned()
     }
 }
@@ -423,7 +423,7 @@ mod tests {
 
         let worker_nodes = vec![
             WorkerNode {
-                id: 1,
+                id: 1.into(),
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
@@ -437,7 +437,7 @@ mod tests {
                 ..Default::default()
             },
             WorkerNode {
-                id: 2,
+                id: 2.into(),
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
