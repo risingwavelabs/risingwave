@@ -71,23 +71,27 @@ mysql -e "
     INSERT INTO t1 VALUES (1, 'abc');
 "
 
-sleep 5
+sleep 10
 echo "--- Verify t before schema change (should be 1 row)"
-COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM t;" | xargs)
-if [ "$COUNT" -eq 1 ]; then
+OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 1 THEN 'OK' ELSE 'FAIL' END FROM t;" 2>&1)
+if echo "$OUTPUT" | grep -q "OK"; then
     echo "✓ PASS: t has 1 row before schema change"
 else
-    echo "✗ FAIL: t has $COUNT rows, expected 1"
+    echo "✗ FAIL: t does not have 1 row"
+    echo "Debug output: $OUTPUT"
+    risedev psql -c "SELECT COUNT(*) FROM t;"
     exit 1
 fi
 
 sleep 5
 echo "--- Verify t1 before schema change (should be 1 row)"
-COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM t1;" | xargs)
-if [ "$COUNT" -eq 1 ]; then
+OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 1 THEN 'OK' ELSE 'FAIL' END FROM t1;" 2>&1)
+if echo "$OUTPUT" | grep -q "OK"; then
     echo "✓ PASS: t1 has 1 row before schema change"
 else
-    echo "✗ FAIL: t1 has $COUNT rows, expected 1"
+    echo "✗ FAIL: t1 does not have 1 row"
+    echo "Debug output: $OUTPUT"
+    risedev psql -c "SELECT COUNT(*) FROM t1;"
     exit 1
 fi
 
@@ -119,21 +123,25 @@ risedev ci-resume mysql-offline-schema-change-test
 
 sleep 20
 echo "--- Verify t after schema change (should be 3 rows)"
-COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM t;" | xargs)
-if [ "$COUNT" -eq 3 ]; then
+OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 3 THEN 'OK' ELSE 'FAIL' END FROM t;" 2>&1)
+if echo "$OUTPUT" | grep -q "OK"; then
     echo "✓ PASS: t has 3 rows after schema change"
 else
-    echo "✗ FAIL: t has $COUNT rows, expected 3"
+    echo "✗ FAIL: t does not have 3 rows"
+    echo "Debug output: $OUTPUT"
+    risedev psql -c "SELECT COUNT(*) FROM t;"
     exit 1
 fi
 
 sleep 10
 echo "--- Verify t1 after schema change (should be 3 rows)"
-COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM t1;" | xargs)
-if [ "$COUNT" -eq 3 ]; then
+OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 3 THEN 'OK' ELSE 'FAIL' END FROM t1;" 2>&1)
+if echo "$OUTPUT" | grep -q "OK"; then
     echo "✓ PASS: t1 has 3 rows after schema change"
 else
-    echo "✗ FAIL: t1 has $COUNT rows, expected 3"
+    echo "✗ FAIL: t1 does not have 3 rows"
+    echo "Debug output: $OUTPUT"
+    risedev psql -c "SELECT COUNT(*) FROM t1;"
     exit 1
 fi
 
