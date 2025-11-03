@@ -71,20 +71,23 @@ struct ExecutionVars<S: StateStore> {
 }
 
 impl<S: StateStore> ExecutorInner<S> {
-    fn generate_filled_rows(
-        prev_row: &OwnedRow,
-        curr_row: &OwnedRow,
+    #[try_stream(ok = StreamChunk, error = ExprError)]
+    async fn generate_filled_rows<'a>(
+        prev_row: &'a OwnedRow,
+        curr_row: &'a OwnedRow,
         time_column_index: usize,
-        fill_columns: &HashMap<usize, FillStrategy>,
+        fill_columns: &'a HashMap<usize, FillStrategy>,
         interval: risingwave_common::types::Interval,
-        metrics: &GapFillMetrics,
-    ) -> Result<Vec<OwnedRow>, ExprError> {
-        let mut filled_rows = Vec::new();
-        let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
-            prev_row.datum_at(time_column_index),
-            curr_row.datum_at(time_column_index),
-        ) else {
-            return Ok(filled_rows);
+        metrics: &'a GapFillMetrics,
+        chunk_builder: &'a mut StreamChunkBuilder,
+    ) {
+        let Some((prev_time_scalar, curr_time_scalar)) = (|| {
+            Some((
+                prev_row.datum_at(time_column_index)?,
+                curr_row.datum_at(time_column_index)?,
+            ))
+        })() else {
+            return Ok(());
         };
 
         let prev_time = match prev_time_scalar {
@@ -94,7 +97,7 @@ impl<S: StateStore> ExecutorInner<S> {
                     Ok(timestamp) => timestamp,
                     Err(_) => {
                         warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(filled_rows);
+                        return Ok(());
                     }
                 }
             }
@@ -103,7 +106,7 @@ impl<S: StateStore> ExecutorInner<S> {
                     "Failed to convert time column to timestamp, got {:?}. Skipping gap fill.",
                     prev_time_scalar
                 );
-                return Ok(filled_rows);
+                return Ok(());
             }
         };
 
@@ -114,7 +117,7 @@ impl<S: StateStore> ExecutorInner<S> {
                     Ok(timestamp) => timestamp,
                     Err(_) => {
                         warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(filled_rows);
+                        return Ok(());
                     }
                 }
             }
@@ -123,24 +126,24 @@ impl<S: StateStore> ExecutorInner<S> {
                     "Failed to convert time column to timestamp, got {:?}. Skipping gap fill.",
                     curr_time_scalar
                 );
-                return Ok(filled_rows);
+                return Ok(());
             }
         };
         if prev_time >= curr_time {
-            return Ok(filled_rows);
+            return Ok(());
         }
 
         let mut fill_time = match prev_time.checked_add(interval) {
             Some(t) => t,
             None => {
-                return Ok(filled_rows);
+                return Ok(());
             }
         };
         if fill_time >= curr_time {
-            return Ok(filled_rows);
+            return Ok(());
         }
 
-        // Calculate the number of rows to fill
+        // Calculate the number of rows to fill for interpolation step calculation
         let mut row_count = 0;
         let mut temp_time = fill_time;
         while temp_time < curr_time {
@@ -175,7 +178,11 @@ impl<S: StateStore> ExecutorInner<S> {
             }
         }
 
+        // Track total generated rows for metrics
+        let mut total_generated_rows = 0u64;
+
         // Generate filled rows, applying the appropriate strategy for each column
+        // Output chunks as we go to avoid keeping all rows in memory
         while fill_time < curr_time {
             let mut new_row_data = Vec::with_capacity(prev_row.len());
 
@@ -216,7 +223,13 @@ impl<S: StateStore> ExecutorInner<S> {
                 new_row_data.push(datum);
             }
 
-            filled_rows.push(OwnedRow::new(new_row_data));
+            let filled_row = OwnedRow::new(new_row_data);
+            total_generated_rows += 1;
+
+            // Append row to chunk builder and yield chunk if full
+            if let Some(chunk) = chunk_builder.append_row(Op::Insert, &filled_row) {
+                yield chunk;
+            }
 
             fill_time = match fill_time.checked_add(interval) {
                 Some(t) => t,
@@ -224,7 +237,7 @@ impl<S: StateStore> ExecutorInner<S> {
                     // Time overflow during iteration, stop filling
                     warn!(
                         "Gap fill stopped due to timestamp overflow after generating {} rows.",
-                        filled_rows.len()
+                        total_generated_rows
                     );
                     break;
                 }
@@ -234,9 +247,7 @@ impl<S: StateStore> ExecutorInner<S> {
         // Update metrics with the number of generated rows
         metrics
             .gap_fill_generated_rows_count
-            .inc_by(filled_rows.len() as u64);
-
-        Ok(filled_rows)
+            .inc_by(total_generated_rows);
     }
 }
 
@@ -326,20 +337,17 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                     {
                         let current_row = row?;
                         if let Some(p_row) = &staging_prev_row {
-                            let filled_rows = ExecutorInner::<S>::generate_filled_rows(
+                            #[for_await]
+                            for chunk in ExecutorInner::<S>::generate_filled_rows(
                                 p_row,
                                 &current_row,
                                 this.time_column_index,
                                 &this.fill_columns,
                                 interval,
                                 &this.metrics,
-                            )?;
-                            for filled_row in filled_rows {
-                                if let Some(chunk) =
-                                    chunk_builder.append_row(Op::Insert, &filled_row)
-                                {
-                                    yield Message::Chunk(chunk);
-                                }
+                                &mut chunk_builder,
+                            ) {
+                                yield Message::Chunk(chunk?);
                             }
                         }
                         if let Some(chunk) = chunk_builder.append_row(Op::Insert, &current_row) {
