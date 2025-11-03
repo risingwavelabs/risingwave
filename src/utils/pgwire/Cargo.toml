@@ -40,8 +40,8 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 base64 = "0.22"
-jsonwebtoken = "9"
-rand = "0.8"
+jsonwebtoken = { workspace = true }
+rand = { workspace = true }
 rsa = "0.9"
 tempfile = "3"
 tokio-postgres = "0.7"
