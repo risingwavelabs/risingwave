@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::any::type_name;
+use std::num::TryFromIntError;
 
 use bitflags::__private::serde::{Deserializer, Serializer};
 use parse_display::Display;
 use sea_orm::sea_query::{ArrayType, ValueTypeErr};
-use sea_orm::{ColIdx, ColumnType, DbErr, QueryResult, TryGetError, Value};
+use sea_orm::{ColIdx, ColumnType, DbErr, QueryResult, TryGetError};
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
+use tracing::warn;
 
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
 #[display("{inner}")]
@@ -37,8 +40,23 @@ impl<const N: usize> TypedId<N> {
 
     fn from_i32(inner: i32) -> Self {
         Self {
-            inner: inner.try_into().unwrap_or_else(|e| {
-                panic!("invalid id {inner} for {}: {:?}", type_name::<Self>(), e)
+            inner: inner.try_into().unwrap_or_else(|e: TryFromIntError| {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "invalid i32 id {} for {}: {:?}",
+                        inner,
+                        type_name::<Self>(),
+                        e.as_report()
+                    );
+                } else {
+                    warn!(
+                        "invalid i32 id {} for {}: {:?}",
+                        inner,
+                        type_name::<Self>(),
+                        e.as_report()
+                    );
+                    inner as _
+                }
             }),
         }
     }
@@ -70,13 +88,30 @@ impl<const N: usize> From<&TypedId<N>> for u32 {
 
 impl<const N: usize> From<TypedId<N>> for sea_orm::Value {
     fn from(value: TypedId<N>) -> Self {
-        let inner: i32 = value.inner.try_into().unwrap();
+        let inner: i32 = value.inner.try_into().unwrap_or_else(|e: TryFromIntError| {
+            if cfg!(debug_assertions) {
+                panic!(
+                    "invalid u32 id {} for {}: {:?}",
+                    value.inner,
+                    type_name::<Self>(),
+                    e.as_report()
+                );
+            } else {
+                warn!(
+                    "invalid u32 id {} for {}: {:?}",
+                    value.inner,
+                    type_name::<Self>(),
+                    e.as_report()
+                );
+                value.inner as _
+            }
+        });
         sea_orm::Value::from(inner)
     }
 }
 
 impl<const N: usize> sea_orm::sea_query::ValueType for TypedId<N> {
-    fn try_from(v: Value) -> Result<Self, ValueTypeErr> {
+    fn try_from(v: sea_orm::Value) -> Result<Self, ValueTypeErr> {
         let inner = <i32 as sea_orm::sea_query::ValueType>::try_from(v)?;
         Ok(Self::from_i32(inner))
     }
@@ -95,7 +130,7 @@ impl<const N: usize> sea_orm::sea_query::ValueType for TypedId<N> {
 }
 
 impl<const N: usize> sea_orm::sea_query::Nullable for TypedId<N> {
-    fn null() -> Value {
+    fn null() -> sea_orm::Value {
         <i32 as sea_orm::sea_query::Nullable>::null()
     }
 }
