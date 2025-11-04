@@ -167,7 +167,9 @@ pub struct StorageOpts {
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     pub iceberg_compaction_max_file_count_per_partition: u32,
     pub iceberg_compaction_small_file_threshold_mb: u32,
-    pub iceberg_compaction_max_task_total_size_mb: u32,
+    pub iceberg_compaction_target_binpack_group_size_mb: Option<u64>,
+    pub iceberg_compaction_min_group_size_mb: Option<u64>,
+    pub iceberg_compaction_min_group_file_count: Option<usize>,
 
     /// The ratio of iceberg compaction max parallelism to the number of CPU cores
     pub iceberg_compaction_task_parallelism_ratio: f32,
@@ -322,9 +324,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_small_file_threshold_mb: c
                 .storage
                 .iceberg_compaction_small_file_threshold_mb,
-            iceberg_compaction_max_task_total_size_mb: c
-                .storage
-                .iceberg_compaction_max_task_total_size_mb,
             iceberg_compaction_task_parallelism_ratio: c
                 .storage
                 .iceberg_compaction_task_parallelism_ratio,
@@ -343,6 +342,13 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_pending_parallelism_budget_multiplier: c
                 .storage
                 .iceberg_compaction_pending_parallelism_budget_multiplier,
+            iceberg_compaction_target_binpack_group_size_mb: c
+                .storage
+                .iceberg_compaction_target_binpack_group_size_mb,
+            iceberg_compaction_min_group_size_mb: c.storage.iceberg_compaction_min_group_size_mb,
+            iceberg_compaction_min_group_file_count: c
+                .storage
+                .iceberg_compaction_min_group_file_count,
             vector_file_block_size_kb: c.storage.vector_file_block_size_kb,
             vector_block_cache_capacity_mb: s.vector_block_cache_capacity_mb,
             vector_block_cache_shard_num: s.vector_block_cache_shard_num,

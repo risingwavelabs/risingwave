@@ -64,11 +64,15 @@ To learn about other installation options, such as using a Docker image, see the
 
 RisingWave delivers a unified streaming data platform that combines **ultra-low-latency stream processing** and **Iceberg-native data management**.
 
-### Streaming analytics
+### Low-latency streaming processing and analytics
 RisingWave integrates real-time stream processing and low-latency serving in a single system. It continuously ingests data from streaming and batch sources, performs incremental computations across streams and tables with end-to-end freshness under 100 ms. Materialized views can be served directly within RisingWave with 10–20 ms p99 query latency, or delivered to downstream systems.
 
-### Iceberg-based lakehouse ingestion and management
+### Iceberg lakehouse ingestion, transformation, and management
 RisingWave treats Apache Iceberg™ as a first-class citizen. It directly hosts and manages the Iceberg REST catalog, allowing users to create and operate Iceberg tables through a PostgreSQL-compatible interface. RisingWave supports two write modes: Merge-on-Read (MoR) and Copy-on-Write (CoW), to suit different ingestion and query patterns. It also provides built-in table maintenance capabilities, including compaction, small-file optimization, vacuum, and snapshot cleanup, ensuring efficient and consistent data management without external tools or pipelines.
+
+_Plug: [Nimtable](https://github.com/nimtable/nimtable) is an observability tool developed by RisingWave for easily exploring and managing Iceberg tables._
+
+
 
 ## Key design decisions
 

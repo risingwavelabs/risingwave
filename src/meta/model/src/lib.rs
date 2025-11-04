@@ -14,17 +14,17 @@
 
 use std::collections::BTreeMap;
 
+pub use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode};
 use sea_orm::entity::prelude::*;
-use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
+use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult, Value};
 use serde::{Deserialize, Serialize};
 
 pub mod prelude;
 
-pub mod actor;
 pub mod catalog_version;
 pub mod cdc_table_snapshot_split;
 pub mod cluster;
@@ -74,18 +74,18 @@ pub type WorkerId = i32;
 
 pub type TransactionId = i32;
 
-pub type ObjectId = i32;
-pub type DatabaseId = ObjectId;
-pub type SchemaId = ObjectId;
-pub type TableId = ObjectId;
-pub type SourceId = ObjectId;
-pub type SinkId = ObjectId;
-pub type SubscriptionId = ObjectId;
-pub type IndexId = ObjectId;
-pub type ViewId = ObjectId;
-pub type FunctionId = ObjectId;
-pub type ConnectionId = ObjectId;
-pub type SecretId = ObjectId;
+type RawObjectId = i32;
+pub type ObjectId = RawObjectId;
+pub type DatabaseId = RawObjectId;
+pub type SchemaId = RawObjectId;
+pub type SourceId = RawObjectId;
+pub type SinkId = RawObjectId;
+pub type SubscriptionId = RawObjectId;
+pub type IndexId = RawObjectId;
+pub type ViewId = RawObjectId;
+pub type FunctionId = RawObjectId;
+pub type ConnectionId = RawObjectId;
+pub type SecretId = RawObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;

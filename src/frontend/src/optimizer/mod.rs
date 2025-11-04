@@ -85,7 +85,9 @@ use crate::optimizer::plan_node::{
     StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion, StreamVectorIndexWrite,
     ToStream, VisitExprsRecursive,
 };
-use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
+use crate::optimizer::plan_visitor::{
+    LocalityProviderCounter, RwTimestampValidator, TemporalJoinValidator,
+};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
 
@@ -579,6 +581,12 @@ impl LogicalPlanRoot {
                 "selecting `_rw_timestamp` in a streaming query is not allowed".to_owned(),
                 "please run the sql in batch mode or remove the column `_rw_timestamp` from the streaming query".to_owned(),
             ).into());
+        }
+
+        if ctx.session_ctx().config().enable_locality_backfill()
+            && LocalityProviderCounter::count(plan.clone()) > 5
+        {
+            risingwave_common::license::Feature::LocalityBackfill.check_available()?
         }
 
         Ok(optimized_plan.into_phase(plan))

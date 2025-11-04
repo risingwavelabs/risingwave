@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::assert_matches::assert_matches;
+use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use tracing::warn;
 
 use crate::barrier::info::{
-    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, InflightSubscriptionInfo,
-    SharedActorInfos,
+    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, SharedActorInfos, SubscriberType,
 };
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 
@@ -38,8 +40,6 @@ pub(crate) struct BarrierWorkerState {
     /// Inflight running actors info.
     pub(super) inflight_graph_info: InflightDatabaseInfo,
 
-    pub(super) inflight_subscription_info: InflightSubscriptionInfo,
-
     /// Whether the cluster is paused.
     is_paused: bool,
 }
@@ -50,7 +50,6 @@ impl BarrierWorkerState {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],
             inflight_graph_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
-            inflight_subscription_info: InflightSubscriptionInfo::default(),
             is_paused: false,
         }
     }
@@ -60,7 +59,6 @@ impl BarrierWorkerState {
         shared_actor_infos: SharedActorInfos,
         in_flight_prev_epoch: TracedEpoch,
         jobs: impl Iterator<Item = InflightStreamingJobInfo>,
-        inflight_subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
     ) -> Self {
         Self {
@@ -71,7 +69,6 @@ impl BarrierWorkerState {
                 jobs,
                 shared_actor_infos,
             ),
-            inflight_subscription_info,
             is_paused,
         }
     }
@@ -133,15 +130,15 @@ impl BarrierWorkerState {
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
     ///
-    /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_is_paused`)
+    /// Return (`graph_info`, `mv_subscription_max_retention`, `table_ids_to_commit`, `jobs_to_wait`, `prev_is_paused`)
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
     ) -> (
         InflightDatabaseInfo,
-        InflightSubscriptionInfo,
+        HashMap<TableId, u64>,
         HashSet<TableId>,
-        HashSet<TableId>,
+        HashSet<JobId>,
         bool,
     ) {
         // update the fragment_infos outside pre_apply
@@ -151,18 +148,48 @@ impl BarrierWorkerState {
         }) = command
         {
             None
-        } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
-            self.inflight_graph_info.pre_apply(&fragment_changes);
+        } else if let Some((new_job_id, fragment_changes)) =
+            command.and_then(Command::fragment_changes)
+        {
+            self.inflight_graph_info
+                .pre_apply(new_job_id, &fragment_changes);
             Some(fragment_changes)
         } else {
             None
         };
-        if let Some(command) = &command {
-            self.inflight_subscription_info.pre_apply(command);
-        }
+
+        match &command {
+            Some(Command::CreateSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+                retention_second,
+            }) => {
+                self.inflight_graph_info.register_subscriber(
+                    upstream_mv_table_id.as_job_id(),
+                    *subscription_id,
+                    SubscriberType::Subscription(*retention_second),
+                );
+            }
+            Some(Command::CreateStreamingJob {
+                info,
+                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+                ..
+            }) => {
+                for upstream_mv_table_id in snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .keys()
+                {
+                    self.inflight_graph_info.register_subscriber(
+                        upstream_mv_table_id.as_job_id(),
+                        info.streaming_job.id().as_raw_id(),
+                        SubscriberType::SnapshotBackfill,
+                    );
+                }
+            }
+            _ => {}
+        };
 
         let info = self.inflight_graph_info.clone();
-        let subscription_info = self.inflight_subscription_info.clone();
 
         if let Some(fragment_changes) = fragment_changes {
             self.inflight_graph_info.post_apply(&fragment_changes);
@@ -178,8 +205,34 @@ impl BarrierWorkerState {
             }
         }
 
-        if let Some(command) = command {
-            self.inflight_subscription_info.post_apply(command);
+        match &command {
+            Some(Command::DropSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+            }) => {
+                if self
+                    .inflight_graph_info
+                    .unregister_subscriber(upstream_mv_table_id.as_job_id(), *subscription_id)
+                    .is_none()
+                {
+                    warn!(subscription_id, %upstream_mv_table_id, "no subscription to drop");
+                }
+            }
+            Some(Command::MergeSnapshotBackfillStreamingJobs(snapshot_backfill_jobs)) => {
+                for (snapshot_backfill_job_id, (upstream_mv_table_ids, _)) in snapshot_backfill_jobs
+                {
+                    for upstream_mv_table_id in upstream_mv_table_ids {
+                        assert_matches!(
+                            self.inflight_graph_info.unregister_subscriber(
+                                upstream_mv_table_id.as_job_id(),
+                                snapshot_backfill_job_id.as_raw_id()
+                            ),
+                            Some(SubscriberType::SnapshotBackfill)
+                        );
+                    }
+                }
+            }
+            _ => {}
         }
 
         let prev_is_paused = self.is_paused();
@@ -192,7 +245,7 @@ impl BarrierWorkerState {
 
         (
             info,
-            subscription_info,
+            self.inflight_graph_info.max_subscription_retention(),
             table_ids_to_commit,
             jobs_to_wait,
             prev_is_paused,

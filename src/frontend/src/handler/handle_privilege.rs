@@ -96,7 +96,7 @@ fn make_prost_privilege(
                         .into());
                     }
                 }
-                grant_objs.push(PbObject::TableId(table.id().table_id));
+                grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
             }
         }
         GrantObjects::Tables(tables) => {
@@ -113,7 +113,7 @@ fn make_prost_privilege(
                     Ok((table, _)) => {
                         match table.table_type() {
                             TableType::Table => {
-                                grant_objs.push(PbObject::TableId(table.id().table_id));
+                                grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
                                 continue;
                             }
                             _ => {
@@ -279,7 +279,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_all_mvs().for_each(|mview| {
-                    grant_objs.push(PbObject::TableId(mview.id().table_id));
+                    grant_objs.push(PbObject::TableId(mview.id().as_raw_id()));
                 });
             }
         }
@@ -288,7 +288,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_user_table().for_each(|table| {
-                    grant_objs.push(PbObject::TableId(table.id().table_id));
+                    grant_objs.push(PbObject::TableId(table.id().as_raw_id()));
                 });
             }
         }

@@ -15,7 +15,8 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
+use risingwave_common::id::JobId;
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -89,7 +90,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
-    async fn finish_cdc_table_backfill(&self, job: TableId) -> MetaResult<()> {
+    async fn finish_cdc_table_backfill(&self, job: JobId) -> MetaResult<()> {
         self.env.cdc_table_backfill_tracker.complete_job(job).await
     }
 
@@ -135,7 +136,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 let table_id = self
                     .metadata_manager
                     .catalog_controller
-                    .get_table_by_associate_source_id(associated_source_id.table_id() as _)
+                    .get_table_by_associate_source_id(associated_source_id.as_raw_id() as _)
                     .await
                     .context("Failed to get table id for source")?
                     .id
@@ -145,7 +146,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 let database_id = self
                     .metadata_manager
                     .catalog_controller
-                    .get_object_database_id(associated_source_id.table_id() as _)
+                    .get_object_database_id(associated_source_id.as_raw_id() as _)
                     .await
                     .context("Failed to get database id for table")?;
 
@@ -194,7 +195,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 let table_id = self
                     .metadata_manager
                     .catalog_controller
-                    .get_table_by_associate_source_id(associated_source_id.table_id() as _)
+                    .get_table_by_associate_source_id(associated_source_id.as_raw_id() as _)
                     .await
                     .context("Failed to get table id for source")?
                     .id
@@ -204,7 +205,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 let database_id = self
                     .metadata_manager
                     .catalog_controller
-                    .get_object_database_id(associated_source_id.table_id() as _)
+                    .get_object_database_id(associated_source_id.as_raw_id() as _)
                     .await
                     .context("Failed to get database id for table")?;
 
@@ -234,30 +235,30 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     async fn handle_refresh_finished_table_ids(
         &self,
-        refresh_finished_table_ids: Vec<u32>,
+        refresh_finished_table_job_ids: Vec<JobId>,
     ) -> MetaResult<()> {
         use risingwave_meta_model::table::RefreshState;
 
         tracing::info!(
             "Handling refresh finished table IDs: {:?}",
-            refresh_finished_table_ids
+            refresh_finished_table_job_ids
         );
 
-        for table_id in refresh_finished_table_ids {
+        for job_id in refresh_finished_table_job_ids {
             let res: MetaResult<()> = try {
-                tracing::info!(%table_id, "Processing refresh finished for materialized view");
+                tracing::info!(%job_id, "Processing refresh finished for materialized view");
 
                 // Update the table's refresh state back to Idle (refresh complete)
                 self.metadata_manager
                     .catalog_controller
-                    .set_table_refresh_state(table_id as i32, RefreshState::Idle)
+                    .set_table_refresh_state(job_id.as_mv_table_id(), RefreshState::Idle)
                     .await
                     .context("Failed to set table refresh state to Idle")?;
 
-                tracing::info!(%table_id, "Table refresh completed, state updated to Idle");
+                tracing::info!(%job_id, "Table refresh completed, state updated to Idle");
             };
             if let Err(e) = res {
-                tracing::error!(error = %e.as_report(), %table_id, "Failed to handle refresh finished table");
+                tracing::error!(error = %e.as_report(), %job_id, "Failed to handle refresh finished table");
             }
         }
 
@@ -296,11 +297,6 @@ impl CommandContext {
             }) => {
                 barrier_manager_context
                     .metadata_manager
-                    .update_actor_splits_by_split_assignment(assignment)
-                    .await?;
-
-                barrier_manager_context
-                    .metadata_manager
                     .update_fragment_splits(assignment)
                     .await?;
             }
@@ -316,11 +312,7 @@ impl CommandContext {
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .complete_dropped_tables(
-                        unregistered_state_table_ids
-                            .iter()
-                            .map(|id| id.table_id as _),
-                    )
+                    .complete_dropped_tables(unregistered_state_table_ids.iter().copied())
                     .await;
             }
             Command::ConnectorPropsChange(obj_id_map_props) => {
@@ -388,7 +380,6 @@ impl CommandContext {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     upstream_fragment_downstreams,
-                    init_split_assignment,
                     ..
                 } = info;
                 let new_sink_downstream =
@@ -407,11 +398,10 @@ impl CommandContext {
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
-                        stream_job_fragments.stream_job_id().table_id as _,
-                        stream_job_fragments.actor_ids(),
+                        stream_job_fragments.stream_job_id(),
                         upstream_fragment_downstreams,
-                        init_split_assignment,
                         new_sink_downstream,
+                        Some(&info.init_split_assignment),
                     )
                     .await?;
 
@@ -424,22 +414,8 @@ impl CommandContext {
                     .source_manager
                     .apply_source_change(source_change)
                     .await;
-
-                barrier_manager_context
-                    .metadata_manager
-                    .update_fragment_splits(&info.init_split_assignment)
-                    .await?;
             }
-            Command::RescheduleFragment {
-                reschedules,
-                post_updates,
-                ..
-            } => {
-                barrier_manager_context
-                    .scale_controller
-                    .post_apply_reschedule(reschedules, post_updates)
-                    .await?;
-
+            Command::RescheduleFragment { reschedules, .. } => {
                 let fragment_splits = reschedules
                     .iter()
                     .map(|(fragment_id, reschedule)| {
@@ -469,11 +445,10 @@ impl CommandContext {
                     .metadata_manager
                     .catalog_controller
                     .post_collect_job_fragments(
-                        new_fragments.stream_job_id.table_id as _,
-                        new_fragments.actor_ids(),
+                        new_fragments.stream_job_id,
                         upstream_fragment_downstreams,
-                        init_split_assignment,
                         None,
+                        Some(init_split_assignment),
                     )
                     .await?;
 
@@ -484,10 +459,9 @@ impl CommandContext {
                             .catalog_controller
                             .post_collect_job_fragments(
                                 sink.tmp_sink_id,
-                                sink.actor_status.keys().cloned().collect(),
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
-                                &Default::default(), // no split assignment
                                 None, // no replace plan
+                                None, // no init split assignment
                             )
                             .await?;
                     }
@@ -505,11 +479,6 @@ impl CommandContext {
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
-                    .await?;
-
-                barrier_manager_context
-                    .metadata_manager
-                    .update_fragment_splits(init_split_assignment)
                     .await?;
             }
 
@@ -529,7 +498,7 @@ impl CommandContext {
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .set_table_refresh_state(table_id.table_id() as i32, RefreshState::Refreshing)
+                    .set_table_refresh_state(*table_id, RefreshState::Refreshing)
                     .await?;
             }
             Command::ListFinish { .. } => {
@@ -540,7 +509,7 @@ impl CommandContext {
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .set_table_refresh_state(table_id.table_id() as i32, RefreshState::Finishing)
+                    .set_table_refresh_state(*table_id, RefreshState::Finishing)
                     .await?;
             }
         }

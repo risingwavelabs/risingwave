@@ -223,3 +223,10 @@
     select sum(unnest) from (select a, b, c, unnest(x) as unnest from t) group by a + 1;
   expected_outputs:
     - stream_plan
+- name: Ban index selection for indexes with distribution key is not the subset of the group by keys
+  sql: |
+    create table t(a int, b int, c int, x int[]);
+    create index idx_a on t(a, b, c) distributed by (a, b, c);
+    select count(*) from t group by a, b;
+  expected_outputs:
+    - stream_plan

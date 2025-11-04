@@ -1041,7 +1041,7 @@
     StreamMaterialize { columns: [cnt, i.x(hidden)], stream_key: [i.x], pk_columns: [i.x], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, i.x] }
       └─StreamHashAgg { group_key: [i.x], aggs: [count] }
-        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i.t._row_id], pk: [x, t._row_id], dist: UpstreamHashShard(i.x) }
+        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i.x, i.t._row_id], pk: [x, t._row_id], dist: UpstreamHashShard(i.x) }
 - name: distinct aggregates only have one distinct argument doesn't need expand
   sql: |
     create table t(x int, y int);
@@ -1502,10 +1502,12 @@
             └─BatchScan { table: idx, columns: [idx.id], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [count, idx.id(hidden)], stream_key: [idx.id], pk_columns: [idx.id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [count, idx.id] }
-      └─StreamHashAgg { group_key: [idx.id], aggs: [count] }
+    └─StreamProject { exprs: [sum0(count), idx.id] }
+      └─StreamHashAgg { group_key: [idx.id], aggs: [sum0(count), count] }
         └─StreamExchange { dist: HashShard(idx.id) }
-          └─StreamTableScan { table: idx, columns: [idx.id], stream_scan_type: ArrangementBackfill, stream_key: [idx.id], pk: [col, id], dist: SomeShard }
+          └─StreamHashAgg { group_key: [idx.id, _vnode], aggs: [count] }
+            └─StreamProject { exprs: [idx.id, idx.col, Vnode(idx.col) as _vnode] }
+              └─StreamTableScan { table: idx, columns: [idx.id, idx.col], stream_scan_type: ArrangementBackfill, stream_key: [idx.col, idx.id], pk: [col, id], dist: UpstreamHashShard(idx.col) }
 - name: two phase agg with stream SomeShard (via index) but pk does not satisfy output dist should use two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;

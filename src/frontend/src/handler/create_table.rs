@@ -778,11 +778,27 @@ fn gen_table_plan_inner(
     }
 
     if !append_only && retention_seconds.is_some() {
-        return Err(ErrorCode::NotSupported(
-            "Defining retention seconds on table requires the table to be append only.".to_owned(),
-            "Use the key words `APPEND ONLY`".to_owned(),
-        )
-        .into());
+        if session
+            .config()
+            .unsafe_enable_storage_retention_for_non_append_only_tables()
+        {
+            tracing::warn!(
+                "Storage retention is enabled for non-append-only table {}. This may lead to stream inconsistency.",
+                table_name
+            );
+            const NOTICE: &str = "Storage retention is enabled for non-append-only table. \
+                                  This may lead to stream inconsistency and unrecoverable \
+                                  node failure if there is any row INSERT/UPDATE/DELETE operation \
+                                  corresponding to the TTLed primary keys";
+            session.notice_to_user(NOTICE);
+        } else {
+            return Err(ErrorCode::NotSupported(
+                "Defining retention seconds on table requires the table to be append only."
+                    .to_owned(),
+                "Use the key words `APPEND ONLY`".to_owned(),
+            )
+            .into());
+        }
     }
 
     let materialize =
@@ -2340,7 +2356,7 @@ pub async fn generate_stream_graph_for_replace_table(
         table.associated_source_id = Some(source_id);
 
         let source = source.as_mut().unwrap();
-        source.id = source_id.table_id;
+        source.id = source_id.as_raw_id();
         source.associated_table_id = Some(table.id());
     }
 

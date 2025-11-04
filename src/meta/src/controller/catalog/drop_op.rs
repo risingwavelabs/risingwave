@@ -95,7 +95,7 @@ impl CatalogController {
 
         // check iceberg source.
         if obj.obj_type == ObjectType::Table {
-            let table_name = Table::find_by_id(object_id)
+            let table_name = Table::find_by_id(TableId::new(object_id as _))
                 .select_only()
                 .column(table::Column::Name)
                 .into_tuple::<String>()
@@ -165,7 +165,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
 
                 if let Some(target_table) = sink.target_table
-                    && !removed_object_ids.contains(&target_table)
+                    && !removed_object_ids.contains(&(target_table.as_raw_id() as _))
                     && !has_table_been_migrated(&txn, target_table).await?
                 {
                     return Err(anyhow::anyhow!(
@@ -182,7 +182,7 @@ impl CatalogController {
             for obj in &removed_objects {
                 // if the obj is iceberg engine table, bail out
                 if obj.obj_type == ObjectType::Table {
-                    let table = Table::find_by_id(obj.oid)
+                    let table = Table::find_by_id(TableId::new(obj.oid as _))
                         .one(&txn)
                         .await?
                         .ok_or_else(|| MetaError::catalog_id_not_found("table", obj.oid))?;
@@ -199,9 +199,9 @@ impl CatalogController {
         let removed_table_ids = removed_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
-            .map(|obj| obj.oid);
+            .map(|obj| TableId::new(obj.oid as _));
 
-        let removed_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
+        let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(streaming_job::Column::JobId.is_in(removed_object_ids))
@@ -275,7 +275,11 @@ impl CatalogController {
                 .all(&txn)
                 .await?;
 
-            removed_state_table_ids.extend(removed_internal_table_objs.iter().map(|obj| obj.oid));
+            removed_state_table_ids.extend(
+                removed_internal_table_objs
+                    .iter()
+                    .map(|obj| TableId::new(obj.oid as _)),
+            );
             removed_objects.extend(removed_internal_table_objs);
         }
 
@@ -336,7 +340,7 @@ impl CatalogController {
                     removed_state_table_ids
                         .iter()
                         .copied()
-                        .collect::<HashSet<ObjectId>>(),
+                        .collect::<HashSet<TableId>>(),
                 ),
             )
             .all(&txn)
@@ -362,7 +366,7 @@ impl CatalogController {
         self.notify_users_update(user_infos).await;
         inner
             .dropped_tables
-            .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+            .extend(dropped_tables.map(|t| (t.id.into(), t)));
 
         let version = match object_type {
             ObjectType::Database => {

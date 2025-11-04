@@ -14,7 +14,7 @@ byteorder = "1.5"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
-jsonwebtoken = "9"
+jsonwebtoken = { workspace = true }
 openssl = "0.10.72"
 panic-message = "0.3"
 parking_lot = { workspace = true }
@@ -39,6 +39,10 @@ tracing = "0.1"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+base64 = "0.22"
+jsonwebtoken = { workspace = true }
+rand = { version = "0.8" }
+rsa = "0.9"
 tempfile = "3"
 tokio-postgres = "0.7"
 

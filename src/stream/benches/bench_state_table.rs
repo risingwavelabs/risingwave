@@ -61,7 +61,7 @@ const MANY_DATA_TYPES: [DataType; 14] = [
 async fn create_state_table<const USE_WATERMARK_CACHE: bool>(
     data_types: &[DataType],
 ) -> TestStateTable<USE_WATERMARK_CACHE> {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
 
     let column_descs = data_types
         .iter()

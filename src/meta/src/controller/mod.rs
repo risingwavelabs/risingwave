@@ -215,7 +215,7 @@ impl From<ObjectModel<schema::Model>> for PbSchema {
 impl From<ObjectModel<table::Model>> for PbTable {
     fn from(value: ObjectModel<table::Model>) -> Self {
         Self {
-            id: value.0.table_id as _,
+            id: value.0.table_id.as_raw_id(),
             schema_id: value.1.schema_id.unwrap() as _,
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
@@ -273,7 +273,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             cdc_table_id: value.0.cdc_table_id,
             maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
             webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
-            job_id: value.0.belongs_to_job_id.map(|id| id as _),
+            job_id: value.0.belongs_to_job_id.map(|id| id.as_raw_id()),
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
             refreshable: value.0.refreshable,
@@ -323,7 +323,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             optional_associated_table_id: value
                 .0
                 .optional_associated_table_id
-                .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id as _)),
+                .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id.as_raw_id())),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
@@ -362,7 +362,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             sink_from_name: value.0.sink_from_name,
             stream_job_status: PbStreamJobStatus::Created as _,
             format_desc: value.0.sink_format_desc.map(|desc| desc.to_protobuf()),
-            target_table: value.0.target_table.map(|id| id as _),
+            target_table: value.0.target_table.map(|id| id.as_raw_id()),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
@@ -375,7 +375,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             auto_refresh_schema_from_table: value
                 .0
                 .auto_refresh_schema_from_table
-                .map(|id| id as _),
+                .map(|id| id.as_raw_id()),
         }
     }
 }
@@ -412,8 +412,8 @@ impl From<ObjectModel<index::Model>> for PbIndex {
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
             owner: value.1.owner_id as _,
-            index_table_id: value.0.index_table_id as _,
-            primary_table_id: value.0.primary_table_id as _,
+            index_table_id: value.0.index_table_id.as_raw_id(),
+            primary_table_id: value.0.primary_table_id.as_raw_id(),
             index_item: value.0.index_items.to_protobuf(),
             index_column_properties: value
                 .0

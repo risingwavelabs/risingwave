@@ -55,7 +55,7 @@ async fn test_empty_read() {
                 gen_key_from_str(VirtualNode::ZERO, "test_key"),
                 u64::MAX,
                 ReadOptions {
-                    table_id: TableId { table_id: 2333 },
+                    table_id: 2333.into(),
                     cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
@@ -72,7 +72,7 @@ async fn test_empty_read() {
             ),
             u64::MAX,
             ReadOptions {
-                table_id: TableId { table_id: 2333 },
+                table_id: TableId::new(2333),
                 cache_policy: CachePolicy::Fill(Hint::Normal),
                 ..Default::default()
             },
@@ -1253,7 +1253,7 @@ async fn test_clear_shared_buffer() {
 #[tokio::test]
 async fn test_replicated_local_hummock_storage() {
     use risingwave_storage::store::ReadOptions;
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
 
     let (hummock_storage, meta_client) = with_hummock_storage(TEST_TABLE_ID).await;
 
@@ -1280,9 +1280,7 @@ async fn test_replicated_local_hummock_storage() {
         .unwrap();
 
     let test_read_options = StateStoreTestReadOptions {
-        table_id: TableId {
-            table_id: TEST_TABLE_ID.table_id,
-        },
+        table_id: TEST_TABLE_ID,
         cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };

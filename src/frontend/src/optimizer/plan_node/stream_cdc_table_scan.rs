@@ -184,7 +184,7 @@ impl StreamCdcTableScan {
             .to_internal_table_prost();
 
         // We need to pass the id of upstream source job here
-        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
+        let upstream_source_id = self.core.cdc_table_desc.source_id.as_raw_id();
 
         // filter upstream source chunk by the value of `_rw_table_name` column
         let filter_expr =

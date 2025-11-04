@@ -35,11 +35,11 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_test_utils};
-use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
+pub use crate::id::TableId;
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
@@ -219,61 +219,16 @@ impl From<SchemaId> for u32 {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Display,
-    Default,
-    Hash,
-    PartialOrd,
-    PartialEq,
-    Eq,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
-#[display("{table_id}")]
-pub struct TableId {
-    pub table_id: u32,
-}
-
 impl TableId {
-    pub const fn new(table_id: u32) -> Self {
-        TableId { table_id }
-    }
-
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         TableId {
-            table_id: OBJECT_ID_PLACEHOLDER,
+            inner: OBJECT_ID_PLACEHOLDER,
         }
     }
 
-    pub fn table_id(&self) -> u32 {
-        self.table_id
-    }
-
     pub fn is_placeholder(&self) -> bool {
-        self.table_id == OBJECT_ID_PLACEHOLDER
-    }
-}
-
-impl From<u32> for TableId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for TableId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<TableId> for u32 {
-    fn from(id: TableId) -> Self {
-        id.table_id
+        self.inner == OBJECT_ID_PLACEHOLDER
     }
 }
 
