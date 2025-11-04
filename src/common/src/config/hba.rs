@@ -19,6 +19,9 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+// Keyword representing "all" databases, users, or addresses
+const ALL_KEYWORD: &str = "all";
+
 /// RisingWave HBA (Host-Based Authentication) configuration, similar to PostgreSQL's `pg_hba.conf`
 /// This determines which authentication method to use for each connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,8 +36,8 @@ impl Default for HbaConfig {
                 // Default rule: allow all local connections without authentication
                 HbaEntry {
                     connection_type: ConnectionType::Local,
-                    databases: vec!["all".to_owned()],
-                    users: vec!["all".to_owned()],
+                    databases: vec![ALL_KEYWORD.to_owned()],
+                    users: vec![ALL_KEYWORD.to_owned()],
                     addresses: None,
                     auth_method: AuthMethod::Trust,
                     auth_options: HashMap::new(),
@@ -42,8 +45,8 @@ impl Default for HbaConfig {
                 // Default rule: require password for all remote connections
                 HbaEntry {
                     connection_type: ConnectionType::Host,
-                    databases: vec!["all".to_owned()],
-                    users: vec!["all".to_owned()],
+                    databases: vec![ALL_KEYWORD.to_owned()],
+                    users: vec![ALL_KEYWORD.to_owned()],
                     addresses: Some(vec![AddressPattern::Cidr("0.0.0.0/0".to_owned())]),
                     auth_method: AuthMethod::Password,
                     auth_options: HashMap::new(),
@@ -100,7 +103,7 @@ impl Serialize for AddressPattern {
         S: Serializer,
     {
         match self {
-            AddressPattern::All => serializer.serialize_str("all"),
+            AddressPattern::All => serializer.serialize_str(ALL_KEYWORD),
             AddressPattern::Cidr(s) => serializer.serialize_str(s),
             AddressPattern::Hostname(s) => serializer.serialize_str(s),
         }
@@ -113,7 +116,7 @@ impl<'de> Deserialize<'de> for AddressPattern {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        if s == "all" {
+        if s == ALL_KEYWORD {
             Ok(AddressPattern::All)
         } else if s.contains('/') {
             Ok(AddressPattern::Cidr(s))
@@ -212,7 +215,7 @@ impl HbaConfig {
     }
 
     fn matches_list(&self, list: &[String], value: &str) -> bool {
-        list.iter().any(|item| item == "all" || item == value)
+        list.iter().any(|item| item == ALL_KEYWORD || item == value)
     }
 
     fn matches_address(&self, patterns: &[AddressPattern], addr: &IpAddr) -> bool {
@@ -289,8 +292,8 @@ mod tests {
 
         let entry = HbaEntry {
             connection_type: ConnectionType::Host,
-            databases: vec!["all".to_owned()],
-            users: vec!["all".to_owned()],
+            databases: vec![ALL_KEYWORD.to_owned()],
+            users: vec![ALL_KEYWORD.to_owned()],
             addresses: Some(vec![AddressPattern::Cidr("10.0.0.0/8".to_owned())]),
             auth_method: AuthMethod::Ldap,
             auth_options,
