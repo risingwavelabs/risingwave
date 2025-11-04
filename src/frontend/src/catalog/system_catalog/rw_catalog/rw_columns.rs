@@ -107,7 +107,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(move |(index, column)| RwColumn {
-                relation_id: table.id.table_id as i32,
+                relation_id: table.id.as_raw_id() as i32,
                 name: column.name().into(),
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,
@@ -132,7 +132,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 .iter()
                 .enumerate()
                 .map(move |(index, column)| RwColumn {
-                    relation_id: table.id.table_id as i32,
+                    relation_id: table.id.as_raw_id() as i32,
                     name: column.name().into(),
                     position: index as i32 + 1,
                     is_hidden: column.is_hidden,

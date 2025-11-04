@@ -404,7 +404,7 @@ mod common {
 
     fn bind_table(schema_catalog: &SchemaCatalog, name: &String) -> crate::error::Result<ObjectId> {
         if let Some(table) = schema_catalog.get_created_table_by_name(name) {
-            Ok(table.id().table_id)
+            Ok(table.id().as_raw_id())
         } else if let Some(source) = schema_catalog.get_source_by_name(name) {
             Ok(source.id)
         } else {

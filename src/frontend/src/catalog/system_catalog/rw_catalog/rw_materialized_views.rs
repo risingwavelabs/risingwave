@@ -53,14 +53,14 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
             schema
                 .iter_all_mvs_with_acl(current_user)
                 .map(|table| RwMaterializedView {
-                    id: table.id.table_id as i32,
+                    id: table.id.as_raw_id() as i32,
                     name: table.name().into(),
                     schema_id: schema.id() as i32,
                     owner: table.owner as i32,
                     definition: table.create_sql(),
                     append_only: table.append_only,
                     acl: get_acl_items(
-                        &Object::TableId(table.id.table_id),
+                        &Object::TableId(table.id.as_raw_id()),
                         true,
                         &users,
                         username_map,

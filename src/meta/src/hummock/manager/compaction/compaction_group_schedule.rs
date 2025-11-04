@@ -266,8 +266,7 @@ impl HummockManager {
         // TODO: remove compaciton group_id from state_table_info
         // rewrite compaction_group_id for all tables
         new_version_delta.with_latest_version(|version, new_version_delta| {
-            for table_id in combined_member_table_ids {
-                let table_id = TableId::new(table_id.table_id());
+            for &table_id in combined_member_table_ids {
                 let info = version
                     .state_table_info
                     .info()

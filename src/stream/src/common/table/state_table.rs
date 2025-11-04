@@ -819,8 +819,8 @@ where
         &self.data_types
     }
 
-    pub fn table_id(&self) -> u32 {
-        self.table_id.table_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -1323,7 +1323,7 @@ where
                     ?new_epoch,
                     prev_op_consistency_level = ?self.op_consistency_level,
                     ?op_consistency_level,
-                    table_id = self.table_id.table_id,
+                    table_id = %self.table_id,
                     "switch to new op consistency level"
                 );
             }

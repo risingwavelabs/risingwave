@@ -984,14 +984,14 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
             assert_eq!(
                 3,
                 FullKey::decode(&ret[2].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1023,14 +1023,14 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
             assert_eq!(
                 3,
                 FullKey::decode(&ret[1].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1062,14 +1062,14 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
             assert_eq!(
                 2,
                 FullKey::decode(&ret[1].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1100,7 +1100,7 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1139,7 +1139,7 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1179,7 +1179,7 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
     }

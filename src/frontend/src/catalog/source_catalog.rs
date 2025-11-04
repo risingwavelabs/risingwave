@@ -90,7 +90,7 @@ impl SourceCatalog {
             created_at_epoch: self.created_at_epoch.map(|x| x.0),
             optional_associated_table_id: self
                 .associated_table_id
-                .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.table_id)),
+                .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.as_raw_id())),
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),

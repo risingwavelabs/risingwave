@@ -143,8 +143,8 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
         self.barrier_manager.report_source_list_finished(
             epoch,
             self.actor_ctx.id,
-            self.stream_source_core.source_id.table_id,
-            self.stream_source_core.source_id.table_id,
+            self.stream_source_core.source_id.as_raw_id(),
+            self.stream_source_core.source_id.as_raw_id(),
         );
     }
 

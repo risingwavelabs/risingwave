@@ -1055,7 +1055,7 @@ pub(crate) mod tests {
 
         // 6. scan kv to check key table_id
         let bloom_filter_key = [
-            existing_table_id.table_id().to_be_bytes().to_vec(),
+            existing_table_id.as_raw_id().to_be_bytes().to_vec(),
             key_prefix.to_vec(),
         ]
         .concat();
@@ -1264,7 +1264,7 @@ pub(crate) mod tests {
             );
             let hash = Sstable::hash_for_bloom_filter(
                 fast_iter.key().user_key.encode().as_slice(),
-                fast_iter.key().user_key.table_id.table_id,
+                fast_iter.key().user_key.table_id.as_raw_id(),
             );
             assert_eq!(normal_iter.value(), fast_iter.value());
             let key = fast_iter.key();

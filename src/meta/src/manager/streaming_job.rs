@@ -16,9 +16,10 @@ use std::collections::HashSet;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::TableVersionId;
+use risingwave_common::id::JobId;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
-use risingwave_meta_model::{SourceId, TableId, TableVersion, source, table};
+use risingwave_meta_model::{SourceId, TableVersion, source, table};
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use sea_orm::entity::prelude::*;
@@ -117,7 +118,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> JobId {
         match self {
             Self::MaterializedView(table) => table.id,
             Self::Sink(sink) => sink.id,
@@ -125,6 +126,7 @@ impl StreamingJob {
             Self::Index(index, _) => index.id,
             Self::Source(source) => source.id,
         }
+        .into()
     }
 
     pub fn mv_table(&self) -> Option<u32> {
@@ -286,13 +288,14 @@ impl StreamingJob {
         match self {
             StreamingJob::Table(_source, table, _table_job_type) => {
                 let new_version = table.get_version()?.get_version();
-                let original_version: Option<TableVersion> = TableModel::find_by_id(id as TableId)
-                    .select_only()
-                    .column(table::Column::Version)
-                    .into_tuple()
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found(self.job_type_str(), id))?;
+                let original_version: Option<TableVersion> =
+                    TableModel::find_by_id(id.as_mv_table_id())
+                        .select_only()
+                        .column(table::Column::Version)
+                        .into_tuple()
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found(self.job_type_str(), id))?;
                 let original_version = original_version
                     .expect("version for table should exist")
                     .to_protobuf();
@@ -302,13 +305,14 @@ impl StreamingJob {
             }
             StreamingJob::Source(source) => {
                 let new_version = source.get_version();
-                let original_version: Option<i64> = SourceModel::find_by_id(id as SourceId)
-                    .select_only()
-                    .column(source::Column::Version)
-                    .into_tuple()
-                    .one(txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found(self.job_type_str(), id))?;
+                let original_version: Option<i64> =
+                    SourceModel::find_by_id(id.as_raw_id() as SourceId)
+                        .select_only()
+                        .column(source::Column::Version)
+                        .into_tuple()
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found(self.job_type_str(), id))?;
                 let original_version = original_version.expect("version for source should exist");
                 if new_version != original_version as u64 + 1 {
                     return Err(MetaError::permission_denied("source version is stale"));

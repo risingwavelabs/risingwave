@@ -162,7 +162,7 @@ pub fn update_filter_key_extractor_for_table_ids(
 ) {
     for table_id in table_ids {
         let mock_table = PbTable {
-            id: table_id.table_id(),
+            id: table_id.as_raw_id(),
             read_prefix_len_hint: 0,
             maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as u32),
             ..Default::default()

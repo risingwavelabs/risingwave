@@ -49,6 +49,7 @@ mod utils;
 mod worker;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
+use risingwave_common::id::JobId;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 
 pub use self::command::{
@@ -103,7 +104,7 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 }
 
 pub(crate) enum BarrierManagerRequest {
-    GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
+    GetDdlProgress(Sender<HashMap<JobId, DdlProgress>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier {
         database_id: DatabaseId,
@@ -117,7 +118,7 @@ pub(crate) enum BarrierManagerRequest {
 struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
     database_job_infos:
-        HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
+        HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -125,7 +126,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<TableId, String>,
+    background_jobs: HashMap<JobId, String>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
     cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
@@ -134,7 +135,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
 impl BarrierWorkerRuntimeInfoSnapshot {
     fn validate_database_info(
         database_id: DatabaseId,
-        database_jobs: &HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
+        database_jobs: &HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         active_streaming_nodes: &ActiveStreamingWorkerNodes,
         stream_actors: &HashMap<ActorId, StreamActor>,
         state_table_committed_epochs: &HashMap<TableId, u64>,
@@ -219,7 +220,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
 
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
-    job_infos: HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
+    job_infos: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -227,7 +228,7 @@ struct DatabaseRuntimeInfoSnapshot {
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<TableId, String>,
+    background_jobs: HashMap<JobId, String>,
     cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
 }
 

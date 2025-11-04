@@ -21,10 +21,11 @@ use parking_lot::RawRwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
+use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
@@ -43,15 +44,15 @@ use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments
 #[derive(Debug, Clone)]
 pub struct SharedFragmentInfo {
     pub fragment_id: FragmentId,
-    pub job_id: ObjectId,
+    pub job_id: JobId,
     pub distribution_type: DistributionType,
     pub actors: HashMap<ActorId, InflightActorInfo>,
     pub vnode_count: usize,
     pub fragment_type_mask: FragmentTypeMask,
 }
 
-impl From<(&InflightFragmentInfo, TableId)> for SharedFragmentInfo {
-    fn from(pair: (&InflightFragmentInfo, TableId)) -> Self {
+impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
+    fn from(pair: (&InflightFragmentInfo, JobId)) -> Self {
         let (info, job_id) = pair;
 
         let InflightFragmentInfo {
@@ -65,7 +66,7 @@ impl From<(&InflightFragmentInfo, TableId)> for SharedFragmentInfo {
 
         Self {
             fragment_id: *fragment_id,
-            job_id: job_id.table_id() as _,
+            job_id,
             distribution_type: *distribution_type,
             fragment_type_mask: *fragment_type_mask,
             actors: actors.clone(),
@@ -203,7 +204,7 @@ impl SharedActorInfos {
     pub(super) fn recover_database(
         &self,
         database_id: DatabaseId,
-        fragments: impl Iterator<Item = (&InflightFragmentInfo, TableId)>,
+        fragments: impl Iterator<Item = (&InflightFragmentInfo, JobId)>,
     ) {
         let mut remaining_fragments: HashMap<_, _> = fragments
             .map(|info @ (fragment, _)| (fragment.fragment_id, info))
@@ -243,7 +244,7 @@ impl SharedActorInfos {
     pub(super) fn upsert(
         &self,
         database_id: DatabaseId,
-        infos: impl IntoIterator<Item = (&InflightFragmentInfo, TableId)>,
+        infos: impl IntoIterator<Item = (&InflightFragmentInfo, JobId)>,
     ) {
         let mut writer = self.start_writer(database_id);
         writer.upsert(infos);
@@ -274,7 +275,7 @@ pub(super) struct SharedActorInfoWriter<'a> {
 impl SharedActorInfoWriter<'_> {
     pub(super) fn upsert(
         &mut self,
-        infos: impl IntoIterator<Item = (&InflightFragmentInfo, TableId)>,
+        infos: impl IntoIterator<Item = (&InflightFragmentInfo, JobId)>,
     ) {
         let database = self.write_guard.info.entry(self.database_id).or_default();
         for info @ (fragment, _) in infos {
@@ -339,7 +340,7 @@ impl BarrierInfo {
 #[derive(Debug, Clone)]
 pub(crate) enum CommandFragmentChanges {
     NewFragment {
-        job_id: TableId,
+        job_id: JobId,
         info: InflightFragmentInfo,
         /// Whether the fragment already exists before added. This is used
         /// when snapshot backfill is finished and add its fragment info
@@ -372,7 +373,7 @@ pub enum SubscriberType {
 
 #[derive(Clone, Debug)]
 pub struct InflightStreamingJobInfo {
-    pub job_id: TableId,
+    pub job_id: JobId,
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     pub subscribers: HashMap<u32, SubscriberType>,
 }
@@ -419,8 +420,8 @@ impl<'a> IntoIterator for &'a InflightStreamingJobInfo {
 #[derive(Clone, Debug)]
 pub struct InflightDatabaseInfo {
     database_id: DatabaseId,
-    jobs: HashMap<TableId, InflightStreamingJobInfo>,
-    fragment_location: HashMap<FragmentId, TableId>,
+    jobs: HashMap<JobId, InflightStreamingJobInfo>,
+    fragment_location: HashMap<FragmentId, JobId>,
     pub(super) shared_actor_infos: SharedActorInfos,
 }
 
@@ -429,7 +430,7 @@ impl InflightDatabaseInfo {
         self.jobs.values().flat_map(|job| job.fragment_infos())
     }
 
-    pub fn contains_job(&self, job_id: TableId) -> bool {
+    pub fn contains_job(&self, job_id: JobId) -> bool {
         self.jobs.contains_key(&job_id)
     }
 
@@ -448,7 +449,7 @@ impl InflightDatabaseInfo {
         self.jobs[&job_id].subscribers.keys().copied()
     }
 
-    pub fn job_subscribers(&self, job_id: TableId) -> impl Iterator<Item = u32> + '_ {
+    pub fn job_subscribers(&self, job_id: JobId) -> impl Iterator<Item = u32> + '_ {
         self.jobs[&job_id].subscribers.keys().copied()
     }
 
@@ -463,14 +464,14 @@ impl InflightDatabaseInfo {
                         SubscriberType::SnapshotBackfill => None,
                     })
                     .max()
-                    .map(|max_subscription| (*job_id, max_subscription))
+                    .map(|max_subscription| (job_id.as_mv_table_id(), max_subscription))
             })
             .collect()
     }
 
     pub fn register_subscriber(
         &mut self,
-        job_id: TableId,
+        job_id: JobId,
         subscriber_id: u32,
         subscriber: SubscriberType,
     ) {
@@ -484,7 +485,7 @@ impl InflightDatabaseInfo {
 
     pub fn unregister_subscriber(
         &mut self,
-        job_id: TableId,
+        job_id: JobId,
         subscriber_id: u32,
     ) -> Option<SubscriberType> {
         self.jobs
@@ -494,7 +495,7 @@ impl InflightDatabaseInfo {
             .remove(&subscriber_id)
     }
 
-    fn fragment_mut(&mut self, fragment_id: FragmentId) -> (&mut InflightFragmentInfo, TableId) {
+    fn fragment_mut(&mut self, fragment_id: FragmentId) -> (&mut InflightFragmentInfo, JobId) {
         let job_id = self.fragment_location[&fragment_id];
         let fragment = self
             .jobs
@@ -564,7 +565,7 @@ impl InflightDatabaseInfo {
     /// the info correspondingly.
     pub(crate) fn pre_apply(
         &mut self,
-        new_job_id: Option<TableId>,
+        new_job_id: Option<JobId>,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
     ) {
         if let Some(job_id) = new_job_id {

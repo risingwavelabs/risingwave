@@ -392,11 +392,11 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             .clone()
             .create_sst_writer(id, writer_options);
         let table_id_to_vnode = HashMap::from_iter(vec![(
-            TableId::default().table_id(),
+            TableId::default().as_raw_id(),
             VirtualNode::COUNT_FOR_TEST,
         )]);
         let table_id_to_watermark_serde =
-            HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+            HashMap::from_iter(vec![(TableId::default().as_raw_id(), None)]);
         let builder = SstableBuilder::for_test(
             id,
             writer,
