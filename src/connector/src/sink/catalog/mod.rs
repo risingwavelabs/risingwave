@@ -405,8 +405,8 @@ impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
         PbSink {
             id: self.id.into(),
-            schema_id: self.schema_id.schema_id,
-            database_id: self.database_id.database_id,
+            schema_id: self.schema_id.as_raw_id(),
+            database_id: self.database_id.as_raw_id(),
             name: self.name.clone(),
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),

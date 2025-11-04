@@ -104,7 +104,7 @@ impl DatabaseScheduledQueue {
                 inner: Default::default(),
                 send_latency: metrics
                     .barrier_send_latency
-                    .with_guarded_label_values(&[database_id.database_id.to_string().as_str()]),
+                    .with_guarded_label_values(&[database_id.to_string().as_str()]),
             },
             status,
         }

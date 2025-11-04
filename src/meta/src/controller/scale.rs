@@ -1181,7 +1181,7 @@ mod tests {
         let actor_id_counter = AtomicU32::new(100);
         let fragment_id: FragmentId = 1;
         let job_id: JobId = 10.into();
-        let database_id: DatabaseId = 3;
+        let database_id: DatabaseId = DatabaseId::new(3);
 
         let fragment_model = build_fragment(
             fragment_id,
@@ -1264,7 +1264,7 @@ mod tests {
         let entry_fragment_id: FragmentId = 1;
         let downstream_fragment_id: FragmentId = 2;
         let job_id: JobId = 20.into();
-        let database_id: DatabaseId = 5;
+        let database_id: DatabaseId = DatabaseId::new(5);
 
         let entry_fragment = build_fragment(
             entry_fragment_id,
@@ -1380,7 +1380,7 @@ mod tests {
         let entry_fragment_id: FragmentId = 11;
         let downstream_fragment_id: FragmentId = 12;
         let job_id: JobId = 30.into();
-        let database_id: DatabaseId = 7;
+        let database_id: DatabaseId = DatabaseId::new(7);
         let source_id: SourceId = 99;
 
         let source_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::Source]) as i32;

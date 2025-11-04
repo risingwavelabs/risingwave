@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
+use risingwave_meta_model::ObjectId;
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
@@ -101,12 +102,11 @@ impl RefreshManager {
         tracing::info!("Starting refresh operation for table {}", table_id);
 
         // Get database_id for the table
-        let database_id = DatabaseId::new(
-            self.metadata_manager
-                .catalog_controller
-                .get_object_database_id(table_id.as_raw_id() as _)
-                .await? as _,
-        );
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(table_id.as_raw_id() as ObjectId)
+            .await?;
 
         // Create refresh command
         let refresh_command = Command::Refresh {

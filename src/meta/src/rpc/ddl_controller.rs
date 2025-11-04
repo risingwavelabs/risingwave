@@ -32,7 +32,7 @@ use risingwave_common::id::{JobId, TableId};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
-use risingwave_common::{bail, bail_not_implemented, catalog};
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::source::cdc::CdcScanOptions;
@@ -195,9 +195,9 @@ impl DdlCommand {
         use Either::*;
         match self {
             DdlCommand::CreateDatabase(database) => Left(database.name.clone()),
-            DdlCommand::DropDatabase(id) => Right(*id),
+            DdlCommand::DropDatabase(id) => Right(id.as_raw_id() as ObjectId),
             DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
-            DdlCommand::DropSchema(id, _) => Right(*id),
+            DdlCommand::DropSchema(id, _) => Right(id.as_raw_id() as ObjectId),
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
             DdlCommand::DropSource(id, _) => Right(*id),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
@@ -220,7 +220,7 @@ impl DdlCommand {
             DdlCommand::CommentOn(comment) => Right(comment.table_id as _),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(*id),
-            DdlCommand::AlterDatabaseParam(id, _) => Right(*id),
+            DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_raw_id() as _),
         }
     }
 
@@ -540,8 +540,12 @@ impl DdlController {
     }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Database, database_id as _, DropMode::Cascade)
-            .await
+        self.drop_object(
+            ObjectType::Database,
+            database_id.as_raw_id() as ObjectId,
+            DropMode::Cascade,
+        )
+        .await
     }
 
     async fn create_schema(&self, schema: Schema) -> MetaResult<NotificationVersion> {
@@ -556,7 +560,7 @@ impl DdlController {
         schema_id: SchemaId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Schema, schema_id as _, drop_mode)
+        self.drop_object(ObjectType::Schema, schema_id.as_raw_id() as _, drop_mode)
             .await
     }
 
@@ -948,7 +952,7 @@ impl DdlController {
                 if streaming_job.create_type() == CreateType::Foreground {
                     let database_id = streaming_job.database_id();
                     self.metadata_manager
-                        .wait_streaming_job_finished(database_id.into(), *job_id)
+                        .wait_streaming_job_finished(database_id, *job_id)
                         .await
                 } else {
                     Ok(IGNORED_NOTIFICATION_VERSION)
@@ -1173,7 +1177,7 @@ impl DdlController {
         let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
-                catalog::DatabaseId::new(database_id as _),
+                database_id,
                 removed_actors.iter().map(|id| *id as _).collect(),
                 removed_streaming_job_ids,
                 removed_state_table_ids,
@@ -1720,7 +1724,7 @@ impl DdlController {
         let resource_group = match specific_resource_group {
             None => {
                 self.metadata_manager
-                    .get_database_resource_group(stream_job.database_id() as ObjectId)
+                    .get_database_resource_group(stream_job.database_id())
                     .await?
             }
             Some(resource_group) => resource_group,

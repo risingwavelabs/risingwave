@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_server::{Session, SessionManager};
+use risingwave_common::id::DatabaseId;
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{
@@ -52,7 +53,7 @@ impl FrontendService for FrontendServiceImpl {
 
         let replace_plan = get_new_table_plan(
             req.table_name,
-            req.database_id,
+            req.database_id.into(),
             req.owner,
             req.cdc_table_change,
         )
@@ -96,7 +97,7 @@ impl FrontendService for FrontendServiceImpl {
 /// Rebuild the table's streaming plan, possibly with cdc column changes.
 async fn get_new_table_plan(
     table_name: String,
-    database_id: u32,
+    database_id: DatabaseId,
     owner: u32,
     cdc_table_change: Option<TableSchemaChange>,
 ) -> Result<ReplaceJobPlan, RwError> {

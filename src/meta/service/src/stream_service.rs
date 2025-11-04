@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
@@ -162,7 +162,6 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_object_database_id(request_id as ObjectId)
             .await?;
-        let database_id = DatabaseId::new(database_id as _);
         // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
             .iter()
@@ -306,8 +305,8 @@ impl StreamManagerService for StreamServiceImpl {
                         parallelism: Some(parallelism.into()),
                         max_parallelism: max_parallelism as _,
                         resource_group,
-                        database_id: database_id as _,
-                        schema_id: schema_id as _,
+                        database_id: database_id.as_raw_id(),
+                        schema_id: schema_id.as_raw_id(),
                     }
                 },
             )
@@ -614,7 +613,6 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_object_database_id(object_id as ObjectId)
             .await?;
-        let database_id = DatabaseId::new(database_id as _);
 
         let mut mutation = HashMap::default();
         mutation.insert(object_id, new_props_plaintext);

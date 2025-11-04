@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{DatabaseId, JobId, SchemaId};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
 use risingwave_meta_model::{SourceId, TableVersion, source, table};
@@ -149,7 +149,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn schema_id(&self) -> u32 {
+    pub fn schema_id(&self) -> SchemaId {
         match self {
             Self::MaterializedView(table) => table.schema_id,
             Self::Sink(sink) => sink.schema_id,
@@ -157,9 +157,10 @@ impl StreamingJob {
             Self::Index(index, _) => index.schema_id,
             Self::Source(source) => source.schema_id,
         }
+        .into()
     }
 
-    pub fn database_id(&self) -> u32 {
+    pub fn database_id(&self) -> DatabaseId {
         match self {
             Self::MaterializedView(table) => table.database_id,
             Self::Sink(sink) => sink.database_id,
@@ -167,6 +168,7 @@ impl StreamingJob {
             Self::Index(index, _) => index.database_id,
             Self::Source(source) => source.database_id,
         }
+        .into()
     }
 
     pub fn name(&self) -> String {

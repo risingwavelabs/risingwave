@@ -311,7 +311,7 @@ impl MetadataManager {
             .list_fragment_database_ids(None)
             .await?
             .into_iter()
-            .map(|(_, database_id)| DatabaseId::new(database_id as _))
+            .map(|(_, database_id)| database_id)
             .collect())
     }
 
@@ -329,9 +329,7 @@ impl MetadataManager {
             ))
             .await?
             .into_iter()
-            .map(|(fragment_id, database_id)| {
-                (fragment_id as FragmentId, DatabaseId::new(database_id as _))
-            })
+            .map(|(fragment_id, database_id)| (fragment_id as FragmentId, database_id))
             .collect();
         let mut ret: HashMap<_, HashMap<_, _>> = HashMap::new();
         for (fragment_id, value) in fragment_map {
@@ -657,7 +655,6 @@ impl MetadataManager {
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<HashMap<TableId, HashMap<SubscriptionId, u64>>> {
-        let database_id = database_id.map(|database_id| database_id.database_id as _);
         Ok(self
             .catalog_controller
             .get_mv_depended_subscriptions(database_id)
@@ -692,7 +689,7 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+    pub async fn get_database_resource_group(&self, database_id: DatabaseId) -> MetaResult<String> {
         self.catalog_controller
             .get_database_resource_group(database_id)
             .await
@@ -735,7 +732,7 @@ impl MetadataManager {
         }
         let (tx, rx) = oneshot::channel();
 
-        mgr.register_finish_notifier(database_id.database_id as _, id, tx);
+        mgr.register_finish_notifier(database_id, id, tx);
         drop(mgr);
         rx.await
             .map_err(|_| "no received reason".to_owned())
@@ -745,11 +742,11 @@ impl MetadataManager {
 
     pub(crate) async fn notify_finish_failed(&self, database_id: Option<DatabaseId>, err: String) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        mgr.notify_finish_failed(database_id.map(|id| id.database_id as _), err);
+        mgr.notify_finish_failed(database_id, err);
     }
 
     pub(crate) async fn notify_cancelled(&self, database_id: DatabaseId, job_id: JobId) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        mgr.notify_cancelled(database_id.database_id as _, job_id);
+        mgr.notify_cancelled(database_id, job_id);
     }
 }

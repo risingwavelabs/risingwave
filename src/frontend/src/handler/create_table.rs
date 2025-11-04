@@ -1602,14 +1602,14 @@ pub async fn create_iceberg_engine_table(
         .env()
         .catalog_reader()
         .read_guard()
-        .get_database_by_id(&table.database_id)?
+        .get_database_by_id(table.database_id)?
         .name()
         .to_owned();
     let rw_schema_name = session
         .env()
         .catalog_reader()
         .read_guard()
-        .get_schema_by_id(&table.database_id, &table.schema_id)?
+        .get_schema_by_id(table.database_id, table.schema_id)?
         .name()
         .clone();
     let iceberg_catalog_name = rw_db_name.clone();

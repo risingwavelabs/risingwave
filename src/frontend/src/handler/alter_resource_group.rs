@@ -62,7 +62,7 @@ pub async fn handle_alter_resource_group(
                 }
 
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
-                table.id.as_raw_id()
+                table.id
             }
             _ => bail!(
                 "invalid statement type for alter resource group: {:?}",
