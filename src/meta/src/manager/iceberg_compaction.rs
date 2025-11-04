@@ -54,67 +54,105 @@ type CompactorChangeRx =
     UnboundedReceiver<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
 #[derive(Debug, Clone)]
-struct CommitInfo {
+struct CompactionTrack {
+    #[allow(dead_code)]
+    task_type: TaskType,
     count: usize,
     next_compaction_time: Option<Instant>,
-    compaction_interval: u64,
+    trigger_interval_sec: u64,
+    trigger_commit_threshold: usize,
+    min_commit_for_trigger: usize,
 }
 
-impl CommitInfo {
+impl CompactionTrack {
+    fn should_trigger(&self, now: Instant) -> bool {
+        // Minimum commit protection
+        if self.count < self.min_commit_for_trigger {
+            return false;
+        }
+
+        // Check time condition
+        let time_ready = self
+            .next_compaction_time
+            .map(|next| now >= next)
+            .unwrap_or(false);
+
+        // Check commit count condition
+        let commit_ready = self.count >= self.trigger_commit_threshold;
+
+        // OR semantics: trigger if either condition is met
+        time_ready || commit_ready
+    }
+
     fn set_processing(&mut self) {
         self.count = 0;
-        // `set next_compaction_time` to `None` value that means is processing
+        // Set next_compaction_time to None to indicate processing
         self.next_compaction_time.take();
     }
 
     fn initialize(&mut self) {
         self.count = 0;
         self.next_compaction_time =
-            Some(Instant::now() + std::time::Duration::from_secs(self.compaction_interval));
+            Some(Instant::now() + std::time::Duration::from_secs(self.trigger_interval_sec));
     }
+}
 
-    fn replace(&mut self, commit_info: CommitInfo) {
-        self.count = commit_info.count;
-        self.next_compaction_time = commit_info.next_compaction_time;
-        self.compaction_interval = commit_info.compaction_interval;
-    }
+#[derive(Debug, Clone)]
+struct CompactionScheduleState {
+    tracks: HashMap<TaskType, CompactionTrack>,
+}
 
+impl CompactionScheduleState {
     fn increase_count(&mut self) {
-        self.count += 1;
+        for track in self.tracks.values_mut() {
+            track.count += 1;
+        }
     }
 
-    fn update_compaction_interval(&mut self, compaction_interval: u64) {
-        self.compaction_interval = compaction_interval;
+    fn get_triggerable_tasks(&self, now: Instant) -> Vec<TaskType> {
+        self.tracks
+            .iter()
+            .filter(|(_, track)| track.should_trigger(now))
+            .map(|(task_type, _)| *task_type)
+            .collect()
+    }
 
-        // reset the next compaction time
-        self.next_compaction_time =
-            Some(Instant::now() + std::time::Duration::from_secs(compaction_interval));
+    fn update_trigger_interval(&mut self, task_type: TaskType, trigger_interval_sec: u64) {
+        if let Some(track) = self.tracks.get_mut(&task_type) {
+            track.trigger_interval_sec = trigger_interval_sec;
+            // Reset the next compaction time
+            track.next_compaction_time =
+                Some(Instant::now() + std::time::Duration::from_secs(trigger_interval_sec));
+        }
     }
 }
 
 pub struct IcebergCompactionHandle {
     sink_id: SinkId,
+    task_type: TaskType,
     inner: Arc<RwLock<IcebergCompactionManagerInner>>,
     metadata_manager: MetadataManager,
     handle_success: bool,
 
-    /// The commit info of the iceberg compaction handle for recovery.
-    commit_info: CommitInfo,
+    /// Snapshot of the compaction track for recovery.
+    track_snapshot: CompactionTrack,
 }
 
 impl IcebergCompactionHandle {
     fn new(
         sink_id: SinkId,
+        task_type: TaskType,
         inner: Arc<RwLock<IcebergCompactionManagerInner>>,
         metadata_manager: MetadataManager,
-        commit_info: CommitInfo,
+        track_snapshot: CompactionTrack,
     ) -> Self {
         Self {
             sink_id,
+            task_type,
             inner,
             metadata_manager,
             handle_success: false,
-            commit_info,
+            track_snapshot,
         }
     }
 
@@ -137,20 +175,12 @@ impl IcebergCompactionHandle {
         let prost_sink_catalog: PbSink = sinks.remove(0);
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
-        let task_type: TaskType = if risingwave_common::license::Feature::IcebergCompaction
-            .check_available()
-            .is_ok()
-        {
-            TaskType::SmallFiles
-        } else {
-            TaskType::Full
-        };
 
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
                 task_id,
                 props: param.properties,
-                task_type: task_type as i32,
+                task_type: self.task_type as i32,
             }));
 
         if result.is_ok() {
@@ -167,26 +197,22 @@ impl IcebergCompactionHandle {
 
 impl Drop for IcebergCompactionHandle {
     fn drop(&mut self) {
-        if self.handle_success {
-            let mut guard = self.inner.write();
-            if let Some(commit_info) = guard.iceberg_commits.get_mut(&self.sink_id) {
-                commit_info.initialize();
-            }
-        } else {
-            // If the handle is not successful, we need to reset the commit info
-            // to the original state.
-            // This is to avoid the case where the handle is dropped before the
-            // compaction task is sent.
-            let mut guard = self.inner.write();
-            if let Some(commit_info) = guard.iceberg_commits.get_mut(&self.sink_id) {
-                commit_info.replace(self.commit_info.clone());
+        let mut guard = self.inner.write();
+        if let Some(schedule_state) = guard.sink_schedules.get_mut(&self.sink_id) {
+            if let Some(track) = schedule_state.tracks.get_mut(&self.task_type) {
+                if self.handle_success {
+                    track.initialize();
+                } else {
+                    // Restore the original state
+                    *track = self.track_snapshot.clone();
+                }
             }
         }
     }
 }
 
 struct IcebergCompactionManagerInner {
-    pub iceberg_commits: HashMap<SinkId, CommitInfo>,
+    pub sink_schedules: HashMap<SinkId, CompactionScheduleState>,
 }
 
 pub struct IcebergCompactionManager {
@@ -214,7 +240,7 @@ impl IcebergCompactionManager {
             Arc::new(Self {
                 env,
                 inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
-                    iceberg_commits: HashMap::default(),
+                    sink_schedules: HashMap::default(),
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,
@@ -256,68 +282,163 @@ impl IcebergCompactionManager {
             force_compaction,
         } = msg;
 
-        let compaction_interval = if force_compaction {
-            0
+        let schedule_state = guard
+            .sink_schedules
+            .entry(sink_id)
+            .or_insert_with(|| self.create_default_schedule_state(compaction_interval));
+
+        schedule_state.increase_count();
+
+        // Force compaction: set all tracks to trigger immediately
+        if force_compaction {
+            for track in schedule_state.tracks.values_mut() {
+                track.next_compaction_time = Some(Instant::now());
+            }
         } else {
-            compaction_interval
-        };
+            // Update trigger interval for the primary track (Small or Full based on license)
+            let primary_task_type = if risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .is_ok()
+            {
+                TaskType::SmallFiles
+            } else {
+                TaskType::Full
+            };
 
-        // if the compaction interval is changed, we need to reset the commit info when the compaction task is sent of initialized
-        let commit_info = guard.iceberg_commits.entry(sink_id).or_insert(CommitInfo {
-            count: 0,
-            next_compaction_time: Some(
-                Instant::now() + std::time::Duration::from_secs(compaction_interval),
-            ),
-            compaction_interval,
-        });
-
-        commit_info.increase_count();
-        if commit_info.compaction_interval != compaction_interval {
-            commit_info.update_compaction_interval(compaction_interval);
+            if let Some(track) = schedule_state.tracks.get(&primary_task_type) {
+                if track.trigger_interval_sec != compaction_interval {
+                    schedule_state.update_trigger_interval(primary_task_type, compaction_interval);
+                }
+            }
         }
     }
 
-    /// Get the top N iceberg commit sink ids
+    fn create_default_schedule_state(&self, compaction_interval: u64) -> CompactionScheduleState {
+        let mut tracks = HashMap::new();
+
+        // Check if licensed for advanced compaction features
+        let is_licensed = risingwave_common::license::Feature::IcebergCompaction
+            .check_available()
+            .is_ok();
+
+        if is_licensed {
+            // Licensed: enable multi-track compaction with different frequencies
+
+            // Track 1: SmallFiles - High frequency, low cost
+            tracks.insert(
+                TaskType::SmallFiles,
+                CompactionTrack {
+                    task_type: TaskType::SmallFiles,
+                    count: 0,
+                    next_compaction_time: Some(
+                        Instant::now() + std::time::Duration::from_secs(compaction_interval),
+                    ),
+                    trigger_interval_sec: compaction_interval,
+                    trigger_commit_threshold: 50,
+                    min_commit_for_trigger: 10,
+                },
+            );
+
+            // Track 2: FilesWithDelete - Medium frequency, medium cost
+            tracks.insert(
+                TaskType::FilesWithDelete,
+                CompactionTrack {
+                    task_type: TaskType::FilesWithDelete,
+                    count: 0,
+                    next_compaction_time: Some(
+                        Instant::now() + std::time::Duration::from_secs(compaction_interval * 6),
+                    ),
+                    trigger_interval_sec: compaction_interval * 6, // 6x of SmallFiles interval
+                    trigger_commit_threshold: 200,
+                    min_commit_for_trigger: 30,
+                },
+            );
+
+            // Track 3: Full - Low frequency, high cost (optional, can be disabled)
+            // Uncomment if you want to enable periodic full compaction alongside small file compaction
+            tracks.insert(
+                TaskType::Full,
+                CompactionTrack {
+                    task_type: TaskType::Full,
+                    count: 0,
+                    next_compaction_time: Some(
+                        Instant::now() + std::time::Duration::from_secs(compaction_interval * 24),
+                    ),
+                    trigger_interval_sec: compaction_interval * 24, // 24x of SmallFiles interval
+                    trigger_commit_threshold: 1000,
+                    min_commit_for_trigger: 100,
+                },
+            );
+        } else {
+            // Unlicensed: only enable Full compaction (backward compatible)
+            tracks.insert(
+                TaskType::Full,
+                CompactionTrack {
+                    task_type: TaskType::Full,
+                    count: 0,
+                    next_compaction_time: Some(
+                        Instant::now() + std::time::Duration::from_secs(compaction_interval),
+                    ),
+                    trigger_interval_sec: compaction_interval,
+                    trigger_commit_threshold: 100,
+                    min_commit_for_trigger: 10,
+                },
+            );
+        }
+
+        CompactionScheduleState { tracks }
+    }
+
+    /// Get the top N compaction tasks to trigger
+    /// Returns handles for tasks that are ready to be compacted
     /// Sorted by commit count and next compaction time
     pub fn get_top_n_iceberg_commit_sink_ids(&self, n: usize) -> Vec<IcebergCompactionHandle> {
         let now = Instant::now();
         let mut guard = self.inner.write();
-        guard
-            .iceberg_commits
-            .iter_mut()
-            .filter(|(_, commit_info)| {
-                commit_info.count > 0
-                    && if let Some(next_compaction_time) = commit_info.next_compaction_time {
-                        next_compaction_time <= now
-                    } else {
-                        false
-                    }
-            })
-            .sorted_by(|a, b| {
-                b.1.count
-                    .cmp(&a.1.count)
-                    .then_with(|| b.1.next_compaction_time.cmp(&a.1.next_compaction_time))
-            })
+
+        // Collect all triggerable tasks with their priority info
+        let mut candidates = Vec::new();
+        for (sink_id, schedule_state) in guard.sink_schedules.iter() {
+            for task_type in schedule_state.get_triggerable_tasks(now) {
+                if let Some(track) = schedule_state.tracks.get(&task_type) {
+                    candidates.push((
+                        sink_id.clone(),
+                        task_type,
+                        track.count,
+                        track.next_compaction_time,
+                    ));
+                }
+            }
+        }
+
+        // Sort by commit count (descending) and next_compaction_time (ascending)
+        candidates.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.3.cmp(&b.3)));
+
+        // Take top N and create handles
+        candidates
+            .into_iter()
             .take(n)
-            .map(|(sink_id, commit_info)| {
-                // reset the commit count and next compaction time and avoid double call
-                let handle = IcebergCompactionHandle::new(
-                    *sink_id,
+            .filter_map(|(sink_id, task_type, _, _)| {
+                let schedule_state = guard.sink_schedules.get_mut(&sink_id)?;
+                let track = schedule_state.tracks.get_mut(&task_type)?;
+
+                let track_snapshot = track.clone();
+                track.set_processing();
+
+                Some(IcebergCompactionHandle::new(
+                    sink_id,
+                    task_type,
                     self.inner.clone(),
                     self.metadata_manager.clone(),
-                    commit_info.clone(),
-                );
-
-                commit_info.set_processing();
-
-                handle
+                    track_snapshot,
+                ))
             })
-            .collect::<Vec<_>>()
+            .collect()
     }
 
     pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
         let mut guard = self.inner.write();
-        guard.iceberg_commits.remove(&sink_id);
+        guard.sink_schedules.remove(&sink_id);
     }
 
     pub async fn get_sink_param(&self, sink_id: &SinkId) -> MetaResult<SinkParam> {
@@ -533,7 +654,7 @@ impl IcebergCompactionManager {
     async fn perform_gc_operations(&self) -> MetaResult<()> {
         let sink_ids = {
             let guard = self.inner.read();
-            guard.iceberg_commits.keys().cloned().collect::<Vec<_>>()
+            guard.sink_schedules.keys().cloned().collect::<Vec<_>>()
         };
 
         tracing::info!("Starting GC operations for {} tables", sink_ids.len());

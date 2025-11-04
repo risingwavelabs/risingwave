@@ -24,8 +24,8 @@ use iceberg_compaction_core::compaction::{
     CompactionPlanner, CompactionResult,
 };
 use iceberg_compaction_core::config::{
-    CompactionExecutionConfigBuilder, CompactionPlanningConfig, FullCompactionConfigBuilder,
-    GroupFilters, SmallFilesConfigBuilder,
+    CompactionExecutionConfigBuilder, CompactionPlanningConfig, FilesWithDeletesConfigBuilder,
+    FullCompactionConfigBuilder, GroupFilters, SmallFilesConfigBuilder,
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -509,6 +509,21 @@ pub async fn create_plan_runners(
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
             CompactionPlanningConfig::Full(config)
+        }
+
+        TaskType::FilesWithDelete => {
+            let config = FilesWithDeletesConfigBuilder::default()
+                .max_parallelism(config.max_parallelism as usize)
+                .min_size_per_partition(config.min_size_per_partition)
+                .max_file_count_per_partition(config.max_file_count_per_partition as usize)
+                .target_file_size_bytes(config.target_file_size_bytes)
+                .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
+                .grouping_strategy(grouping_strategy)
+                .min_delete_file_count_threshold(256 as usize)
+                .build()
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+            CompactionPlanningConfig::FilesWithDeletes(config)
         }
 
         _ => {
