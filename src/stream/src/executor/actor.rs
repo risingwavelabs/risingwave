@@ -40,6 +40,7 @@ use tracing::Instrument;
 use super::StreamConsumer;
 use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
+use crate::CONFIG;
 use crate::error::StreamResult;
 use crate::task::{ActorId, FragmentId, LocalBarrierManager, StreamEnvironment};
 
@@ -199,6 +200,7 @@ where
         let expr_context = self.expr_context.clone();
         let fragment_id = self.actor_context.fragment_id;
         let vnode_count = self.actor_context.vnode_count;
+        let config = self.actor_context.streaming_config.clone();
 
         let run = async move {
             tokio::join!(
@@ -214,6 +216,7 @@ where
         let run = expr_context_scope(expr_context, run);
         let run = FRAGMENT_ID::scope(fragment_id, run);
         let run = VNODE_COUNT::scope(vnode_count, run);
+        let run = CONFIG.scope(config, run);
 
         run.await
     }
