@@ -191,7 +191,7 @@ public class SnowflakeJDBCSinkConfig extends JDBCSinkConfig {
             props.remove(PROP_PRIVATE_KEY_PEM);
             props.remove(PROP_PRIVATE_KEY_PWD);
             props.put("authenticator", "snowflake_jwt");
-            LOG.info("Loaded private key for Snowflake authentication");
+            LOG.debug("Loaded private key for Snowflake authentication");
         }
     }
 
