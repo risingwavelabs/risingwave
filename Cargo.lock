@@ -9591,7 +9591,7 @@ dependencies = [
  "risingwave_sqlparser",
  "rsa",
  "rustls 0.21.11",
- "rustls-native-certs 0.6.3",
+ "rustls-native-certs 0.8.1",
  "rustls-pemfile 1.0.4",
  "serde",
  "serde_json",
