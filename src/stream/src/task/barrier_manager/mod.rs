@@ -45,14 +45,14 @@ pub(super) enum LocalBarrierEvent {
     ReportSourceListFinished {
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: TableId,
     },
     ReportSourceLoadFinished {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        associated_source_id: u32,
+        associated_source_id: TableId,
     },
     RefreshFinished {
         epoch: EpochPair,
@@ -174,8 +174,8 @@ impl LocalBarrierManager {
         &self,
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: TableId,
     ) {
         self.send_event(LocalBarrierEvent::ReportSourceListFinished {
             epoch,
@@ -190,7 +190,7 @@ impl LocalBarrierManager {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        associated_source_id: u32,
+        associated_source_id: TableId,
     ) {
         self.send_event(LocalBarrierEvent::ReportSourceLoadFinished {
             epoch,

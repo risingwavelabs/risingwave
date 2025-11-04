@@ -160,8 +160,8 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                 self.barrier_manager.report_source_list_finished(
                                     barrier.epoch,
                                     self.actor_ctx.id,
-                                    self.stream_source_core.source_id.table_id,
-                                    self.stream_source_core.source_id.table_id,
+                                    self.stream_source_core.source_id,
+                                    self.stream_source_core.source_id,
                                 );
                                 is_refreshing = false;
                             }

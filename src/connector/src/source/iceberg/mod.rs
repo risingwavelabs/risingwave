@@ -645,6 +645,8 @@ pub struct IcebergScanOpts {
     pub handle_delete_files: bool,
 }
 
+type EqualityDeleteEntries = Vec<(Vec<String>, HashSet<Vec<Datum>>)>;
+
 /// Scan a data file and optionally apply delete files (both position delete and equality delete).
 /// This implementation follows the iceberg-rust `process_file_scan_task` logic for proper delete handling.
 #[try_stream(ok = DataChunk, error = ConnectorError)]
@@ -759,7 +761,7 @@ pub async fn scan_task_to_chunk_with_deletes(
     };
 
     // Build equality delete predicates
-    let equality_deletes: Option<(Vec<String>, HashSet<Vec<Datum>>)> = if handle_delete_files {
+    let equality_deletes: Option<EqualityDeleteEntries> = if handle_delete_files {
         let equality_delete_tasks: Vec<_> = data_file_scan_task
             .deletes
             .iter()
@@ -768,54 +770,79 @@ pub async fn scan_task_to_chunk_with_deletes(
             .collect();
 
         if !equality_delete_tasks.is_empty() {
-            // Get equality_ids from the first delete task (should be consistent across all delete files)
-            let equality_ids = equality_delete_tasks[0].equality_ids.clone();
+            let mut delete_key_map: HashMap<Vec<String>, HashSet<Vec<Datum>>> = HashMap::new();
 
-            if !equality_ids.is_empty() {
-                let mut delete_key_set: HashSet<Vec<Datum>> = HashSet::new();
+            for delete_task in equality_delete_tasks {
+                let equality_ids = delete_task.equality_ids.clone();
 
-                let delete_schema = equality_delete_tasks[0].schema();
+                if equality_ids.is_empty() {
+                    continue;
+                }
+
+                let delete_schema = delete_task.schema();
                 let delete_name_vec = equality_ids
                     .iter()
                     .filter_map(|id| delete_schema.name_by_field_id(*id))
                     .map(|s| s.to_owned())
                     .collect_vec();
-                let _ = delete_schema;
 
-                // Read all equality delete files and build the delete key set
-                for delete_task in equality_delete_tasks {
-                    let delete_reader = table.reader_builder().with_batch_size(chunk_size).build();
-                    // Clone the FileScanTask (not Arc) to create a proper stream
-                    let task_clone: FileScanTask = delete_task.as_ref().clone();
-                    let delete_stream = tokio_stream::once(Ok(task_clone));
-                    let mut delete_record_stream =
-                        delete_reader.read(Box::pin(delete_stream)).await?;
+                if delete_name_vec.len() != equality_ids.len() {
+                    tracing::warn!(
+                        "Skip equality delete task due to missing column mappings: expected {} names, got {}",
+                        equality_ids.len(),
+                        delete_name_vec.len()
+                    );
+                    continue;
+                }
 
-                    while let Some(record_batch) = delete_record_stream.next().await {
-                        let record_batch = record_batch?;
+                let delete_reader = table.reader_builder().with_batch_size(chunk_size).build();
+                // Clone the FileScanTask (not Arc) to create a proper stream
+                let task_clone: FileScanTask = delete_task.as_ref().clone();
+                let delete_stream = tokio_stream::once(Ok(task_clone));
+                let mut delete_record_stream = delete_reader.read(Box::pin(delete_stream)).await?;
 
-                        let delete_chunk =
-                            IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                let mut task_delete_key_set: HashSet<Vec<Datum>> = HashSet::new();
 
-                        // Build delete keys from equality columns
-                        for row_idx in 0..delete_chunk.capacity() {
-                            let mut key = Vec::with_capacity(equality_ids.len());
-                            for field_name in &delete_name_vec {
-                                let col_idx = record_batch
-                                    .schema()
-                                    .column_with_name(field_name)
-                                    .map(|(idx, _)| idx)
-                                    .unwrap();
-                                let col = delete_chunk.column_at(col_idx);
-                                key.push(col.value_at(row_idx).to_owned_datum());
-                            }
-                            delete_key_set.insert(key);
+                while let Some(record_batch) = delete_record_stream.next().await {
+                    let record_batch = record_batch?;
+
+                    let delete_chunk =
+                        IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+
+                    let field_indices = delete_name_vec
+                        .iter()
+                        .map(|field_name| {
+                            record_batch
+                                .schema()
+                                .column_with_name(field_name)
+                                .map(|(idx, _)| idx)
+                                .unwrap()
+                        })
+                        .collect_vec();
+
+                    // Build delete keys from equality columns
+                    for row_idx in 0..delete_chunk.capacity() {
+                        let mut key = Vec::with_capacity(field_indices.len());
+                        for &col_idx in &field_indices {
+                            let col = delete_chunk.column_at(col_idx);
+                            key.push(col.value_at(row_idx).to_owned_datum());
                         }
+                        task_delete_key_set.insert(key);
                     }
                 }
-                Some((delete_name_vec, delete_key_set))
-            } else {
+
+                if !task_delete_key_set.is_empty() {
+                    delete_key_map
+                        .entry(delete_name_vec.clone())
+                        .or_default()
+                        .extend(task_delete_key_set);
+                }
+            }
+
+            if delete_key_map.is_empty() {
                 None
+            } else {
+                Some(delete_key_map.into_iter().collect())
             }
         } else {
             None
@@ -873,38 +900,60 @@ pub async fn scan_task_to_chunk_with_deletes(
         }
 
         // Apply equality deletes
-        if let Some((ref delete_name_vec, ref delete_key_set)) = equality_deletes {
+        if let Some(ref equality_delete_entries) = equality_deletes {
             let (columns, _) = chunk.into_parts();
+
+            let delete_entries_info: Vec<(Vec<usize>, HashSet<Vec<DatumRef<'_>>>)> =
+                equality_delete_entries
+                    .iter()
+                    .map(|(delete_name_vec, delete_key_set)| {
+                        let indices = delete_name_vec
+                            .iter()
+                            .map(|field_name| {
+                                record_batch
+                                    .schema()
+                                    .column_with_name(field_name)
+                                    .map(|(idx, _)| idx)
+                                    .unwrap()
+                            })
+                            .collect_vec();
+                        let delete_key_ref_set: HashSet<Vec<DatumRef<'_>>> = delete_key_set
+                            .iter()
+                            .map(|datum_vec| {
+                                datum_vec.iter().map(|datum| datum.to_datum_ref()).collect()
+                            })
+                            .collect();
+                        (indices, delete_key_ref_set)
+                    })
+                    .collect::<Vec<_>>();
 
             let mut deleted_count = 0;
 
-            let to_remove_keys: HashSet<Vec<DatumRef<'_>>> = delete_key_set
-                .iter()
-                .map(|key| {
-                    key.iter()
-                        .map(|datum| datum.to_datum_ref())
-                        .collect::<Vec<_>>()
-                })
-                .collect();
-
-            // Check each row against the delete set
+            // Check each row against the delete sets built per equality delete task
             for (row_idx, item) in visibility.iter_mut().enumerate().take(batch_num_rows) {
-                if *item {
-                    let mut row_key = Vec::with_capacity(delete_name_vec.len());
-                    for field_name in delete_name_vec {
-                        let col_idx = record_batch
-                            .schema()
-                            .column_with_name(field_name)
-                            .map(|(idx, _)| idx)
-                            .unwrap();
+                if !*item {
+                    continue;
+                }
+
+                let mut removed = false;
+
+                for (field_indices, delete_key_set) in &delete_entries_info {
+                    let mut row_key = Vec::with_capacity(field_indices.len());
+                    for &col_idx in field_indices {
                         let datum = columns[col_idx].value_at(row_idx);
                         row_key.push(datum);
                     }
 
-                    if to_remove_keys.contains(&row_key) {
+                    if delete_key_set.contains(&row_key) {
                         *item = false;
                         deleted_count += 1;
+                        removed = true;
+                        break;
                     }
+                }
+
+                if removed {
+                    continue;
                 }
             }
 

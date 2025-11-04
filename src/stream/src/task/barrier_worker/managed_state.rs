@@ -887,8 +887,8 @@ impl DatabaseManagedBarrierState {
                     self.report_source_list_finished(
                         epoch,
                         actor_id,
-                        table_id,
-                        associated_source_id,
+                        table_id.as_raw_id(),
+                        associated_source_id.as_raw_id(),
                     );
                 }
                 LocalBarrierEvent::ReportSourceLoadFinished {
@@ -1053,8 +1053,9 @@ impl DatabaseManagedBarrierState {
         epoch: EpochPair,
         actor_id: ActorId,
         _table_id: TableId,
-        associated_source_id: u32,
+        associated_source_id: TableId,
     ) {
+        let associated_source_id = associated_source_id.as_raw_id();
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
             && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
