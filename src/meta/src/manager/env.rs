@@ -15,6 +15,7 @@
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
 use anyhow::Context;
 use risingwave_common::config::{
@@ -64,7 +65,7 @@ pub struct MetaSrvEnv {
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
-    pub(crate) shared_actor_info: SharedActorInfos,
+    pub shared_actor_info: SharedActorInfos,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -89,6 +90,8 @@ pub struct MetaSrvEnv {
     pub opts: Arc<MetaOpts>,
 
     pub cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
+
+    actor_id_generator: Arc<AtomicU32>,
 }
 
 /// Options shared by all meta service instances
@@ -472,6 +475,7 @@ impl MetaSrvEnv {
             // Await trees on the meta node is lightweight, thus always enabled.
             await_tree_reg: await_tree::Registry::new(Default::default()),
             cdc_table_backfill_tracker,
+            actor_id_generator: Arc::new(AtomicU32::new(0)),
         })
     }
 
@@ -501,6 +505,10 @@ impl MetaSrvEnv {
 
     pub fn idle_manager(&self) -> &IdleManager {
         self.idle_manager.deref()
+    }
+
+    pub fn actor_id_generator(&self) -> &AtomicU32 {
+        self.actor_id_generator.deref()
     }
 
     pub async fn system_params_reader(&self) -> SystemParamsReader {

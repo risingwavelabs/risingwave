@@ -149,7 +149,7 @@ pub struct HummockManager {
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
 
-    table_id_to_table_option: parking_lot::RwLock<HashMap<u32, TableOption>>,
+    table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -238,6 +238,7 @@ impl HummockManager {
     ) -> Result<HummockManagerRef> {
         let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
+
         let state_store_dir: &str = sys_params.data_directory();
         let use_new_object_prefix_strategy: bool = sys_params.use_new_object_prefix_strategy();
         let deterministic_mode = env.opts.compaction_deterministic_test;
@@ -537,7 +538,7 @@ impl HummockManager {
 
     pub fn update_table_id_to_table_option(
         &self,
-        new_table_id_to_table_option: HashMap<u32, TableOption>,
+        new_table_id_to_table_option: HashMap<TableId, TableOption>,
     ) {
         *self.table_id_to_table_option.write() = new_table_id_to_table_option;
     }

@@ -484,7 +484,7 @@ impl SubscriptionCursor {
                     // Initiate a new batch query to continue fetching
                     match Self::get_next_rw_timestamp(
                         *seek_timestamp,
-                        &self.dependent_table_id,
+                        self.dependent_table_id,
                         *expected_timestamp,
                         handler_args.clone(),
                         &self.subscription,
@@ -652,7 +652,7 @@ impl SubscriptionCursor {
                         session
                             .env
                             .hummock_snapshot_manager()
-                            .wait_table_change_log_notification(self.dependent_table_id.table_id()),
+                            .wait_table_change_log_notification(self.dependent_table_id),
                     )
                     .await
                     {
@@ -688,7 +688,7 @@ impl SubscriptionCursor {
 
     fn get_next_rw_timestamp(
         seek_timestamp: u64,
-        table_id: &TableId,
+        table_id: TableId,
         expected_timestamp: Option<u64>,
         handler_args: HandlerArgs,
         dependent_subscription: &SubscriptionCatalog,
@@ -701,7 +701,7 @@ impl SubscriptionCursor {
         )?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = session.list_change_log_epochs(table_id.table_id(), seek_timestamp, 2)?;
+        let new_epochs = session.list_change_log_epochs(table_id, seek_timestamp, 2)?;
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {

@@ -19,6 +19,7 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
@@ -330,7 +331,7 @@ pub async fn compact_with_agent(
 ) -> (
     (
         CompactTask,
-        HashMap<u32, TableStats>,
+        HashMap<TableId, TableStats>,
         HashMap<HummockSstableObjectId, u64>,
     ),
     Option<MemoryTracker>,
@@ -589,7 +590,7 @@ pub async fn compact(
 ) -> (
     (
         CompactTask,
-        HashMap<u32, TableStats>,
+        HashMap<TableId, TableStats>,
         HashMap<HummockSstableObjectId, u64>,
     ),
     Option<MemoryTracker>,
@@ -672,7 +673,7 @@ pub(crate) fn compact_done(
     task_status: TaskStatus,
 ) -> (
     CompactTask,
-    HashMap<u32, TableStats>,
+    HashMap<TableId, TableStats>,
     HashMap<HummockSstableObjectId, u64>,
 ) {
     let mut table_stats_map = TableStatsMap::default();
@@ -750,7 +751,7 @@ where
     let mut compaction_statistics = CompactionStatistics::default();
     // object id -> block id. For an object id, block id is updated in a monotonically increasing manner.
     let mut skip_schema_check: HashMap<HummockSstableObjectId, u64> = HashMap::default();
-    let schemas: HashMap<u32, HashSet<i32>> = task_config
+    let schemas: HashMap<TableId, HashSet<i32>> = task_config
         .table_schemas
         .iter()
         .map(|(table_id, schema)| (*table_id, schema.column_ids.iter().copied().collect()))
@@ -779,11 +780,11 @@ where
             local_stats.skip_multi_version_key_count += 1;
         }
 
-        if last_table_id != Some(iter_key.user_key.table_id.table_id) {
+        if last_table_id != Some(iter_key.user_key.table_id) {
             if let Some(last_table_id) = last_table_id.take() {
                 table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
             }
-            last_table_id = Some(iter_key.user_key.table_id.table_id);
+            last_table_id = Some(iter_key.user_key.table_id);
         }
 
         // Among keys with same user key, only keep the latest key unless retain_multiple_version is true.
@@ -806,9 +807,7 @@ where
             compaction_statistics.iter_drop_key_counts += 1;
 
             let should_count = match task_config.stats_target_table_ids.as_ref() {
-                Some(target_table_ids) => {
-                    target_table_ids.contains(&iter_key.user_key.table_id.table_id)
-                }
+                Some(target_table_ids) => target_table_ids.contains(&iter_key.user_key.table_id),
                 None => true,
             };
             if should_count {
@@ -823,7 +822,7 @@ where
         }
 
         // May drop stale columns
-        let check_table_id = iter_key.user_key.table_id.table_id;
+        let check_table_id = iter_key.user_key.table_id;
         let mut is_value_rewritten = false;
         if let HummockValue::Put(v) = value
             && let Some(object_id) = object_id

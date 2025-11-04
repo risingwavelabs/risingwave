@@ -21,11 +21,13 @@ use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
+use risingwave_common::id::{JobId, SchemaId};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::replace_job_plan::{
     ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
 };
@@ -151,8 +153,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn create_connection(
         &self,
         connection_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()>;
@@ -160,8 +162,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn create_secret(
         &self,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         payload: Vec<u8>,
     ) -> Result<()>;
@@ -185,9 +187,9 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_database(&self, database_id: u32) -> Result<()>;
+    async fn drop_database(&self, database_id: DatabaseId) -> Result<()>;
 
-    async fn drop_schema(&self, schema_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_schema(&self, schema_id: SchemaId, cascade: bool) -> Result<()>;
 
     async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()>;
 
@@ -201,8 +203,8 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         secret_id: u32,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         payload: Vec<u8>,
     ) -> Result<()>;
@@ -220,14 +222,14 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_parallelism(
         &self,
-        job_id: u32,
+        job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()>;
 
     async fn alter_resource_group(
         &self,
-        table_id: u32,
+        table_id: TableId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()>;
@@ -235,7 +237,7 @@ pub trait CatalogWriter: Send + Sync {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        new_schema_id: u32,
+        new_schema_id: SchemaId,
     ) -> Result<()>;
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()>;
@@ -244,6 +246,14 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         database_id: DatabaseId,
         param: AlterDatabaseParam,
+    ) -> Result<()>;
+
+    async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
     ) -> Result<()>;
 }
 
@@ -289,7 +299,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .create_schema(PbSchema {
                 id: 0,
                 name: schema_name.to_owned(),
-                database_id: db_id,
+                database_id: db_id.as_raw_id(),
                 owner,
             })
             .await?;
@@ -451,8 +461,8 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn create_connection(
         &self,
         connection_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         connection: create_connection_request::Payload,
     ) -> Result<()> {
@@ -472,8 +482,8 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn create_secret(
         &self,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         payload: Vec<u8>,
     ) -> Result<()> {
@@ -543,12 +553,12 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_schema(&self, schema_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_schema(&self, schema_id: SchemaId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_schema(schema_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_database(&self, database_id: u32) -> Result<()> {
+    async fn drop_database(&self, database_id: DatabaseId) -> Result<()> {
         let version = self.meta_client.drop_database(database_id).await?;
         self.wait_version(version).await
     }
@@ -583,7 +593,7 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        new_schema_id: u32,
+        new_schema_id: SchemaId,
     ) -> Result<()> {
         let version = self
             .meta_client
@@ -599,7 +609,7 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_parallelism(
         &self,
-        job_id: u32,
+        job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()> {
@@ -620,8 +630,8 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         secret_id: u32,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         payload: Vec<u8>,
     ) -> Result<()> {
@@ -641,7 +651,7 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_resource_group(
         &self,
-        table_id: u32,
+        table_id: TableId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
@@ -663,6 +673,20 @@ impl CatalogWriter for CatalogWriterImpl {
             .alter_database_param(database_id, param)
             .await
             .map_err(|e| anyhow!(e))?;
+        self.wait_version(version).await
+    }
+
+    async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_iceberg_table(table_job_info, sink_job_info, iceberg_source, if_not_exists)
+            .await?;
         self.wait_version(version).await
     }
 }

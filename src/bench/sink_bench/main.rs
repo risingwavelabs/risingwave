@@ -405,7 +405,7 @@ where
 #[allow(dead_code)]
 struct TableSchemaFromYml {
     table_name: String,
-    pk_indices: Vec<usize>,
+    pk_indices: Option<Vec<usize>>,
     columns: Vec<ColumnDescFromYml>,
 }
 

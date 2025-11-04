@@ -80,7 +80,6 @@ pub fn mysql_datum_to_rw_datum(
             // before https://github.com/risingwavelabs/risingwave/pull/19071
             // we permit boolean and tinyint(1) to be equivalent to boolean in RW.
             if let Some(Ok(val)) = mysql_row.get_opt::<Option<bool>, _>(mysql_datum_index) {
-                let _ = mysql_row.take::<bool, _>(mysql_datum_index);
                 return Ok(val.map(ScalarImpl::from));
             }
             // Bit(1)
@@ -113,6 +112,7 @@ pub fn mysql_datum_to_rw_datum(
             handle_data_type!(mysql_row, mysql_datum_index, column_name, i32)
         }
         DataType::Int64 => {
+            // for bigint unsigned, should up cast to decimal.
             handle_data_type!(mysql_row, mysql_datum_index, column_name, i64)
         }
         DataType::Float32 => {

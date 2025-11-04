@@ -123,7 +123,7 @@ impl JoinHashMapMetrics {
         actor_id: ActorId,
         fragment_id: FragmentId,
         side: &'static str,
-        join_table_id: u32,
+        join_table_id: TableId,
     ) -> Self {
         let actor_id = actor_id.to_string();
         let fragment_id = fragment_id.to_string();
@@ -900,7 +900,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
         &self.null_matched
     }
 
-    pub fn table_id(&self) -> u32 {
+    pub fn table_id(&self) -> TableId {
         self.state.table.table_id()
     }
 
@@ -942,6 +942,7 @@ pub struct JoinHashMapPostCommit<'a, K: HashKey, S: StateStore, E: JoinEncoding>
     inner: &'a mut JoinHashMapInner<K, E>,
 }
 
+use risingwave_common::catalog::TableId;
 use risingwave_common_estimate_size::KvSize;
 use thiserror::Error;
 

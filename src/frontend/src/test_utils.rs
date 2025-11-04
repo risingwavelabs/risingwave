@@ -31,6 +31,7 @@ use risingwave_common::catalog::{
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
+use risingwave_common::id::JobId;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -45,6 +46,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
     alter_swap_rename_request, create_connection_request,
@@ -98,7 +100,7 @@ impl SessionManager for LocalFrontend {
 
     fn create_dummy_session(
         &self,
-        _database_id: u32,
+        _database_id: DatabaseId,
         _user_name: u32,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         unreachable!()
@@ -243,7 +245,7 @@ pub struct MockCatalogWriter {
     catalog: Arc<RwLock<Catalog>>,
     id: AtomicU32,
     table_id_to_schema_id: RwLock<HashMap<u32, SchemaId>>,
-    schema_id_to_database_id: RwLock<HashMap<u32, DatabaseId>>,
+    schema_id_to_database_id: RwLock<HashMap<SchemaId, DatabaseId>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
@@ -257,10 +259,10 @@ impl CatalogWriter for MockCatalogWriter {
         barrier_interval_ms: Option<u32>,
         checkpoint_frequency: Option<u64>,
     ) -> Result<()> {
-        let database_id = self.gen_id();
+        let database_id = DatabaseId::new(self.gen_id());
         self.catalog.write().create_database(&PbDatabase {
             name: db_name.to_owned(),
-            id: database_id,
+            id: database_id.as_raw_id(),
             owner,
             resource_group: resource_group.to_owned(),
             barrier_interval_ms,
@@ -285,10 +287,10 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog.write().create_schema(&PbSchema {
             id,
             name: schema_name.to_owned(),
-            database_id: db_id,
+            database_id: db_id.as_raw_id(),
             owner,
         });
-        self.add_schema_id(id, db_id);
+        self.add_schema_id(id.into(), db_id);
         Ok(())
     }
 
@@ -304,7 +306,7 @@ impl CatalogWriter for MockCatalogWriter {
         table.stream_job_status = PbStreamJobStatus::Created as _;
         table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
         self.catalog.write().create_table(&table);
-        self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
+        self.add_table_or_source_id(table.id, table.schema_id.into(), table.database_id.into());
         self.hummock_snapshot_manager
             .add_table_for_test(TableId::new(table.id));
         Ok(())
@@ -324,7 +326,7 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_view(&self, mut view: PbView, _dependencies: HashSet<ObjectId>) -> Result<()> {
         view.id = self.gen_id();
         self.catalog.write().create_view(&view);
-        self.add_table_or_source_id(view.id, view.schema_id, view.database_id);
+        self.add_table_or_source_id(view.id, view.schema_id.into(), view.database_id.into());
         Ok(())
     }
 
@@ -401,8 +403,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog.write().create_table(&index_table);
         self.add_table_or_index_id(
             index_table.id,
-            index_table.schema_id,
-            index_table.database_id,
+            index_table.schema_id.into(),
+            index_table.database_id.into(),
         );
 
         index.id = index_table.id;
@@ -418,8 +420,8 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_connection(
         &self,
         _connection_name: String,
-        _database_id: u32,
-        _schema_id: u32,
+        _database_id: DatabaseId,
+        _schema_id: SchemaId,
         _owner_id: u32,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
@@ -429,8 +431,8 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_secret(
         &self,
         _secret_name: String,
-        _database_id: u32,
-        _schema_id: u32,
+        _database_id: DatabaseId,
+        _schema_id: SchemaId,
         _owner_id: u32,
         _payload: Vec<u8>,
     ) -> Result<()> {
@@ -457,7 +459,7 @@ impl CatalogWriter for MockCatalogWriter {
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
             self.catalog
                 .read()
@@ -488,7 +490,7 @@ impl CatalogWriter for MockCatalogWriter {
             )
             .into());
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
             self.catalog
                 .read()
@@ -565,7 +567,7 @@ impl CatalogWriter for MockCatalogWriter {
         let index = {
             let catalog_reader = self.catalog.read();
             let schema_catalog = catalog_reader
-                .get_schema_by_id(&database_id, &schema_id)
+                .get_schema_by_id(database_id, schema_id)
                 .unwrap();
             schema_catalog.get_index_by_id(&index_id).unwrap().clone()
         };
@@ -593,12 +595,12 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_database(&self, database_id: u32) -> Result<()> {
+    async fn drop_database(&self, database_id: DatabaseId) -> Result<()> {
         self.catalog.write().drop_database(database_id);
         Ok(())
     }
 
-    async fn drop_schema(&self, schema_id: u32, _cascade: bool) -> Result<()> {
+    async fn drop_schema(&self, schema_id: SchemaId, _cascade: bool) -> Result<()> {
         let database_id = self.drop_schema_id(schema_id);
         self.catalog.write().drop_schema(database_id, schema_id);
         Ok(())
@@ -652,7 +654,7 @@ impl CatalogWriter for MockCatalogWriter {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        new_schema_id: u32,
+        new_schema_id: SchemaId,
     ) -> Result<()> {
         match object {
             alter_set_schema_request::Object::TableId(table_id) => {
@@ -661,7 +663,7 @@ impl CatalogWriter for MockCatalogWriter {
                     let table = reader.get_any_table_by_id(&table_id.into())?.to_owned();
                     table.to_prost()
                 };
-                pb_table.schema_id = new_schema_id;
+                pb_table.schema_id = new_schema_id.as_raw_id();
                 self.catalog.write().update_table(&pb_table);
                 self.table_id_to_schema_id
                     .write()
@@ -674,7 +676,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_parallelism(
         &self,
-        _table_id: u32,
+        _job_id: JobId,
         _parallelism: PbTableParallelism,
         _deferred: bool,
     ) -> Result<()> {
@@ -689,8 +691,8 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _secret_id: u32,
         _secret_name: String,
-        _database_id: u32,
-        _schema_id: u32,
+        _database_id: DatabaseId,
+        _schema_id: SchemaId,
         _owner_id: u32,
         _payload: Vec<u8>,
     ) -> Result<()> {
@@ -699,7 +701,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_resource_group(
         &self,
-        _table_id: u32,
+        _table_id: TableId,
         _resource_group: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
@@ -708,12 +710,12 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_database_param(
         &self,
-        database_id: u32,
+        database_id: DatabaseId,
         param: AlterDatabaseParam,
     ) -> Result<()> {
         let mut pb_database = {
             let reader = self.catalog.read();
-            let database = reader.get_database_by_id(&database_id)?.to_owned();
+            let database = reader.get_database_by_id(database_id)?.to_owned();
             database.to_prost()
         };
         match param {
@@ -726,6 +728,16 @@ impl CatalogWriter for MockCatalogWriter {
         }
         self.catalog.write().update_database(&pb_database);
         Ok(())
+    }
+
+    async fn create_iceberg_table(
+        &self,
+        _table_job_info: PbTableJobInfo,
+        _sink_job_info: PbSinkJobInfo,
+        _iceberg_source: PbSource,
+        _if_not_exists: bool,
+    ) -> Result<()> {
+        todo!()
     }
 }
 
@@ -760,10 +772,10 @@ impl MockCatalogWriter {
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
-        let mut map: HashMap<u32, DatabaseId> = HashMap::new();
-        map.insert(1_u32, 0_u32);
-        map.insert(2_u32, 0_u32);
-        map.insert(3_u32, 0_u32);
+        let mut map: HashMap<SchemaId, DatabaseId> = HashMap::new();
+        map.insert(1_u32.into(), 0_u32.into());
+        map.insert(2_u32.into(), 0_u32.into());
+        map.insert(3_u32.into(), 0_u32.into());
         Self {
             catalog,
             id: AtomicU32::new(3),
@@ -843,13 +855,13 @@ impl MockCatalogWriter {
         (self.get_database_id_by_schema(schema_id), schema_id)
     }
 
-    fn add_schema_id(&self, schema_id: u32, database_id: DatabaseId) {
+    fn add_schema_id(&self, schema_id: SchemaId, database_id: DatabaseId) {
         self.schema_id_to_database_id
             .write()
             .insert(schema_id, database_id);
     }
 
-    fn drop_schema_id(&self, schema_id: u32) -> DatabaseId {
+    fn drop_schema_id(&self, schema_id: SchemaId) -> DatabaseId {
         self.schema_id_to_database_id
             .write()
             .remove(&schema_id)
@@ -859,7 +871,11 @@ impl MockCatalogWriter {
     fn create_source_inner(&self, mut source: PbSource) -> Result<u32> {
         source.id = self.gen_id();
         self.catalog.write().create_source(&source);
-        self.add_table_or_source_id(source.id, source.schema_id, source.database_id);
+        self.add_table_or_source_id(
+            source.id,
+            source.schema_id.into(),
+            source.database_id.into(),
+        );
         Ok(source.id)
     }
 
@@ -867,7 +883,7 @@ impl MockCatalogWriter {
         sink.id = self.gen_id();
         sink.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_sink(&sink);
-        self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
+        self.add_table_or_sink_id(sink.id, sink.schema_id.into(), sink.database_id.into());
         Ok(())
     }
 
@@ -876,13 +892,13 @@ impl MockCatalogWriter {
         self.catalog.write().create_subscription(&subscription);
         self.add_table_or_subscription_id(
             subscription.id,
-            subscription.schema_id,
-            subscription.database_id,
+            subscription.schema_id.into(),
+            subscription.database_id.into(),
         );
         Ok(())
     }
 
-    fn get_database_id_by_schema(&self, schema_id: u32) -> DatabaseId {
+    fn get_database_id_by_schema(&self, schema_id: SchemaId) -> DatabaseId {
         *self
             .schema_id_to_database_id
             .read()
@@ -1166,6 +1182,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn alter_fragment_parallelism(
+        &self,
+        _fragment_ids: Vec<u32>,
+        _parallelism: Option<PbTableParallelism>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn get_cluster_recovery_status(&self) -> RpcResult<RecoveryStatus> {
         Ok(RecoveryStatus::StatusRunning)
     }
@@ -1247,6 +1271,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
         Ok(RefreshResponse { status: None })
+    }
+
+    fn cluster_id(&self) -> &str {
+        "test-cluster-uuid"
     }
 }
 

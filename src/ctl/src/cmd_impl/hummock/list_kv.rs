@@ -14,7 +14,6 @@
 
 use core::ops::Bound::Unbounded;
 
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
@@ -47,7 +46,7 @@ pub async fn list_kv(
         .new_read_snapshot(
             HummockReadEpoch::Committed(epoch),
             NewReadSnapshotOptions {
-                table_id: TableId { table_id },
+                table_id: table_id.into(),
             },
         )
         .await?;
@@ -63,7 +62,7 @@ pub async fn list_kv(
         .await?;
     while let Some(item) = scan_result.try_next().await? {
         let (k, v) = item;
-        let print_string = format!("[t{}]", k.user_key.table_id.table_id());
+        let print_string = format!("[t{}]", k.user_key.table_id);
         println!("{} {:?} => {:?}", print_string, k, v)
     }
     Ok(())

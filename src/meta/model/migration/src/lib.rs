@@ -54,6 +54,7 @@ mod m20250821_081110_cdc_table_snapshot_splits_add_column;
 mod m20250905_144810_deprecate_table_incoming_sinks;
 mod m20250916_120000_add_refresh_fields;
 mod m20251005_000000_fragment_splits;
+mod m20251016_220528_fragment_parallelism;
 mod utils;
 
 pub struct Migrator;
@@ -146,6 +147,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250905_144810_deprecate_table_incoming_sinks::Migration),
             Box::new(m20250916_120000_add_refresh_fields::Migration),
             Box::new(m20251005_000000_fragment_splits::Migration),
+            Box::new(m20251016_220528_fragment_parallelism::Migration),
         ]
     }
 }

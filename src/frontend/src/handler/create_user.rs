@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::grant_privilege::ActionWithGrantOption;
 use risingwave_pb::user::{Action, GrantPrivilege, UserInfo};
 use risingwave_sqlparser::ast::{CreateUserStatement, UserOption};
 
@@ -95,7 +95,7 @@ pub async fn handle_create_user(
                 with_grant_option: true,
                 granted_by: session_user.id,
             }],
-            object: Some(Object::DatabaseId(database_id)),
+            object: Some(database_id.into()),
         }];
 
         for option in stmt.with_options.0 {

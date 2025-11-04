@@ -23,7 +23,9 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
-use risingwave_connector::parser::{TimeHandling, TimestampHandling, TimestamptzHandling};
+use risingwave_connector::parser::{
+    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+};
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
@@ -107,7 +109,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         assert!(!self.options.disable_backfill);
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
-        let table_id = self.external_table.table_id().table_id;
+        let table_id = self.external_table.table_id();
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
         let external_database_name = self.external_table.database_name().to_owned();
@@ -153,6 +155,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             .map(|v| v == "connect")
             .unwrap_or(false)
             .then_some(TimeHandling::Milli);
+        let bigint_unsigned_handling: Option<BigintUnsignedHandlingMode> = self
+            .properties
+            .get("debezium.bigint.unsigned.handling.mode")
+            .map(|v| v == "precise")
+            .unwrap_or(false)
+            .then_some(BigintUnsignedHandlingMode::Precise);
         // Only postgres-cdc connector may trigger TOAST.
         let handle_toast_columns: bool =
             self.external_table.table_type() == &ExternalCdcTableType::Postgres;
@@ -162,6 +170,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             timestamp_handling,
             timestamptz_handling,
             time_handling,
+            bigint_unsigned_handling,
             handle_toast_columns,
         )
         .boxed();
@@ -221,9 +230,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             if !is_reset {
                 state_impl.init_epoch(barrier_epoch).await?;
                 is_reset = true;
-                tracing::info!(table_id, "Initialize executor.");
+                tracing::info!(%table_id, "Initialize executor.");
             } else {
-                tracing::info!(table_id, "Reset executor.");
+                tracing::info!(%table_id, "Reset executor.");
             }
 
             let mut current_actor_bounds = None;
@@ -327,7 +336,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 } else {
                     assert!(table_reader.is_some(), "table reader must created");
                     tracing::info!(
-                        table_id,
+                        %table_id,
                         upstream_table_name,
                         "table reader created successfully"
                     );
@@ -344,7 +353,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             // Backfill snapshot splits sequentially.
             for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 tracing::info!(
-                    table_id,
+                    %table_id,
                     upstream_table_name,
                     ?split,
                     is_snapshot_paused,
@@ -432,7 +441,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             }) => {
                                                 if dropped_actors.contains(&self.actor_ctx.id) {
                                                     tracing::info!(
-                                                        table_id,
+                                                        %table_id,
                                                         upstream_table_name,
                                                         "CdcBackfill has been dropped due to config change"
                                                     );
@@ -495,7 +504,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     ) && filtered_chunk.cardinality() > 0
                                     {
                                         // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(filtered_chunk.compact());
+                                        upstream_chunk_buffer.push(filtered_chunk.compact_vis());
                                     }
                                 }
                                 Message::Watermark(_) => {
@@ -508,7 +517,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                             match msg? {
                                 None => {
                                     tracing::info!(
-                                        table_id,
+                                        %table_id,
                                         split_id = split.split_id,
                                         "snapshot read stream ends"
                                     );
@@ -574,7 +583,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
             upstream_table_reader.disconnect().await?;
             tracing::info!(
-                table_id,
+                %table_id,
                 upstream_table_name,
                 "CdcBackfill has already finished and will forward messages directly to the downstream"
             );
@@ -820,7 +829,7 @@ mod tests {
 
         let bound = Some((OwnedRow::new(vec![None]), OwnedRow::new(vec![None])));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
-        assert_eq!(c.unwrap().compact(), chunk);
+        assert_eq!(c.unwrap().compact_vis(), chunk);
 
         let bound = Some((
             OwnedRow::new(vec![None]),
@@ -828,7 +837,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              + 1 6
@@ -842,7 +851,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
             U- 3 7
@@ -856,7 +865,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 0);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              - 2 .
@@ -871,7 +880,7 @@ mod tests {
 
         let bound = Some((OwnedRow::new(vec![None]), OwnedRow::new(vec![None])));
         let c = filter_stream_chunk(chunk.clone(), &bound, 1);
-        assert_eq!(c.unwrap().compact(), chunk);
+        assert_eq!(c.unwrap().compact_vis(), chunk);
 
         let bound = Some((
             OwnedRow::new(vec![None]),
@@ -879,7 +888,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk.clone(), &bound, 1);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
              + 1 6
@@ -894,7 +903,7 @@ mod tests {
         ));
         let c = filter_stream_chunk(chunk, &bound, 1);
         assert_eq!(
-            c.unwrap().compact(),
+            c.unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I I
             U- 3 7",

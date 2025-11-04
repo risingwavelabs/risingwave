@@ -81,7 +81,7 @@
     create table t (a int, b int, c int);
     select RANK() OVER (PARTITION BY a ORDER BY b) as rank from t;
   stream_plan: |-
-    StreamMaterialize { columns: [rank, t._row_id(hidden), t.a(hidden)], stream_key: [t._row_id, t.a], pk_columns: [t._row_id, t.a], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [rank, t._row_id(hidden), t.a(hidden)], stream_key: [t.a, t._row_id], pk_columns: [t.a, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [rank, t._row_id, t.a] }
       └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamLocalityProvider { locality_columns: [t.a] }
@@ -95,7 +95,7 @@
     create index idx2 on version (a2, b2);
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
   stream_plan: |-
-    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), stream.b1(hidden)], stream_key: [stream._row_id, id2, a1, stream.b1], pk_columns: [stream._row_id, id2, a1, stream.b1], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [id1, a1, id2, a2, stream._row_id(hidden), stream.b1(hidden)], stream_key: [a1, stream.b1, stream._row_id, id2], pk_columns: [a1, stream.b1, stream._row_id, id2], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(stream.a1, idx2.id2, stream._row_id, stream.b1) }
       └─StreamTemporalJoin { type: LeftOuter, append_only: false, predicate: stream.a1 = idx2.a2 AND stream.b1 = idx2.b2, nested_loop: false, output: [stream.id1, stream.a1, idx2.id2, idx2.a2, stream._row_id, stream.b1] }
         ├─StreamExchange { dist: HashShard(stream.a1) }
@@ -103,7 +103,7 @@
         │   └─StreamExchange { dist: HashShard(stream.a1, stream.b1) }
         │     └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.b1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(idx2.a2) }
-          └─StreamTableScan { table: idx2, columns: [idx2.id2, idx2.a2, idx2.b2], stream_scan_type: UpstreamOnly, stream_key: [idx2.id2], pk: [a2, b2, id2], dist: UpstreamHashShard(idx2.a2) }
+          └─StreamTableScan { table: idx2, columns: [idx2.id2, idx2.a2, idx2.b2], stream_scan_type: UpstreamOnly, stream_key: [idx2.a2, idx2.id2], pk: [a2, b2, id2], dist: UpstreamHashShard(idx2.a2) }
 - sql: |
     set enable_locality_backfill = true;
     create table t(a int, b int, c int) append only;

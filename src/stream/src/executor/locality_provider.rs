@@ -377,7 +377,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         backfill_state: &LocalityBackfillState,
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<StreamChunk> {
-        let chunk = chunk.compact();
+        let chunk = chunk.compact_vis();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = risingwave_common::bitmap::BitmapBuilder::with_capacity(ops.len());
 
@@ -466,7 +466,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             .per_vnode
             .values()
             .all(|progress| matches!(progress, LocalityBackfillProgress::NotStarted));
-
+        let mut buffered_rows: u64 = 0;
         // Initial buffering phase before backfill - wait for StartFragmentBackfill mutation (if needed)
         if need_buffering {
             // Enter buffering phase - buffer data until StartFragmentBackfill is received
@@ -481,6 +481,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         // Ignore watermarks during initial buffering
                     }
                     Message::Chunk(chunk) => {
+                        buffered_rows += chunk.cardinality() as u64;
                         state_table.write_chunk(chunk);
                         state_table.try_flush().await?;
                     }
@@ -500,6 +501,13 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                 start_backfill = true;
                             }
                         }
+
+                        self.progress.update_with_buffered_rows(
+                            barrier.epoch,
+                            barrier.epoch.curr,
+                            0,
+                            buffered_rows,
+                        );
 
                         // Commit state tables
                         let post_commit1 = state_table.commit(epoch).await?;
@@ -598,7 +606,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                                     }
                                     Message::Chunk(chunk) => {
                                         // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(chunk.compact());
+                                        upstream_chunk_buffer.push(chunk.compact_vis());
                                     }
                                     Message::Watermark(_) => {
                                         // Ignore watermark during backfill.
@@ -700,6 +708,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     .await?;
 
                 // Update progress with current epoch and snapshot read count
+                // Report both consumed rows and buffered rows separately for precise progress
                 let total_snapshot_processed_rows: u64 = backfill_state
                     .vnodes()
                     .map(|(_, progress)| match *progress {
@@ -711,10 +720,11 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     })
                     .sum();
 
-                self.progress.update(
+                self.progress.update_with_buffered_rows(
                     barrier.epoch,
                     barrier.epoch.curr, // Use barrier epoch as snapshot read epoch
                     total_snapshot_processed_rows,
+                    buffered_rows,
                 );
 
                 // Persist backfill progress
@@ -765,9 +775,13 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                             })
                             .sum();
 
-                        // Finish progress reporting
-                        self.progress
-                            .finish(barrier.epoch, total_snapshot_processed_rows);
+                        // Finish progress reporting with any remaining buffered rows
+                        // At completion, buffered_rows is 0 since all rows have been consumed
+                        self.progress.finish_with_buffered_rows(
+                            barrier.epoch,
+                            total_snapshot_processed_rows,
+                            buffered_rows,
+                        );
 
                         // Persist final state
                         Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;

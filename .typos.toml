@@ -8,6 +8,10 @@ nd = "nd"               # N-dimentional / 2nd
 steam = "stream"        # You played with Steam games too much.
 ser = "ser"             # Serialization
 typ = "typ"             # Type, to avoid conflict with rust keyword `type`
+# CDC / MySQL binlog terms
+GTID = "GTID"
+GTIDs = "GTIDs"
+GTI = "GTI"
 # Some weird short variable names
 ot = "ot"
 bui = "bui"             # BackwardUserIterator

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::hba::HbaConfig;
 use super::*;
 
 /// The section [`frontend`] in `risingwave.toml`.
@@ -28,6 +29,10 @@ pub struct FrontendConfig {
     /// A query of size exceeding this threshold will always be rejected due to memory constraints.
     #[serde(default = "default::frontend::max_single_query_size_bytes")]
     pub max_single_query_size_bytes: u64,
+
+    /// Host-based authentication configuration
+    #[serde(default = "HbaConfig::default")]
+    pub hba_config: HbaConfig,
 }
 
 pub mod default {

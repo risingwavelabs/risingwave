@@ -420,6 +420,13 @@ impl<'a> VectorRef<'a> {
         }
         Ok(())
     }
+
+    pub fn subvector(&self, start: usize, end: usize) -> VectorVal {
+        let slice = &self.inner[start..end];
+        VectorInner {
+            inner: slice.to_vec().into_boxed_slice(),
+        }
+    }
 }
 
 impl VectorVal {

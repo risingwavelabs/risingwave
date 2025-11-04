@@ -34,6 +34,7 @@ mod delete;
 mod expr;
 pub mod fetch_cursor;
 mod for_system;
+mod gap_fill_binder;
 mod insert;
 mod query;
 mod relation;
@@ -48,14 +49,17 @@ pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::bind_data_type;
+pub use gap_fill_binder::BoundFillStrategy;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
-    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
+    BoundBackCteRef, BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput,
+    BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
     ResolveQualifiedNameError, WindowTableFunctionKind,
 };
+// Re-export common types
+pub use risingwave_common::gap_fill_types::FillStrategy;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
@@ -67,7 +71,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
 use crate::error::ErrorCode;
-use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
+use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
@@ -132,6 +136,9 @@ pub struct Binder {
 
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
+
+    /// The staging catalogs that will be used during binding phase
+    staging_catalog_manager: StagingCatalogManager,
 
     /// Information for `secure_compare` function. It's ONLY available when binding the
     /// `VALIDATE` clause of Webhook source i.e. `VALIDATE SECRET ... AS SECURE_COMPARE(...)`.
@@ -250,6 +257,7 @@ impl Binder {
             included_udfs: HashSet::new(),
             param_types: ParameterTypes::new(vec![]),
             temporary_source_manager: session.temporary_source_manager(),
+            staging_catalog_manager: session.staging_catalog_manager(),
             secure_compare_context: None,
         }
     }

@@ -24,7 +24,6 @@ itertools = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 prometheus = { version = "0.14" }
-rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
 serde = { workspace = true }
 thiserror-ext = { workspace = true }
@@ -44,7 +43,7 @@ procfs = { version = "0.18", default-features = false }
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2"
-mach2 = "0.4"
+mach2 = "0.5"
 
 [lints]
 workspace = true
