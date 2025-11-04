@@ -113,11 +113,8 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
             metrics: params.executor_stats,
             join_type_proto,
             join_key_data_types,
-            chunk_size: params.env.config().developer.chunk_size,
-            high_join_amplification_threshold: params
-                .env
-                .config()
-                .developer
+            chunk_size: params.config.developer.chunk_size,
+            high_join_amplification_threshold: (params.config.developer)
                 .high_join_amplification_threshold,
             asof_desc,
             join_encoding_type,

@@ -80,7 +80,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 right_table,
                 condition,
                 output_indices,
-                chunk_size: params.env.config().developer.chunk_size,
+                chunk_size: params.config.developer.chunk_size,
                 metrics: params.executor_stats,
                 join_type_proto: node.get_join_type()?,
             };
@@ -161,7 +161,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 table_output_indices,
                 table_stream_key_indices,
                 watermark_epoch: params.watermark_epoch,
-                chunk_size: params.env.config().developer.chunk_size,
+                chunk_size: params.config.developer.chunk_size,
                 metrics: params.executor_stats,
                 join_type_proto: node.get_join_type()?,
                 join_key_data_types,

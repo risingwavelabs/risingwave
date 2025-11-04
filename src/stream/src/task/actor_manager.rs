@@ -21,7 +21,7 @@ use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::config::MetricLevel;
+use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -135,7 +135,7 @@ impl StreamActorManager {
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
-        let chunk_size = env.config().developer.chunk_size;
+        let chunk_size = actor_context.streaming_config.developer.chunk_size;
         let upstream = self
             .create_snapshot_backfill_input(
                 upstream_node,
@@ -334,17 +334,13 @@ impl StreamActorManager {
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
             local_barrier_manager: local_barrier_manager.clone(),
+            config: actor_context.streaming_config.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
 
         // Wrap the executor for debug purpose.
-        let wrapped = WrapperExecutor::new(
-            executor,
-            actor_context.clone(),
-            env.config().developer.enable_executor_row_count,
-            env.config().developer.enable_explain_analyze_stats,
-        );
+        let wrapped = WrapperExecutor::new(executor, actor_context.clone());
         let executor = (info, wrapped).into();
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
@@ -402,14 +398,13 @@ impl StreamActorManager {
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         let actor_id = actor.actor_id;
-        let streaming_config = self.env.config().clone();
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
             self.env.total_mem_usage(),
             self.streaming_metrics.clone(),
             self.env.meta_client(),
-            streaming_config,
+            self.env.global_config().clone(), // TODO(config): local config for actor
             self.env.clone(),
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
@@ -496,7 +491,12 @@ impl StreamActorManager {
         };
 
         let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
-            || self.env.config().developer.enable_actor_tokio_metrics
+            // TODO(config): use config from actor context, instead of the global one
+            || self
+                .env
+                .global_config()
+                .developer
+                .enable_actor_tokio_metrics
         {
             tracing::info!("Tokio metrics are enabled.");
             let streaming_metrics = self.streaming_metrics.clone();
@@ -589,6 +589,9 @@ pub struct ExecutorParams {
     pub watermark_epoch: AtomicU64Ref,
 
     pub local_barrier_manager: LocalBarrierManager,
+
+    /// Same as `actor_context.streaming_config`.
+    pub config: Arc<StreamingConfig>,
 }
 
 impl Debug for ExecutorParams {

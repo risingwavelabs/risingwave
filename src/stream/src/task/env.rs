@@ -33,7 +33,7 @@ pub struct StreamEnvironment {
     server_addr: HostAddr,
 
     /// Streaming related configurations.
-    config: Arc<StreamingConfig>,
+    config: Arc<StreamingConfig>, // rename to `global_config`
 
     /// Current worker node id.
     worker_id: WorkerNodeId,
@@ -113,7 +113,7 @@ impl StreamEnvironment {
         &self.server_addr
     }
 
-    pub fn config(&self) -> &Arc<StreamingConfig> {
+    pub fn global_config(&self) -> &Arc<StreamingConfig> {
         &self.config
     }
 

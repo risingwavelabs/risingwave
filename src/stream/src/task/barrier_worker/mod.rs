@@ -1075,7 +1075,7 @@ impl LocalBarrierWorker {
     ) -> JoinHandle<()> {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
-            if let Some(worker_threads_num) = env.config().actor_runtime_worker_threads_num {
+            if let Some(worker_threads_num) = env.global_config().actor_runtime_worker_threads_num {
                 builder.worker_threads(worker_threads_num);
             }
             builder

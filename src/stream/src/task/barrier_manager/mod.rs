@@ -159,7 +159,7 @@ impl LocalBarrierManager {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
     ) -> permit::Receiver {
-        let (tx, rx) = channel_from_config(self.env.config());
+        let (tx, rx) = channel_from_config(self.env.global_config());
         self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
             actor_id,
             upstream_actor_id,

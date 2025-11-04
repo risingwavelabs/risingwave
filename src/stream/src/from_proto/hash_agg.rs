@@ -107,7 +107,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 actor_ctx: params.actor_context,
                 info: params.info.clone(),
 
-                extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
+                extreme_cache_size: params.config.developer.unsafe_extreme_cache_size,
 
                 agg_calls,
                 row_count_index: node.get_row_count_index() as usize,
@@ -117,11 +117,8 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 watermark_epoch: params.watermark_epoch,
                 extra: HashAggExecutorExtraArgs {
                     group_key_indices,
-                    chunk_size: params.env.config().developer.chunk_size,
-                    max_dirty_groups_heap_size: params
-                        .env
-                        .config()
-                        .developer
+                    chunk_size: params.config.developer.chunk_size,
+                    max_dirty_groups_heap_size: (params.config.developer)
                         .hash_agg_max_dirty_groups_heap_size,
                     emit_on_window_close: node.get_emit_on_window_close(),
                 },

@@ -75,7 +75,7 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             input_schema,
             progress,
             params.executor_stats.clone(),
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             params.actor_context.fragment_id,
         );
 

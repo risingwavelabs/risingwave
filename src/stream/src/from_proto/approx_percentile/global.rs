@@ -50,7 +50,7 @@ impl ExecutorBuilder for GlobalApproxPercentileExecutorBuilder {
             input,
             node.quantile,
             node.base,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             bucket_state_table,
             count_state_table,
         )

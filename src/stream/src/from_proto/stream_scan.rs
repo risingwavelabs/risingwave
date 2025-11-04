@@ -96,7 +96,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     output_indices,
                     progress,
                     params.executor_stats.clone(),
-                    params.env.config().developer.chunk_size,
+                    params.config.developer.chunk_size,
                     node.rate_limit.into(),
                     params.fragment_id,
                 )
@@ -139,7 +139,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             output_indices,
                             progress,
                             params.executor_stats.clone(),
-                            params.env.config().developer.chunk_size,
+                            params.config.developer.chunk_size,
                             node.rate_limit.into(),
                             params.fragment_id,
                         )
@@ -186,7 +186,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .build()
                     .await;
 
-                let chunk_size = params.env.config().developer.chunk_size;
+                let chunk_size = params.config.developer.chunk_size;
                 let snapshot_epoch = node
                     .snapshot_backfill_epoch
                     .ok_or_else(|| anyhow!("snapshot epoch not set for {:?}", node))?;
@@ -218,10 +218,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             info.identity = format!("{} (troubled)", info.identity);
             Ok((
                 params.info,
-                TroublemakerExecutor::new(
-                    (info, exec).into(),
-                    params.env.config().developer.chunk_size,
-                ),
+                TroublemakerExecutor::new((info, exec).into(), params.config.developer.chunk_size),
             )
                 .into())
         } else {

@@ -80,7 +80,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
             .get_params()
             .load()
             .barrier_interval_ms();
-        let progress_ratio = params.env.config().developer.now_progress_ratio;
+        let progress_ratio = params.config.developer.now_progress_ratio;
         let exec = NowExecutor::new(
             params.info.schema.data_types(),
             mode,

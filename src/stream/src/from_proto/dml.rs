@@ -43,7 +43,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             table_id,
             node.table_version_id,
             column_descs,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             node.rate_limit.into(),
         );
         Ok((params.info, exec).into())

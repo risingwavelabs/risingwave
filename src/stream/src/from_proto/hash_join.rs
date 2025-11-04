@@ -166,11 +166,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
-            chunk_size: params.env.config().developer.chunk_size,
-            high_join_amplification_threshold: params
-                .env
-                .config()
-                .developer
+            chunk_size: params.config.developer.chunk_size,
+            high_join_amplification_threshold: (params.config.developer)
                 .high_join_amplification_threshold,
             join_encoding_type,
         };

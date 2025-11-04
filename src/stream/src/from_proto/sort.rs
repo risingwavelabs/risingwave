@@ -41,7 +41,7 @@ impl ExecutorBuilder for SortExecutorBuilder {
             schema: params.info.schema.clone(),
             input,
             buffer_table: state_table,
-            chunk_size: params.env.config().developer.chunk_size,
+            chunk_size: params.config.developer.chunk_size,
             sort_column_index: node.sort_column_index as _,
         });
         Ok((params.info, exec).into())

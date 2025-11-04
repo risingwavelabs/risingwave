@@ -75,7 +75,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
                 state_table_l,
                 state_table_r,
                 params.executor_stats,
-                params.env.config().developer.chunk_size,
+                params.config.developer.chunk_size,
                 cleaned_by_watermark,
             )
             .boxed()
@@ -96,7 +96,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
                 state_table_l,
                 state_table_r,
                 params.executor_stats,
-                params.env.config().developer.chunk_size,
+                params.config.developer.chunk_size,
                 cleaned_by_watermark,
             )
             .boxed()
