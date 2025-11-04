@@ -2249,8 +2249,8 @@
     └─StreamProject { exprs: [auction.id, internal_last_seen_value(auction.item_name), count(bid.auction)] }
       └─StreamTopN { order: [count(bid.auction) DESC], limit: 1000, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count(bid.auction) DESC], limit: 1000, offset: 0, group_key: [$expr1] }
-            └─StreamProject { exprs: [auction.id, internal_last_seen_value(auction.item_name), count(bid.auction), Vnode(auction.id) as $expr1] }
+          └─StreamGroupTopN { order: [count(bid.auction) DESC], limit: 1000, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [auction.id, internal_last_seen_value(auction.item_name), count(bid.auction), Vnode(auction.id) as _vnode] }
               └─StreamHashAgg { group_key: [auction.id], aggs: [internal_last_seen_value(auction.item_name), count(bid.auction), count] }
                 └─StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
                   ├─StreamExchange { dist: HashShard(auction.id) }
@@ -2265,8 +2265,8 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count(bid.auction) DESC], limit: 1000, offset: 0, group_key: [$expr1] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [auction.id, internal_last_seen_value(auction.item_name), count(bid.auction), Vnode(auction.id) as $expr1] }
+    StreamGroupTopN { order: [count(bid.auction) DESC], limit: 1000, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [auction.id, internal_last_seen_value(auction.item_name), count(bid.auction), Vnode(auction.id) as _vnode] }
         └── StreamHashAgg { group_key: [auction.id], aggs: [internal_last_seen_value(auction.item_name), count(bid.auction), count] }
             ├── tables: [ HashAggState: 2 ]
             └── StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
@@ -2287,14 +2287,14 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), $expr1, _rw_timestamp ]
+    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), _vnode, _rw_timestamp ]
     ├── primary key: [ $2 DESC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), $expr1, _rw_timestamp ]
+    ├── columns: [ auction_id, internal_last_seen_value(auction_item_name), count(bid_auction), _vnode, _rw_timestamp ]
     ├── primary key: [ $3 ASC, $2 DESC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -2377,8 +2377,8 @@
     └─StreamProject { exprs: [min(min(max(bid.price)))] }
       └─StreamSimpleAgg { aggs: [min(min(max(bid.price))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr1], aggs: [min(max(bid.price)), count] }
-            └─StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as $expr1] }
+          └─StreamHashAgg { group_key: [_vnode], aggs: [min(max(bid.price)), count] }
+            └─StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as _vnode] }
               └─StreamHashAgg { group_key: [auction.id], aggs: [max(bid.price), count] }
                 └─StreamProject { exprs: [auction.id, bid.price, bid._row_id] }
                   └─StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
@@ -2396,9 +2396,9 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamHashAgg { group_key: [$expr1], aggs: [min(max(bid.price)), count] }
+    StreamHashAgg { group_key: [_vnode], aggs: [min(max(bid.price)), count] }
     ├── tables: [ HashAggState: 3, HashAggCall0: 2 ]
-    └── StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as $expr1] }
+    └── StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as _vnode] }
         └── StreamHashAgg { group_key: [auction.id], aggs: [max(bid.price), count] }
             ├── tables: [ HashAggState: 5, HashAggCall0: 4 ]
             └── StreamProject { exprs: [auction.id, bid.price, bid._row_id] }
@@ -2420,19 +2420,19 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ min(max(bid_price)), $expr1, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ min(max(bid_price)), _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ min(min(max(bid_price))), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ $expr1, max(bid_price), auction_id, _rw_timestamp ]
+    ├── columns: [ _vnode, max(bid_price), auction_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 3 { columns: [ $expr1, min(max(bid_price)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ _vnode, min(max(bid_price)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4 { columns: [ auction_id, bid_price, bid__row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 DESC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
