@@ -264,6 +264,7 @@ message FragmentDistribution {
   uint32 parallelism = 7;
   uint32 vnode_count = 8;
   stream_plan.StreamNode node = 9;
+  string parallelism_policy = 10;
 }
 
 message ListFragmentDistributionResponse {
