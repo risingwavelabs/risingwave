@@ -63,8 +63,8 @@ pub async fn handle_comment(
 
                 PbComment {
                     table_id: table.table_id.into(),
-                    schema_id,
-                    database_id,
+                    schema_id: schema_id.into(),
+                    database_id: database_id.into(),
                     column_index: column.as_input_ref().map(|input_ref| input_ref.index as _),
                     description: comment,
                 }
@@ -85,8 +85,8 @@ pub async fn handle_comment(
 
                 PbComment {
                     table_id: table.table_id.into(),
-                    schema_id,
-                    database_id,
+                    schema_id: schema_id.into(),
+                    database_id: database_id.into(),
                     column_index: None,
                     description: comment,
                 }

@@ -1171,7 +1171,7 @@ impl<S: StateStore> Debug for SourceBackfillExecutorInner<S> {
         f.debug_struct("SourceBackfillExecutor")
             .field("source_id", &self.source_id)
             .field("column_ids", &self.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("stream_key", &self.info.stream_key)
             .finish()
     }
 }

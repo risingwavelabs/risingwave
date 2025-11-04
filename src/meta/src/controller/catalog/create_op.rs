@@ -60,16 +60,21 @@ impl CatalogController {
 
         let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id, None, None).await?;
         let mut db: database::ActiveModel = db.into();
-        db.database_id = Set(db_obj.oid);
+        db.database_id = Set(DatabaseId::new(db_obj.oid as _));
         let db = db.insert(&txn).await?;
 
         let mut schemas = vec![];
         for schema_name in iter::once(DEFAULT_SCHEMA_NAME).chain(SYSTEM_SCHEMAS) {
-            let schema_obj =
-                Self::create_object(&txn, ObjectType::Schema, owner_id, Some(db_obj.oid), None)
-                    .await?;
+            let schema_obj = Self::create_object(
+                &txn,
+                ObjectType::Schema,
+                owner_id,
+                Some(DatabaseId::new(db_obj.oid as _)),
+                None,
+            )
+            .await?;
             let schema = schema::ActiveModel {
-                schema_id: Set(schema_obj.oid),
+                schema_id: Set(SchemaId::new(schema_obj.oid as _)),
                 name: Set(schema_name.into()),
             };
             let schema = schema.insert(&txn).await?;
@@ -98,18 +103,18 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
         ensure_object_id(ObjectType::Database, schema.database_id as _, &txn).await?;
-        check_schema_name_duplicate(&schema.name, schema.database_id as _, &txn).await?;
+        check_schema_name_duplicate(&schema.name, schema.database_id.into(), &txn).await?;
 
         let schema_obj = Self::create_object(
             &txn,
             ObjectType::Schema,
             owner_id,
-            Some(schema.database_id as _),
+            Some(schema.database_id.into()),
             None,
         )
         .await?;
         let mut schema: schema::ActiveModel = schema.into();
-        schema.schema_id = Set(schema_obj.oid);
+        schema.schema_id = Set(SchemaId::new(schema_obj.oid as _));
         let schema = schema.insert(&txn).await?;
 
         let updated_user_info =
@@ -148,8 +153,8 @@ impl CatalogController {
             &txn,
             ObjectType::Subscription,
             pb_subscription.owner as _,
-            Some(pb_subscription.database_id as _),
-            Some(pb_subscription.schema_id as _),
+            Some(pb_subscription.database_id.into()),
+            Some(pb_subscription.schema_id.into()),
         )
         .await?;
         pb_subscription.id = obj.oid as _;
@@ -180,8 +185,8 @@ impl CatalogController {
         ensure_object_id(ObjectType::Schema, pb_source.schema_id as _, &txn).await?;
         check_relation_name_duplicate(
             &pb_source.name,
-            pb_source.database_id as _,
-            pb_source.schema_id as _,
+            pb_source.database_id.into(),
+            pb_source.schema_id.into(),
             &txn,
         )
         .await?;
@@ -194,8 +199,8 @@ impl CatalogController {
             &txn,
             ObjectType::Source,
             owner_id,
-            Some(pb_source.database_id as _),
-            Some(pb_source.schema_id as _),
+            Some(pb_source.database_id.into()),
+            Some(pb_source.schema_id.into()),
         )
         .await?;
         let source_id = source_obj.oid;
@@ -252,8 +257,8 @@ impl CatalogController {
             &txn,
             ObjectType::Function,
             owner_id,
-            Some(pb_function.database_id as _),
-            Some(pb_function.schema_id as _),
+            Some(pb_function.database_id.into()),
+            Some(pb_function.schema_id.into()),
         )
         .await?;
         pb_function.id = function_obj.oid as _;
@@ -310,8 +315,8 @@ impl CatalogController {
             &txn,
             ObjectType::Connection,
             owner_id,
-            Some(pb_connection.database_id as _),
-            Some(pb_connection.schema_id as _),
+            Some(pb_connection.database_id.into()),
+            Some(pb_connection.schema_id.into()),
         )
         .await?;
         pb_connection.id = conn_obj.oid as _;
@@ -383,8 +388,8 @@ impl CatalogController {
             &txn,
             ObjectType::Secret,
             owner_id,
-            Some(pb_secret.database_id as _),
-            Some(pb_secret.schema_id as _),
+            Some(pb_secret.database_id.into()),
+            Some(pb_secret.schema_id.into()),
         )
         .await?;
         pb_secret.id = secret_obj.oid as _;
@@ -433,8 +438,8 @@ impl CatalogController {
         ensure_object_id(ObjectType::Schema, pb_view.schema_id as _, &txn).await?;
         check_relation_name_duplicate(
             &pb_view.name,
-            pb_view.database_id as _,
-            pb_view.schema_id as _,
+            pb_view.database_id.into(),
+            pb_view.schema_id.into(),
             &txn,
         )
         .await?;
@@ -443,8 +448,8 @@ impl CatalogController {
             &txn,
             ObjectType::View,
             owner_id,
-            Some(pb_view.database_id as _),
-            Some(pb_view.schema_id as _),
+            Some(pb_view.database_id.into()),
+            Some(pb_view.schema_id.into()),
         )
         .await?;
         pb_view.id = view_obj.oid as _;

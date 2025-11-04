@@ -311,7 +311,7 @@ impl GlobalStreamManager {
         );
 
         let job_id = stream_job_fragments.stream_job_id();
-        let database_id = ctx.streaming_job.database_id().into();
+        let database_id = ctx.streaming_job.database_id();
 
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let execution = StreamingJobExecution::new(job_id, cancel_tx, permit);
@@ -505,7 +505,7 @@ impl GlobalStreamManager {
         };
 
         self.barrier_scheduler
-            .run_command(streaming_job.database_id().into(), command)
+            .run_command(streaming_job.database_id(), command)
             .await?;
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
@@ -554,7 +554,7 @@ impl GlobalStreamManager {
 
         self.barrier_scheduler
             .run_command(
-                streaming_job.database_id().into(),
+                streaming_job.database_id(),
                 Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                     old_fragments,
                     new_fragments,
@@ -682,7 +682,7 @@ impl GlobalStreamManager {
 
                 if let Some(database_id) = database_id {
                     self.barrier_scheduler
-                        .run_command(DatabaseId::new(database_id as _), cancel_command)
+                        .run_command(database_id, cancel_command)
                         .await?;
                 }
             };

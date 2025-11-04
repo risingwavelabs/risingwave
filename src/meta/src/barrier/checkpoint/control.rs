@@ -499,7 +499,7 @@ struct DatabaseCheckpointControlMetrics {
 
 impl DatabaseCheckpointControlMetrics {
     fn new(database_id: DatabaseId) -> Self {
-        let database_id_str = database_id.database_id.to_string();
+        let database_id_str = database_id.to_string();
         let barrier_latency = GLOBAL_META_METRICS
             .barrier_latency
             .with_guarded_label_values(&[&database_id_str]);

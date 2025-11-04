@@ -461,7 +461,7 @@ mod tests {
             Field::unnamed(DataType::Float32),
             Field::unnamed(DataType::Float64),
         ]);
-        let input_pk_indices = vec![time_column_index];
+        let input_stream_key = vec![time_column_index];
 
         let table_columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamp),
@@ -504,7 +504,7 @@ mod tests {
         .await;
 
         let (tx, source) = MockSource::channel();
-        let source = source.into_executor(input_schema, input_pk_indices);
+        let source = source.into_executor(input_schema, input_stream_key);
         let gap_fill_executor = EowcGapFillExecutor::new(EowcGapFillExecutorArgs {
             actor_ctx: ActorContext::for_test(123),
             schema: source.schema().clone(),

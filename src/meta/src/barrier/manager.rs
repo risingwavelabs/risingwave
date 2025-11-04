@@ -94,7 +94,7 @@ impl GlobalBarrierManager {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(BarrierManagerRequest::UpdateDatabaseBarrier {
-                database_id: (database_id as u32).into(),
+                database_id,
                 barrier_interval_ms,
                 checkpoint_frequency,
                 sender: tx,

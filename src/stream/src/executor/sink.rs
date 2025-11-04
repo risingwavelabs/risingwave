@@ -222,7 +222,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
 
         let non_append_only_behavior = if !sink_param.sink_type.is_append_only() {
-            let stream_key = &info.pk_indices;
+            let stream_key = &info.stream_key;
             let pk_specified_and_matched = (sink_param.downstream_pk.as_ref())
                 .is_some_and(|downstream_pk| stream_key.iter().all(|i| downstream_pk.contains(i)));
             Some(NonAppendOnlyBehavior {
@@ -260,7 +260,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let actor_id = self.actor_context.id;
         let fragment_id = self.actor_context.fragment_id;
 
-        let stream_key = self.info.pk_indices.clone();
+        let stream_key = self.info.stream_key.clone();
         let metrics = self.actor_context.streaming_metrics.new_sink_exec_metrics(
             sink_id,
             actor_id,
@@ -483,7 +483,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn process_msg(
         input: impl MessageStream,
         sink_type: SinkType,
-        stream_key: PkIndices,
+        stream_key: StreamKey,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
         input_compact_ib: InconsistencyBehavior,
@@ -824,7 +824,7 @@ mod test {
             .iter()
             .map(|column| Field::from(column.column_desc.clone()))
             .collect();
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
 
         let source = MockSource::with_messages(vec![
             Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
@@ -844,7 +844,7 @@ mod test {
                     - 5 6 7",
             ))),
         ])
-        .into_executor(schema.clone(), pk_indices.clone());
+        .into_executor(schema.clone(), stream_key.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -856,14 +856,14 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: Some(pk_indices.clone()),
+            downstream_pk: Some(stream_key.clone()),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo::for_test(schema, pk_indices, "SinkExecutor".to_owned(), 0);
+        let info = ExecutorInfo::for_test(schema, stream_key, "SinkExecutor".to_owned(), 0);
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
@@ -1068,14 +1068,14 @@ mod test {
             .iter()
             .map(|column| Field::from(column.column_desc.clone()))
             .collect();
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
 
         let source = MockSource::with_messages(vec![
             Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), pk_indices.clone());
+        .into_executor(schema.clone(), stream_key.clone());
 
         let sink_param = SinkParam {
             sink_id: 0.into(),
@@ -1087,14 +1087,14 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: Some(pk_indices.clone()),
+            downstream_pk: Some(stream_key.clone()),
             sink_type: SinkType::ForceAppendOnly,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
 
-        let info = ExecutorInfo::for_test(schema, pk_indices, "SinkExecutor".to_owned(), 0);
+        let info = ExecutorInfo::for_test(schema, stream_key, "SinkExecutor".to_owned(), 0);
 
         let sink = build_sink(sink_param.clone()).unwrap();
 

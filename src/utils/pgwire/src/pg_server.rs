@@ -22,6 +22,7 @@ use bytes::Bytes;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use parking_lot::Mutex;
 use risingwave_common::config::HbaEntry;
+use risingwave_common::id::DatabaseId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -52,7 +53,7 @@ pub trait SessionManager: Send + Sync + 'static {
     /// catalog information in frontend and build a replace plan for the table.
     fn create_dummy_session(
         &self,
-        database_id: u32,
+        database_id: DatabaseId,
         user_id: u32,
     ) -> Result<Arc<Self::Session>, BoxedError>;
 
@@ -377,6 +378,7 @@ mod tests {
     use bytes::Bytes;
     use futures::StreamExt;
     use futures::stream::BoxStream;
+    use risingwave_common::id::DatabaseId;
     use risingwave_common::types::DataType;
     use risingwave_common::util::tokio_util::sync::CancellationToken;
     use risingwave_sqlparser::ast::Statement;
@@ -403,7 +405,7 @@ mod tests {
 
         fn create_dummy_session(
             &self,
-            _database_id: u32,
+            _database_id: DatabaseId,
             _user_name: u32,
         ) -> Result<Arc<Self::Session>, BoxedError> {
             unimplemented!()

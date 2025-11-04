@@ -566,8 +566,8 @@ impl TableCatalog {
     pub fn to_prost(&self) -> PbTable {
         PbTable {
             id: self.id.as_raw_id(),
-            schema_id: self.schema_id,
-            database_id: self.database_id,
+            schema_id: self.schema_id.as_raw_id(),
+            database_id: self.database_id.as_raw_id(),
             name: self.name.clone(),
             // ignore `_rw_timestamp` when serializing
             columns: self
@@ -808,8 +808,8 @@ impl From<PbTable> for TableCatalog {
 
         Self {
             id: id.into(),
-            schema_id: tb.schema_id,
-            database_id: tb.database_id,
+            schema_id: tb.schema_id.into(),
+            database_id: tb.database_id.into(),
             associated_source_id: associated_source_id.map(Into::into),
             name,
             pk,
@@ -965,8 +965,8 @@ mod tests {
             table,
             TableCatalog {
                 id: TableId::new(0),
-                schema_id: 0,
-                database_id: 0,
+                schema_id: 0.into(),
+                database_id: 0.into(),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_owned(),
                 table_type: TableType::Table,

@@ -176,7 +176,7 @@ impl ControlStreamHandle {
         reset_request_id: u32,
     ) {
         self.send_response(Response::ResetDatabase(ResetDatabaseResponse {
-            database_id: database_id.database_id,
+            database_id: database_id.as_raw_id(),
             root_err: root_err.map(|err| PbScoredError {
                 err_msg: err.error.to_report_string(),
                 score: err.score.0,
@@ -265,7 +265,7 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
             writeln!(
                 f,
                 "database {} status: {} managed_barrier_state:\n{}",
-                database_id.database_id,
+                database_id,
                 status,
                 managed_barrier_state
                     .as_ref()
@@ -846,7 +846,7 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(|sst| sst.sst_info.into())
                             .collect(),
-                        database_id: database_id.database_id,
+                        database_id: database_id.as_raw_id(),
                         list_finished_source_ids,
                         load_finished_source_ids,
                         vector_index_adds: vector_index_adds
@@ -910,14 +910,14 @@ impl LocalBarrierWorker {
     ) {
         let Some(database_status) = self.state.databases.get_mut(&database_id) else {
             warn!(
-                database_id = database_id.database_id,
+                %database_id,
                 "database to remove partial graph not exist"
             );
             return;
         };
         let Some(database_state) = database_status.state_for_request() else {
             warn!(
-                database_id = database_id.database_id,
+                %database_id,
                 "ignore remove partial graph request on err database",
             );
             return;
@@ -1002,7 +1002,7 @@ impl LocalBarrierWorker {
         reset_request_id: u32,
     ) {
         info!(
-            database_id = database_id.database_id,
+            %database_id,
             "database reset successfully"
         );
         if let Some(reset_database) = self.state.databases.remove(&database_id) {
@@ -1032,7 +1032,7 @@ impl LocalBarrierWorker {
         message: impl Into<String>,
     ) {
         let message = message.into();
-        error!(database_id = database_id.database_id, ?failed_actor, message, err = ?err.as_report(), "suspend database on error");
+        error!(%database_id, ?failed_actor, message, err = ?err.as_report(), "suspend database on error");
         let completing_futures = self.await_epoch_completed_futures.remove(&database_id);
         self.state
             .databases
@@ -1042,7 +1042,7 @@ impl LocalBarrierWorker {
         self.control_stream_handle
             .send_response(Response::ReportDatabaseFailure(
                 ReportDatabaseFailureResponse {
-                    database_id: database_id.database_id,
+                    database_id: database_id.as_raw_id(),
                 },
             ));
     }
@@ -1176,7 +1176,7 @@ pub(crate) mod barrier_test_utils {
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             PbCreatePartialGraphRequest {
                                 partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
-                                database_id: TEST_DATABASE_ID.database_id,
+                                database_id: TEST_DATABASE_ID.as_raw_id(),
                             },
                         ),
                     ),
@@ -1222,7 +1222,7 @@ pub(crate) mod barrier_test_utils {
                         InjectBarrierRequest {
                             request_id: "".to_owned(),
                             barrier: Some(barrier.to_protobuf()),
-                            database_id: TEST_DATABASE_ID.database_id,
+                            database_id: TEST_DATABASE_ID.as_raw_id(),
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),

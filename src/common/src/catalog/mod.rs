@@ -39,7 +39,7 @@ pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_te
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
-pub use crate::id::TableId;
+pub use crate::id::{DatabaseId, SchemaId, TableId};
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
@@ -146,91 +146,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
 pub type ObjectId = u32;
-
-#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Copy)]
-#[display("{database_id}")]
-pub struct DatabaseId {
-    pub database_id: u32,
-}
-
-impl DatabaseId {
-    pub const fn new(database_id: u32) -> Self {
-        DatabaseId { database_id }
-    }
-
-    pub fn placeholder() -> Self {
-        DatabaseId {
-            database_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-}
-
-impl From<u32> for DatabaseId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for DatabaseId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<DatabaseId> for u32 {
-    fn from(id: DatabaseId) -> Self {
-        id.database_id
-    }
-}
-
-#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq)]
-#[display("{schema_id}")]
-pub struct SchemaId {
-    pub schema_id: u32,
-}
-
-impl SchemaId {
-    pub fn new(schema_id: u32) -> Self {
-        SchemaId { schema_id }
-    }
-
-    pub fn placeholder() -> Self {
-        SchemaId {
-            schema_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-}
-
-impl From<u32> for SchemaId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for SchemaId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<SchemaId> for u32 {
-    fn from(id: SchemaId) -> Self {
-        id.schema_id
-    }
-}
-
-impl TableId {
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        TableId {
-            inner: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn is_placeholder(&self) -> bool {
-        self.inner == OBJECT_ID_PLACEHOLDER
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {

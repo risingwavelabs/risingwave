@@ -510,7 +510,7 @@ impl DatabaseStatus {
             DatabaseStatus::Running(state) => {
                 assert_eq!(database_id, state.database_id);
                 info!(
-                    database_id = database_id.database_id,
+                    %database_id,
                     reset_request_id, "start database reset from Running"
                 );
                 tokio::spawn(SuspendedDatabaseState::new(state, None, completing_futures).reset())
@@ -522,7 +522,7 @@ impl DatabaseStatus {
                 );
                 assert_eq!(database_id, state.inner.database_id);
                 info!(
-                    database_id = database_id.database_id,
+                    %database_id,
                     reset_request_id,
                     suspend_elapsed = ?state.suspend_time.elapsed(),
                     "start database reset after suspended"
@@ -532,7 +532,7 @@ impl DatabaseStatus {
             DatabaseStatus::Resetting(state) => {
                 let prev_request_id = state.reset_request_id;
                 info!(
-                    database_id = database_id.database_id,
+                    %database_id,
                     reset_request_id, prev_request_id, "receive duplicate reset request"
                 );
                 assert!(reset_request_id > prev_request_id);

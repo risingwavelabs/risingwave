@@ -1117,7 +1117,7 @@ impl SessionImpl {
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         if catalog_reader
-            .get_schema_by_id(&database_id, &schema_id)?
+            .get_schema_by_id(database_id, schema_id)?
             .get_function_by_name_args(&function_name, arg_types)
             .is_some()
         {
@@ -1164,7 +1164,7 @@ impl SessionImpl {
             schema.owner(),
             AclMode::Create,
             schema_name,
-            Object::SchemaId(schema.id()),
+            schema.id(),
         )])?;
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
@@ -1204,7 +1204,7 @@ impl SessionImpl {
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        let schema = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let schema = catalog_reader.get_schema_by_id(db_id, schema_id)?;
         let subscription = schema
             .get_subscription_by_name(subscription_name)
             .ok_or_else(|| {
@@ -1240,12 +1240,12 @@ impl SessionImpl {
     pub fn get_table_by_name(
         &self,
         table_name: &str,
-        db_id: u32,
-        schema_id: u32,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
     ) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let table = catalog_reader
-            .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
+            .get_schema_by_id(db_id, schema_id)?
             .get_created_table_by_name(table_name)
             .ok_or_else(|| {
                 Error::new(
@@ -1258,7 +1258,7 @@ impl SessionImpl {
             table.owner(),
             AclMode::Select,
             table_name.to_owned(),
-            Object::TableId(table.id.as_raw_id()),
+            table.id,
         )])?;
 
         Ok(table.clone())
@@ -1485,7 +1485,7 @@ impl SessionManager for SessionManagerImpl {
 
     fn create_dummy_session(
         &self,
-        database_id: u32,
+        database_id: DatabaseId,
         user_id: u32,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let dummy_addr = Address::Tcp(SocketAddr::new(
@@ -1588,14 +1588,14 @@ impl SessionManagerImpl {
 
     fn connect_inner(
         &self,
-        database_id: u32,
+        database_id: DatabaseId,
         user_name: &str,
         peer_addr: AddressRef,
     ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
         let (database_name, database_owner) = {
-            let db = reader.get_database_by_id(&database_id).map_err(|_| {
+            let db = reader.get_database_by_id(database_id).map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("database \"{}\" does not exist", database_id),
@@ -1613,8 +1613,7 @@ impl SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let has_privilege =
-                user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+            let has_privilege = user.has_privilege(database_id, AclMode::Connect);
             if !user.is_super && database_owner != user.id && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,

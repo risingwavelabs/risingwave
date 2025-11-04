@@ -1585,7 +1585,7 @@ mod tests {
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1688,7 +1688,7 @@ mod tests {
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1780,7 +1780,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1908,7 +1908,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2086,7 +2086,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2189,7 +2189,7 @@ mod tests {
             Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2307,7 +2307,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2496,7 +2496,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2696,7 +2696,7 @@ mod tests {
             .collect();
         // Prepare stream executors.
         let source =
-            MockSource::with_messages(messages).into_executor(schema.clone(), PkIndices::new());
+            MockSource::with_messages(messages).into_executor(schema.clone(), StreamKey::new());
 
         let mut materialize_executor = MaterializeExecutor::for_test(
             source,

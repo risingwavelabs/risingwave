@@ -158,10 +158,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
                 // Schedule the command through the barrier system without waiting
                 self.barrier_scheduler
-                    .run_command_no_wait(
-                        risingwave_common::catalog::DatabaseId::new(database_id as u32),
-                        list_finish_command,
-                    )
+                    .run_command_no_wait(database_id, list_finish_command)
                     .context("Failed to schedule ListFinish command")?;
 
                 tracing::info!(%associated_source_id, %table_id, "ListFinish command scheduled successfully");
@@ -217,10 +214,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
                 // Schedule the command through the barrier system without waiting
                 self.barrier_scheduler
-                    .run_command_no_wait(
-                        risingwave_common::catalog::DatabaseId::new(database_id as u32),
-                        load_finish_command,
-                    )
+                    .run_command_no_wait(database_id, load_finish_command)
                     .context("Failed to schedule LoadFinish command")?;
 
                 tracing::info!(%associated_source_id, %associated_source_id, "LoadFinish command scheduled successfully");

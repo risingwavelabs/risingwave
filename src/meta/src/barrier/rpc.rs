@@ -554,7 +554,7 @@ impl DatabaseInitialBarrierCollector {
     }
 
     pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
-        assert_eq!(self.database_id.database_id, resp.database_id);
+        assert_eq!(self.database_id.as_raw_id(), resp.database_id);
         if let Some(creating_job_id) = from_partial_graph_id(resp.partial_graph_id) {
             self.creating_streaming_job_controls
                 .get_mut(&creating_job_id)
@@ -863,7 +863,7 @@ impl ControlStreamManager {
             )?;
             debug!(
                 ?node_to_collect,
-                database_id = database_id.database_id,
+                %database_id,
                 "inject initial barrier"
             );
             node_to_collect
@@ -1060,7 +1060,7 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
-                                        database_id: database_id.database_id,
+                                        database_id: database_id.as_raw_id(),
                                         actor_ids_to_collect,
                                         table_ids_to_sync: table_ids_to_sync
                                             .iter()
@@ -1151,7 +1151,7 @@ impl ControlStreamManager {
                     request: Some(
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             CreatePartialGraphRequest {
-                                database_id: database_id.database_id,
+                                database_id: database_id.as_raw_id(),
                                 partial_graph_id,
                             },
                         ),
@@ -1182,7 +1182,7 @@ impl ControlStreamManager {
                         streaming_control_stream_request::Request::RemovePartialGraph(
                             RemovePartialGraphRequest {
                                 partial_graph_ids: partial_graph_ids.clone(),
-                                database_id: database_id.database_id,
+                                database_id: database_id.as_raw_id(),
                             },
                         ),
                     ),
@@ -1207,7 +1207,7 @@ impl ControlStreamManager {
                     .send(StreamingControlStreamRequest {
                         request: Some(streaming_control_stream_request::Request::ResetDatabase(
                             ResetDatabaseRequest {
-                                database_id: database_id.database_id,
+                                database_id: database_id.as_raw_id(),
                                 reset_request_id,
                             },
                         )),

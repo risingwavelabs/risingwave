@@ -83,7 +83,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                 RwSink {
                     id: sink.id.sink_id as i32,
                     name: sink.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: sink.owner.user_id as i32,
                     connector: sink
                         .properties
@@ -95,7 +95,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     connection_id: sink.connection_id.map(|id| id.connection_id() as i32),
                     definition: sink.create_sql(),
                     acl: get_acl_items(
-                        &Object::SinkId(sink.id.sink_id),
+                        Object::SinkId(sink.id.sink_id),
                         false,
                         &users,
                         username_map,

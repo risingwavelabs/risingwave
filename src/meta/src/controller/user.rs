@@ -529,7 +529,7 @@ impl CatalogController {
     ) -> MetaResult<()> {
         tracing::debug!(
             ?user_ids,
-            database_id,
+            %database_id,
             ?schema_ids,
             ?actions,
             ?object_type,
@@ -542,9 +542,9 @@ impl CatalogController {
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
-        ensure_object_id(ObjectType::Database, database_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, database_id.as_raw_id() as _, &txn).await?;
         for schema_id in &schema_ids {
-            ensure_object_id(ObjectType::Schema, *schema_id, &txn).await?;
+            ensure_object_id(ObjectType::Schema, schema_id.as_raw_id() as _, &txn).await?;
         }
         for grantee in &grantees {
             ensure_user_id(*grantee, &txn).await?;
@@ -749,7 +749,7 @@ mod tests {
     use super::*;
     use crate::manager::MetaSrvEnv;
 
-    const TEST_DATABASE_ID: DatabaseId = 1;
+    const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
     const TEST_ROOT_USER_ID: UserId = 1;
 
     fn make_test_user(name: &str) -> PbUserInfo {
@@ -803,16 +803,9 @@ mod tests {
         let user_1 = mgr.get_user(user_1.user_id).await?;
         assert_eq!(user_1.name, "test_user_1_new".to_owned());
 
-        let conn_with_option = make_privilege(
-            PbObject::DatabaseId(TEST_DATABASE_ID as _),
-            &[PbAction::Connect],
-            true,
-        );
-        let create_without_option = make_privilege(
-            PbObject::DatabaseId(TEST_DATABASE_ID as _),
-            &[PbAction::Create],
-            false,
-        );
+        let conn_with_option = make_privilege(TEST_DATABASE_ID.into(), &[PbAction::Connect], true);
+        let create_without_option =
+            make_privilege(TEST_DATABASE_ID.into(), &[PbAction::Create], false);
         // ROOT grant CONN with grant option to user_1.
         mgr.grant_privilege(
             vec![user_1.user_id],
@@ -852,16 +845,22 @@ mod tests {
 
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 2);
-        assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID as u32));
+        assert!(
+            privilege_1
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID as u32)
+        );
 
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_2.len(), 1);
-        assert!(privilege_2.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].granted_by == user_1.user_id as u32
-            && gp.action_with_opts[0].with_grant_option));
+        assert!(
+            privilege_2
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].granted_by == user_1.user_id as u32
+                    && gp.action_with_opts[0].with_grant_option)
+        );
 
         // revoke privilege for others by non-super user.
         assert!(
@@ -921,9 +920,12 @@ mod tests {
 
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 1);
-        assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].action == PbAction::Connect as i32));
+        assert!(
+            privilege_1
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].action == PbAction::Connect as i32)
+        );
 
         // revoke grant option for referred privilege in cascade mode.
         mgr.revoke_privilege(
@@ -937,16 +939,22 @@ mod tests {
         .await?;
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 1);
-        assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].action == PbAction::Connect as i32
-            && !gp.action_with_opts[0].with_grant_option));
+        assert!(
+            privilege_1
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].action == PbAction::Connect as i32
+                    && !gp.action_with_opts[0].with_grant_option)
+        );
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_2.len(), 1);
-        assert!(privilege_2.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].action == PbAction::Connect as i32
-            && !gp.action_with_opts[0].with_grant_option));
+        assert!(
+            privilege_2
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].action == PbAction::Connect as i32
+                    && !gp.action_with_opts[0].with_grant_option)
+        );
 
         // revoke referred privilege in cascade mode.
         mgr.revoke_privilege(

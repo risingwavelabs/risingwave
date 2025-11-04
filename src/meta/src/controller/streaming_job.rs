@@ -139,12 +139,22 @@ impl CatalogController {
         };
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
-        ensure_object_id(ObjectType::Database, streaming_job.database_id() as _, &txn).await?;
-        ensure_object_id(ObjectType::Schema, streaming_job.schema_id() as _, &txn).await?;
+        ensure_object_id(
+            ObjectType::Database,
+            streaming_job.database_id().as_raw_id() as _,
+            &txn,
+        )
+        .await?;
+        ensure_object_id(
+            ObjectType::Schema,
+            streaming_job.schema_id().as_raw_id() as _,
+            &txn,
+        )
+        .await?;
         check_relation_name_duplicate(
             &streaming_job.name(),
-            streaming_job.database_id() as _,
-            streaming_job.schema_id() as _,
+            streaming_job.database_id(),
+            streaming_job.schema_id(),
             &txn,
         )
         .await?;
@@ -187,8 +197,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id as _),
-                    Some(table.schema_id as _),
+                    Some(table.database_id.into()),
+                    Some(table.schema_id.into()),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -216,8 +226,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Sink,
                     sink.owner as _,
-                    Some(sink.database_id as _),
-                    Some(sink.schema_id as _),
+                    Some(sink.database_id.into()),
+                    Some(sink.schema_id.into()),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -234,8 +244,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id as _),
-                    Some(table.schema_id as _),
+                    Some(table.database_id.into()),
+                    Some(table.schema_id.into()),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -249,8 +259,8 @@ impl CatalogController {
                         &txn,
                         ObjectType::Source,
                         src.owner as _,
-                        Some(src.database_id as _),
-                        Some(src.schema_id as _),
+                        Some(src.database_id.into()),
+                        Some(src.schema_id.into()),
                     )
                     .await?;
                     src.id = src_obj.oid as _;
@@ -272,8 +282,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Index,
                     index.owner as _,
-                    Some(index.database_id as _),
-                    Some(index.schema_id as _),
+                    Some(index.database_id.into()),
+                    Some(index.schema_id.into()),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -304,8 +314,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Source,
                     src.owner as _,
-                    Some(src.database_id as _),
-                    Some(src.schema_id as _),
+                    Some(src.database_id.into()),
+                    Some(src.schema_id.into()),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -377,8 +387,8 @@ impl CatalogController {
                 &txn,
                 ObjectType::Table,
                 table.owner as _,
-                Some(table.database_id as _),
-                Some(table.schema_id as _),
+                Some(table.database_id.into()),
+                Some(table.schema_id.into()),
             )
             .await?
             .oid;

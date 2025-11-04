@@ -422,8 +422,8 @@ where
         .inner_join(Object)
         .filter(
             object::Column::DatabaseId
-                .eq(pb_function.database_id as DatabaseId)
-                .and(object::Column::SchemaId.eq(pb_function.schema_id as SchemaId))
+                .eq(DatabaseId::new(pb_function.database_id))
+                .and(object::Column::SchemaId.eq(SchemaId::new(pb_function.schema_id)))
                 .and(function::Column::Name.eq(&pb_function.name))
                 .and(
                     function::Column::ArgTypes
@@ -451,8 +451,8 @@ where
         .inner_join(Object)
         .filter(
             object::Column::DatabaseId
-                .eq(pb_connection.database_id as DatabaseId)
-                .and(object::Column::SchemaId.eq(pb_connection.schema_id as SchemaId))
+                .eq(DatabaseId::new(pb_connection.database_id))
+                .and(object::Column::SchemaId.eq(SchemaId::new(pb_connection.schema_id)))
                 .and(connection::Column::Name.eq(&pb_connection.name)),
         )
         .count(db)
@@ -475,8 +475,8 @@ where
         .inner_join(Object)
         .filter(
             object::Column::DatabaseId
-                .eq(pb_secret.database_id as DatabaseId)
-                .and(object::Column::SchemaId.eq(pb_secret.schema_id as SchemaId))
+                .eq(pb_secret.database_id)
+                .and(object::Column::SchemaId.eq(pb_secret.schema_id))
                 .and(secret::Column::Name.eq(&pb_secret.name)),
         )
         .count(db)
@@ -499,8 +499,8 @@ where
         .inner_join(Object)
         .filter(
             object::Column::DatabaseId
-                .eq(pb_subscription.database_id as DatabaseId)
-                .and(object::Column::SchemaId.eq(pb_subscription.schema_id as SchemaId))
+                .eq(pb_subscription.database_id)
+                .and(object::Column::SchemaId.eq(pb_subscription.schema_id))
                 .and(subscription::Column::Name.eq(&pb_subscription.name)),
         )
         .count(db)
@@ -1534,47 +1534,47 @@ pub(crate) fn build_object_group_for_delete(
             ObjectType::Schema => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Schema(PbSchema {
                     id: obj.oid as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Table => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Table(PbTable {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Source => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Source(PbSource {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Sink => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Sink(PbSink {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Subscription => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Subscription(PbSubscription {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::View => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::View(PbView {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
@@ -1582,16 +1582,16 @@ pub(crate) fn build_object_group_for_delete(
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Index(PbIndex {
                         id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
+                        schema_id: obj.schema_id.unwrap().into(),
+                        database_id: obj.database_id.unwrap().into(),
                         ..Default::default()
                     })),
                 });
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Table(PbTable {
                         id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
+                        schema_id: obj.schema_id.unwrap().into(),
+                        database_id: obj.database_id.unwrap().into(),
                         ..Default::default()
                     })),
                 });
@@ -1599,24 +1599,24 @@ pub(crate) fn build_object_group_for_delete(
             ObjectType::Function => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Function(PbFunction {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Connection => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Connection(PbConnection {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Secret => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Secret(PbSecret {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
@@ -1735,7 +1735,7 @@ pub async fn rename_relation(
     Ok((to_update_relations, old_name))
 }
 
-pub async fn get_database_resource_group<C>(txn: &C, database_id: ObjectId) -> MetaResult<String>
+pub async fn get_database_resource_group<C>(txn: &C, database_id: DatabaseId) -> MetaResult<String>
 where
     C: ConnectionTrait,
 {
