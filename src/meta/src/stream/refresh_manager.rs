@@ -20,7 +20,6 @@ use parking_lot::Mutex;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::table::RefreshState;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
@@ -147,7 +146,7 @@ impl RefreshManager {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(table_id.as_raw_id() as _)
+            .get_object_database_id(table_id)
             .await?;
 
         // load actor info for refresh
@@ -275,11 +274,7 @@ impl RefreshManager {
             )));
         }
 
-        if table.optional_associated_source_id
-            != Some(OptionalAssociatedSourceId::AssociatedSourceId(
-                associated_source_id.as_raw_id(),
-            ))
-        {
+        if table.optional_associated_source_id != Some(associated_source_id.into()) {
             return Err(MetaError::invalid_parameter(format!(
                 "Table '{}' is not associated with source '{}'. table.optional_associated_source_id: {:?}",
                 table.name, associated_source_id, table.optional_associated_source_id

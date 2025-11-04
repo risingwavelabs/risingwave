@@ -130,7 +130,7 @@ impl From<PbSink> for ActiveModel {
             sink_type: Set(sink_type.into()),
             properties: Set(pb_sink.properties.into()),
             definition: Set(pb_sink.definition),
-            connection_id: Set(pb_sink.connection_id.map(|x| x as _)),
+            connection_id: Set(pb_sink.connection_id),
             db_name: Set(pb_sink.db_name),
             sink_from_name: Set(pb_sink.sink_from_name),
             sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),

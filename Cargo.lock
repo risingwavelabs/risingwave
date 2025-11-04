@@ -12642,6 +12642,7 @@ dependencies = [
  "fs-err",
  "madsim-tonic",
  "madsim-tonic-build",
+ "paste",
  "pbjson",
  "pbjson-build",
  "prost 0.13.4",

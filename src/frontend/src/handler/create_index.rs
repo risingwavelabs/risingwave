@@ -450,7 +450,7 @@ pub(crate) fn gen_create_index_plan(
         };
 
     let index_prost = PbIndex {
-        id: IndexId::placeholder().index_id,
+        id: IndexId::placeholder(),
         schema_id: index_schema_id,
         database_id: index_database_id,
         name: index_table_name,

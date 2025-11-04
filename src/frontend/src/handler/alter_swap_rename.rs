@@ -16,8 +16,6 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
-use risingwave_pb::ddl_service::alter_swap_rename_request;
-use risingwave_pb::ddl_service::alter_swap_rename_request::ObjectNameSwapPair;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::Binder;
@@ -99,10 +97,7 @@ pub async fn handle_swap_rename(
 
             check_swap_rename_privilege(&session, src_table.owner, target_table.owner)?;
 
-            alter_swap_rename_request::Object::Table(ObjectNameSwapPair {
-                src_object_id: src_table.id.as_raw_id(),
-                dst_object_id: target_table.id.as_raw_id(),
-            })
+            (src_table.id, target_table.id).into()
         }
         StatementType::ALTER_VIEW => {
             let catalog_reader = session.env().catalog_reader().read_guard();
@@ -112,10 +107,7 @@ pub async fn handle_swap_rename(
                 catalog_reader.get_view_by_name(db_name, target_schema_path, &target_obj_name)?;
             check_swap_rename_privilege(&session, src_view.owner, target_view.owner)?;
 
-            alter_swap_rename_request::Object::View(ObjectNameSwapPair {
-                src_object_id: src_view.id,
-                dst_object_id: target_view.id,
-            })
+            (src_view.id, target_view.id).into()
         }
         StatementType::ALTER_SOURCE => {
             let catalog_reader = session.env().catalog_reader().read_guard();
@@ -125,10 +117,7 @@ pub async fn handle_swap_rename(
                 catalog_reader.get_source_by_name(db_name, target_schema_path, &target_obj_name)?;
             check_swap_rename_privilege(&session, src_source.owner, target_source.owner)?;
 
-            alter_swap_rename_request::Object::Source(ObjectNameSwapPair {
-                src_object_id: src_source.id.as_raw_id(),
-                dst_object_id: target_source.id.as_raw_id(),
-            })
+            (src_source.id, target_source.id).into()
         }
         StatementType::ALTER_SINK => {
             let catalog_reader = session.env().catalog_reader().read_guard();
@@ -145,10 +134,7 @@ pub async fn handle_swap_rename(
                 target_sink.owner.user_id,
             )?;
 
-            alter_swap_rename_request::Object::Sink(ObjectNameSwapPair {
-                src_object_id: src_sink.id.as_raw_id(),
-                dst_object_id: target_sink.id.as_raw_id(),
-            })
+            (src_sink.id, target_sink.id).into()
         }
         StatementType::ALTER_SUBSCRIPTION => {
             let catalog_reader = session.env().catalog_reader().read_guard();
@@ -165,10 +151,7 @@ pub async fn handle_swap_rename(
                 target_subscription.owner.user_id,
             )?;
 
-            alter_swap_rename_request::Object::Subscription(ObjectNameSwapPair {
-                src_object_id: src_subscription.id.subscription_id,
-                dst_object_id: target_subscription.id.subscription_id,
-            })
+            (src_subscription.id, target_subscription.id).into()
         }
         _ => {
             unreachable!("handle_swap_rename: unsupported statement type")

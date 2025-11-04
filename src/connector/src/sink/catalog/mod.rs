@@ -100,7 +100,7 @@ pub struct SinkFormatDesc {
     pub options: BTreeMap<String, String>,
     pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub key_encode: Option<SinkEncode>,
-    pub connection_id: Option<u32>,
+    pub connection_id: Option<ConnectionId>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
@@ -384,7 +384,7 @@ impl SinkCatalog {
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
-            connection_id: self.connection_id.map(|id| id.into()),
+            connection_id: self.connection_id,
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             db_name: self.db_name.clone(),
@@ -496,7 +496,7 @@ impl From<PbSink> for SinkCatalog {
             owner: pb.owner.into(),
             sink_type: SinkType::from_proto(sink_type),
             format_desc,
-            connection_id: pb.connection_id.map(ConnectionId),
+            connection_id: pb.connection_id,
             created_at_epoch: pb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
             db_name: pb.db_name,

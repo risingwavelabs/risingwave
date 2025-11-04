@@ -34,7 +34,7 @@ use risingwave_meta::stream::{
     ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy, ThrottleConfig,
 };
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
-use risingwave_meta_model::{ObjectId, StreamingParallelism};
+use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
@@ -265,7 +265,7 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateSecretResponse>, Status> {
         let req = request.into_inner();
         let pb_secret = Secret {
-            id: 0,
+            id: 0.into(),
             name: req.get_name().clone(),
             database_id: req.get_database_id(),
             value: req.get_value().clone(),
@@ -288,7 +288,7 @@ impl DdlService for DdlServiceImpl {
         let secret_id = req.get_secret_id();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSecret(secret_id as _))
+            .run_command(DdlCommand::DropSecret(secret_id))
             .await?;
 
         Ok(Response::new(DropSecretResponse { version }))
@@ -416,11 +416,7 @@ impl DdlService for DdlServiceImpl {
 
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
-        let dependencies = req
-            .get_dependencies()
-            .iter()
-            .map(|id| *id as ObjectId)
-            .collect();
+        let dependencies = req.get_dependencies().iter().copied().collect();
 
         let stream_job = StreamingJob::Sink(sink);
 
@@ -492,7 +488,7 @@ impl DdlService for DdlServiceImpl {
         let subscription_id = request.subscription_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = DdlCommand::DropSubscription(subscription_id as _, drop_mode);
+        let command = DdlCommand::DropSubscription(subscription_id, drop_mode);
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -512,11 +508,7 @@ impl DdlService for DdlServiceImpl {
         let mview = req.get_materialized_view()?.clone();
         let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
-        let dependencies = req
-            .get_dependencies()
-            .iter()
-            .map(|id| *id as ObjectId)
-            .collect();
+        let dependencies = req.get_dependencies().iter().copied().collect();
 
         let stream_job = StreamingJob::MaterializedView(mview);
         let version = self
@@ -601,7 +593,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
-                job_id: StreamingJobId::Index(index_id as _),
+                job_id: StreamingJobId::Index(index_id),
                 drop_mode,
             })
             .await?;
@@ -639,7 +631,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropFunction(
-                request.function_id as _,
+                request.function_id,
                 DropMode::from_request_setting(request.cascade),
             ))
             .await?;
@@ -656,11 +648,7 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
         let job_type = request.get_job_type().unwrap_or_default();
-        let dependencies = request
-            .get_dependencies()
-            .iter()
-            .map(|id| *id as ObjectId)
-            .collect();
+        let dependencies = request.get_dependencies().iter().copied().collect();
         let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
@@ -718,7 +706,7 @@ impl DdlService for DdlServiceImpl {
         let dependencies = req
             .get_dependencies()
             .iter()
-            .map(|id| *id as ObjectId)
+            .copied()
             .collect::<HashSet<_>>();
 
         let version = self
@@ -741,7 +729,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropView(view_id as _, drop_mode))
+            .run_command(DdlCommand::DropView(view_id, drop_mode))
             .await?;
         Ok(Response::new(DropViewResponse {
             status: None,
@@ -882,7 +870,7 @@ impl DdlService for DdlServiceImpl {
             }
             create_connection_request::Payload::ConnectionParams(params) => {
                 let pb_connection = Connection {
-                    id: 0,
+                    id: 0.into(),
                     schema_id: req.schema_id,
                     database_id: req.database_id,
                     name: req.name,
@@ -922,10 +910,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(
-                req.connection_id as _,
-                drop_mode,
-            ))
+            .run_command(DdlCommand::DropConnection(req.connection_id, drop_mode))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
@@ -1539,8 +1524,8 @@ impl DdlService for DdlServiceImpl {
             });
         }
 
-        let table_id = table_catalog.id.as_raw_id() as ObjectId;
-        let dependencies = HashSet::from_iter([table_id]);
+        let table_id = table_catalog.id;
+        let dependencies = HashSet::from_iter([table_id.into(), schema_id.into()]);
         let stream_job = StreamingJob::Sink(sink);
         let res = self
             .ddl_controller
@@ -1557,7 +1542,7 @@ impl DdlService for DdlServiceImpl {
             let _ = self
                 .ddl_controller
                 .run_command(DdlCommand::DropStreamingJob {
-                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
+                    job_id: StreamingJobId::Table(None, table_id),
                     drop_mode: DropMode::Cascade,
                 })
                 .await
@@ -1607,7 +1592,7 @@ impl DdlService for DdlServiceImpl {
             let _ = self
                 .ddl_controller
                 .run_command(DdlCommand::DropStreamingJob {
-                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
+                    job_id: StreamingJobId::Table(None, table_id),
                     drop_mode: DropMode::Cascade,
                 })
                 .await
