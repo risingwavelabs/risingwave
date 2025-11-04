@@ -76,7 +76,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 let state_table = if let Ok(table) = node.get_state_table() {
                     Some(
                         StateTableBuilder::new(table, state_store.clone(), vnodes.clone())
-                            .enable_preload_all_rows_by_config(&params.actor_context.config)
+                            .enable_preload_all_rows_by_config(&params.config)
                             .build()
                             .await,
                     )
@@ -113,7 +113,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 let state_table = node.get_state_table().unwrap();
                 let state_table =
                     StateTableBuilder::new(state_table, state_store.clone(), vnodes.clone())
-                        .enable_preload_all_rows_by_config(&params.actor_context.config)
+                        .enable_preload_all_rows_by_config(&params.config)
                         .build()
                         .await;
 
@@ -180,7 +180,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
 
                 let state_table = node.get_state_table()?;
                 let state_table = StateTableBuilder::new(state_table, state_store.clone(), vnodes)
-                    .enable_preload_all_rows_by_config(&params.actor_context.config)
+                    .enable_preload_all_rows_by_config(&params.config)
                     .build()
                     .await;
 

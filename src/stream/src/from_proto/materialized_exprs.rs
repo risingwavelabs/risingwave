@@ -41,7 +41,7 @@ impl ExecutorBuilder for MaterializedExprsExecutorBuilder {
 
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
-            .enable_preload_all_rows_by_config(&params.actor_context.config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
 

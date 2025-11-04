@@ -59,7 +59,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
                 .expect("vnodes not set for EOWC over window"),
         ));
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
-            .enable_preload_all_rows_by_config(&params.actor_context.config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let exec = OverWindowExecutor::new(OverWindowExecutorArgs {

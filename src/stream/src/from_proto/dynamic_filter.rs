@@ -51,7 +51,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         }
 
         let state_table_r = StateTableBuilder::new(node.get_right_table()?, store.clone(), None)
-            .enable_preload_all_rows_by_config(&params.actor_context.config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
 
@@ -60,7 +60,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
 
         let exec = if cleaned_by_watermark {
             let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
-                .enable_preload_all_rows_by_config(&params.actor_context.config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
 
@@ -81,7 +81,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             .boxed()
         } else {
             let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
-                .enable_preload_all_rows_by_config(&params.actor_context.config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
 

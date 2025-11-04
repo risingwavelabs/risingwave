@@ -136,7 +136,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                     );
                     Some(
                         StateTableBuilder::new(memo_table, store.clone(), Some(vnodes.clone()))
-                            .enable_preload_all_rows_by_config(&params.actor_context.config)
+                            .enable_preload_all_rows_by_config(&params.config)
                             .build()
                             .await,
                     )

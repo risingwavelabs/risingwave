@@ -82,12 +82,12 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
             .collect_vec();
 
         let state_table_l = StateTableBuilder::new(table_l, store.clone(), Some(vnodes.clone()))
-            .enable_preload_all_rows_by_config(&params.actor_context.config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
 
         let state_table_r = StateTableBuilder::new(table_r, store.clone(), Some(vnodes.clone()))
-            .enable_preload_all_rows_by_config(&params.actor_context.config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
 

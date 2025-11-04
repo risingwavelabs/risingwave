@@ -52,14 +52,14 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             store.clone(),
             vnodes.clone(),
         )
-        .enable_preload_all_rows_by_config(&params.actor_context.config)
+        .enable_preload_all_rows_by_config(&params.config)
         .build()
         .await;
 
         // Create progress table for tracking backfill progress
         let progress_table =
             StateTableBuilder::new(node.get_progress_table().unwrap(), store, vnodes)
-                .enable_preload_all_rows_by_config(&params.actor_context.config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
 
