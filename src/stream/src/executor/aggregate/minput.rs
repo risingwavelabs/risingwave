@@ -34,7 +34,7 @@ use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
 use crate::common::StateTableColumnMapping;
 use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
-use crate::executor::{StreamExecutorResult, StreamKey};
+use crate::executor::{StreamExecutorResult, StreamKeyRef};
 
 /// Aggregation state as a materialization of input chunks.
 ///
@@ -71,7 +71,7 @@ impl MaterializedInputState {
     pub fn new(
         version: PbAggNodeVersion,
         agg_call: &AggCall,
-        stream_key: &StreamKey,
+        stream_key: StreamKeyRef<'_>,
         order_columns: &[ColumnOrder],
         col_mapping: &StateTableColumnMapping,
         extreme_cache_size: usize,
@@ -262,7 +262,7 @@ impl MaterializedInputState {
 /// Copied from old code before <https://github.com/risingwavelabs/risingwave/commit/0020507edbc4010b20aeeb560c7bea9159315602>.
 fn generate_order_columns_before_version_issue_13465(
     agg_call: &AggCall,
-    stream_key: &StreamKey,
+    stream_key: StreamKeyRef<'_>,
     arg_col_indices: &[usize],
 ) -> (Vec<usize>, Vec<OrderType>) {
     let (mut order_col_indices, mut order_types) = if matches!(

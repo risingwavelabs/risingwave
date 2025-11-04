@@ -32,7 +32,7 @@ use risingwave_storage::StateStore;
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
 use crate::consistency::consistency_panic;
-use crate::executor::StreamKey;
+use crate::executor::StreamKeyRef;
 use crate::executor::error::StreamExecutorResult;
 
 #[derive(Debug)]
@@ -265,7 +265,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         intermediate_state_table: &StateTable<S>,
-        stream_key: &StreamKey,
+        stream_key: StreamKeyRef<'_>,
         row_count_index: usize,
         emit_on_window_close: bool,
         extreme_cache_size: usize,
@@ -324,7 +324,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         inter_states: &OwnedRow,
-        stream_key: &StreamKey,
+        stream_key: StreamKeyRef<'_>,
         row_count_index: usize,
         emit_on_window_close: bool,
         extreme_cache_size: usize,

@@ -27,7 +27,7 @@ use super::minput::MaterializedInputState;
 use crate::common::StateTableColumnMapping;
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregate::agg_group::{AggStateCacheStats, GroupKey};
-use crate::executor::{StreamExecutorResult, StreamKey};
+use crate::executor::{StreamExecutorResult, StreamKeyRef};
 
 /// Represents the persistent storage of aggregation state.
 pub enum AggStateStorage<S: StateStore> {
@@ -73,7 +73,7 @@ impl AggState {
         agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
         encoded_state: Option<&Datum>,
-        stream_key: &StreamKey,
+        stream_key: StreamKeyRef<'_>,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
