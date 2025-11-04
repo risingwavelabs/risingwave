@@ -9592,7 +9592,7 @@ dependencies = [
  "rsa",
  "rustls 0.21.11",
  "rustls-native-certs 0.6.3",
- "rustls-pemfile 1.0.4",
+ "rustls-pemfile 2.2.0",
  "serde",
  "serde_json",
  "socket2 0.6.0",
