@@ -254,28 +254,6 @@ def _(outer_panels: Panels):
                 [
                     panels.target(
                         f"sum by(fragment_id) ( \
-                            label_replace( \
-                                rate({metric('state_store_get_duration_sum')}[$__rate_interval]), \
-                                'operation', 'get', '', '' \
-                            ) \
-                            * on(table_id) group_left(fragment_id) table_info \
-                            or \
-                            label_replace( \
-                                rate({metric('state_store_iter_init_duration_sum')}[$__rate_interval]), \
-                                'operation', 'iter_init', '', '' \
-                            ) \
-                            * on(table_id) group_left(fragment_id) table_info \
-                            or \
-                            label_replace( \
-                                rate({metric('state_store_iter_scan_duration_sum')}[$__rate_interval]), \
-                                'operation', 'iter_scan', '', '' \
-                            ) \
-                            * on(table_id) group_left(fragment_id) table_info \
-                        )",
-                        "total_io_rate: fragment={{fragment_id}}",
-                    ),
-                    panels.target(
-                        f"sum by(fragment_id) ( \
                             rate({metric('state_store_get_duration_sum')}[$__rate_interval]) \
                             * on(table_id) group_left(fragment_id) table_info \
                         )",
