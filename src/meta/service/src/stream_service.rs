@@ -536,7 +536,9 @@ impl StreamManagerService for StreamServiceImpl {
             self.barrier_scheduler.clone(),
         );
 
-        let response = refresh_manager.refresh_table(req).await?;
+        let response = refresh_manager
+            .refresh_table(req, &self.env.shared_actor_info)
+            .await?;
 
         Ok(Response::new(response))
     }

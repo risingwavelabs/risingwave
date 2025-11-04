@@ -52,7 +52,7 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        associated_source_id: u32,
+        associated_source_id: TableId,
     },
     RefreshFinished {
         epoch: EpochPair,
@@ -190,7 +190,7 @@ impl LocalBarrierManager {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        associated_source_id: u32,
+        associated_source_id: TableId,
     ) {
         self.send_event(LocalBarrierEvent::ReportSourceLoadFinished {
             epoch,

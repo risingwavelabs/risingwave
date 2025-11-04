@@ -1053,7 +1053,7 @@ impl DatabaseManagedBarrierState {
         epoch: EpochPair,
         actor_id: ActorId,
         _table_id: TableId,
-        associated_source_id: u32,
+        associated_source_id: TableId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
@@ -1064,11 +1064,11 @@ impl DatabaseManagedBarrierState {
                 .load_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
-                .insert(associated_source_id);
+                .insert(associated_source_id.as_raw_id());
         } else {
             warn!(
                 ?epoch,
-                actor_id, associated_source_id, "ignore source load finished"
+                %actor_id, %associated_source_id, "ignore source load finished"
             );
         }
     }

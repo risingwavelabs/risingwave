@@ -174,8 +174,8 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                         self.barrier_manager.report_source_load_finished(
                                             barrier.epoch,
                                             self.actor_ctx.id,
-                                            core.source_id.table_id(),
-                                            core.source_id.table_id(),
+                                            core.source_id,
+                                            core.source_id,
                                         );
 
                                         // reset flags

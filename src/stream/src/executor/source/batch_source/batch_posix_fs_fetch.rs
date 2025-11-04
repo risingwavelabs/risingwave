@@ -349,7 +349,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     epoch,
                                     actor_ctx.id,
                                     core.source_id,
-                                    core.source_id.as_raw_id(),
+                                    core.source_id,
                                 );
                                 // Reset the flag to avoid duplicate reports
                                 list_finished = false;
