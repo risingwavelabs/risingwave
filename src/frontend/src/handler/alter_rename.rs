@@ -58,10 +58,7 @@ pub async fn handle_rename_table(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::TableId(table_id.as_raw_id()),
-            &new_table_name,
-        )
+        .alter_name(table_id.into(), &new_table_name)
         .await?;
 
     let stmt_type = match table_type {
@@ -289,10 +286,7 @@ pub async fn handle_rename_schema(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::SchemaId(schema_id.into()),
-            &new_schema_name,
-        )
+        .alter_name(schema_id.into(), &new_schema_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SCHEMA))
@@ -340,10 +334,7 @@ pub async fn handle_rename_database(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::DatabaseId(database_id.into()),
-            &new_database_name,
-        )
+        .alter_name(database_id.into(), &new_database_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_DATABASE))

@@ -201,16 +201,35 @@ impl TableId {
     }
 }
 
-macro_rules! impl_into_grant_object {
-    ($type_name:ident) => {
-        impl From<$type_name> for risingwave_pb::user::grant_privilege::Object {
-            fn from(value: $type_name) -> Self {
-                risingwave_pb::user::grant_privilege::Object::$type_name(value.inner)
+macro_rules! impl_into_object {
+    ($mod_prefix:ty, $($type_name:ident),+) => {
+        $(
+            impl From<$type_name> for $mod_prefix {
+                fn from(value: $type_name) -> Self {
+                    <$mod_prefix>::$type_name(value.inner)
+                }
             }
-        }
+        )+
     };
 }
 
-impl_into_grant_object!(DatabaseId);
-impl_into_grant_object!(TableId);
-impl_into_grant_object!(SchemaId);
+impl_into_object!(
+    risingwave_pb::user::grant_privilege::Object,
+    DatabaseId,
+    TableId,
+    SchemaId
+);
+
+impl_into_object!(
+    risingwave_pb::ddl_service::alter_name_request::Object,
+    DatabaseId,
+    TableId,
+    SchemaId
+);
+
+impl_into_object!(
+    risingwave_pb::ddl_service::alter_owner_request::Object,
+    DatabaseId,
+    TableId,
+    SchemaId
+);

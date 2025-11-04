@@ -99,7 +99,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&table.owner)?;
-                    Object::TableId(table.id.as_raw_id())
+                    table.id.into()
                 }
                 StatementType::ALTER_VIEW => {
                     let (view, schema_name) =
@@ -170,7 +170,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&database.owner)?;
-                    Object::DatabaseId(database.id().into())
+                    database.id().into()
                 }
                 StatementType::ALTER_SCHEMA => {
                     let schema =
@@ -180,7 +180,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&schema.owner)?;
-                    Object::SchemaId(schema.id().into())
+                    schema.id().into()
                 }
                 StatementType::ALTER_CONNECTION => {
                     let (connection, schema_name) = catalog_reader.get_connection_by_name(
