@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::{Bytes, BytesMut};
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
@@ -109,12 +109,12 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     block_metas: Vec<BlockMeta>,
 
     /// `table_id` of added keys.
-    table_ids: BTreeSet<u32>,
+    table_ids: BTreeSet<TableId>,
     last_full_key: Vec<u8>,
     /// Buffer for encoded key and value to avoid allocation.
     raw_key: BytesMut,
     raw_value: BytesMut,
-    last_table_id: Option<u32>,
+    last_table_id: Option<TableId>,
     sst_object_id: HummockSstableObjectId,
 
     /// Per table stats.
@@ -136,7 +136,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         sstable_id: u64,
         writer: W,
         options: SstableBuilderOptions,
-        table_id_to_vnode: HashMap<StateTableId, usize>,
+        table_id_to_vnode: HashMap<u32, usize>,
         table_id_to_watermark_serde: HashMap<
             u32,
             Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
@@ -144,8 +144,14 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
     ) -> Self {
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
-            table_id_to_vnode,
-            table_id_to_watermark_serde,
+            table_id_to_vnode
+                .into_iter()
+                .map(|(table_id, v)| (table_id.into(), v))
+                .collect(),
+            table_id_to_watermark_serde
+                .into_iter()
+                .map(|(table_id, v)| (table_id.into(), v))
+                .collect(),
         ));
 
         Self::new(
@@ -216,7 +222,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         largest_key: Vec<u8>,
         mut meta: BlockMeta,
     ) -> HummockResult<bool> {
-        let table_id = smallest_key.user_key.table_id.table_id;
+        let table_id = smallest_key.user_key.table_id;
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             if !self.block_builder.is_empty() {
                 // Try to finish the previous `Block`` when the `table_id` is switched, making sure that the data in the `Block` doesn't span two `table_ids`.
@@ -298,7 +304,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             || table_value_len > large_value_len
             || table_key_len + table_value_len > large_key_value_len
         {
-            let table_id = full_key.user_key.table_id.table_id();
+            let table_id = full_key.user_key.table_id.as_raw_id();
             tracing::warn!(
                 "A large key/value (table_id={}, key len={}, value len={}, epoch={}, spill offset={}) is added to block",
                 table_id,
@@ -314,7 +320,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         value.encode(&mut self.raw_value);
         let is_new_user_key = self.last_full_key.is_empty()
             || !user_key(&self.raw_key).eq(user_key(&self.last_full_key));
-        let table_id = full_key.user_key.table_id.table_id();
+        let table_id = full_key.user_key.table_id;
         let is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
         let current_block_size = self.current_block_size();
         let is_block_full = current_block_size >= self.options.block_capacity
@@ -365,7 +371,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             });
         }
 
-        let table_id = full_key.user_key.table_id.table_id();
+        let table_id = full_key.user_key.table_id.as_raw_id();
         let mut extract_key = user_key(&self.raw_key);
         extract_key = self.compaction_catalog_agent_ref.extract(extract_key);
         // add bloom_filter check
@@ -556,12 +562,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         if !meta.block_metas.is_empty() {
             // fill total_compressed_size
-            let mut last_table_id = meta.block_metas[0].table_id().table_id();
+            let mut last_table_id = meta.block_metas[0].table_id();
             let mut last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
             for block_meta in &meta.block_metas {
                 let block_table_id = block_meta.table_id();
-                if last_table_id != block_table_id.table_id() {
-                    last_table_id = block_table_id.table_id();
+                if last_table_id != block_table_id {
+                    last_table_id = block_table_id;
                     last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
                 }
 
@@ -867,19 +873,26 @@ pub(super) mod tests {
             .clone()
             .create_sst_writer(object_id, writer_opts);
         let mut filter = MultiFilterKeyExtractor::default();
-        filter.register(1, FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor));
         filter.register(
-            2,
+            1.into(),
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor),
+        );
+        filter.register(
+            2.into(),
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
         );
-        filter.register(3, FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor));
+        filter.register(
+            3.into(),
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor),
+        );
 
         let table_id_to_vnode = HashMap::from_iter(vec![
-            (1, VirtualNode::COUNT_FOR_TEST),
-            (2, VirtualNode::COUNT_FOR_TEST),
-            (3, VirtualNode::COUNT_FOR_TEST),
+            (1.into(), VirtualNode::COUNT_FOR_TEST),
+            (2.into(), VirtualNode::COUNT_FOR_TEST),
+            (3.into(), VirtualNode::COUNT_FOR_TEST),
         ]);
-        let table_id_to_watermark_serde = HashMap::from_iter(vec![(1, None), (2, None), (3, None)]);
+        let table_id_to_watermark_serde =
+            HashMap::from_iter(vec![(1.into(), None), (2.into(), None), (3.into(), None)]);
 
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(filter),

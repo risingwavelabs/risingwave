@@ -335,7 +335,7 @@ impl HummockStorageReadSnapshot {
         let meta_client = self.hummock_meta_client.clone();
         let fetch = async move {
             let pb_version = meta_client
-                .get_version_by_epoch(epoch, table_id.table_id())
+                .get_version_by_epoch(epoch, table_id.as_raw_id())
                 .await
                 .inspect_err(|e| tracing::error!("{}", e.to_report_string()))
                 .map_err(|e| HummockError::meta_error(e.to_report_string()))?;
@@ -345,7 +345,7 @@ impl HummockStorageReadSnapshot {
         };
         let version = self
             .simple_time_travel_version_cache
-            .get_or_insert(table_id.table_id, epoch, fetch)
+            .get_or_insert(table_id, epoch, fetch)
             .await?;
         Ok(version)
     }

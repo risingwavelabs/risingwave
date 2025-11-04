@@ -52,7 +52,7 @@ pub enum HummockErrorInner {
     ReadCurrentEpoch,
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}")]
     ExpiredEpoch {
-        table_id: u32,
+        table_id: TableId,
         safe_epoch: u64,
         epoch: u64,
     },
@@ -121,7 +121,7 @@ impl HummockError {
 
     pub fn expired_epoch(table_id: TableId, safe_epoch: u64, epoch: u64) -> HummockError {
         HummockErrorInner::ExpiredEpoch {
-            table_id: table_id.table_id,
+            table_id,
             safe_epoch,
             epoch,
         }

@@ -1257,7 +1257,7 @@ impl SessionImpl {
             table.owner(),
             AclMode::Select,
             table_name.to_owned(),
-            Object::TableId(table.id.table_id()),
+            Object::TableId(table.id.as_raw_id()),
         )])?;
 
         Ok(table.clone())
@@ -1288,7 +1288,7 @@ impl SessionImpl {
 
     pub fn list_change_log_epochs(
         &self,
-        table_id: u32,
+        table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
@@ -1637,7 +1637,10 @@ impl SessionManagerImpl {
                             salt,
                         }
                     } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                        UserAuthenticator::OAuth(auth_info.metadata.clone())
+                        UserAuthenticator::OAuth {
+                            metadata: auth_info.metadata.clone(),
+                            cluster_id: self.env.meta_client().cluster_id().to_owned(),
+                        }
                     } else {
                         return Err(Box::new(Error::new(
                             ErrorKind::Unsupported,

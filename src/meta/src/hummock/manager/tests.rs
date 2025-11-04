@@ -98,7 +98,7 @@ fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> Sstabl
             right: full_key_r.into(),
             right_exclusive: false,
         },
-        table_ids,
+        table_ids: table_ids.into_iter().map(Into::into).collect(),
         object_id: sst_id.into(),
         min_epoch: 20,
         max_epoch: 20,
@@ -1279,7 +1279,7 @@ async fn test_version_stats() {
 
         total_compressed_size: 1024 * 1024,
     };
-    let ssts_with_table_ids = vec![vec![1, 2], vec![2, 3]];
+    let ssts_with_table_ids = vec![vec![1.into(), 2.into()], vec![2.into(), 3.into()]];
     let sst_ids = get_sst_ids(&hummock_manager, ssts_with_table_ids.len() as _).await;
     let ssts = ssts_with_table_ids
         .into_iter()
@@ -1343,7 +1343,7 @@ async fn test_version_stats() {
     // compact_task.task_status = TaskStatus::Success as _;
     let compact_table_stats_change = TableStatsMap::from([
         (
-            2,
+            2.into(),
             TableStats {
                 total_key_size: -1000,
                 total_value_size: -100,
@@ -1352,7 +1352,7 @@ async fn test_version_stats() {
             },
         ),
         (
-            3,
+            3.into(),
             TableStats {
                 total_key_size: -1000,
                 total_value_size: -100,
@@ -1399,14 +1399,14 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
         sst_info: gen_sstable_info(10, vec![100, 101], test_epoch(20)),
         table_stats: HashMap::from([
             (
-                100,
+                100.into(),
                 TableStats {
                     total_compressed_size: 50,
                     ..Default::default()
                 },
             ),
             (
-                101,
+                101.into(),
                 TableStats {
                     total_compressed_size: 50,
                     ..Default::default()
@@ -1440,7 +1440,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
             .state_table_info
             .compaction_group_member_table_ids(2)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -1449,7 +1449,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_commit() {
             .state_table_info
             .compaction_group_member_table_ids(3)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![101]
     );
@@ -1473,13 +1473,13 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
     assert_eq!(original_groups, vec![2, 3]);
 
     let err = hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(100, &[0], None)
+        .move_state_tables_to_dedicated_compaction_group(100, &[0.into()], None)
         .await
         .unwrap_err();
     assert_eq!("compaction group error: invalid group 100", err.to_string());
 
     let err = hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(2, &[100], None)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100.into()], None)
         .await
         .unwrap_err();
     assert_eq!(
@@ -1514,7 +1514,11 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let err = hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100, 101], None)
+        .move_state_tables_to_dedicated_compaction_group(
+            compaction_group_id,
+            &[100.into(), 101.into()],
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(
@@ -1530,7 +1534,11 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
         .unwrap();
 
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100, 101], None)
+        .move_state_tables_to_dedicated_compaction_group(
+            compaction_group_id,
+            &[100.into(), 101.into()],
+            None,
+        )
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1553,7 +1561,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
             .state_table_info
             .compaction_group_member_table_ids(old_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![102]
     );
@@ -1562,7 +1570,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
             .state_table_info
             .compaction_group_member_table_ids(new_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .sorted()
             .collect_vec(),
         vec![100, 101]
@@ -1598,7 +1606,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100.into()], None)
         .await
         .unwrap();
 
@@ -1621,7 +1629,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
             .state_table_info
             .compaction_group_member_table_ids(old_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![101]
     );
@@ -1630,7 +1638,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_non_triv
             .state_table_info
             .compaction_group_member_table_ids(new_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -1711,7 +1719,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .unwrap();
 
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100.into()], None)
         .await
         .unwrap();
 
@@ -1726,7 +1734,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
             .state_table_info
             .compaction_group_member_table_ids(right_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .sorted()
             .collect_vec(),
         vec![101, 102]
@@ -1736,7 +1744,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
             .state_table_info
             .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -1756,7 +1764,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
                     object_id: 12.into(),
                     sst_id: 12.into(),
                     key_range: KeyRange::default(),
-                    table_ids: vec![100],
+                    table_ids: vec![100.into()],
                     min_epoch: 20,
                     max_epoch: 20,
                     file_size: 100,
@@ -1885,7 +1893,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
     let base_level: usize = 6;
 
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(2, &[100], None)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100.into()], None)
         .await
         .unwrap();
 
@@ -1909,7 +1917,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
             .levels[base_level - 1]
             .table_infos[0]
             .table_ids,
-        vec![101, 102]
+        vec![101.into(), 102.into()]
     );
     assert_eq!(
         current_version
@@ -1933,7 +1941,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
             .levels[base_level - 1]
             .table_infos[0]
             .table_ids,
-        vec![100]
+        vec![100.into()]
     );
     assert_eq!(
         current_version
@@ -1941,7 +1949,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
             .levels[base_level - 1]
             .table_infos[1]
             .table_ids,
-        vec![103]
+        vec![103.into()]
     );
 }
 
@@ -1985,7 +1993,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         get_manual_compact_task(hummock_manager.clone(), compaction_group_id, 0).await;
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100.into()], None)
         .await
         .unwrap();
 
@@ -2080,7 +2088,7 @@ async fn test_move_tables_between_compaction_group() {
     assert!(sst_ids.contains(&14.into()));
 
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(2, &[100], None)
+        .move_state_tables_to_dedicated_compaction_group(2, &[100.into()], None)
         .await
         .unwrap();
     let compaction_group_id =
@@ -2217,7 +2225,7 @@ async fn test_partition_level() {
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(
             compaction_group_id,
-            &[100],
+            &[100.into()],
             Some(env.opts.partition_vnode_count),
         )
         .await
@@ -2342,7 +2350,7 @@ async fn test_unregister_moved_table() {
 
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let new_compaction_group_id = hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100.into()], None)
         .await
         .unwrap()
         .0;
@@ -2368,7 +2376,7 @@ async fn test_unregister_moved_table() {
             .state_table_info
             .compaction_group_member_table_ids(right_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![101]
     );
@@ -2377,7 +2385,7 @@ async fn test_unregister_moved_table() {
             .state_table_info
             .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -2397,7 +2405,7 @@ async fn test_unregister_moved_table() {
             .state_table_info
             .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -2481,7 +2489,7 @@ async fn test_merge_compaction_group_task_expired() {
 
     // will cancel the task
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100], None)
+        .move_state_tables_to_dedicated_compaction_group(compaction_group_id, &[100.into()], None)
         .await
         .unwrap();
 
@@ -2496,7 +2504,7 @@ async fn test_merge_compaction_group_task_expired() {
             .state_table_info
             .compaction_group_member_table_ids(right_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .sorted()
             .collect_vec(),
         vec![101, 102]
@@ -2506,7 +2514,7 @@ async fn test_merge_compaction_group_task_expired() {
             .state_table_info
             .compaction_group_member_table_ids(left_compaction_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
     );
@@ -2524,7 +2532,7 @@ async fn test_merge_compaction_group_task_expired() {
         .unwrap()
         .unwrap();
 
-    let created_tables = HashSet::from_iter(vec![100, 101, 102]);
+    let created_tables = HashSet::from_iter(vec![100.into(), 101.into(), 102.into()]);
 
     // will cancel the task2
     hummock_manager
@@ -2546,7 +2554,7 @@ async fn test_merge_compaction_group_task_expired() {
                     object_id: report_sst_id.into(),
                     sst_id: report_sst_id.into(),
                     key_range: KeyRange::default(),
-                    table_ids: vec![100],
+                    table_ids: vec![100.into()],
                     min_epoch: 20,
                     max_epoch: 20,
                     file_size: 100,

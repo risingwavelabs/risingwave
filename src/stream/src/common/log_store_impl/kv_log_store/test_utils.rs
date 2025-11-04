@@ -27,7 +27,7 @@ use risingwave_pb::catalog::PbTable;
 use crate::common::log_store_impl::kv_log_store::KvLogStorePkInfo;
 use crate::common::table::test_utils::gen_pbtable_with_dist_key;
 
-pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+pub(crate) const TEST_TABLE_ID: TableId = TableId::new(233);
 pub(crate) const TEST_DATA_SIZE: usize = 10;
 
 pub(crate) fn gen_test_data(base: i64) -> (Vec<Op>, Vec<OwnedRow>) {

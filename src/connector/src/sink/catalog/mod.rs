@@ -428,7 +428,7 @@ impl SinkCatalog {
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: self.stream_job_status.to_proto().into(),
-            target_table: self.target_table.map(|table_id| table_id.table_id()),
+            target_table: self.target_table.map(|table_id| table_id.as_raw_id()),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
@@ -440,7 +440,7 @@ impl SinkCatalog {
                 .collect_vec(),
             auto_refresh_schema_from_table: self
                 .auto_refresh_schema_from_table
-                .map(|table_id| table_id.table_id),
+                .map(|table_id| table_id.as_raw_id()),
         }
     }
 

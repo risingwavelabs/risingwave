@@ -112,7 +112,7 @@ impl StreamReaderBuilder {
                             {
                                 tracing::warn!(
                                     error = %e.as_report(),
-                                    source_id = source_id.table_id,
+                                    %source_id,
                                     "Failed to add CDC auto schema change fail event to event log."
                                 );
                             }
@@ -233,13 +233,13 @@ impl StreamReaderBuilder {
                     tracing::error!(
                         error = %e.as_report(),
                         source_name = self.source_name,
-                        source_id = self.source_id.table_id,
+                        source_id = %self.source_id,
                         actor_id = self.actor_ctx.id,
                         "build stream source reader error, retry in 1s"
                     );
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         e.variant_name().to_owned(),
-                        self.source_id.table_id.to_string(),
+                        self.source_id.to_string(),
                         self.source_name.clone(),
                         self.actor_ctx.fragment_id.to_string(),
                     ]);
@@ -268,13 +268,13 @@ impl StreamReaderBuilder {
                         tracing::error!(
                             error = %e.as_report(),
                             source_name = self.source_name,
-                            source_id = self.source_id.table_id,
+                            source_id = %self.source_id,
                             actor_id = self.actor_ctx.id,
                             "stream source reader error"
                         );
                         GLOBAL_ERROR_METRICS.user_source_error.report([
                             e.variant_name().to_owned(),
-                            self.source_id.table_id.to_string(),
+                            self.source_id.to_string(),
                             self.source_name.clone(),
                             self.actor_ctx.fragment_id.to_string(),
                         ]);

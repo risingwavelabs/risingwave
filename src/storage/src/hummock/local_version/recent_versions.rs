@@ -205,7 +205,7 @@ mod tests {
                 state_table_info: HashMap::from_iter(table_committed_epoch.into_iter().map(
                     |(table_id, committed_epoch)| {
                         (
-                            table_id.table_id,
+                            table_id.as_raw_id(),
                             StateTableInfo {
                                 committed_epoch,
                                 compaction_group_id: 0,

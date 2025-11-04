@@ -51,7 +51,7 @@ pub async fn handle_alter_streaming_rate_limit(
                 .into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_MATERIALIZED_VIEW, table.id.table_id)
+            (StatementType::ALTER_MATERIALIZED_VIEW, table.id.as_raw_id())
         }
         PbThrottleTarget::Source => {
             let reader = session.env().catalog_reader().read_guard();
@@ -67,7 +67,7 @@ pub async fn handle_alter_streaming_rate_limit(
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             // Get the corresponding source catalog.
             let source_id = if let Some(id) = table.associated_source_id {
-                id.table_id()
+                id.as_raw_id()
             } else {
                 bail!("ALTER SOURCE_RATE_LIMIT is not for table without source")
             };
@@ -81,7 +81,7 @@ pub async fn handle_alter_streaming_rate_limit(
                 return Err(ErrorCode::InvalidInputSyntax(format!("\"{table_name}\" ",)).into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_TABLE, table.id.table_id)
+            (StatementType::ALTER_TABLE, table.id.as_raw_id())
         }
         PbThrottleTarget::TableDml => {
             let reader = session.env().catalog_reader().read_guard();
@@ -94,7 +94,7 @@ pub async fn handle_alter_streaming_rate_limit(
                 .into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_TABLE, table.id.table_id)
+            (StatementType::ALTER_TABLE, table.id.as_raw_id())
         }
         PbThrottleTarget::Sink => {
             let reader = session.env().catalog_reader().read_guard();

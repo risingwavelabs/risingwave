@@ -23,7 +23,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::bail;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkId, SinkType};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{IcebergConfig, should_enable_iceberg_cow};
 use risingwave_connector::sink::{SinkError, SinkParam};
 use risingwave_pb::catalog::PbSink;
@@ -137,20 +137,15 @@ impl IcebergCompactionHandle {
         let prost_sink_catalog: PbSink = sinks.remove(0);
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
-        let task_type: TaskType = match param.sink_type {
-            SinkType::AppendOnly | SinkType::ForceAppendOnly => {
-                if risingwave_common::license::Feature::IcebergCompaction
-                    .check_available()
-                    .is_ok()
-                {
-                    TaskType::SmallDataFileCompaction
-                } else {
-                    TaskType::FullCompaction
-                }
-            }
-
-            _ => TaskType::FullCompaction,
+        let task_type: TaskType = if risingwave_common::license::Feature::IcebergCompaction
+            .check_available()
+            .is_ok()
+        {
+            TaskType::SmallFiles
+        } else {
+            TaskType::Full
         };
+
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
                 task_id,
@@ -450,7 +445,7 @@ impl IcebergCompactionManager {
         compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
             task_id,
             props: sink_param.properties,
-            task_type: TaskType::FullCompaction as i32, // default to full compaction
+            task_type: TaskType::Full as i32, // default to full compaction
         }))?;
 
         tracing::info!(

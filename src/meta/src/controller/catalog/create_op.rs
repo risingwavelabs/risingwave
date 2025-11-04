@@ -491,7 +491,7 @@ impl CatalogController {
         let table_ids = cross_db_snapshot_backfill_info
             .upstream_mv_table_id_to_backfill_epoch
             .keys()
-            .map(|t| t.table_id as ObjectId)
+            .map(|t| t.as_raw_id() as ObjectId)
             .collect_vec();
         let cnt = Subscription::find()
             .select_only()

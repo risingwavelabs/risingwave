@@ -272,8 +272,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             actor_context.fragment_id,
         );
 
-        let metrics_info =
-            MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
+        let metrics_info = MetricsInfo::new(
+            metrics,
+            table_catalog.id.into(),
+            actor_context.id,
+            "Materialize",
+        );
 
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
@@ -304,8 +308,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let mv_table_id = TableId::new(self.state_table.table_id());
-        let _staging_table_id = TableId::new(self.state_table.table_id());
+        let mv_table_id = self.state_table.table_id();
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
@@ -407,15 +410,23 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 self.metrics
                                     .materialize_input_row_count
                                     .inc_by(chunk.cardinality() as u64);
+
                                 // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
                                 // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false,
-                                // and the conflict behavior is overwrite.
-                                let do_not_handle_conflict = !self.state_table.is_consistent_op()
+                                // and the conflict behavior is overwrite. We can rely on the state table to overwrite the conflicting rows in the storage,
+                                // while outputting inconsistent changes to downstream which no one will subscribe to.
+                                let optimized_conflict_behavior = if let ConflictBehavior::Overwrite =
+                                    self.conflict_behavior
+                                    && !self.state_table.is_consistent_op()
                                     && self.version_column_indices.is_empty()
-                                    && self.conflict_behavior == ConflictBehavior::Overwrite;
+                                {
+                                    ConflictBehavior::NoCheck
+                                } else {
+                                    self.conflict_behavior
+                                };
 
-                                match self.conflict_behavior {
-                                    checked_conflict_behaviors!() if !do_not_handle_conflict => {
+                                match optimized_conflict_behavior {
+                                    checked_conflict_behaviors!() => {
                                         if chunk.cardinality() == 0 {
                                             // empty chunk
                                             continue;
@@ -507,10 +518,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             None => continue,
                                         }
                                     }
-                                    ConflictBehavior::IgnoreConflict => unreachable!(),
-                                    ConflictBehavior::NoCheck
-                                    | ConflictBehavior::Overwrite
-                                    | ConflictBehavior::DoUpdateIfNotNull => {
+                                    ConflictBehavior::NoCheck => {
                                         self.state_table.write_chunk(chunk.clone());
                                         self.state_table.try_flush().await?;
 
@@ -695,7 +703,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 self.local_barrier_manager.report_refresh_finished(
                                     epoch,
                                     self.actor_context.id,
-                                    refresh_args.table_id.into(),
+                                    refresh_args.table_id,
                                     staging_table_id,
                                 );
                                 tracing::debug!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
@@ -727,7 +735,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .try_wait_epoch(
                             HummockReadEpoch::Committed(on_complete_epoch.prev),
                             TryWaitEpochOptions {
-                                table_id: staging_table_id.into(),
+                                table_id: staging_table_id,
                             },
                         )
                         .await?;
@@ -776,7 +784,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     None => unreachable!("associated_source_id is not set"),
                                 };
 
-                                if load_finish_source_id.table_id() == associated_source_id {
+                                if load_finish_source_id.as_raw_id() == associated_source_id {
                                     tracing::info!(
                                         %load_finish_source_id,
                                         "LoadFinish received, starting data replacement"
@@ -1389,22 +1397,34 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
                 }
 
+                Op::UpdateDelete
+                    if matches!(
+                        conflict_behavior,
+                        ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull
+                    ) =>
+                {
+                    // For `UpdateDelete`s, we skip processing them but directly handle the following `UpdateInsert`
+                    // instead. This is because...
+                    //
+                    // - For `Overwrite`, we only care about the new row.
+                    // - For `DoUpdateIfNotNull`, we don't want the whole row to be deleted, but instead perform
+                    //   column-wise replacement when handling the `UpdateInsert`.
+                    //
+                    // However, for `IgnoreConflict`, we still need to delete the old row first, otherwise the row
+                    // cannot be updated at all.
+                }
+
                 Op::Delete | Op::UpdateDelete => {
-                    match conflict_behavior {
-                        checked_conflict_behaviors!() => {
-                            if let Some(old_row) = self.get_expected(&key) {
-                                let old_row_deserialized =
-                                    row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                change_buffer.delete(key.clone(), old_row_deserialized);
-                                // put a None into the cache to represent deletion
-                                self.lru_cache.put(key, None);
-                            } else {
-                                // delete a non-existent value
-                                // this is allowed in the case of mview conflict, so ignore
-                            };
-                        }
-                        _ => unreachable!(),
-                    };
+                    if let Some(old_row) = self.get_expected(&key) {
+                        let old_row_deserialized =
+                            row_serde.deserializer.deserialize(old_row.row.clone())?;
+                        change_buffer.delete(key.clone(), old_row_deserialized);
+                        // put a None into the cache to represent deletion
+                        self.lru_cache.put(key, None);
+                    } else {
+                        // delete a non-existent value
+                        // this is allowed in the case of mview conflict, so ignore
+                    }
                 }
             }
         }

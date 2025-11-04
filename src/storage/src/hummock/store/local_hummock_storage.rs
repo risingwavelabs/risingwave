@@ -496,7 +496,7 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
             && self.mem_table.kv_size.size() > self.mem_table_spill_threshold
         {
             if self.spill_offset < MAX_SPILL_TIMES {
-                let table_id_label = self.table_id.table_id().to_string();
+                let table_id_label = self.table_id.to_string();
                 self.flush().await?;
                 self.stats
                     .mem_table_spill_counts

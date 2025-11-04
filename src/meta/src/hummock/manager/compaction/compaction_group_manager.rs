@@ -20,8 +20,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::version::GroupDelta;
 use risingwave_meta_model::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -109,9 +109,9 @@ impl HummockManager {
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(
         &self,
-        mv_table: Option<u32>,
-        mut internal_tables: Vec<u32>,
-    ) -> Result<Vec<StateTableId>> {
+        mv_table: Option<TableId>,
+        mut internal_tables: Vec<TableId>,
+    ) -> Result<()> {
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
             if internal_tables.extract_if(.., |t| *t == mv_table).count() > 0 {
@@ -131,7 +131,7 @@ impl HummockManager {
             ));
         }
         self.register_table_ids_for_test(&pairs).await?;
-        Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
+        Ok(())
     }
 
     #[cfg(test)]
@@ -140,13 +140,9 @@ impl HummockManager {
         &self,
         table_fragments: &[crate::model::StreamJobFragments],
     ) {
-        self.unregister_table_ids(
-            table_fragments
-                .iter()
-                .flat_map(|t| t.all_table_ids().map(TableId::new)),
-        )
-        .await
-        .unwrap();
+        self.unregister_table_ids(table_fragments.iter().flat_map(|t| t.all_table_ids()))
+            .await
+            .unwrap();
     }
 
     /// Unregisters stale members and groups
@@ -176,7 +172,7 @@ impl HummockManager {
     /// that it's currently only used in test.
     pub async fn register_table_ids_for_test(
         &self,
-        pairs: &[(StateTableId, CompactionGroupId)],
+        pairs: &[(impl Into<TableId> + Copy, CompactionGroupId)],
     ) -> Result<()> {
         if pairs.is_empty() {
             return Ok(());
@@ -189,14 +185,11 @@ impl HummockManager {
         let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
 
         for (table_id, _) in pairs {
-            if let Some(info) = current_version
-                .state_table_info
-                .info()
-                .get(&TableId::new(*table_id))
-            {
+            let table_id = (*table_id).into();
+            if let Some(info) = current_version.state_table_info.info().get(&table_id) {
                 return Err(Error::CompactionGroup(format!(
                     "table {} already {:?}",
-                    *table_id, info
+                    table_id, info
                 )));
             }
         }
@@ -221,6 +214,7 @@ impl HummockManager {
             .unwrap_or(INVALID_EPOCH);
 
         for (table_id, raw_group_id) in pairs {
+            let table_id = (*table_id).into();
             let mut group_id = *raw_group_id;
             if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
                 let mut is_group_init = false;
@@ -261,7 +255,7 @@ impl HummockManager {
                 new_version_delta
                     .state_table_info_delta
                     .insert(
-                        TableId::new(*table_id),
+                        table_id,
                         PbStateTableInfoDelta {
                             committed_epoch,
                             compaction_group_id: *raw_group_id,
@@ -278,7 +272,7 @@ impl HummockManager {
 
     pub async fn unregister_table_ids(
         &self,
-        table_ids: impl IntoIterator<Item = TableId> + Send,
+        table_ids: impl IntoIterator<Item = TableId>,
     ) -> Result<()> {
         let table_ids = table_ids.into_iter().collect_vec();
         if table_ids.is_empty() {
@@ -291,8 +285,8 @@ impl HummockManager {
             // The table write throughput statistic accepts data inconsistencies (unregister table ids fail), so we can clean it up in advance.
             let mut table_write_throughput_statistic_manager =
                 self.table_write_throughput_statistic_manager.write();
-            for table_id in table_ids.iter().unique() {
-                table_write_throughput_statistic_manager.remove_table(table_id.table_id);
+            for &table_id in table_ids.iter().unique() {
+                table_write_throughput_statistic_manager.remove_table(table_id);
             }
         }
 
@@ -426,7 +420,7 @@ impl HummockManager {
                     .state_table_info
                     .compaction_group_member_table_ids(levels.group_id)
                     .iter()
-                    .map(|table_id| table_id.table_id)
+                    .map(|table_id| table_id.as_raw_id())
                     .collect_vec(),
                 compaction_config: Some(compaction_config),
             };
@@ -453,14 +447,12 @@ impl HummockManager {
                     let stats_size = versioning_guard
                         .version_stats
                         .table_stats
-                        .get(&table_id.table_id)
+                        .get(&table_id.as_raw_id())
                         .map(|stats| stats.total_key_size + stats.total_value_size)
                         .unwrap_or(0);
                     let table_size = std::cmp::max(stats_size, 0) as u64;
                     group_info.group_size += table_size;
-                    group_info
-                        .table_statistic
-                        .insert(table_id.table_id, table_size);
+                    group_info.table_statistic.insert(*table_id, table_size);
                     group_info.compaction_group_config =
                         manager.try_get_compaction_group_config(*group_id).unwrap();
                 }
@@ -713,7 +705,8 @@ impl CompactionGroupTransaction<'_> {
 mod tests {
     use std::collections::{BTreeMap, HashSet};
 
-    use risingwave_common::catalog::TableId;
+    use itertools::Itertools;
+    use risingwave_common::id::JobId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 
     use crate::controller::SqlMetaStore;
@@ -791,23 +784,23 @@ mod tests {
     async fn test_manager() {
         let (_, compaction_group_manager, ..) = setup_compute_env(8080).await;
         let table_fragment_1 = StreamJobFragments::for_test(
-            TableId::new(10),
+            JobId::new(10),
             BTreeMap::from([(
                 1,
                 Fragment {
                     fragment_id: 1,
-                    state_table_ids: vec![10, 11, 12, 13],
+                    state_table_ids: vec![10.into(), 11.into(), 12.into(), 13.into()],
                     ..Default::default()
                 },
             )]),
         );
         let table_fragment_2 = StreamJobFragments::for_test(
-            TableId::new(20),
+            JobId::new(20),
             BTreeMap::from([(
                 2,
                 Fragment {
                     fragment_id: 2,
-                    state_table_ids: vec![20, 21, 22, 23],
+                    state_table_ids: vec![20.into(), 21.into(), 22.into(), 23.into()],
                     ..Default::default()
                 },
             )]),
@@ -828,16 +821,24 @@ mod tests {
 
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_1.stream_job_id().table_id),
-                table_fragment_1.internal_table_ids(),
+                Some(table_fragment_1.stream_job_id().as_mv_table_id()),
+                table_fragment_1
+                    .internal_table_ids()
+                    .into_iter()
+                    .map_into()
+                    .collect(),
             )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_2.stream_job_id().table_id),
-                table_fragment_2.internal_table_ids(),
+                Some(table_fragment_2.stream_job_id().as_mv_table_id()),
+                table_fragment_2
+                    .internal_table_ids()
+                    .into_iter()
+                    .map_into()
+                    .collect(),
             )
             .await
             .unwrap();
@@ -851,7 +852,7 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge(&table_fragment_2.all_table_ids().map(TableId::new).collect())
+            .purge(&table_fragment_2.all_table_ids().collect())
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
@@ -865,8 +866,12 @@ mod tests {
 
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_1.stream_job_id().table_id),
-                table_fragment_1.internal_table_ids(),
+                Some(table_fragment_1.stream_job_id().as_mv_table_id()),
+                table_fragment_1
+                    .internal_table_ids()
+                    .into_iter()
+                    .map_into()
+                    .collect(),
             )
             .await
             .unwrap();

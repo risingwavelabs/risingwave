@@ -83,7 +83,7 @@ impl Binder {
                 table_catalog.owner,
                 AclMode::Delete,
                 table_name.clone(),
-                PbObject::TableId(table_catalog.id.table_id),
+                PbObject::TableId(table_catalog.id.as_raw_id()),
             ),
             table_catalog.database_id,
         )?;

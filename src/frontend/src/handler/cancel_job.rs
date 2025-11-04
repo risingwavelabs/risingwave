@@ -18,6 +18,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::JobIdents;
 
 use super::RwPgResponseBuilderExt;
+use super::util::execute_with_long_running_notification;
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
@@ -57,13 +58,22 @@ pub(super) async fn handle_cancel(
     }
 
     let canceled_jobs = if !filtered_job_ids.is_empty() {
-        session
-            .env()
-            .meta_client()
-            .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
-                job_ids: filtered_job_ids,
-            }))
-            .await?
+        // Wrap in async block to convert RpcError to RwError
+        execute_with_long_running_notification(
+            async {
+                session
+                    .env()
+                    .meta_client()
+                    .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
+                        job_ids: filtered_job_ids,
+                    }))
+                    .await
+                    .map_err(Into::into)
+            },
+            &session,
+            "CANCEL JOBS",
+        )
+        .await?
     } else {
         vec![]
     };

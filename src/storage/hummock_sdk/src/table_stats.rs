@@ -20,7 +20,7 @@ use risingwave_pb::hummock::PbTableStats;
 
 use crate::version::HummockVersion;
 
-pub type TableStatsMap = HashMap<u32, TableStats>;
+pub type TableStatsMap = HashMap<TableId, TableStats>;
 
 pub type PbTableStatsMap = HashMap<u32, PbTableStats>;
 
@@ -97,17 +97,17 @@ pub fn to_prost_table_stats_map(
     table_stats
         .borrow()
         .iter()
-        .map(|(t, s)| (*t, s.into()))
+        .map(|(t, s)| (t.as_raw_id(), s.into()))
         .collect()
 }
 
 pub fn from_prost_table_stats_map(
     table_stats: impl Borrow<HashMap<u32, PbTableStats>>,
-) -> HashMap<u32, TableStats> {
+) -> HashMap<TableId, TableStats> {
     table_stats
         .borrow()
         .iter()
-        .map(|(t, s)| (*t, s.into()))
+        .map(|(t, s)| (t.into(), s.into()))
         .collect()
 }
 

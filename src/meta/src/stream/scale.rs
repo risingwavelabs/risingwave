@@ -25,9 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::ActorMapping;
-use risingwave_meta_model::{
-    ObjectId, StreamingParallelism, WorkerId, fragment, fragment_relation,
-};
+use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, fragment_relation};
 use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::stream_plan::{Dispatcher, PbDispatchOutputMapping, PbDispatcher, StreamNode};
@@ -43,6 +41,7 @@ use crate::controller::scale::{
     FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
     find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
 };
+use crate::error::bail_invalid_parameter;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
 use crate::model::{
     ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, StreamContext,
@@ -75,6 +74,7 @@ pub struct CustomActorInfo {
     pub vnode_bitmap: Option<Bitmap>,
 }
 
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_meta_model::DispatcherType;
@@ -119,8 +119,8 @@ impl ScaleController {
 
     pub async fn resolve_related_no_shuffle_jobs(
         &self,
-        jobs: &[ObjectId],
-    ) -> MetaResult<HashSet<ObjectId>> {
+        jobs: &[JobId],
+    ) -> MetaResult<HashSet<JobId>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -285,7 +285,7 @@ impl ScaleController {
             newly_created_actors,
             actor_splits,
             cdc_table_snapshot_split_assignment: Default::default(),
-            cdc_table_id: None,
+            cdc_table_job_id: None,
         };
 
         Ok(reschedule)
@@ -293,7 +293,7 @@ impl ScaleController {
 
     pub async fn reschedule_inplace(
         &self,
-        policy: HashMap<ObjectId, ReschedulePolicy>,
+        policy: HashMap<JobId, ReschedulePolicy>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -358,7 +358,7 @@ impl ScaleController {
 
     pub async fn reschedule_fragment_inplace(
         &self,
-        policy: HashMap<risingwave_meta_model::FragmentId, ParallelismPolicy>,
+        policy: HashMap<risingwave_meta_model::FragmentId, Option<StreamingParallelism>>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         if policy.is_empty() {
@@ -395,37 +395,53 @@ impl ScaleController {
         for ensemble in find_fragment_no_shuffle_dags_detailed(&txn, &fragment_id_list).await? {
             let entry_fragment_ids = ensemble.entry_fragments().collect_vec();
 
-            let parallelisms = entry_fragment_ids
+            let desired_parallelism = match entry_fragment_ids
                 .iter()
-                .filter_map(|fragment_id| policy.get(fragment_id))
+                .filter_map(|fragment_id| policy.get(fragment_id).cloned())
                 .dedup()
-                .collect_vec();
-
-            let parallelism = match parallelisms.as_slice() {
+                .collect_vec()
+                .as_slice()
+            {
                 [] => {
-                    bail!(
-                        "no reschedule policy specified for fragments in the no-shuffle ensemble: {:?}",
+                    bail_invalid_parameter!(
+                        "none of the entry fragments {:?} were included in the reschedule request; \
+                         provide at least one entry fragment id",
                         entry_fragment_ids
                     );
                 }
-                [policy] => &policy.parallelism,
-                _ => {
+                [parallelism] => parallelism.clone(),
+                parallelisms => {
                     bail!(
                         "conflicting reschedule policies for fragments in the same no-shuffle ensemble: {:?}",
                         parallelisms
-                            .iter()
-                            .map(|policy| &policy.parallelism)
-                            .collect_vec()
                     );
                 }
             };
 
-            for fragment_id in entry_fragment_ids {
-                let fragment = fragment::ActiveModel {
-                    fragment_id: Set(fragment_id),
-                    parallelism: Set(Some(parallelism.clone())),
-                    ..Default::default()
-                };
+            let fragments = Fragment::find()
+                .filter(fragment::Column::FragmentId.is_in(entry_fragment_ids))
+                .all(&txn)
+                .await?;
+
+            debug_assert!(
+                fragments
+                    .iter()
+                    .map(|fragment| fragment.parallelism.as_ref())
+                    .all_equal(),
+                "entry fragments in the same ensemble should share the same parallelism"
+            );
+
+            let current_parallelism = fragments
+                .first()
+                .and_then(|fragment| fragment.parallelism.clone());
+
+            if current_parallelism == desired_parallelism {
+                continue;
+            }
+
+            for fragment in fragments {
+                let mut fragment = fragment.into_active_model();
+                fragment.parallelism = Set(desired_parallelism.clone());
                 fragment.update(&txn).await?;
             }
 
@@ -456,7 +472,7 @@ impl ScaleController {
 
     async fn rerender(
         &self,
-        jobs: HashSet<ObjectId>,
+        jobs: HashSet<JobId>,
         workers: BTreeMap<WorkerId, WorkerInfo>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -493,7 +509,7 @@ impl ScaleController {
     async fn rerender_inner(
         &self,
         txn: &impl ConnectionTrait,
-        jobs: HashSet<ObjectId>,
+        jobs: HashSet<JobId>,
         workers: BTreeMap<WorkerId, WorkerInfo>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
         let adaptive_parallelism_strategy = {
@@ -780,14 +796,14 @@ impl ScaleController {
                 )?;
 
                 // We only handle CDC splits at this stage, so it should have been empty before.
-                debug_assert!(reschedule.cdc_table_id.is_none());
+                debug_assert!(reschedule.cdc_table_job_id.is_none());
                 debug_assert!(reschedule.cdc_table_snapshot_split_assignment.is_empty());
                 let cdc_info = if fragment_info
                     .fragment_type_mask
                     .contains(FragmentTypeFlag::StreamCdcScan)
                 {
                     let assignment = assign_cdc_table_snapshot_splits_impl(
-                        *job_id as _,
+                        *job_id,
                         actors.keys().copied().collect(),
                         self.env.meta_store_ref(),
                         None,
@@ -799,7 +815,7 @@ impl ScaleController {
                 };
 
                 if let Some((cdc_table_id, cdc_table_snapshot_split_assignment)) = cdc_info {
-                    reschedule.cdc_table_id = Some(*cdc_table_id as u32);
+                    reschedule.cdc_table_job_id = Some(*cdc_table_id);
                     reschedule.cdc_table_snapshot_split_assignment =
                         cdc_table_snapshot_split_assignment;
                 }
@@ -882,7 +898,7 @@ impl GlobalStreamManager {
             HashSet::new()
         };
 
-        let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<ObjectId>> = self
+        let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
             .metadata_manager
             .catalog_controller
             .list_streaming_job_with_database()

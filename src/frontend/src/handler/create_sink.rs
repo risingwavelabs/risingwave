@@ -417,7 +417,7 @@ pub async fn gen_sink_plan(
     let dependencies =
         RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
             .into_iter()
-            .map(|id| id.table_id() as ObjectId)
+            .map(|id| id.as_raw_id() as ObjectId)
             .chain(
                 dependent_udfs
                     .into_iter()

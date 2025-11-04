@@ -60,7 +60,7 @@ pub async fn handle_rename_table(
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_name(
-            alter_name_request::Object::TableId(table_id.table_id),
+            alter_name_request::Object::TableId(table_id.as_raw_id()),
             &new_table_name,
         )
         .await?;

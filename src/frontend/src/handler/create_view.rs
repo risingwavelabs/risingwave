@@ -112,7 +112,7 @@ pub async fn handle_create_view(
             view,
             dependent_relations
                 .into_iter()
-                .map(|t| t.table_id)
+                .map(|t| t.as_raw_id())
                 .collect(),
         )
         .await?;

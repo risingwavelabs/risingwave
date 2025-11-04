@@ -610,12 +610,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
         join_key_data_types: Vec<DataType>,
         memo_table: Option<StateTable<S>>,
     ) -> Self {
-        let metrics_info = MetricsInfo::new(
-            metrics.clone(),
-            table.table_id().table_id,
-            ctx.id,
-            "temporal join",
-        );
+        let metrics_info =
+            MetricsInfo::new(metrics.clone(), table.table_id(), ctx.id, "temporal join");
 
         let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
 

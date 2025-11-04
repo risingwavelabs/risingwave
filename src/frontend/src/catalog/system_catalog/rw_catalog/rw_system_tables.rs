@@ -42,13 +42,13 @@ fn read_system_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<SystemTab
     Ok(schemas
         .flat_map(|schema| {
             schema.iter_system_tables().map(|table| SystemTable {
-                id: table.id.table_id as i32,
+                id: table.id.as_raw_id() as i32,
                 name: table.name().to_owned(),
                 schema_id: schema.id() as i32,
                 owner: table.owner as i32,
                 definition: None,
                 acl: get_acl_items(
-                    &Object::TableId(table.id.table_id),
+                    &Object::TableId(table.id.as_raw_id()),
                     false,
                     &users,
                     username_map,

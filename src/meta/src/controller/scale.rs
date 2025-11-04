@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
@@ -29,9 +30,8 @@ use risingwave_meta_model::prelude::{
     Database, Fragment, FragmentRelation, FragmentSplits, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    DatabaseId, DispatcherType, FragmentId, ObjectId, SourceId, StreamingParallelism, TableId,
-    WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink, source,
-    streaming_job, table,
+    DatabaseId, DispatcherType, FragmentId, SourceId, StreamingParallelism, WorkerId, database,
+    fragment, fragment_relation, fragment_splits, object, sink, source, streaming_job, table,
 };
 use risingwave_meta_model_migration::Condition;
 use sea_orm::{
@@ -47,15 +47,15 @@ use crate::stream::{AssignerBuilder, SplitDiffOptions};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
     txn: &C,
-    job_ids: &HashSet<ObjectId>,
-) -> MetaResult<HashMap<ObjectId, String>>
+    job_ids: &HashSet<JobId>,
+) -> MetaResult<HashMap<JobId, String>>
 where
     C: ConnectionTrait,
 {
     let job_ids = job_ids.iter().cloned().collect_vec();
 
     // including table, materialized view, index
-    let common_job_definitions: Vec<(ObjectId, String)> = Table::find()
+    let common_job_definitions: Vec<(JobId, String)> = Table::find()
         .select_only()
         .columns([
             table::Column::TableId,
@@ -69,7 +69,7 @@ where
         .all(txn)
         .await?;
 
-    let sink_definitions: Vec<(ObjectId, String)> = Sink::find()
+    let sink_definitions: Vec<(JobId, String)> = Sink::find()
         .select_only()
         .columns([
             sink::Column::SinkId,
@@ -83,7 +83,7 @@ where
         .all(txn)
         .await?;
 
-    let source_definitions: Vec<(ObjectId, String)> = Source::find()
+    let source_definitions: Vec<(JobId, String)> = Source::find()
         .select_only()
         .columns([
             source::Column::SourceId,
@@ -97,7 +97,7 @@ where
         .all(txn)
         .await?;
 
-    let definitions: HashMap<ObjectId, String> = common_job_definitions
+    let definitions: HashMap<JobId, String> = common_job_definitions
         .into_iter()
         .chain(sink_definitions.into_iter())
         .chain(source_definitions.into_iter())
@@ -126,13 +126,13 @@ where
             .filter(object::Column::DatabaseId.eq(database_id));
     }
 
-    let jobs: Vec<ObjectId> = query.into_tuple().all(txn).await?;
+    let jobs: Vec<JobId> = query.into_tuple().all(txn).await?;
 
     if jobs.is_empty() {
         return Ok(HashMap::new());
     }
 
-    let jobs: HashSet<ObjectId> = jobs.into_iter().collect();
+    let jobs: HashSet<JobId> = jobs.into_iter().collect();
 
     let available_workers: BTreeMap<_, _> = worker_nodes
         .current()
@@ -174,7 +174,7 @@ pub struct WorkerInfo {
 }
 
 pub type FragmentRenderMap =
-    HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>;
+    HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>;
 
 #[derive(Default)]
 pub struct RenderedGraph {
@@ -279,7 +279,7 @@ where
 pub async fn render_jobs<C>(
     txn: &C,
     actor_id_counter: &AtomicU32,
-    job_ids: HashSet<ObjectId>,
+    job_ids: HashSet<JobId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 ) -> MetaResult<RenderedGraph>
@@ -366,7 +366,7 @@ async fn render_no_shuffle_ensembles<C>(
     actor_id_counter: &AtomicU32,
     ensembles: &[NoShuffleEnsemble],
     fragment_map: &HashMap<FragmentId, fragment::Model>,
-    job_map: &HashMap<ObjectId, streaming_job::Model>,
+    job_map: &HashMap<JobId, streaming_job::Model>,
     worker_map: &BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 ) -> MetaResult<FragmentRenderMap>
@@ -387,7 +387,7 @@ where
 
     let job_ids = job_map.keys().copied().collect_vec();
 
-    let streaming_job_databases: HashMap<ObjectId, _> = StreamingJob::find()
+    let streaming_job_databases: HashMap<JobId, _> = StreamingJob::find()
         .select_only()
         .column(streaming_job::Column::JobId)
         .column(object::Column::DatabaseId)
@@ -433,7 +433,7 @@ where
 struct RenderActorsContext<'a> {
     fragment_source_ids: &'a HashMap<FragmentId, SourceId>,
     fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
-    streaming_job_databases: &'a HashMap<ObjectId, DatabaseId>,
+    streaming_job_databases: &'a HashMap<JobId, DatabaseId>,
     database_map: &'a HashMap<DatabaseId, database::Model>,
 }
 
@@ -441,7 +441,7 @@ fn render_actors(
     actor_id_counter: &AtomicU32,
     ensembles: &[NoShuffleEnsemble],
     fragment_map: &HashMap<FragmentId, fragment::Model>,
-    job_map: &HashMap<ObjectId, streaming_job::Model>,
+    job_map: &HashMap<JobId, streaming_job::Model>,
     worker_map: &BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     context: RenderActorsContext<'_>,
@@ -680,7 +680,7 @@ fn render_actors(
 fn debug_sanity_check(
     ensembles: &[NoShuffleEnsemble],
     fragment_map: &HashMap<FragmentId, fragment::Model>,
-    jobs: &HashMap<ObjectId, streaming_job::Model>,
+    jobs: &HashMap<JobId, streaming_job::Model>,
 ) {
     // Debug-only assertions to catch inconsistent ensemble metadata early.
     debug_assert!(
@@ -964,7 +964,7 @@ mod tests {
     #[allow(deprecated)]
     fn build_fragment(
         fragment_id: FragmentId,
-        job_id: ObjectId,
+        job_id: JobId,
         fragment_type_mask: i32,
         distribution_type: DistributionType,
         vnode_count: i32,
@@ -1180,7 +1180,7 @@ mod tests {
     fn render_actors_increments_actor_counter() {
         let actor_id_counter = AtomicU32::new(100);
         let fragment_id: FragmentId = 1;
-        let job_id: ObjectId = 10;
+        let job_id: JobId = 10.into();
         let database_id: DatabaseId = 3;
 
         let fragment_model = build_fragment(
@@ -1263,7 +1263,7 @@ mod tests {
         let actor_id_counter = AtomicU32::new(0);
         let entry_fragment_id: FragmentId = 1;
         let downstream_fragment_id: FragmentId = 2;
-        let job_id: ObjectId = 20;
+        let job_id: JobId = 20.into();
         let database_id: DatabaseId = 5;
 
         let entry_fragment = build_fragment(
@@ -1379,7 +1379,7 @@ mod tests {
         let actor_id_counter = AtomicU32::new(0);
         let entry_fragment_id: FragmentId = 11;
         let downstream_fragment_id: FragmentId = 12;
-        let job_id: ObjectId = 30;
+        let job_id: JobId = 30.into();
         let database_id: DatabaseId = 7;
         let source_id: SourceId = 99;
 

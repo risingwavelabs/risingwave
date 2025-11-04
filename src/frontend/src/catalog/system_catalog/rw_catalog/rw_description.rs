@@ -52,21 +52,21 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDescription>> {
 
     let rw_tables_id: i32 = rw_catalog
         .get_system_table_by_name("rw_tables")
-        .map(|st| st.id.table_id)
+        .map(|st| st.id.as_raw_id())
         .unwrap_or_default() as _;
 
     Ok(schemas
         .flat_map(|schema| {
             schema.iter_user_table().flat_map(|table| {
                 iter::once(build_row(
-                    table.id.table_id as _,
+                    table.id.as_raw_id() as _,
                     rw_tables_id,
                     None,
                     table.description.as_deref().map(Into::into),
                 ))
                 .chain(table.columns.iter().map(|col| {
                     build_row(
-                        table.id.table_id as _,
+                        table.id.as_raw_id() as _,
                         rw_tables_id,
                         Some(col.column_id().get_id() as _),
                         col.column_desc.description.as_deref().map(Into::into),

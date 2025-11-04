@@ -104,7 +104,7 @@ impl RefreshManager {
         let database_id = DatabaseId::new(
             self.metadata_manager
                 .catalog_controller
-                .get_object_database_id(table_id.table_id() as _)
+                .get_object_database_id(table_id.as_raw_id() as _)
                 .await? as _,
         );
 
@@ -137,7 +137,7 @@ impl RefreshManager {
 
                 self.metadata_manager
                     .catalog_controller
-                    .set_table_refresh_state(table_id.table_id as _, RefreshState::Idle)
+                    .set_table_refresh_state(table_id, RefreshState::Idle)
                     .await?;
 
                 Err(anyhow!(e)
@@ -157,7 +157,7 @@ impl RefreshManager {
         let table = self
             .metadata_manager
             .catalog_controller
-            .get_table_by_id(table_id.table_id as _)
+            .get_table_by_id(table_id)
             .await?;
 
         // Check if table is refreshable
@@ -170,7 +170,7 @@ impl RefreshManager {
 
         if table.optional_associated_source_id
             != Some(OptionalAssociatedSourceId::AssociatedSourceId(
-                associated_source_id.table_id(),
+                associated_source_id.as_raw_id(),
             ))
         {
             return Err(MetaError::invalid_parameter(format!(
@@ -182,7 +182,7 @@ impl RefreshManager {
         let current_state = self
             .metadata_manager
             .catalog_controller
-            .get_table_refresh_state(table_id.table_id as _)
+            .get_table_refresh_state(table_id)
             .await?;
         match current_state {
             Some(RefreshState::Idle) | None => {

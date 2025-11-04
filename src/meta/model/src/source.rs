@@ -89,7 +89,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSource> for ActiveModel {
     fn from(source: PbSource) -> Self {
         let optional_associated_table_id = source.optional_associated_table_id.map(|x| match x {
-            OptionalAssociatedTableId::AssociatedTableId(id) => id as TableId,
+            OptionalAssociatedTableId::AssociatedTableId(id) => id.into(),
         });
         Self {
             source_id: Set(source.id as _),

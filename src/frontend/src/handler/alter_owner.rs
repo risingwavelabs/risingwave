@@ -104,7 +104,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&table.owner)?;
-                    Object::TableId(table.id.table_id)
+                    Object::TableId(table.id.as_raw_id())
                 }
                 StatementType::ALTER_VIEW => {
                     let (view, schema_name) =

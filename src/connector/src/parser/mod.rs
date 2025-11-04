@@ -217,7 +217,7 @@ impl<P: ByteStreamSourceParser> P {
     /// large transaction and `source_ctrl_opts.split_txn` is false.
     pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
         let actor_id = self.source_ctx().actor_id;
-        let source_id = self.source_ctx().source_id.table_id();
+        let source_id = self.source_ctx().source_id.as_raw_id();
 
         // The stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.

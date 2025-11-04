@@ -114,7 +114,7 @@ impl SubscriptionCatalog {
             owner: self.owner.into(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
-            dependent_table_id: self.dependent_table_id.table_id,
+            dependent_table_id: self.dependent_table_id.as_raw_id(),
             subscription_state: match self.subscription_state {
                 SubscriptionState::Init => PbSubscriptionState::Init.into(),
                 SubscriptionState::Created => PbSubscriptionState::Created.into(),

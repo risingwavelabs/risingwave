@@ -1522,7 +1522,7 @@ pub enum Statement {
     },
     /// ALTER FRAGMENT
     AlterFragment {
-        fragment_id: u32,
+        fragment_ids: Vec<u32>,
         operation: AlterFragmentOperation,
     },
     /// DESCRIBE relation
@@ -2515,10 +2515,15 @@ impl Statement {
                 Ok(())
             }
             Statement::AlterFragment {
-                fragment_id,
+                fragment_ids,
                 operation,
             } => {
-                write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
+                write!(
+                    f,
+                    "ALTER FRAGMENT {} {}",
+                    display_comma_separated(fragment_ids),
+                    operation
+                )
             }
             Statement::AlterDefaultPrivileges {
                 target_users,

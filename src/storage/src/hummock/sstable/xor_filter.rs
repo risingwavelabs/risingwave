@@ -481,8 +481,8 @@ mod tests {
             .clone()
             .create_sst_writer(object_id, writer_opts);
 
-        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
-        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let table_id_to_vnode = HashMap::from_iter(vec![(0.into(), VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0.into(), None)]);
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
             table_id_to_vnode,
@@ -529,8 +529,10 @@ mod tests {
                 iter.seek_to_first();
                 while iter.is_valid() {
                     let k = iter.key().user_key.encode();
-                    let h =
-                        Sstable::hash_for_bloom_filter(&k, iter.key().user_key.table_id.table_id);
+                    let h = Sstable::hash_for_bloom_filter(
+                        &k,
+                        iter.key().user_key.table_id.as_raw_id(),
+                    );
                     assert!(reader.filters[idx].1.contains(&h));
                     iter.next();
                 }

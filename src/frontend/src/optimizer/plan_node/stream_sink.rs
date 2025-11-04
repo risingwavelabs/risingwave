@@ -288,7 +288,12 @@ impl StreamSink {
             Self::derive_sink_type(input.stream_kind(), &properties, format_desc.as_ref())?;
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
-        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
+        let (pk, _) = derive_pk(
+            input.clone(),
+            user_distributed_by.clone(),
+            user_order_by,
+            &columns,
+        );
         let derived_pk = pk.iter().map(|k| k.column_index).collect_vec();
 
         // Get downstream pk from user input, override and perform some checks if applicable.

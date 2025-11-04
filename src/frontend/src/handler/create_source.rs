@@ -1023,7 +1023,7 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
         Some(TableId::placeholder())
     };
     let source = SourceCatalog {
-        id: TableId::placeholder().table_id,
+        id: TableId::placeholder().as_raw_id(),
         name: source_name,
         schema_id,
         database_id,

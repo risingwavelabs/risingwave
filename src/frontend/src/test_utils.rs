@@ -458,7 +458,7 @@ impl CatalogWriter for MockCatalogWriter {
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
             self.catalog
                 .read()
@@ -489,7 +489,7 @@ impl CatalogWriter for MockCatalogWriter {
             )
             .into());
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.as_raw_id());
         let indexes =
             self.catalog
                 .read()
@@ -1177,6 +1177,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn alter_fragment_parallelism(
+        &self,
+        _fragment_ids: Vec<u32>,
+        _parallelism: Option<PbTableParallelism>,
+    ) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn get_cluster_recovery_status(&self) -> RpcResult<RecoveryStatus> {
         Ok(RecoveryStatus::StatusRunning)
     }
@@ -1258,6 +1266,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn refresh(&self, _request: RefreshRequest) -> RpcResult<RefreshResponse> {
         Ok(RefreshResponse { status: None })
+    }
+
+    fn cluster_id(&self) -> &str {
+        "test-cluster-uuid"
     }
 }
 

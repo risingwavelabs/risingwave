@@ -516,13 +516,19 @@ pub fn start_iceberg_compactor(
                                     .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
                                     .write_parquet_properties(write_parquet_properties)
                                     .small_file_threshold(compactor_context.storage_opts.iceberg_compaction_small_file_threshold_mb as u64 * 1024 * 1024)
-                                    .max_task_total_size(
-                                        compactor_context.storage_opts.iceberg_compaction_max_task_total_size_mb as u64 * 1024 * 1024,
-                                    )
                                     .enable_heuristic_output_parallelism(compactor_context.storage_opts.iceberg_compaction_enable_heuristic_output_parallelism)
                                     .max_concurrent_closes(compactor_context.storage_opts.iceberg_compaction_max_concurrent_closes)
                                     .enable_dynamic_size_estimation(compactor_context.storage_opts.iceberg_compaction_enable_dynamic_size_estimation)
                                     .size_estimation_smoothing_factor(compactor_context.storage_opts.iceberg_compaction_size_estimation_smoothing_factor)
+                                    .target_binpack_group_size_mb(
+                                        compactor_context.storage_opts.iceberg_compaction_target_binpack_group_size_mb
+                                    )
+                                    .min_group_size_mb(
+                                        compactor_context.storage_opts.iceberg_compaction_min_group_size_mb
+                                    )
+                                    .min_group_file_count(
+                                        compactor_context.storage_opts.iceberg_compaction_min_group_file_count
+                                    )
                                     .build() {
                                     Ok(config) => config,
                                     Err(e) => {
@@ -914,7 +920,7 @@ pub fn start_compactor(
 
                                     if enable_check_compaction_result && need_check_task {
                                         let compact_table_ids = compact_task.build_compact_table_ids();
-                                        match compaction_catalog_manager_ref.acquire(compact_table_ids).await {
+                                        match compaction_catalog_manager_ref.acquire(compact_table_ids.into_iter().collect()).await {
                                             Ok(compaction_catalog_agent_ref) =>  {
                                                 match check_compaction_result(&compact_task, context.clone(), compaction_catalog_agent_ref).await
                                                 {
@@ -1050,7 +1056,7 @@ pub fn start_shared_compactor(
                             task: dispatch_task,
                         } = request.into_inner();
                         let table_id_to_catalog = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
-                            acc.insert(table.id, table);
+                            acc.insert(table.id.into(), table);
                             acc
                         });
 

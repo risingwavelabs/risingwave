@@ -862,7 +862,7 @@ pub fn handle_show_create_object(
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
                                 t.is_mview()
-                                    && has_access_to_object(current_user, t.id.table_id, t.owner)
+                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
                             }),
                     )
                 })?
@@ -886,7 +886,7 @@ pub fn handle_show_create_object(
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
                                 t.is_user_table()
-                                    && has_access_to_object(current_user, t.id.table_id, t.owner)
+                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
                             }),
                     )
                 })?
@@ -927,7 +927,7 @@ pub fn handle_show_create_object(
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
                                 t.is_index()
-                                    && has_access_to_object(current_user, t.id.table_id, t.owner)
+                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
                             }),
                     )
                 })?

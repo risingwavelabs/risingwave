@@ -132,7 +132,7 @@ impl<PlanRef: GenericPlanRef> VectorIndexLookupJoin<PlanRef> {
 
     pub fn to_reader_desc(&self) -> PbVectorIndexReaderDesc {
         PbVectorIndexReaderDesc {
-            table_id: self.index_table_id.table_id,
+            table_id: self.index_table_id.as_raw_id(),
             info_column_desc: self
                 .info_column_desc
                 .iter()

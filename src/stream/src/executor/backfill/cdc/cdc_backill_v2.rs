@@ -109,7 +109,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         assert!(!self.options.disable_backfill);
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
-        let table_id = self.external_table.table_id().table_id;
+        let table_id = self.external_table.table_id();
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
         let external_database_name = self.external_table.database_name().to_owned();
@@ -230,9 +230,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             if !is_reset {
                 state_impl.init_epoch(barrier_epoch).await?;
                 is_reset = true;
-                tracing::info!(table_id, "Initialize executor.");
+                tracing::info!(%table_id, "Initialize executor.");
             } else {
-                tracing::info!(table_id, "Reset executor.");
+                tracing::info!(%table_id, "Reset executor.");
             }
 
             let mut current_actor_bounds = None;
@@ -336,7 +336,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 } else {
                     assert!(table_reader.is_some(), "table reader must created");
                     tracing::info!(
-                        table_id,
+                        %table_id,
                         upstream_table_name,
                         "table reader created successfully"
                     );
@@ -353,7 +353,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             // Backfill snapshot splits sequentially.
             for split in actor_snapshot_splits.iter().skip(next_split_idx) {
                 tracing::info!(
-                    table_id,
+                    %table_id,
                     upstream_table_name,
                     ?split,
                     is_snapshot_paused,
@@ -441,7 +441,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             }) => {
                                                 if dropped_actors.contains(&self.actor_ctx.id) {
                                                     tracing::info!(
-                                                        table_id,
+                                                        %table_id,
                                                         upstream_table_name,
                                                         "CdcBackfill has been dropped due to config change"
                                                     );
@@ -517,7 +517,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                             match msg? {
                                 None => {
                                     tracing::info!(
-                                        table_id,
+                                        %table_id,
                                         split_id = split.split_id,
                                         "snapshot read stream ends"
                                     );
@@ -583,7 +583,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
             upstream_table_reader.disconnect().await?;
             tracing::info!(
-                table_id,
+                %table_id,
                 upstream_table_name,
                 "CdcBackfill has already finished and will forward messages directly to the downstream"
             );

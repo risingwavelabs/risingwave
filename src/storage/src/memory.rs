@@ -289,7 +289,7 @@ pub mod sled {
 
         #[test]
         fn test_filter_variable_key_length_false_positive() {
-            let table_id = TableId { table_id: 233 };
+            let table_id = TableId::new(233);
             let epoch = u64::MAX - u64::from_be_bytes([1, 2, 3, 4, 5, 6, 7, 8]);
             let excluded_short_table_key = [0, 1, 0, 0];
             let included_long_table_key = [0, 1, 0, 0, 1, 2];
@@ -620,7 +620,7 @@ where
             HummockEpoch::MAX,
         )),
         Unbounded => {
-            if let Some(next_table_id) = table_id.table_id().checked_add(1) {
+            if let Some(next_table_id) = table_id.as_raw_id().checked_add(1) {
                 Excluded(FullKey::new(
                     next_table_id.into(),
                     TableKey(Bytes::from(b"".to_vec())),

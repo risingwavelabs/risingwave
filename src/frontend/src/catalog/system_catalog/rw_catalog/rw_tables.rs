@@ -52,7 +52,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
             schema
                 .iter_user_table_with_acl(current_user)
                 .map(|table| RwTable {
-                    id: table.id.table_id as i32,
+                    id: table.id.as_raw_id() as i32,
                     name: table.name().to_owned(),
                     schema_id: schema.id() as i32,
                     owner: table.owner as i32,
@@ -60,7 +60,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
                     append_only: table.append_only,
                     refreshable: table.refreshable,
                     acl: get_acl_items(
-                        &GrantObject::TableId(table.id.table_id),
+                        &GrantObject::TableId(table.id.as_raw_id()),
                         true,
                         &users,
                         username_map,

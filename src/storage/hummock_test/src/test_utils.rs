@@ -149,7 +149,7 @@ pub async fn with_hummock_storage(
     register_tables_with_id_for_test(
         hummock_storage.compaction_catalog_manager_ref(),
         &hummock_manager_ref,
-        &[table_id.table_id()],
+        &[table_id],
     )
     .await;
 
@@ -158,11 +158,11 @@ pub async fn with_hummock_storage(
 
 pub fn update_filter_key_extractor_for_table_ids(
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
-    table_ids: &[u32],
+    table_ids: &[TableId],
 ) {
     for table_id in table_ids {
         let mock_table = PbTable {
-            id: *table_id,
+            id: table_id.as_raw_id(),
             read_prefix_len_hint: 0,
             maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as u32),
             ..Default::default()
@@ -174,7 +174,7 @@ pub fn update_filter_key_extractor_for_table_ids(
 pub async fn register_tables_with_id_for_test(
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     hummock_manager_ref: &HummockManagerRef,
-    table_ids: &[u32],
+    table_ids: &[TableId],
 ) {
     update_filter_key_extractor_for_table_ids(compaction_catalog_manager_ref, table_ids);
     register_table_ids_to_compaction_group(
@@ -190,7 +190,7 @@ pub fn update_filter_key_extractor_for_tables(
     tables: &[PbTable],
 ) {
     for table in tables {
-        compaction_catalog_manager_ref.update(table.id, table.clone())
+        compaction_catalog_manager_ref.update(table.id.into(), table.clone())
     }
 }
 pub async fn register_tables_with_catalog_for_test(
@@ -225,7 +225,7 @@ impl HummockTestEnv {
         register_tables_with_id_for_test(
             self.storage.compaction_catalog_manager_ref(),
             &self.manager,
-            &[table_id.table_id()],
+            &[table_id],
         )
         .await;
         self.wait_version_sync().await;

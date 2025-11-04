@@ -18,7 +18,8 @@ use std::time::Duration;
 use compact_task::PbTaskStatus;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{SYS_CATALOG_START_ID, TableId};
+use risingwave_common::catalog::SYS_CATALOG_START_ID;
+use risingwave_common::id::JobId;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
@@ -214,11 +215,8 @@ impl HummockManagerService for HummockServiceImpl {
         // get internal_table_id by metadata_manger
         if request.table_id < SYS_CATALOG_START_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
-            let table_id = TableId::new(request.table_id);
-            if let Ok(table_fragment) = self
-                .metadata_manager
-                .get_job_fragments_by_id(&table_id)
-                .await
+            let job_id = JobId::new(request.table_id);
+            if let Ok(table_fragment) = self.metadata_manager.get_job_fragments_by_id(job_id).await
             {
                 option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());
             }
@@ -228,7 +226,7 @@ impl HummockManagerService for HummockServiceImpl {
             option
                 .internal_table_id
                 .iter()
-                .all(|table_id| *table_id < SYS_CATALOG_START_ID as u32),
+                .all(|table_id| table_id.as_raw_id() < SYS_CATALOG_START_ID as u32),
         );
 
         tracing::info!(
@@ -362,7 +360,7 @@ impl HummockManagerService for HummockServiceImpl {
             .hummock_manager
             .move_state_tables_to_dedicated_compaction_group(
                 req.group_id,
-                &req.table_ids,
+                &req.table_ids.into_iter().map_into().collect_vec(),
                 if req.partition_vnode_count > 0 {
                     Some(req.partition_vnode_count)
                 } else {
@@ -654,7 +652,7 @@ impl HummockManagerService for HummockServiceImpl {
         let GetVersionByEpochRequest { epoch, table_id } = request.into_inner();
         let version = self
             .hummock_manager
-            .epoch_to_version(epoch, table_id)
+            .epoch_to_version(epoch, table_id.into())
             .await?;
         Ok(Response::new(GetVersionByEpochResponse {
             version: Some(version.to_protobuf()),

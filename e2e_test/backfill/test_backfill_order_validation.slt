@@ -1,0 +1,99 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO TRUE;
+
+statement ok
+drop table if exists car_sales cascade;
+
+statement ok
+drop table if exists car_info cascade;
+
+statement ok
+drop table if exists car_regions cascade;
+
+statement ok
+drop table if exists t cascade;
+
+statement ok
+create table car_sales(id int, car_id int, region_id int, price int);
+
+statement ok
+create table car_info(id int, name varchar);
+
+statement ok
+create table car_regions(id int, region varchar);
+
+# Create table t that is NOT used in the query
+statement ok
+create table t(a int, b int, c int);
+
+# Test 1: Should fail because 't' is specified in backfill_order but not used in query
+statement error Table or source 't' specified in backfill_order is not used in the query
+create materialized view m1
+    with (backfill_order = FIXED(car_regions -> car_sales, t -> car_sales))
+    as
+      with price_ranges as (
+        select
+          car_info.name as name,
+          car_sales.price as price,
+          round(log10(1 + car_sales.price)::numeric, 1) as price_range
+        from car_sales join car_info
+          on car_sales.car_id = car_info.id
+          join car_regions
+            on car_sales.region_id = car_regions.id
+      )
+      select
+        name,
+        price_range,
+        count(*) as sales_count,
+        sum(price) as sales_volume,
+        avg(price) as sales_avg,
+        min(price) as sales_min,
+        max(price) as sales_max,
+        approx_percentile(0.5) WITHIN GROUP (ORDER BY price) as sales_est_median,
+        approx_percentile(0.01) WITHIN GROUP (ORDER BY price) as sales_est_bottom_1_percent,
+        approx_percentile(0.99) WITHIN GROUP (ORDER BY price) as sales_est_top_1_percent
+      FROM
+        price_ranges
+GROUP BY name, price_range;
+
+# Test 2: Should also fail when 't' is on the right side of the arrow
+statement error Table or source 't' specified in backfill_order is not used in the query
+create materialized view m2
+    with (backfill_order = FIXED(car_sales -> t))
+    as
+      select
+        car_info.name as name,
+        car_sales.price as price
+      from car_sales join car_info
+        on car_sales.car_id = car_info.id
+        join car_regions
+          on car_sales.region_id = car_regions.id;
+
+# Test 3: Should succeed when only actual tables from the query are specified
+statement ok
+create materialized view m3
+    with (backfill_order = FIXED(car_regions -> car_sales))
+    as
+      select
+        car_info.name as name,
+        car_sales.price as price
+      from car_sales join car_info
+        on car_sales.car_id = car_info.id
+        join car_regions
+          on car_sales.region_id = car_regions.id;
+
+# Cleanup
+statement ok
+drop materialized view m3;
+
+statement ok
+drop table car_sales;
+
+statement ok
+drop table car_info;
+
+statement ok
+drop table car_regions;
+
+statement ok
+drop table t;

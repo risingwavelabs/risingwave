@@ -45,7 +45,7 @@ pub async fn handle_alter_streaming_enable_unaligned_join(
                             ));
                         }
                     }
-                    Relation::BaseTable(t) => t.table_catalog.id.table_id,
+                    Relation::BaseTable(t) => t.table_catalog.id.as_raw_id(),
                     Relation::SystemTable(_t) => {
                         bail!(ErrorCode::NotSupported(
                             "system table has no unaligned_join".to_owned(),

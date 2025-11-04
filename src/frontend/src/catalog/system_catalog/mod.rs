@@ -329,7 +329,7 @@ impl SysCatalogReader for SysCatalogReaderImpl {
     fn read_table(&self, table_id: TableId) -> BoxStream<'_, Result<DataChunk, BoxedError>> {
         let table_name = SYS_CATALOGS
             .catalogs
-            .get((table_id.table_id - SYS_CATALOG_START_ID as u32) as usize)
+            .get((table_id.as_raw_id() - SYS_CATALOG_START_ID as u32) as usize)
             .unwrap();
         match table_name {
             BuiltinCatalog::Table(t) => (t.function)(self),

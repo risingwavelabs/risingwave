@@ -21,11 +21,11 @@ use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::{
     ActorAlignmentId, IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat,
 };
+use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -187,7 +187,7 @@ pub struct Fragment {
     pub fragment_type_mask: FragmentTypeMask,
     pub distribution_type: PbFragmentDistributionType,
     pub actors: Vec<StreamActor>,
-    pub state_table_ids: Vec<u32>,
+    pub state_table_ids: Vec<TableId>,
     pub maybe_vnode_count: Option<u32>,
     pub nodes: StreamNode,
 }
@@ -215,7 +215,7 @@ impl Fragment {
                     )
                 })
                 .collect(),
-            state_table_ids: self.state_table_ids.clone(),
+            state_table_ids: self.state_table_ids.iter().map_into().collect(),
             upstream_fragment_ids: upstream_fragments.collect(),
             maybe_vnode_count: self.maybe_vnode_count,
             nodes: Some(self.nodes.clone()),
@@ -243,7 +243,7 @@ impl IsSingleton for Fragment {
 #[derive(Debug, Clone)]
 pub struct StreamJobFragments {
     /// The table id.
-    pub stream_job_id: TableId,
+    pub stream_job_id: JobId,
 
     /// The state of the table fragments.
     pub state: State,
@@ -312,7 +312,7 @@ impl StreamJobFragments {
         fragment_dispatchers: &FragmentActorDispatchers,
     ) -> PbTableFragments {
         PbTableFragments {
-            table_id: self.stream_job_id.table_id(),
+            table_id: self.stream_job_id.as_raw_id(),
             state: self.state as _,
             fragments: self
                 .fragments
@@ -344,9 +344,9 @@ pub type StreamJobActorsToCreate = HashMap<
 
 impl StreamJobFragments {
     /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
-    pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+    pub fn for_test(job_id: JobId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self::new(
-            table_id,
+            job_id,
             fragments,
             &BTreeMap::new(),
             StreamContext::default(),
@@ -355,10 +355,10 @@ impl StreamJobFragments {
         )
     }
 
-    /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
-    /// `Inactive` on the given workers.
+    /// Create a new `TableFragments` with state of `Initial`, recording actor locations on the given
+    /// workers.
     pub fn new(
-        stream_job_id: TableId,
+        stream_job_id: JobId,
         fragments: BTreeMap<FragmentId, Fragment>,
         actor_locations: &BTreeMap<ActorId, ActorAlignmentId>,
         ctx: StreamContext,
@@ -372,7 +372,6 @@ impl StreamJobFragments {
                     actor_id,
                     ActorStatus {
                         location: PbActorLocation::from_worker(alignment_id.worker_id()),
-                        state: ActorState::Inactive as i32,
                     },
                 )
             })
@@ -405,7 +404,7 @@ impl StreamJobFragments {
     }
 
     /// Returns the table id.
-    pub fn stream_job_id(&self) -> TableId {
+    pub fn stream_job_id(&self) -> JobId {
         self.stream_job_id
     }
 
@@ -417,13 +416,6 @@ impl StreamJobFragments {
     /// Returns whether the table fragments is in `Created` state.
     pub fn is_created(&self) -> bool {
         self.state == State::Created
-    }
-
-    /// Update state of all actors
-    pub fn update_actors_state(&mut self, state: ActorState) {
-        for actor_status in self.actor_status.values_mut() {
-            actor_status.set_state(state);
-        }
     }
 
     /// Returns actor ids associated with this table.
@@ -656,18 +648,6 @@ impl StreamJobFragments {
         table_ids
     }
 
-    /// Returns states of actors group by worker id.
-    pub fn worker_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
-        let mut map = BTreeMap::default();
-        for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.worker_id() as WorkerId;
-            map.entry(node_id)
-                .or_insert_with(Vec::new)
-                .push((actor_id, actor_status.state()));
-        }
-        map
-    }
-
     /// Returns actor locations group by worker id.
     pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
@@ -676,20 +656,6 @@ impl StreamJobFragments {
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
-    }
-
-    /// Returns the status of actors group by worker id.
-    pub fn active_actors(&self) -> Vec<StreamActor> {
-        let mut actors = vec![];
-        for fragment in self.fragments.values() {
-            for actor in &fragment.actors {
-                if self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32 {
-                    continue;
-                }
-                actors.push(actor.clone());
-            }
-        }
-        actors
     }
 
     pub fn actors_to_create(
@@ -717,20 +683,14 @@ impl StreamJobFragments {
         })
     }
 
-    pub fn mv_table_id(&self) -> Option<u32> {
-        if self
-            .fragments
+    pub fn mv_table_id(&self) -> Option<TableId> {
+        self.fragments
             .values()
-            .flat_map(|f| f.state_table_ids.iter())
-            .any(|table_id| *table_id == self.stream_job_id.table_id)
-        {
-            Some(self.stream_job_id.table_id)
-        } else {
-            None
-        }
+            .flat_map(|f| f.state_table_ids.iter().copied())
+            .find(|table_id| self.stream_job_id.is_mv_table_id(*table_id))
     }
 
-    pub fn collect_tables(fragments: impl Iterator<Item = &Fragment>) -> BTreeMap<u32, Table> {
+    pub fn collect_tables(fragments: impl Iterator<Item = &Fragment>) -> BTreeMap<TableId, Table> {
         let mut tables = BTreeMap::new();
         for fragment in fragments {
             stream_graph_visitor::visit_stream_node_tables_inner(
@@ -740,7 +700,7 @@ impl StreamJobFragments {
                 |table, _| {
                     let table_id = table.id;
                     tables
-                        .try_insert(table_id, table.clone())
+                        .try_insert(table_id.into(), table.clone())
                         .unwrap_or_else(|_| panic!("duplicated table id `{}`", table_id));
                 },
             );
@@ -749,16 +709,16 @@ impl StreamJobFragments {
     }
 
     /// Returns the internal table ids without the mview table.
-    pub fn internal_table_ids(&self) -> Vec<u32> {
+    pub fn internal_table_ids(&self) -> Vec<TableId> {
         self.fragments
             .values()
-            .flat_map(|f| f.state_table_ids.clone())
-            .filter(|&t| t != self.stream_job_id.table_id)
+            .flat_map(|f| f.state_table_ids.iter().copied())
+            .filter(|&t| !self.stream_job_id.is_mv_table_id(t))
             .collect_vec()
     }
 
     /// Returns all internal table ids including the mview table.
-    pub fn all_table_ids(&self) -> impl Iterator<Item = u32> + '_ {
+    pub fn all_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         self.fragments
             .values()
             .flat_map(|f| f.state_table_ids.clone())

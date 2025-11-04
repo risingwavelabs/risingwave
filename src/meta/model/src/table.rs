@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::id::JobId;
 use risingwave_pb::catalog::table::{
     CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
 };
@@ -24,8 +25,8 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
-    TableId, TableVersion, WebhookSourceInfo,
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, SourceId, TableId,
+    TableVersion, WebhookSourceInfo,
 };
 
 #[derive(
@@ -236,7 +237,7 @@ pub struct Model {
     pub name: String,
     pub optional_associated_source_id: Option<SourceId>,
     pub table_type: TableType,
-    pub belongs_to_job_id: Option<ObjectId>,
+    pub belongs_to_job_id: Option<JobId>,
     pub columns: ColumnCatalogArray,
     pub pk: ColumnOrderArray,
     pub distribution_key: I32Array,
@@ -370,11 +371,11 @@ impl From<PbTable> for ActiveModel {
             };
 
         Self {
-            table_id: Set(pb_table.id as _),
+            table_id: Set(pb_table.id.into()),
             name: Set(pb_table.name),
             optional_associated_source_id,
             table_type: Set(table_type.into()),
-            belongs_to_job_id: Set(pb_table.job_id.map(|x| x as _)),
+            belongs_to_job_id: Set(pb_table.job_id.map(|x| x.into())),
             columns: Set(pb_table.columns.into()),
             pk: Set(pb_table.pk.into()),
             distribution_key: Set(pb_table.distribution_key.into()),

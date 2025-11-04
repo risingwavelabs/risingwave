@@ -77,7 +77,7 @@ pub async fn handle_alter_iceberg_table_props(
         session.check_privilege_for_drop_alter(schema_name, &**sink)?;
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
-        (sink.id.sink_id, source.id, table.id.table_id)
+        (sink.id.sink_id, source.id, table.id.as_raw_id())
     } else {
         return Err(ErrorCode::NotSupported(
             "ALTER TABLE With is only supported for iceberg tables".to_owned(),

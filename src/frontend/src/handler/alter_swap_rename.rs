@@ -100,8 +100,8 @@ pub async fn handle_swap_rename(
             check_swap_rename_privilege(&session, src_table.owner, target_table.owner)?;
 
             alter_swap_rename_request::Object::Table(ObjectNameSwapPair {
-                src_object_id: src_table.id.table_id,
-                dst_object_id: target_table.id.table_id,
+                src_object_id: src_table.id.as_raw_id(),
+                dst_object_id: target_table.id.as_raw_id(),
             })
         }
         StatementType::ALTER_VIEW => {

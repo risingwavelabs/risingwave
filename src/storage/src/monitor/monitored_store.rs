@@ -104,8 +104,8 @@ impl<S, E> MonitoredStateStore<S, E> {
         let monitored = MonitoredStateStoreIter {
             inner: iter_stream,
             stats: MonitoredStateStoreIterStats {
-                inner: Stat::new(table_id.table_id, &self.storage_metrics, iter_init_duration),
-                table_id: table_id.table_id,
+                inner: Stat::new(table_id, &self.storage_metrics, iter_init_duration),
+                table_id,
                 metrics: self.storage_metrics.clone(),
             },
             _phantom: PhantomData,
@@ -119,8 +119,7 @@ impl<S, E> MonitoredStateStore<S, E> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<O>> {
-        let mut stats =
-            MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
+        let mut stats = MonitoredStateStoreGetStats::new(table_id, self.storage_metrics.clone());
 
         let value = on_key_value_future
             .instrument_await("store_on_key_value".verbose())

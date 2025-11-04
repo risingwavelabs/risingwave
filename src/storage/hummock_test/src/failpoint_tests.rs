@@ -94,7 +94,7 @@ async fn test_failpoints_state_store_read_upload() {
     // Get the value after flushing to remote.
     let anchor_prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + anchor.len());
-        ret.put_u32(TableId::default().table_id());
+        ret.put_u32(TableId::default().as_raw_id());
         ret.put_slice(anchor.as_ref());
         ret
     };
@@ -141,7 +141,7 @@ async fn test_failpoints_state_store_read_upload() {
 
     let anchor_prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + anchor.len());
-        ret.put_u32(TableId::default().table_id());
+        ret.put_u32(TableId::default().as_raw_id());
         ret.put_slice(anchor.as_ref());
         ret
     };
@@ -175,7 +175,7 @@ async fn test_failpoints_state_store_read_upload() {
 
     let bee_prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + b"ee".as_ref().len());
-        ret.put_u32(TableId::default().table_id());
+        ret.put_u32(TableId::default().as_raw_id());
         ret.put_slice(b"ee".as_ref().as_ref());
         ret
     };
@@ -217,7 +217,7 @@ async fn test_failpoints_state_store_read_upload() {
 
     let anchor_prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + anchor.len());
-        ret.put_u32(TableId::default().table_id());
+        ret.put_u32(TableId::default().as_raw_id());
         ret.put_slice(anchor.as_ref());
         ret
     };

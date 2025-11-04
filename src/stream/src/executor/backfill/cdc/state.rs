@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use risingwave_common::id::TableId;
 use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{Datum, JsonbVal, ScalarImpl};
@@ -42,7 +43,7 @@ pub struct CdcBackfillState<S: StateStore> {
 }
 
 impl<S: StateStore> CdcBackfillState<S> {
-    pub fn new(table_id: u32, state_table: StateTable<S>, state_len: usize) -> Self {
+    pub fn new(table_id: TableId, state_table: StateTable<S>, state_len: usize) -> Self {
         Self {
             split_id: table_id.to_string(),
             state_table,

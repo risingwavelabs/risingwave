@@ -97,6 +97,11 @@
             "description": "Support state table memory preload for boosting performance.",
             "type": "string",
             "const": "StateTableMemoryPreload"
+        },
+        {
+            "description": "Support locality backfill for complex streaming queries.",
+            "type": "string",
+            "const": "LocalityBackfill"
         }
     ]
 }

@@ -23,9 +23,11 @@ mod cdc_filter;
 mod changelog;
 mod dml;
 mod dynamic_filter;
+mod eowc_gap_fill;
 mod eowc_over_window;
 mod expand;
 mod filter;
+mod gap_fill;
 mod group_top_n;
 mod hash_agg;
 mod hash_join;
@@ -79,9 +81,11 @@ use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
 use self::dml::*;
 use self::dynamic_filter::*;
+use self::eowc_gap_fill::EowcGapFillExecutorBuilder;
 use self::eowc_over_window::*;
 use self::expand::*;
 use self::filter::*;
+use self::gap_fill::GapFillExecutorBuilder;
 use self::group_top_n::GroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
@@ -204,5 +208,7 @@ pub async fn create_executor(
         NodeBody::VectorIndexWrite => VectorIndexWriteExecutorBuilder,
         NodeBody::UpstreamSinkUnion => UpstreamSinkUnionExecutorBuilder,
         NodeBody::LocalityProvider => LocalityProviderBuilder,
+        NodeBody::EowcGapFill => EowcGapFillExecutorBuilder,
+        NodeBody::GapFill => GapFillExecutorBuilder,
     }
 }

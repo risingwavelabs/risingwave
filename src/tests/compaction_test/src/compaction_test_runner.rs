@@ -24,7 +24,6 @@ use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
 use foyer::Hint;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     MetaConfig, NoOverride, extract_storage_memory_config, load_config,
 };
@@ -634,7 +633,7 @@ async fn open_hummock_iters(
             .new_read_snapshot(
                 HummockReadEpoch::NoWait(epoch),
                 NewReadSnapshotOptions {
-                    table_id: TableId { table_id },
+                    table_id: table_id.into(),
                 },
             )
             .await?;

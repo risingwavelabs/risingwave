@@ -56,7 +56,7 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                 RwIndex {
                     id: index.id.index_id as i32,
                     name: index.name.clone(),
-                    primary_table_id: index.primary_table.id().table_id as i32,
+                    primary_table_id: index.primary_table.id().as_raw_id() as i32,
                     key_columns: index
                         .index_item
                         .iter()

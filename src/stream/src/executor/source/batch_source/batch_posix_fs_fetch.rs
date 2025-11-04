@@ -284,8 +284,8 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     Mutation::RefreshStart {
                                         associated_source_id,
                                         ..
-                                    } if associated_source_id.table_id()
-                                        == core.source_id.table_id() =>
+                                    } if associated_source_id.as_raw_id()
+                                        == core.source_id.as_raw_id() =>
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,
@@ -309,8 +309,8 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         associated_source_id,
                                     } => {
                                         // Check if this ListFinish is for our source
-                                        if associated_source_id.table_id()
-                                            == core.source_id.table_id()
+                                        if associated_source_id.as_raw_id()
+                                            == core.source_id.as_raw_id()
                                         {
                                             tracing::info!(
                                                 ?barrier.epoch,
@@ -348,8 +348,8 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 barrier_manager.report_source_load_finished(
                                     epoch,
                                     actor_ctx.id,
-                                    core.source_id.table_id(),
-                                    core.source_id.table_id(),
+                                    core.source_id,
+                                    core.source_id.as_raw_id(),
                                 );
                                 // Reset the flag to avoid duplicate reports
                                 list_finished = false;

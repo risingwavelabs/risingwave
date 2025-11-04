@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
+use risingwave_hummock_sdk::table_stats::{PbTableStatsMap, add_prost_table_stats_map};
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
-use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
+use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::GroupStateValidator;
@@ -306,7 +306,7 @@ pub(super) fn calc_new_write_limits(
                         .state_table_info
                         .compaction_group_member_table_ids(*id)
                         .iter()
-                        .map(|table_id| table_id.table_id)
+                        .map(|table_id| table_id.as_raw_id())
                         .collect(),
                     reason: group_state.reason().unwrap().to_owned(),
                 },
@@ -339,8 +339,8 @@ fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
 /// - The file stats is evenly distributed among multiple tables within the file.
 /// - The total key size and total value size are estimated based on key range and file size.
 /// - Branched files may lead to an overestimation.
-fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
-    let mut changes: HashMap<u32, TableStats> = HashMap::default();
+fn estimate_table_stats(sst: &SstableInfo) -> PbTableStatsMap {
+    let mut changes: PbTableStatsMap = HashMap::default();
     let weighted_value =
         |value: i64| -> i64 { (value as f64 / sst.table_ids.len() as f64).ceil() as i64 };
     let key_range = &sst.key_range;
@@ -357,7 +357,7 @@ fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
     }
     let estimated_total_value_size = sst.uncompressed_file_size - estimated_total_key_size;
     for table_id in &sst.table_ids {
-        let e = changes.entry(*table_id).or_default();
+        let e = changes.entry(table_id.as_raw_id()).or_default();
         e.total_key_count += weighted_value(sst.total_key_count as i64);
         e.total_key_size += weighted_value(estimated_total_key_size as i64);
         e.total_value_size += weighted_value(estimated_total_value_size as i64);
@@ -540,7 +540,7 @@ mod tests {
         last_level.table_infos.extend(vec![
             SstableInfoInner {
                 key_range: KeyRange::default(),
-                table_ids: vec![1, 2, 3],
+                table_ids: vec![1.into(), 2.into(), 3.into()],
                 total_key_count: 100,
                 sst_size: 100,
                 uncompressed_file_size: 100,
@@ -549,7 +549,7 @@ mod tests {
             .into(),
             SstableInfoInner {
                 key_range: KeyRange::default(),
-                table_ids: vec![1, 2, 3],
+                table_ids: vec![1.into(), 2.into(), 3.into()],
                 total_key_count: 100,
                 sst_size: 100,
                 uncompressed_file_size: 100,
@@ -615,7 +615,7 @@ mod tests {
                 right: vec![1; 20].into(),
                 ..Default::default()
             },
-            table_ids: vec![1, 2, 3],
+            table_ids: vec![1.into(), 2.into(), 3.into()],
             total_key_count: 6000,
             uncompressed_file_size: 6_000_000,
             ..Default::default()
@@ -677,7 +677,7 @@ mod tests {
                 right: vec![1; 2000].into(),
                 ..Default::default()
             },
-            table_ids: vec![1, 2, 3],
+            table_ids: vec![1.into(), 2.into(), 3.into()],
             total_key_count: 6000,
             uncompressed_file_size: 60_000,
             ..Default::default()
@@ -686,7 +686,7 @@ mod tests {
         let changes = estimate_table_stats(&sst);
         assert_eq!(changes.len(), 3);
         for t in &sst.table_ids {
-            let stats = changes.get(t).unwrap();
+            let stats = changes.get(&t.as_raw_id()).unwrap();
             assert_eq!(stats.total_key_count, 6000 / 3);
             assert_eq!(stats.total_key_size, 60_000 / 2 / 3);
             assert_eq!(stats.total_value_size, (60_000 - 60_000 / 2) / 3);
