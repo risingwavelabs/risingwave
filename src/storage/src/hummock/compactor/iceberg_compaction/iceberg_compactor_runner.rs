@@ -519,7 +519,7 @@ pub async fn create_plan_runners(
                 .target_file_size_bytes(config.target_file_size_bytes)
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .grouping_strategy(grouping_strategy)
-                .min_delete_file_count_threshold(256 as usize)
+                .min_delete_file_count_threshold(256_usize)
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 

@@ -198,14 +198,14 @@ impl IcebergCompactionHandle {
 impl Drop for IcebergCompactionHandle {
     fn drop(&mut self) {
         let mut guard = self.inner.write();
-        if let Some(schedule_state) = guard.sink_schedules.get_mut(&self.sink_id) {
-            if let Some(track) = schedule_state.tracks.get_mut(&self.task_type) {
-                if self.handle_success {
-                    track.initialize();
-                } else {
-                    // Restore the original state
-                    *track = self.track_snapshot.clone();
-                }
+        if let Some(schedule_state) = guard.sink_schedules.get_mut(&self.sink_id)
+            && let Some(track) = schedule_state.tracks.get_mut(&self.task_type)
+        {
+            if self.handle_success {
+                track.initialize();
+            } else {
+                // Restore the original state
+                *track = self.track_snapshot.clone();
             }
         }
     }
@@ -305,10 +305,10 @@ impl IcebergCompactionManager {
                 TaskType::Full
             };
 
-            if let Some(track) = schedule_state.tracks.get(&primary_task_type) {
-                if track.trigger_interval_sec != compaction_interval {
-                    schedule_state.update_trigger_interval(primary_task_type, compaction_interval);
-                }
+            if let Some(track) = schedule_state.tracks.get(&primary_task_type)
+                && track.trigger_interval_sec != compaction_interval
+            {
+                schedule_state.update_trigger_interval(primary_task_type, compaction_interval);
             }
         }
     }
@@ -398,15 +398,10 @@ impl IcebergCompactionManager {
 
         // Collect all triggerable tasks with their priority info
         let mut candidates = Vec::new();
-        for (sink_id, schedule_state) in guard.sink_schedules.iter() {
+        for (sink_id, schedule_state) in &guard.sink_schedules {
             for task_type in schedule_state.get_triggerable_tasks(now) {
                 if let Some(track) = schedule_state.tracks.get(&task_type) {
-                    candidates.push((
-                        sink_id.clone(),
-                        task_type,
-                        track.count,
-                        track.next_compaction_time,
-                    ));
+                    candidates.push((*sink_id, task_type, track.count, track.next_compaction_time));
                 }
             }
         }
