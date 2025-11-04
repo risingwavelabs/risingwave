@@ -64,6 +64,7 @@ risedev-components.user.env
 risedev-compose.yml
 risedev-profiles.user.yml
 ft.txt
+.sqlsmith/
 # generated output from regress tests
 src/tests/regress/output/*
 src/tests/sync_point/slt/e2e_test
