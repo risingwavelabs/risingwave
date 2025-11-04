@@ -165,7 +165,7 @@ pub async fn gen_test_sstable_data(
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta) {
     let table_id_to_vnode = HashMap::from_iter(vec![(
-        TableId::default().table_id(),
+        TableId::default().as_raw_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
     let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
@@ -301,12 +301,12 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     sstable_store: SstableStoreRef,
 ) -> (TableHolder, SstableInfo) {
     let table_id_to_vnode = HashMap::from_iter(vec![(
-        TableId::default().table_id(),
+        TableId::default().as_raw_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
 
     let table_id_to_watermark_serde =
-        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+        HashMap::from_iter(vec![(TableId::default().as_raw_id(), None)]);
 
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
@@ -369,12 +369,12 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
     let table_id_to_vnode = HashMap::from_iter(vec![(
-        TableId::default().table_id(),
+        TableId::default().as_raw_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
 
     let table_id_to_watermark_serde =
-        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+        HashMap::from_iter(vec![(TableId::default().as_raw_id(), None)]);
 
     gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
         opts,
@@ -396,12 +396,12 @@ pub async fn gen_test_sstable_with_range_tombstone(
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
     let table_id_to_vnode = HashMap::from_iter(vec![(
-        TableId::default().table_id(),
+        TableId::default().as_raw_id(),
         VirtualNode::COUNT_FOR_TEST,
     )]);
 
     let table_id_to_watermark_serde =
-        HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+        HashMap::from_iter(vec![(TableId::default().as_raw_id(), None)]);
 
     gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,

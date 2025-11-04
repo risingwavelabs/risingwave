@@ -61,7 +61,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     table.name(),
                 )?;
-                Object::TableId(table.id.table_id)
+                Object::TableId(table.id.as_raw_id())
             }
             StatementType::ALTER_VIEW => {
                 let (view, old_schema_name) =

@@ -680,7 +680,7 @@ where
                 self.ready_for_query()?;
             }
             UserAuthenticator::ClearText(_)
-            | UserAuthenticator::OAuth(_)
+            | UserAuthenticator::OAuth { .. }
             | UserAuthenticator::Ldap(..) => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationCleartextPassword)?;

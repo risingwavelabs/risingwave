@@ -346,7 +346,7 @@ impl Binder {
                 table_catalog.owner,
                 AclMode::Select,
                 table_catalog.name.clone(),
-                PbObject::TableId(table_id.table_id),
+                PbObject::TableId(table_id.as_raw_id()),
             ),
             table_catalog.database_id,
         )?;

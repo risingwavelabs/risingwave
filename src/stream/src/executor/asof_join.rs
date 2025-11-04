@@ -932,8 +932,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 let key = key.deserialize(join_key_data_types)?;
                 tracing::warn!(target: "high_join_amplification",
                     matched_rows_len = join_matched_rows_cnt,
-                    update_table_id = side_update.ht.table_id(),
-                    match_table_id = side_match.ht.table_id(),
+                    update_table_id = %side_update.ht.table_id(),
+                    match_table_id = %side_match.ht.table_id(),
                     join_key = ?key,
                     actor_id = ctx.id,
                     fragment_id = ctx.fragment_id,

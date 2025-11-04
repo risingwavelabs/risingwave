@@ -438,7 +438,7 @@ impl From<CompactTask> for PbCompactTask {
                 .pk_prefix_table_watermarks
                 .into_iter()
                 .chain(compact_task.non_pk_prefix_table_watermarks)
-                .map(|(table_id, table_watermark)| (table_id.table_id(), table_watermark.into()))
+                .map(|(table_id, table_watermark)| (table_id.as_raw_id(), table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
             table_schemas: compact_task
@@ -507,7 +507,7 @@ impl From<&CompactTask> for PbCompactTask {
                 .pk_prefix_table_watermarks
                 .iter()
                 .chain(compact_task.non_pk_prefix_table_watermarks.iter())
-                .map(|(table_id, table_watermark)| (table_id.table_id(), table_watermark.into()))
+                .map(|(table_id, table_watermark)| (table_id.as_raw_id(), table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
             table_schemas: compact_task

@@ -93,7 +93,7 @@ impl HummockVersionStateTableInfo {
     pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
         self.state_table_info
             .iter()
-            .map(|(table_id, info)| (table_id.table_id, *info))
+            .map(|(table_id, info)| (table_id.as_raw_id(), *info))
             .collect()
     }
 
@@ -131,7 +131,7 @@ impl HummockVersionStateTableInfo {
                 assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());
             } else {
                 warn!(
-                    table_id = table_id.table_id,
+                    %table_id,
                     "table to remove does not exist"
                 );
             }
@@ -150,7 +150,7 @@ impl HummockVersionStateTableInfo {
                     assert!(
                         new_info.committed_epoch >= prev_info.committed_epoch,
                         "state table info regress. table id: {}, prev_info: {:?}, new_info: {:?}",
-                        table_id.table_id,
+                        table_id.as_raw_id(),
                         prev_info,
                         new_info
                     );
@@ -361,18 +361,18 @@ where
             table_watermarks: version
                 .table_watermarks
                 .iter()
-                .map(|(table_id, watermark)| (table_id.table_id, watermark.as_ref().into()))
+                .map(|(table_id, watermark)| (table_id.as_raw_id(), watermark.as_ref().into()))
                 .collect(),
             table_change_logs: version
                 .table_change_log
                 .iter()
-                .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
+                .map(|(table_id, change_log)| (table_id.as_raw_id(), change_log.to_protobuf()))
                 .collect(),
             state_table_info: version.state_table_info.to_protobuf(),
             vector_indexes: version
                 .vector_indexes
                 .iter()
-                .map(|(table_id, index)| (table_id.table_id, index.clone().into()))
+                .map(|(table_id, index)| (table_id.as_raw_id(), index.clone().into()))
                 .collect(),
         }
     }
@@ -396,18 +396,18 @@ where
             table_watermarks: version
                 .table_watermarks
                 .into_iter()
-                .map(|(table_id, watermark)| (table_id.table_id, watermark.as_ref().into()))
+                .map(|(table_id, watermark)| (table_id.as_raw_id(), watermark.as_ref().into()))
                 .collect(),
             table_change_logs: version
                 .table_change_log
                 .into_iter()
-                .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
+                .map(|(table_id, change_log)| (table_id.as_raw_id(), change_log.to_protobuf()))
                 .collect(),
             state_table_info: version.state_table_info.to_protobuf(),
             vector_indexes: version
                 .vector_indexes
                 .into_iter()
-                .map(|(table_id, index)| (table_id.table_id, index.into()))
+                .map(|(table_id, index)| (table_id.as_raw_id(), index.into()))
                 .collect(),
         }
     }
@@ -752,27 +752,27 @@ where
             new_table_watermarks: version_delta
                 .new_table_watermarks
                 .iter()
-                .map(|(table_id, watermarks)| (table_id.table_id, watermarks.into()))
+                .map(|(table_id, watermarks)| (table_id.as_raw_id(), watermarks.into()))
                 .collect(),
             removed_table_ids: version_delta
                 .removed_table_ids
                 .iter()
-                .map(|table_id| table_id.table_id)
+                .map(|table_id| table_id.as_raw_id())
                 .collect(),
             change_log_delta: version_delta
                 .change_log_delta
                 .iter()
-                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.into()))
+                .map(|(table_id, log_delta)| (table_id.as_raw_id(), log_delta.into()))
                 .collect(),
             state_table_info_delta: version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, *delta))
+                .map(|(table_id, delta)| (table_id.as_raw_id(), *delta))
                 .collect(),
             vector_index_delta: version_delta
                 .vector_index_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.clone().into()))
+                .map(|(table_id, delta)| (table_id.as_raw_id(), delta.clone().into()))
                 .collect(),
         }
     }
@@ -797,27 +797,27 @@ where
             new_table_watermarks: version_delta
                 .new_table_watermarks
                 .into_iter()
-                .map(|(table_id, watermarks)| (table_id.table_id, watermarks.into()))
+                .map(|(table_id, watermarks)| (table_id.as_raw_id(), watermarks.into()))
                 .collect(),
             removed_table_ids: version_delta
                 .removed_table_ids
                 .into_iter()
-                .map(|table_id| table_id.table_id)
+                .map(|table_id| table_id.as_raw_id())
                 .collect(),
             change_log_delta: version_delta
                 .change_log_delta
                 .into_iter()
-                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.into()))
+                .map(|(table_id, log_delta)| (table_id.as_raw_id(), log_delta.into()))
                 .collect(),
             state_table_info_delta: version_delta
                 .state_table_info_delta
                 .into_iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta))
+                .map(|(table_id, delta)| (table_id.as_raw_id(), delta))
                 .collect(),
             vector_index_delta: version_delta
                 .vector_index_delta
                 .into_iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta.into()))
+                .map(|(table_id, delta)| (table_id.as_raw_id(), delta.into()))
                 .collect(),
         }
     }

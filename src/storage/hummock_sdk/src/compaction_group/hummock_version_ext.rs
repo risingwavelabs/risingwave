@@ -818,13 +818,11 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         let left_group_id_table_ids = self
             .state_table_info
             .compaction_group_member_table_ids(left_group_id)
-            .iter()
-            .map(|table_id| table_id.table_id);
+            .iter();
         let right_group_id_table_ids = self
             .state_table_info
             .compaction_group_member_table_ids(right_group_id)
-            .iter()
-            .map(|table_id| table_id.table_id);
+            .iter();
 
         assert!(
             left_group_id_table_ids
@@ -2311,7 +2309,7 @@ mod tests {
             assert!(branched_sst.sst_size < origin_sst.file_size);
             assert_eq!(10, branched_sst.sst_id);
             assert_eq!(11, origin_sst.sst_id);
-            assert_eq!(3, branched_sst.table_ids.first().unwrap().table_id()); // split table_id to right
+            assert_eq!(3, branched_sst.table_ids.first().unwrap().as_raw_id()); // split table_id to right
         }
 
         {
@@ -2342,7 +2340,7 @@ mod tests {
             assert!(branched_sst.sst_size < origin_sst.file_size);
             assert_eq!(10, branched_sst.sst_id);
             assert_eq!(11, origin_sst.sst_id);
-            assert_eq!(5, branched_sst.table_ids.first().unwrap().table_id()); // split table_id to right
+            assert_eq!(5, branched_sst.table_ids.first().unwrap().as_raw_id()); // split table_id to right
         }
 
         {

@@ -20,6 +20,7 @@ use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -80,7 +81,7 @@ impl GlobalBarrierWorkerContextImpl {
     async fn list_background_job_progress(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<TableId, String>> {
+    ) -> MetaResult<HashMap<JobId, String>> {
         let mgr = &self.metadata_manager;
         let job_info = mgr
             .catalog_controller
@@ -92,10 +93,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         Ok(job_info
             .into_iter()
-            .map(|(id, definition, _init_at)| {
-                let table_id = TableId::new(id as _);
-                (table_id, definition)
-            })
+            .map(|(job_id, definition, _init_at)| (job_id, definition))
             .collect())
     }
 
@@ -106,7 +104,7 @@ impl GlobalBarrierWorkerContextImpl {
         &self,
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
         let database_id = database_id.map(|database_id| database_id.database_id as _);
 
@@ -127,7 +125,6 @@ impl GlobalBarrierWorkerContextImpl {
                     job_fragment_infos
                         .into_iter()
                         .map(|(job_id, fragment_infos)| {
-                            let job_id = TableId::new(job_id as _);
                             (
                                 job_id,
                                 fragment_infos
@@ -144,7 +141,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     #[expect(clippy::type_complexity)]
     fn resolve_hummock_version_epochs(
-        background_jobs: impl Iterator<Item = (TableId, &HashMap<FragmentId, InflightFragmentInfo>)>,
+        background_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, InflightFragmentInfo>)>,
         version: &HummockVersion,
     ) -> MetaResult<(
         HashMap<TableId, u64>,
@@ -271,9 +268,9 @@ impl GlobalBarrierWorkerContextImpl {
         Ok((table_committed_epoch, log_epochs))
     }
 
-    fn collect_cdc_table_backfill_actors<'a, I>(jobs: I) -> HashMap<u32, HashSet<ActorId>>
+    fn collect_cdc_table_backfill_actors<'a, I>(jobs: I) -> HashMap<JobId, HashSet<ActorId>>
     where
-        I: Iterator<Item = (&'a TableId, &'a HashMap<FragmentId, InflightFragmentInfo>)>,
+        I: Iterator<Item = (&'a JobId, &'a HashMap<FragmentId, InflightFragmentInfo>)>,
     {
         let mut cdc_table_backfill_actors = HashMap::new();
 
@@ -284,7 +281,7 @@ impl GlobalBarrierWorkerContextImpl {
                     .contains(FragmentTypeFlag::StreamCdcScan)
                 {
                     cdc_table_backfill_actors
-                        .entry(job_id.table_id())
+                        .entry(*job_id)
                         .or_insert_with(HashSet::new)
                         .extend(fragment_info.actors.keys().cloned());
                 }
@@ -302,30 +299,29 @@ impl GlobalBarrierWorkerContextImpl {
         &self,
         inflight_jobs: &mut HashMap<
             DatabaseId,
-            HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
+            HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         >,
     ) -> MetaResult<()> {
         let mut jobs = inflight_jobs.values_mut().try_fold(
             HashMap::new(),
             |mut acc, table_map| -> MetaResult<_> {
-                for (tid, job) in table_map {
-                    if acc.insert(tid.table_id, job).is_some() {
-                        return Err(anyhow::anyhow!("Duplicate table id found: {:?}", tid).into());
+                for (job_id, job) in table_map {
+                    if acc.insert(*job_id, job).is_some() {
+                        return Err(anyhow::anyhow!("Duplicate job id found: {}", job_id).into());
                     }
                 }
                 Ok(acc)
             },
         )?;
-        let job_ids = jobs.keys().cloned().collect_vec();
         // Only `Table` will be returned here, ignoring other catalog objects.
         let tables = self
             .metadata_manager
             .catalog_controller
-            .get_user_created_table_by_ids(job_ids.into_iter().map(|id| id as _).collect())
+            .get_user_created_table_by_ids(jobs.keys().copied())
             .await?;
         for table in tables {
             assert_eq!(table.table_type(), PbTableType::Table);
-            let fragment_infos = jobs.get_mut(&table.id).unwrap();
+            let fragment_infos = jobs.get_mut(&table.id.into()).unwrap();
             let mut target_fragment_id = None;
             for fragment in fragment_infos.values() {
                 let mut is_target_fragment = false;
@@ -405,7 +401,7 @@ impl GlobalBarrierWorkerContextImpl {
                         for job_id in background_streaming_jobs {
                             let scan_types = self
                                 .metadata_manager
-                                .get_job_backfill_scan_types(job_id.table_id as ObjectId)
+                                .get_job_backfill_scan_types(job_id.as_raw_id() as ObjectId)
                                 .await?;
 
                             if scan_types
@@ -448,9 +444,7 @@ impl GlobalBarrierWorkerContextImpl {
                     if !dropped_table_ids.is_empty() {
                         self.metadata_manager
                             .catalog_controller
-                            .complete_dropped_tables(
-                                dropped_table_ids.into_iter().map(|id| id.table_id as _),
-                            )
+                            .complete_dropped_tables(dropped_table_ids)
                             .await;
                         info = self
                             .resolve_graph_info(None, &active_streaming_nodes)
@@ -615,7 +609,7 @@ impl GlobalBarrierWorkerContextImpl {
             .pre_apply_drop_cancel(Some(database_id));
         self.metadata_manager
             .catalog_controller
-            .complete_dropped_tables(dropped_table_ids.into_iter().map(|id| id.table_id as _))
+            .complete_dropped_tables(dropped_table_ids)
             .await;
 
         let active_streaming_nodes =
@@ -727,11 +721,11 @@ impl GlobalBarrierWorkerContextImpl {
 
     async fn load_stream_actors(
         &self,
-        all_info: &HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>,
+        all_info: &HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>,
     ) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let job_ids = all_info
             .values()
-            .flat_map(|jobs| jobs.keys().map(|job_id| job_id.table_id as i32))
+            .flat_map(|jobs| jobs.keys().copied())
             .collect_vec();
 
         let job_extra_info = self
@@ -747,9 +741,9 @@ impl GlobalBarrierWorkerContextImpl {
                 timezone,
                 job_definition,
             } = job_extra_info
-                .get(&(job_id.table_id as i32))
+                .get(job_id)
                 .cloned()
-                .ok_or_else(|| anyhow!("no streaming job info for {}", job_id.table_id))?;
+                .ok_or_else(|| anyhow!("no streaming job info for {}", job_id))?;
 
             let expr_context = Some(StreamContext { timezone }.to_expr_context());
 

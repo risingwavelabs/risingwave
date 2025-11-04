@@ -18,7 +18,8 @@ use std::time::Duration;
 use compact_task::PbTaskStatus;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::{SYS_CATALOG_START_ID, TableId};
+use risingwave_common::catalog::SYS_CATALOG_START_ID;
+use risingwave_common::id::JobId;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
@@ -214,14 +215,10 @@ impl HummockManagerService for HummockServiceImpl {
         // get internal_table_id by metadata_manger
         if request.table_id < SYS_CATALOG_START_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
-            let table_id = TableId::new(request.table_id);
-            if let Ok(table_fragment) = self
-                .metadata_manager
-                .get_job_fragments_by_id(&table_id)
-                .await
+            let job_id = JobId::new(request.table_id);
+            if let Ok(table_fragment) = self.metadata_manager.get_job_fragments_by_id(job_id).await
             {
-                option.internal_table_id =
-                    HashSet::from_iter(table_fragment.all_table_ids().map(TableId::new));
+                option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());
             }
         }
 
@@ -229,7 +226,7 @@ impl HummockManagerService for HummockServiceImpl {
             option
                 .internal_table_id
                 .iter()
-                .all(|table_id| table_id.table_id() < SYS_CATALOG_START_ID as u32),
+                .all(|table_id| table_id.as_raw_id() < SYS_CATALOG_START_ID as u32),
         );
 
         tracing::info!(

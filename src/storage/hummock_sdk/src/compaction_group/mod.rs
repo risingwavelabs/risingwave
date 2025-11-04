@@ -78,7 +78,7 @@ pub mod group_split {
     ) -> FullKey<Vec<u8>> {
         if VirtualNode::MAX_REPRESENTABLE == vnode {
             // Modify `table_id` to `next_table_id` to satisfy the `split_to_right`` rule, so that the `table_id`` originally passed in will be split to left.
-            table_id = table_id.table_id().strict_add(1).into();
+            table_id = table_id.as_raw_id().strict_add(1).into();
             vnode = VirtualNode::ZERO;
         }
 

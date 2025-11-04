@@ -304,7 +304,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             || table_value_len > large_value_len
             || table_key_len + table_value_len > large_key_value_len
         {
-            let table_id = full_key.user_key.table_id.table_id();
+            let table_id = full_key.user_key.table_id.as_raw_id();
             tracing::warn!(
                 "A large key/value (table_id={}, key len={}, value len={}, epoch={}, spill offset={}) is added to block",
                 table_id,
@@ -371,7 +371,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             });
         }
 
-        let table_id = full_key.user_key.table_id.table_id();
+        let table_id = full_key.user_key.table_id.as_raw_id();
         let mut extract_key = user_key(&self.raw_key);
         extract_key = self.compaction_catalog_agent_ref.extract(extract_key);
         // add bloom_filter check

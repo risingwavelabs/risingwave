@@ -51,7 +51,7 @@ use crate::test_utils::{TestIngestBatch, gen_key_from_str, prepare_hummock_test_
 
 #[tokio::test]
 async fn test_storage_basic() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut hummock_storage = test_env
@@ -435,7 +435,7 @@ async fn test_storage_basic() {
 
 #[tokio::test]
 async fn test_state_store_sync() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -781,7 +781,7 @@ async fn test_state_store_sync() {
 
 #[tokio::test]
 async fn test_state_store_multiple_flush_no_upload() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -973,7 +973,7 @@ async fn test_state_store_multiple_flush_no_upload() {
 
 #[tokio::test]
 async fn test_delete_get() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1060,7 +1060,7 @@ async fn test_delete_get() {
 
 #[tokio::test]
 async fn test_multiple_epoch_sync() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1223,7 +1223,7 @@ async fn test_multiple_epoch_sync() {
 
 #[tokio::test]
 async fn test_iter_with_min_epoch() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1470,7 +1470,7 @@ async fn test_iter_with_min_epoch() {
 #[tokio::test]
 async fn test_hummock_version_reader() {
     use risingwave_storage::store::ReadOptions;
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1913,7 +1913,7 @@ async fn test_hummock_version_reader() {
 
 #[tokio::test]
 async fn test_get_with_min_epoch() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
@@ -1969,7 +1969,7 @@ async fn test_get_with_min_epoch() {
         let k = gen_key(0);
         let prefix_hint = {
             let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
-            ret.put_u32(TEST_TABLE_ID.table_id());
+            ret.put_u32(TEST_TABLE_ID.as_raw_id());
             ret.put_slice(k.as_ref());
             ret
         };
@@ -2075,7 +2075,7 @@ async fn test_get_with_min_epoch() {
     let k = gen_key(0);
     let prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
-        ret.put_u32(TEST_TABLE_ID.table_id());
+        ret.put_u32(TEST_TABLE_ID.as_raw_id());
         ret.put_slice(k.as_ref());
         ret
     };
@@ -2160,7 +2160,7 @@ async fn test_get_with_min_epoch() {
 
 #[tokio::test]
 async fn test_table_watermark() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table_id(TEST_TABLE_ID).await;
     let mut local1 = test_env

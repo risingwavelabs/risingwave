@@ -186,7 +186,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let metrics_info = MetricsInfo::new(
             ctx.streaming_metrics.clone(),
-            storage_table.table_id().table_id(),
+            storage_table.table_id(),
             ctx.id,
             "Lookup",
         );

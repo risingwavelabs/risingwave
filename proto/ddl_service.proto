@@ -312,6 +312,15 @@ message AlterParallelismRequest {
 
 message AlterParallelismResponse {}
 
+message AlterFragmentParallelismRequest {
+  repeated uint32 fragment_ids = 1;
+
+  // When `parallelism` is `None`, it indicates resetting to the job's parallelism.
+  optional meta.TableParallelism parallelism = 2;
+}
+
+message AlterFragmentParallelismResponse {}
+
 message AlterCdcTableBackfillParallelismRequest {
   uint32 table_id = 1;
   meta.TableParallelism parallelism = 2;
@@ -645,6 +654,7 @@ service DdlService {
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
+  rpc AlterFragmentParallelism(AlterFragmentParallelismRequest) returns (AlterFragmentParallelismResponse);
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);

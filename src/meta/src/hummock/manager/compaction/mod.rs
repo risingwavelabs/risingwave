@@ -1388,7 +1388,7 @@ fn update_table_stats_for_vnode_watermark_trivial_reclaim(
         *e += s.total_key_count;
     }
     for (table_id, delete_count) in deleted_table_keys {
-        let Some(stats) = table_stats.get_mut(&table_id.table_id()) else {
+        let Some(stats) = table_stats.get_mut(&table_id.as_raw_id()) else {
             continue;
         };
         if stats.total_key_count == 0 {

@@ -868,7 +868,7 @@ impl Mutation {
                     .iter()
                     .map(|(table_id, subscriber_id)| SubscriptionUpstreamInfo {
                         subscriber_id: *subscriber_id,
-                        upstream_mv_table_id: table_id.table_id,
+                        upstream_mv_table_id: table_id.as_raw_id(),
                     })
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
@@ -922,7 +922,7 @@ impl Mutation {
                     .map(
                         |(subscriber_id, upstream_mv_table_id)| SubscriptionUpstreamInfo {
                             subscriber_id: *subscriber_id,
-                            upstream_mv_table_id: upstream_mv_table_id.table_id,
+                            upstream_mv_table_id: upstream_mv_table_id.as_raw_id(),
                         },
                     )
                     .collect(),
@@ -954,18 +954,18 @@ impl Mutation {
                 table_id,
                 associated_source_id,
             } => PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
-                table_id: table_id.table_id,
-                associated_source_id: associated_source_id.table_id,
+                table_id: table_id.as_raw_id(),
+                associated_source_id: associated_source_id.as_raw_id(),
             }),
             Mutation::ListFinish {
                 associated_source_id,
             } => PbMutation::ListFinish(risingwave_pb::stream_plan::ListFinishMutation {
-                associated_source_id: associated_source_id.table_id,
+                associated_source_id: associated_source_id.as_raw_id(),
             }),
             Mutation::LoadFinish {
                 associated_source_id,
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
-                associated_source_id: associated_source_id.table_id,
+                associated_source_id: associated_source_id.as_raw_id(),
             }),
         }
     }

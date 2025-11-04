@@ -62,7 +62,7 @@ fn fetch_schema_info(
         .into());
     };
     let (source_def, _) =
-        reader.get_source_by_id(db_name.as_str(), schema_path, &source_id.table_id())?;
+        reader.get_source_by_id(db_name.as_str(), schema_path, &source_id.as_raw_id())?;
     Ok((table_def.clone(), source_def.clone()))
 }
 

@@ -588,7 +588,8 @@ impl<T: AsRef<[u8]>> Debug for UserKey<T> {
         write!(
             f,
             "UserKey {{ {}, {:?} }}",
-            self.table_id.table_id, self.table_key
+            self.table_id.as_raw_id(),
+            self.table_key
         )
     }
 }
@@ -611,7 +612,7 @@ impl<T: AsRef<[u8]>> UserKey<T> {
 
     /// Encode in to a buffer.
     pub fn encode_into(&self, buf: &mut impl BufMut) {
-        buf.put_u32(self.table_id.table_id());
+        buf.put_u32(self.table_id.as_raw_id());
         buf.put_slice(self.table_key.as_ref());
     }
 
@@ -923,9 +924,7 @@ pub mod range_delete_backward_compatibility_serde_struct {
     impl From<UserKeySerde> for UserKey {
         fn from(value: UserKeySerde) -> Self {
             Self {
-                table_id: TableId {
-                    table_id: value.table_id.table_id,
-                },
+                table_id: TableId::new(value.table_id.table_id),
                 table_key: value.table_key,
             }
         }
@@ -935,7 +934,7 @@ pub mod range_delete_backward_compatibility_serde_struct {
         fn from(value: UserKey) -> Self {
             Self {
                 table_id: TableIdSerde {
-                    table_id: value.table_id.table_id,
+                    table_id: value.table_id.as_raw_id(),
                 },
                 table_key: value.table_key,
             }
@@ -955,7 +954,7 @@ pub mod range_delete_backward_compatibility_serde_struct {
         }
 
         pub fn encode_length_prefixed(&self, mut buf: impl BufMut) {
-            buf.put_u32(self.table_id.table_id());
+            buf.put_u32(self.table_id.as_raw_id());
             buf.put_u32(self.table_key.0.as_slice().len() as u32);
             buf.put_slice(self.table_key.0.as_slice());
         }
@@ -1013,7 +1012,7 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
         Included(b) => Included(UserKey::new(table_id, TableKey(&b.0))),
         Excluded(b) => Excluded(UserKey::new(table_id, TableKey(&b.0))),
         Unbounded => {
-            if let Some(next_table_id) = table_id.table_id().checked_add(1) {
+            if let Some(next_table_id) = table_id.as_raw_id().checked_add(1) {
                 Excluded(UserKey::new(
                     next_table_id.into(),
                     TableKey(T::empty_slice_ref()),
@@ -1052,7 +1051,7 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
     /// use risingwave_hummock_sdk::EpochWithGap;
     /// use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, TableKey};
     ///
-    /// let table_id = TableId { table_id: 1 };
+    /// let table_id = TableId::new(1);
     /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5 << EPOCH_AVAILABLE_BITS);
     /// let mut a: FullKeyTracker<_> = FullKeyTracker::<Bytes>::new(full_key1.clone());
     ///

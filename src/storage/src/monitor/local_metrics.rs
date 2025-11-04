@@ -518,7 +518,7 @@ impl Drop for GetLocalMetricsGuard {
     fn drop(&mut self) {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
             let table_metrics = local_metrics
-                .entry(self.table_id.table_id)
+                .entry(self.table_id.as_raw_id())
                 .or_insert_with(|| {
                     LocalStoreMetrics::new(
                         self.metrics.as_ref(),
@@ -556,7 +556,7 @@ impl Drop for IterLocalMetricsGuard {
     fn drop(&mut self) {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
             let table_metrics = local_metrics
-                .entry(self.table_id.table_id)
+                .entry(self.table_id.as_raw_id())
                 .or_insert_with(|| {
                     LocalStoreMetrics::new(
                         self.metrics.as_ref(),
