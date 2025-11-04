@@ -30,7 +30,7 @@ use risingwave_common::util::sort_util::cmp_datum_iter;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
-
+use crate::common::change_buffer::BTreeChangeBuffer;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils::create_builder;
 use crate::executor::prelude::*;
@@ -189,6 +189,10 @@ pub struct LocalityProviderExecutor<S: StateStore> {
 
     /// Chunk size for output
     chunk_size: usize,
+
+    pk_indices: PkIndices,
+
+    enable_locality_sort_buffer: bool,
 }
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
@@ -203,6 +207,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         fragment_id: FragmentId,
+        pk_indices: PkIndices,
+        enable_locality_sort_buffer: bool,
     ) -> Self {
         Self {
             upstream,
@@ -215,6 +221,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             metrics,
             chunk_size,
             fragment_id,
+            pk_indices,
+            enable_locality_sort_buffer,
         }
     }
 
@@ -803,25 +811,82 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             }
         }
 
-        // After backfill completion, forward messages directly
-        #[for_await]
-        for msg in upstream {
-            let msg = msg?;
 
-            match msg {
-                Message::Barrier(barrier) => {
-                    // Commit state tables but don't modify them
-                    state_table
-                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
-                        .await?;
-                    progress_table
-                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
-                        .await?;
-                    yield Message::Barrier(barrier);
+        if self.enable_locality_sort_buffer {
+            debug_assert_eq!(
+                self.pk_indices,
+                state_table.pk_indices(),
+                "locality sort buffer expects executor pk to align with state table pk"
+            );
+
+            let pk_indices = self.pk_indices.clone();
+            let pk_serde = state_table.pk_serde().clone();
+            let data_types = self.input_schema.data_types();
+            let chunk_size = self.chunk_size;
+
+            let mut buffer: BTreeChangeBuffer<Vec<u8>, OwnedRow> = BTreeChangeBuffer::new();
+
+            #[for_await]
+            for msg in upstream {
+                let msg = msg?;
+
+                match msg {
+                    Message::Chunk(chunk) => {
+                        let chunk = chunk.compact_vis();
+                        for record in chunk.records() {
+                            let owned_record = record.map(|row| row.into_owned_row());
+                            buffer.apply_record(owned_record, |row| {
+                                let pk = row.project(&pk_indices);
+                                let mut key = Vec::new();
+                                pk_serde.serialize(pk, &mut key);
+                                key
+                            });
+                        }
+                    }
+                    Message::Watermark(watermark) => {
+                        yield Message::Watermark(watermark);
+                    }
+                    Message::Barrier(barrier) => {
+                        if !buffer.is_empty() {
+                            let to_flush = std::mem::take(&mut buffer);
+                            for sorted_chunk in
+                                to_flush.into_chunks(data_types.clone(), chunk_size)
+                            {
+                                yield Message::Chunk(sorted_chunk);
+                            }
+                        }
+
+                        state_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        progress_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        yield Message::Barrier(barrier);
+                    }
                 }
-                _ => {
-                    // Forward all other messages directly
-                    yield msg;
+            }
+        } else {
+            // Forward messages directly without sorting
+            #[for_await]
+            for msg in upstream {
+                let msg = msg?;
+
+                match msg {
+                    Message::Barrier(barrier) => {
+                        // Commit state tables but don't modify them
+                        state_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        progress_table
+                            .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                            .await?;
+                        yield Message::Barrier(barrier);
+                    }
+                    _ => {
+                        // Forward all other messages directly
+                        yield msg;
+                    }
                 }
             }
         }

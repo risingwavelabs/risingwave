@@ -248,6 +248,10 @@ pub struct StreamingDeveloperConfig {
     /// only if it's confirmed that no-op updates are causing significant streaming amplification.
     #[serde(default)]
     pub aggressive_noop_update_elimination: bool,
+
+    /// Enable sort buffer in LocalityProviderExecutor, which is used to provide locality even after backfilling.
+    #[serde(default)]
+    pub enable_locality_sort_buffer: bool,
 }
 
 pub mod default {

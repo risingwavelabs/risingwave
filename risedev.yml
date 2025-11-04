@@ -114,6 +114,7 @@ profile:
         user-managed: true
 
   full:
+    config-path: src/config/example.toml
     steps:
       - use: minio
       - use: postgres
@@ -1089,7 +1090,7 @@ template:
     user-managed: false
 
     # Total available memory for the compute node in bytes
-    total-memory-bytes: 8589934592
+    total-memory-bytes: 2589934592
 
     # Parallelism of tasks per compute node
     parallelism: 4

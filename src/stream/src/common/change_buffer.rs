@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use indexmap::IndexMap;
 use indexmap::map::Entry;
+use std::collections::btree_map::Entry as BTreeEntry;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, StreamChunkBuilder};
 use risingwave_common::log::LogSuppresser;
@@ -57,6 +59,9 @@ mod private {
 
     pub trait Row: Eq + Default {}
     impl<R> Row for R where R: Eq + Default {}
+
+    pub trait OrdKey: Ord {}
+    impl<K> OrdKey for K where K: Ord {}
 }
 
 /// A buffer that accumulates changes and produce compacted changes.
@@ -228,6 +233,190 @@ impl<K, R> ChangeBuffer<K, R> {
 impl<K, R> ChangeBuffer<K, R>
 where
     K: private::Key,
+    R: private::Row + Row,
+{
+    /// Consume the buffer and produce a single compacted chunk.
+    pub fn into_chunk(self, data_types: Vec<DataType>) -> Option<StreamChunk> {
+        let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
+        for record in self.into_records() {
+            let none = builder.append_record(record);
+            debug_assert!(none.is_none());
+        }
+        builder.take()
+    }
+
+    /// Consume the buffer and produce a list of compacted chunks with the given size at most.
+    pub fn into_chunks(self, data_types: Vec<DataType>, chunk_size: usize) -> Vec<StreamChunk> {
+        let mut res = Vec::new();
+        let mut builder = StreamChunkBuilder::new(chunk_size, data_types);
+        for record in self.into_records() {
+            if let Some(chunk) = builder.append_record(record) {
+                res.push(chunk);
+            }
+        }
+        res.extend(builder.take());
+        res
+    }
+}
+
+/// A change buffer backed by a `BTreeMap`, which keeps entries ordered by key.
+#[derive(Debug)]
+pub struct BTreeChangeBuffer<K, R> {
+    buffer: BTreeMap<K, Record<R>>,
+    ib: InconsistencyBehavior,
+}
+
+impl<K, R> BTreeChangeBuffer<K, R>
+where
+    K: private::OrdKey,
+    R: private::Row,
+{
+    /// Apply an insertion of a row with the given key.
+    pub fn insert(&mut self, key: K, new_row: R) {
+        match self.buffer.entry(key) {
+            BTreeEntry::Vacant(e) => {
+                e.insert(Record::Insert { new_row });
+            }
+            BTreeEntry::Occupied(mut e) => match e.get_mut() {
+                Record::Delete { old_row } => {
+                    let old_row = std::mem::take(old_row);
+                    e.insert(Record::Update { old_row, new_row });
+                }
+                Record::Insert { new_row: dst } => {
+                    self.ib.report("inconsistent changes: double-inserting");
+                    *dst = new_row;
+                }
+                Record::Update { new_row: dst, .. } => {
+                    self.ib.report("inconsistent changes: double-inserting");
+                    *dst = new_row;
+                }
+            },
+        }
+    }
+
+    /// Apply a deletion of a row with the given key.
+    pub fn delete(&mut self, key: K, old_row: R) {
+        match self.buffer.entry(key) {
+            BTreeEntry::Vacant(e) => {
+                e.insert(Record::Delete { old_row });
+            }
+            BTreeEntry::Occupied(mut e) => match e.get_mut() {
+                Record::Insert { .. } => {
+                    e.remove_entry();
+                }
+                Record::Update { old_row: dst, .. } => {
+                    let old_row = std::mem::take(dst);
+                    e.insert(Record::Delete { old_row });
+                }
+                Record::Delete { old_row: dst } => {
+                    self.ib.report("inconsistent changes: double-deleting");
+                    *dst = old_row;
+                }
+            },
+        }
+    }
+
+    /// Apply an update of a row with the given key.
+    pub fn update(&mut self, key: K, old_row: R, new_row: R) {
+        match self.buffer.entry(key) {
+            BTreeEntry::Vacant(e) => {
+                e.insert(Record::Update { old_row, new_row });
+            }
+            BTreeEntry::Occupied(mut e) => match e.get_mut() {
+                Record::Insert { .. } => {
+                    e.insert(Record::Insert { new_row });
+                }
+                Record::Update { new_row: dst, .. } => {
+                    *dst = new_row;
+                }
+                Record::Delete { .. } => {
+                    self.ib.report("inconsistent changes: update after delete");
+                    e.insert(Record::Update { old_row, new_row });
+                }
+            },
+        }
+    }
+
+    /// Apply a change record, with the key extracted by the given function.
+    pub fn apply_record(&mut self, record: Record<R>, key_fn: impl Fn(&R) -> K) {
+        match record {
+            Record::Insert { new_row } => self.insert(key_fn(&new_row), new_row),
+            Record::Delete { old_row } => self.delete(key_fn(&old_row), old_row),
+            Record::Update { old_row, new_row } => {
+                let old_key = key_fn(&old_row);
+                let new_key = key_fn(&new_row);
+
+                if old_key != new_key {
+                    self.ib
+                        .report("inconsistent changes: mismatched key in update");
+                    self.delete(old_key, old_row);
+                    self.insert(new_key, new_row);
+                } else {
+                    self.update(old_key, old_row, new_row);
+                }
+            }
+        }
+    }
+
+    /// Apply an `Op` of a row with the given key.
+    pub fn apply_op_row(&mut self, op: Op, key: K, row: R) {
+        match op {
+            Op::Insert | Op::UpdateInsert => self.insert(key, row),
+            Op::Delete | Op::UpdateDelete => self.delete(key, row),
+        }
+    }
+
+    /// Consume the buffer and produce a list of change records.
+    pub fn into_records(self) -> impl Iterator<Item = Record<R>> {
+        self.buffer.into_values().filter(|record| match record {
+            Record::Insert { .. } => true,
+            Record::Delete { .. } => true,
+            Record::Update { old_row, new_row } => old_row != new_row,
+        })
+    }
+}
+
+impl<K, R> Default for BTreeChangeBuffer<K, R> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K, R> BTreeChangeBuffer<K, R> {
+    /// Create a new `BTreeChangeBuffer` that panics on inconsistency.
+    pub fn new() -> Self {
+        Self::with_capacity(0)
+    }
+
+    /// Create a new `BTreeChangeBuffer` with the given capacity that panics on inconsistency.
+    #[allow(clippy::unused_self)]
+    pub fn with_capacity(_capacity: usize) -> Self {
+        Self {
+            buffer: BTreeMap::new(),
+            ib: InconsistencyBehavior::Panic,
+        }
+    }
+
+    /// Set the inconsistency behavior.
+    pub fn with_inconsistency_behavior(mut self, ib: InconsistencyBehavior) -> Self {
+        self.ib = ib;
+        self
+    }
+
+    /// Get the number of keys that have pending changes in the buffer.
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Check if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+}
+
+impl<K, R> BTreeChangeBuffer<K, R>
+where
+    K: private::OrdKey,
     R: private::Row + Row,
 {
     /// Consume the buffer and produce a single compacted chunk.

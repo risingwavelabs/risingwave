@@ -204,6 +204,7 @@ stream_default_enable_mem_preload_state_table = false
 stream_mem_preload_state_table_ids_whitelist = []
 stream_mem_preload_state_table_ids_blacklist = []
 stream_aggressive_noop_update_elimination = false
+stream_enable_locality_sort_buffer = true
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5
