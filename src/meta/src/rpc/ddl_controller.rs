@@ -1570,6 +1570,11 @@ impl DdlController {
                 }
             }?;
         }
+        if object_type == ObjectType::Source {
+            self.env
+                .notification_manager_ref()
+                .notify_local_subscribers(LocalNotification::SourceDropped(object_id));
+        }
 
         let ReleaseContext {
             database_id,
