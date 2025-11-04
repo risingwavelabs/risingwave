@@ -12366,6 +12366,7 @@ dependencies = [
  "paste",
  "prost 0.13.4",
  "risingwave_common",
+ "risingwave_object_store",
  "risingwave_pb",
  "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
