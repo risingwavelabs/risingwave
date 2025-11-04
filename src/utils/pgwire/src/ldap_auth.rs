@@ -227,7 +227,7 @@ impl LdapConfig {
 
         let start_tls = options
             .get(LDAP_TLS)
-            .map(|s| s.as_str().parse::<bool>().unwrap())
+            .and_then(|p| p.parse::<bool>().ok())
             .unwrap_or(false);
 
         // Validate that StartTLS and ldaps are not used together
@@ -323,7 +323,7 @@ impl LdapConfig {
 
             // First part is attributes (comma-separated, we only care about the first one for search)
             if !parts.is_empty() && !parts[0].is_empty() {
-                search_attribute = Some(parts[0].split(',').next().unwrap_or("uid").to_owned());
+                search_attribute = Some(parts[0].split(',').next().unwrap().to_owned());
             }
 
             // Third part is filter (index 2)
@@ -337,7 +337,7 @@ impl LdapConfig {
         // - ldapbinddn/ldapbindpasswd: for authenticated searches
         let start_tls = options
             .get(LDAP_TLS)
-            .map(|s| s.as_str().parse::<bool>().unwrap())
+            .and_then(|p| p.parse::<bool>().ok())
             .unwrap_or(false);
 
         // Validate that StartTLS and ldaps are not used together
