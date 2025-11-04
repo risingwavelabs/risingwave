@@ -80,7 +80,7 @@ pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     schema: Schema,
 
     /// The storage key indices of the `TopNExecutor`
-    storage_key_indices: PkIndices,
+    storage_key_indices: Vec<usize>,
 
     managed_state: ManagedTopNState<S>,
 
@@ -170,8 +170,8 @@ where
         }
         let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(staging.len()));
         for res in staging.into_deserialized_changes(&deserializer) {
-            let (op, row) = res?;
-            let _none = chunk_builder.append_row(op, row);
+            let record = res?;
+            let _none = chunk_builder.append_record(record);
         }
         Ok(chunk_builder.take())
     }
@@ -273,7 +273,7 @@ mod tests {
             vec![ColumnOrder::new(0, OrderType::ascending())]
         }
 
-        fn pk_indices() -> PkIndices {
+        fn stream_key() -> StreamKey {
             vec![0, 1]
         }
 
@@ -291,7 +291,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[3])),
                 Message::Barrier(Barrier::new_test_barrier(test_epoch(5))),
             ])
-            .into_executor(schema, pk_indices())
+            .into_executor(schema, stream_key())
         }
 
         #[tokio::test]
@@ -300,7 +300,7 @@ mod tests {
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
             )
             .await;
 
@@ -380,7 +380,7 @@ mod tests {
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
             )
             .await;
             let schema = source.schema().clone();
@@ -467,7 +467,7 @@ mod tests {
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
             )
             .await;
             let schema = source.schema().clone();
@@ -553,7 +553,7 @@ mod tests {
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
             )
             .await;
             let schema = source.schema().clone();
@@ -668,7 +668,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[3])),
                 Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ])
-            .into_executor(schema, pk_indices())
+            .into_executor(schema, stream_key())
         }
 
         fn create_source_new_before_recovery() -> Executor {
@@ -696,7 +696,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ])
-            .into_executor(schema, pk_indices())
+            .into_executor(schema, stream_key())
         }
 
         fn create_source_new_after_recovery() -> Executor {
@@ -726,7 +726,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ])
-            .into_executor(schema, pk_indices())
+            .into_executor(schema, stream_key())
         }
 
         fn storage_key() -> Vec<ColumnOrder> {
@@ -740,7 +740,7 @@ mod tests {
             ]
         }
 
-        fn pk_indices() -> PkIndices {
+        fn stream_key() -> StreamKey {
             vec![0, 3]
         }
 
@@ -755,7 +755,7 @@ mod tests {
                     DataType::Int64,
                 ],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
             )
             .await;
             let schema = source.schema().clone();
@@ -818,7 +818,7 @@ mod tests {
                     DataType::Int64,
                 ],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
                 state_store.clone(),
             )
             .await;
@@ -859,7 +859,7 @@ mod tests {
                     DataType::Int64,
                 ],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
                 state_store,
             )
             .await;
@@ -959,7 +959,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[3])),
                 Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ])
-            .into_executor(schema, pk_indices())
+            .into_executor(schema, stream_key())
         }
 
         fn storage_key() -> Vec<ColumnOrder> {
@@ -972,7 +972,7 @@ mod tests {
             vec![ColumnOrder::new(0, OrderType::ascending())]
         }
 
-        fn pk_indices() -> PkIndices {
+        fn stream_key() -> StreamKey {
             vec![0, 1]
         }
 
@@ -982,7 +982,7 @@ mod tests {
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
             )
             .await;
             let schema = source.schema().clone();
@@ -1080,7 +1080,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
             ])
-            .into_executor(schema, pk_indices())
+            .into_executor(schema, stream_key())
         }
 
         fn create_source_after_recovery() -> Executor {
@@ -1106,7 +1106,7 @@ mod tests {
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             ])
-            .into_executor(schema, pk_indices())
+            .into_executor(schema, stream_key())
         }
 
         #[tokio::test]
@@ -1115,7 +1115,7 @@ mod tests {
             let state_table = create_in_memory_state_table_from_state_store(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
                 state_store.clone(),
             )
             .await;
@@ -1163,7 +1163,7 @@ mod tests {
             let state_table = create_in_memory_state_table_from_state_store(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::ascending(), OrderType::ascending()],
-                &pk_indices(),
+                &stream_key(),
                 state_store,
             )
             .await;

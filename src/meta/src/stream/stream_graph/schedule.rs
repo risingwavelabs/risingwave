@@ -28,6 +28,7 @@ use itertools::Itertools;
 use risingwave_common::hash::{
     ActorAlignmentId, ActorAlignmentMapping, ActorMapping, VnodeCountCompat,
 };
+use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_common::{bail, hash};
 use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
@@ -216,7 +217,7 @@ impl Scheduler {
     ///
     /// For different streaming jobs, we even out possible scheduling skew by using the streaming job id as the salt for the scheduling algorithm.
     pub fn new(
-        streaming_job_id: u32,
+        streaming_job_id: JobId,
         workers: &HashMap<u32, WorkerNode>,
         default_parallelism: NonZeroUsize,
         expected_vnode_count: usize,
@@ -345,6 +346,17 @@ impl Scheduler {
                                 .insert(id, options.backfill_parallelism as usize);
                             CDC_BACKFILL_MAX_PARALLELISM as usize
                         } else {
+                            return;
+                        }
+                    }
+                    NodeBody::GapFill(node) => {
+                        // GapFill node uses buffer_table for vnode count requirement
+                        let buffer_table = node.get_state_table().unwrap();
+                        // Check if vnode_count is a placeholder, skip if so as it will be filled later
+                        if let Some(vnode_count) = buffer_table.vnode_count_inner().value_opt() {
+                            vnode_count
+                        } else {
+                            // Skip this node as vnode_count is still a placeholder
                             return;
                         }
                     }

@@ -140,7 +140,7 @@ struct SourceBackfillInfo {
 
 impl SourceBackfillInfo {
     fn new(table: &TableCatalog) -> anyhow::Result<Self> {
-        let Some(job_id) = table.job_id.map(|id| id.table_id) else {
+        let Some(job_id) = table.job_id.map(|id| id.as_raw_id()) else {
             bail!("`job_id` column not found in source backfill table catalog");
         };
         let Some(backfill_progress_column_index) = table
@@ -154,7 +154,7 @@ impl SourceBackfillInfo {
             );
         };
         let fragment_id = table.fragment_id;
-        let table_id = table.id.table_id;
+        let table_id = table.id.as_raw_id();
 
         Ok(Self {
             job_id,

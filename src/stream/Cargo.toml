@@ -29,17 +29,17 @@ fail = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+glob = "0.3"
 hytra = "0.1.2"
 iceberg = { workspace = true }
+indexmap = "2"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-lru = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
 multimap = "0.10"
 parking_lot = { workspace = true }
 pin-project = "1"
-prehash = "1"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }
@@ -90,6 +90,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
   "test",
 ] }
+risingwave_stream = { workspace = true, features = ["test"] }
 serde_yaml = "0.9"
 tracing-subscriber = "0.3.20"
 tracing-test = "0.2"

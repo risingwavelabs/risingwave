@@ -82,7 +82,7 @@ impl ExchangeSource for GrpcExchangeSource {
             Some(r) => r,
         };
         let task_data = res.map_err(RpcError::from_batch_status)?;
-        let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
+        let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact_vis();
         trace!(
             "Receiver taskOutput = {:?}, data = {:?}",
             self.task_output_id, data

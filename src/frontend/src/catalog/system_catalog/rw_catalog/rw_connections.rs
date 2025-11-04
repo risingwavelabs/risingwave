@@ -51,12 +51,12 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                 let mut rw_connection = RwConnection {
                     id: conn.id as i32,
                     name: conn.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: conn.owner as i32,
                     type_: conn.connection_type().into(),
                     provider: "".to_owned(),
                     acl: get_acl_items(
-                        &GrantObject::ConnectionId(conn.id),
+                        GrantObject::ConnectionId(conn.id),
                         false,
                         &users,
                         username_map,

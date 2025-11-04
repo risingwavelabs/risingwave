@@ -21,7 +21,6 @@ use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragm
 #[derive(Debug, Clone)]
 pub struct SplitState {
     pub split_assignment: SplitAssignment,
-    pub discovered_source_splits: DiscoveredSourceSplits,
 }
 
 impl SourceManager {
@@ -96,8 +95,8 @@ impl SourceManager {
                     .iter()
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
-                let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
-                let splits = handle.discovered_splits(source_id, &actor_hashset).await?;
+                let actor_count = empty_actor_splits.keys().len();
+                let splits = handle.discovered_splits(source_id, actor_count).await?;
                 if splits.is_empty() {
                     tracing::warn!(?stream_job_id, source_id, "no splits detected");
                     continue 'loop_source;
@@ -280,7 +279,6 @@ impl SourceManagerCore {
     /// after the mutation barrier has been collected.
     pub async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitState>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
-        let mut source_splits_discovered = HashMap::new();
 
         'loop_source: for (source_id, handle) in &self.managed_sources {
             let source_fragment_ids = match self.source_fragments.get(source_id) {
@@ -309,7 +307,7 @@ impl SourceManagerCore {
                     }
                 };
 
-                let discovered_splits = handle.discovered_splits(*source_id, &actors).await?;
+                let discovered_splits = handle.discovered_splits(*source_id, actors.len()).await?;
                 if discovered_splits.is_empty() {
                     // The discover loop for this source is not ready yet; we'll wait for the next run
                     continue 'loop_source;
@@ -331,11 +329,6 @@ impl SourceManagerCore {
                         })
                         .unwrap_or_default()
                 };
-
-                source_splits_discovered.insert(
-                    *source_id,
-                    discovered_splits.values().cloned().collect_vec(),
-                );
 
                 if let Some(new_assignment) = reassign_splits(
                     fragment_id,
@@ -396,22 +389,10 @@ impl SourceManagerCore {
 
         let mut result = HashMap::new();
         for (database_id, assignment) in assignments {
-            let mut source_splits = HashMap::new();
-            for (source_id, fragment_ids) in &self.source_fragments {
-                if fragment_ids
-                    .iter()
-                    .any(|fragment_id| assignment.contains_key(fragment_id))
-                    && let Some(splits) = source_splits_discovered.get(source_id)
-                {
-                    source_splits.insert(*source_id, splits.clone());
-                }
-            }
-
             result.insert(
                 database_id,
                 SplitState {
                     split_assignment: assignment,
-                    discovered_source_splits: source_splits,
                 },
             );
         }

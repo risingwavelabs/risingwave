@@ -112,7 +112,7 @@ impl MockOffsetGenExecutor {
             match msg {
                 Message::Chunk(chunk) => {
                     let mut offset_builder = Utf8ArrayBuilder::new(chunk.cardinality());
-                    assert!(chunk.is_compacted());
+                    assert!(chunk.is_vis_compacted());
                     let (ops, mut columns, vis) = chunk.into_inner();
 
                     for _ in 0..ops.len() {

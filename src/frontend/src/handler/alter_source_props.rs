@@ -48,7 +48,7 @@ pub async fn handle_alter_table_connector_props(
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
         let (source_catalog, _) =
-            reader.get_source_by_id(db_name, schema_path, &associate_source_id.table_id)?;
+            reader.get_source_by_id(db_name, schema_path, &associate_source_id.as_raw_id())?;
 
         ensure_alter_props_not_set_by_connection(
             &reader,
@@ -61,10 +61,10 @@ pub async fn handle_alter_table_connector_props(
             "handle_alter_table_connector_props: table_name: {}, table id: {}, source_id: {}",
             real_table_name,
             table.id,
-            associate_source_id.table_id
+            associate_source_id
         );
 
-        associate_source_id.table_id
+        associate_source_id.as_raw_id()
     };
 
     handle_alter_source_props_inner(&session, alter_props, source_id).await?;

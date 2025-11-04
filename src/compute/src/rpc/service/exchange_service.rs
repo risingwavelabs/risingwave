@@ -177,7 +177,7 @@ impl ExchangeServiceImpl {
                 Either::Right(MessageWithPermits { message, permits }) => {
                     let message = match message {
                         DispatcherMessageBatch::Chunk(chunk) => {
-                            DispatcherMessageBatch::Chunk(chunk.compact())
+                            DispatcherMessageBatch::Chunk(chunk.compact_vis())
                         }
                         msg @ (DispatcherMessageBatch::Watermark(_)
                         | DispatcherMessageBatch::BarrierBatch(_)) => msg,

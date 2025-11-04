@@ -58,6 +58,10 @@ if [ "$profile" == "ci-dev" ]; then
     risedev slt './e2e_test/debug_mode_only/debug_splits.slt'
 fi
 
+echo "--- Run mqtt test"
+risedev slt './e2e_test/mqtt/**/*.slt'
+echo "--- Run mqtt test done"
+
 echo "--- Run kafka sasl test"
 risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 echo "--- Run kafka sasl test done"
@@ -107,22 +111,30 @@ risedev ci-start ci-1cn-1fe-with-recovery
 
 
 echo "--- mongodb cdc test"
-# install the mongo shell
-wget --no-verbose http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
-wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/focal/mongodb-org/4.4/multiverse/binary-amd64/mongodb-org-shell_4.4.28_amd64.deb
-dpkg -i libssl1.1_1.1.1f-1ubuntu2_amd64.deb
-dpkg -i mongodb-org-shell_4.4.28_amd64.deb
+# install mongosh
+wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb
+dpkg -i mongodb-mongosh_2.5.8_amd64.deb
 
 echo '> ping mongodb'
-echo 'db.runCommand({ping: 1})' | mongo mongodb://mongodb:27017
+echo 'db.runCommand({ping: 1})' | mongosh mongodb://mongodb:27017
 echo '> rs config'
-echo 'rs.conf()' | mongo mongodb://mongodb:27017
+echo 'rs.conf()' | mongosh mongodb://mongodb:27017
 echo '> run test..'
 risedev slt './e2e_test/source_legacy/cdc/mongodb/**/*.slt'
 
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+
+source ci/scripts/e2e-source-mysql-offline-schema-change.sh
+
+echo "--- mysql offline schema change test done --- \n\n"
+
+echo "--- re-starting risingwave cluster"
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+risedev ci-start ci-1cn-1fe-with-recovery
+
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
+
 
 echo "--- mysql & postgres cdc validate test"
 risedev slt './e2e_test/source_legacy/cdc/cdc.validate.mysql.slt'

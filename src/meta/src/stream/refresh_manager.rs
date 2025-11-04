@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
+use risingwave_meta_model::ObjectId;
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
@@ -94,19 +95,18 @@ impl RefreshManager {
         let table_id = TableId::new(request.table_id);
         let associated_source_id = TableId::new(request.associated_source_id);
 
-        tracing::info!("Starting refresh operation for table {}", table_id);
-
         // Validate that the table exists and is refreshable
         self.validate_refreshable_table(table_id, associated_source_id)
             .await?;
 
+        tracing::info!("Starting refresh operation for table {}", table_id);
+
         // Get database_id for the table
-        let database_id = DatabaseId::new(
-            self.metadata_manager
-                .catalog_controller
-                .get_object_database_id(table_id.table_id() as _)
-                .await? as _,
-        );
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(table_id.as_raw_id() as ObjectId)
+            .await?;
 
         // Create refresh command
         let refresh_command = Command::Refresh {
@@ -132,8 +132,13 @@ impl RefreshManager {
                 tracing::error!(
                     error = %e.as_report(),
                     table_id = %table_id,
-                    "Failed to execute refresh command"
+                    "Failed to execute refresh command, resetting refresh state to Idle"
                 );
+
+                self.metadata_manager
+                    .catalog_controller
+                    .set_table_refresh_state(table_id, RefreshState::Idle)
+                    .await?;
 
                 Err(anyhow!(e)
                     .context(format!("Failed to refresh table {}", table_id))
@@ -152,7 +157,7 @@ impl RefreshManager {
         let table = self
             .metadata_manager
             .catalog_controller
-            .get_table_by_id(table_id.table_id as _)
+            .get_table_by_id(table_id)
             .await?;
 
         // Check if table is refreshable
@@ -165,7 +170,7 @@ impl RefreshManager {
 
         if table.optional_associated_source_id
             != Some(OptionalAssociatedSourceId::AssociatedSourceId(
-                associated_source_id.table_id(),
+                associated_source_id.as_raw_id(),
             ))
         {
             return Err(MetaError::invalid_parameter(format!(
@@ -177,7 +182,7 @@ impl RefreshManager {
         let current_state = self
             .metadata_manager
             .catalog_controller
-            .get_table_refresh_state(table_id.table_id as _)
+            .get_table_refresh_state(table_id)
             .await?;
         match current_state {
             Some(RefreshState::Idle) | None => {

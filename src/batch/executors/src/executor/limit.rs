@@ -89,7 +89,7 @@ impl LimitExecutor {
             }
             // process chunk
             let mut new_vis;
-            if !data_chunk.is_compacted() {
+            if !data_chunk.is_vis_compacted() {
                 new_vis = data_chunk.visibility().iter().collect_vec();
                 for vis in new_vis.iter_mut().filter(|x| **x) {
                     if skipped < self.offset {
@@ -112,7 +112,7 @@ impl LimitExecutor {
             }
             yield data_chunk
                 .with_visibility(new_vis.into_iter().collect::<Bitmap>())
-                .compact();
+                .compact_vis();
         }
     }
 }
@@ -316,7 +316,7 @@ mod tests {
         let stream = limit_executor.execute();
         #[for_await]
         for chunk in stream {
-            results.push(chunk.unwrap().compact());
+            results.push(chunk.unwrap().compact_vis());
         }
         let chunks =
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();

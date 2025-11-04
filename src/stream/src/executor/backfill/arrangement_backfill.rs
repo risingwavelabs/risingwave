@@ -273,7 +273,7 @@ where
                                     }
                                     Message::Chunk(chunk) => {
                                         // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(chunk.compact());
+                                        upstream_chunk_buffer.push(chunk.compact_vis());
                                     }
                                     Message::Watermark(_) => {
                                         // Ignore watermark during backfill.
@@ -566,7 +566,7 @@ where
                                     tracing::info!(
                                         old_rate_limit = ?old_rate_limit,
                                         new_rate_limit = ?new_rate_limit,
-                                        upstream_table_id = upstream_table_id,
+                                        %upstream_table_id,
                                         actor_id = self.actor_id,
                                         "backfill rate limit changed",
                                     );

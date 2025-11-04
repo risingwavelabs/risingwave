@@ -416,7 +416,7 @@ impl TryFrom<SinkParam> for SnowflakeV2Sink {
         let schema = param.schema();
         let config = SnowflakeV2Config::from_btreemap(&param.properties)?;
         let is_append_only = param.sink_type.is_append_only();
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         Ok(Self {
             config,
             schema,

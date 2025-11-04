@@ -60,7 +60,7 @@ impl HummockManager {
         &self,
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
-        created_tables: HashSet<u32>,
+        created_tables: HashSet<TableId>,
     ) -> Result<()> {
         self.merge_compaction_group_impl(group_1, group_2, Some(created_tables))
             .await
@@ -70,7 +70,7 @@ impl HummockManager {
         &self,
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
-        created_tables: Option<HashSet<u32>>,
+        created_tables: Option<HashSet<TableId>>,
     ) -> Result<()> {
         let compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
@@ -138,11 +138,11 @@ impl HummockManager {
 
         fn contains_creating_table(
             table_ids: &Vec<TableId>,
-            created_tables: &HashSet<u32>,
+            created_tables: &HashSet<TableId>,
         ) -> bool {
             table_ids
                 .iter()
-                .any(|table_id| !created_tables.contains(&table_id.table_id()))
+                .any(|table_id| !created_tables.contains(table_id))
         }
 
         // do not merge the compaction group which is creating
@@ -266,8 +266,7 @@ impl HummockManager {
         // TODO: remove compaciton group_id from state_table_info
         // rewrite compaction_group_id for all tables
         new_version_delta.with_latest_version(|version, new_version_delta| {
-            for table_id in combined_member_table_ids {
-                let table_id = TableId::new(table_id.table_id());
+            for &table_id in combined_member_table_ids {
                 let info = version
                     .state_table_info
                     .info()
@@ -407,7 +406,7 @@ impl HummockManager {
             .state_table_info
             .compaction_group_member_table_ids(parent_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .copied()
             .collect::<BTreeSet<_>>();
 
         if !member_table_ids.contains(&table_id_to_split) {
@@ -431,7 +430,7 @@ impl HummockManager {
         let (table_ids_left, table_ids_right) =
             group_split::split_table_ids_with_table_id_and_vnode(
                 &table_ids,
-                split_full_key.user_key.table_id.table_id(),
+                split_full_key.user_key.table_id,
                 split_full_key.user_key.get_vnode_id(),
             );
         if table_ids_left.is_empty() || table_ids_right.is_empty() {
@@ -496,8 +495,7 @@ impl HummockManager {
         };
 
         new_version_delta.with_latest_version(|version, new_version_delta| {
-            for table_id in &table_ids_right {
-                let table_id = TableId::new(*table_id);
+            for &table_id in &table_ids_right {
                 let info = version
                     .state_table_info
                     .info()
@@ -624,7 +622,7 @@ impl HummockManager {
                 .state_table_info
                 .compaction_group_member_table_ids(parent_group_id)
                 .iter()
-                .map(|table_id| table_id.table_id)
+                .copied()
                 .collect_vec()
         };
 
@@ -635,7 +633,7 @@ impl HummockManager {
             )));
         }
 
-        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<u64, Vec<u32>>) {
+        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<u64, Vec<TableId>>) {
             // 1. table_ids in different cg are sorted.
             {
                 cg_id_to_table_ids
@@ -670,7 +668,7 @@ impl HummockManager {
         // The new compaction group id is always generate on the right side
         // Hence, we return the first compaction group id as the result
         // split 1
-        let mut cg_id_to_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
+        let mut cg_id_to_table_ids: BTreeMap<u64, Vec<TableId>> = BTreeMap::new();
         let table_id_to_split = *table_ids.first().unwrap();
         let mut target_compaction_group_id = 0;
         let result_vec = self
@@ -761,7 +759,7 @@ impl HummockManager {
     pub async fn try_move_high_throughput_table_to_dedicated_cg(
         &self,
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
-        table_id: u32,
+        table_id: TableId,
         _table_size: &u64,
         parent_group_id: u64,
     ) {
@@ -872,7 +870,7 @@ impl HummockManager {
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         group: &CompactionGroupStatistic,
         next_group: &CompactionGroupStatistic,
-        created_tables: &HashSet<u32>,
+        created_tables: &HashSet<TableId>,
     ) -> Result<()> {
         GroupMergeValidator::validate_group_merge(
             group,
@@ -990,7 +988,7 @@ impl GroupMergeValidator {
 
     fn check_is_creating_compaction_group(
         group: &CompactionGroupStatistic,
-        created_tables: &HashSet<u32>,
+        created_tables: &HashSet<TableId>,
     ) -> bool {
         group
             .table_statistic
@@ -1001,7 +999,7 @@ impl GroupMergeValidator {
     async fn validate_group_merge(
         group: &CompactionGroupStatistic,
         next_group: &CompactionGroupStatistic,
-        created_tables: &HashSet<u32>,
+        created_tables: &HashSet<TableId>,
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         opts: &Arc<MetaOpts>,
         versioning: &MonitoredRwLock<Versioning>,

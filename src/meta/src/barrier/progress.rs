@@ -17,8 +17,9 @@ use std::collections::hash_map::Entry;
 use std::mem::take;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::{CreateType, ObjectId};
+use risingwave_meta_model::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
@@ -26,19 +27,20 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::BackfillOrderState;
-use crate::barrier::info::BarrierInfo;
+use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::{Command, CreateStreamingJobCommandInfo, CreateStreamingJobType};
 use crate::manager::MetadataManager;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
 use crate::stream::{SourceChange, SourceManagerRef};
 
 type ConsumedRows = u64;
+type BufferedRows = u64;
 
 #[derive(Clone, Copy, Debug)]
 enum BackfillState {
     Init,
-    ConsumingUpstream(#[expect(dead_code)] Epoch, ConsumedRows),
-    Done(ConsumedRows),
+    ConsumingUpstream(#[expect(dead_code)] Epoch, ConsumedRows, BufferedRows),
+    Done(ConsumedRows, BufferedRows),
 }
 
 /// Represents the backfill nodes that need to be scheduled or cleaned up.
@@ -70,6 +72,9 @@ pub(super) struct Progress {
     upstream_mvs_total_key_count: u64,
     mv_backfill_consumed_rows: u64,
     source_backfill_consumed_rows: u64,
+    /// Buffered rows (for locality backfill) that are yet to be consumed
+    /// This is used to calculate precise progress: consumed / (`upstream_total` + buffered)
+    mv_backfill_buffered_rows: u64,
 
     /// DDL definition
     definition: String,
@@ -103,6 +108,7 @@ impl Progress {
             upstream_mvs_total_key_count: upstream_total_key_count,
             mv_backfill_consumed_rows: 0,
             source_backfill_consumed_rows: 0,
+            mv_backfill_buffered_rows: 0,
             definition,
             create_type,
             backfill_order_state,
@@ -121,25 +127,29 @@ impl Progress {
         self.upstream_mvs_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
         let backfill_upstream_type = self.backfill_upstream_types.get(&actor).unwrap();
-        tracing::debug!(?actor, states = ?self.states, "update progress for actor");
 
-        let mut old = 0;
-        let mut new = 0;
+        let mut old_consumed_row = 0;
+        let mut new_consumed_row = 0;
+        let mut old_buffered_row = 0;
+        let mut new_buffered_row = 0;
         match self.states.remove(&actor).unwrap() {
             BackfillState::Init => {}
-            BackfillState::ConsumingUpstream(_, old_consumed_rows) => {
-                old = old_consumed_rows;
+            BackfillState::ConsumingUpstream(_, consumed_rows, buffered_rows) => {
+                old_consumed_row = consumed_rows;
+                old_buffered_row = buffered_rows;
             }
-            BackfillState::Done(_) => panic!("should not report done multiple times"),
+            BackfillState::Done(_, _) => panic!("should not report done multiple times"),
         };
         match &new_state {
             BackfillState::Init => {}
-            BackfillState::ConsumingUpstream(_, new_consumed_rows) => {
-                new = *new_consumed_rows;
+            BackfillState::ConsumingUpstream(_, consumed_rows, buffered_rows) => {
+                new_consumed_row = *consumed_rows;
+                new_buffered_row = *buffered_rows;
             }
-            BackfillState::Done(new_consumed_rows) => {
+            BackfillState::Done(consumed_rows, buffered_rows) => {
                 tracing::debug!("actor {} done", actor);
-                new = *new_consumed_rows;
+                new_consumed_row = *consumed_rows;
+                new_buffered_row = *buffered_rows;
                 self.done_count += 1;
                 let before_backfill_nodes = self
                     .backfill_order_state
@@ -168,20 +178,29 @@ impl Progress {
                 );
             }
         };
-        debug_assert!(new >= old, "backfill progress should not go backward");
+        debug_assert!(
+            new_consumed_row >= old_consumed_row,
+            "backfill progress should not go backward"
+        );
+        debug_assert!(
+            new_buffered_row >= old_buffered_row,
+            "backfill progress should not go backward"
+        );
         match backfill_upstream_type {
             BackfillUpstreamType::MView => {
-                self.mv_backfill_consumed_rows += new - old;
+                self.mv_backfill_consumed_rows += new_consumed_row - old_consumed_row;
             }
             BackfillUpstreamType::Source => {
-                self.source_backfill_consumed_rows += new - old;
+                self.source_backfill_consumed_rows += new_consumed_row - old_consumed_row;
             }
             BackfillUpstreamType::Values => {
                 // do not consider progress for values
             }
             BackfillUpstreamType::LocalityProvider => {
                 // Track LocalityProvider progress similar to MView
-                self.mv_backfill_consumed_rows += new - old;
+                // Update buffered rows for precise progress calculation
+                self.mv_backfill_consumed_rows += new_consumed_row - old_consumed_row;
+                self.mv_backfill_buffered_rows += new_buffered_row - old_buffered_row;
             }
         }
         self.states.insert(actor, new_state);
@@ -222,11 +241,15 @@ impl Progress {
         }
 
         let mv_progress = (mv_count > 0).then_some({
-            if self.upstream_mvs_total_key_count == 0 {
+            // Include buffered rows in total for precise progress calculation
+            // Progress = consumed / (upstream_total + buffered)
+            let total_rows_to_consume =
+                self.upstream_mvs_total_key_count + self.mv_backfill_buffered_rows;
+            if total_rows_to_consume == 0 {
                 "99.99%".to_owned()
             } else {
-                let mut progress = self.mv_backfill_consumed_rows as f64
-                    / (self.upstream_mvs_total_key_count as f64);
+                let mut progress =
+                    self.mv_backfill_consumed_rows as f64 / (total_rows_to_consume as f64);
                 if progress > 1.0 {
                     progress = 0.9999;
                 }
@@ -234,7 +257,7 @@ impl Progress {
                     "{:.2}% ({}/{})",
                     progress * 100.0,
                     self.mv_backfill_consumed_rows,
-                    self.upstream_mvs_total_key_count
+                    total_rows_to_consume
                 )
             }
         });
@@ -263,7 +286,7 @@ impl Progress {
 /// 2. if `is_recovered` is true, it is a "Recovered" tracking job.
 ///    On recovery, the barrier manager will recover and start managing the job.
 pub struct TrackingJob {
-    job_id: ObjectId,
+    job_id: JobId,
     is_recovered: bool,
     source_change: Option<SourceChange>,
 }
@@ -281,7 +304,7 @@ impl std::fmt::Display for TrackingJob {
 
 impl TrackingJob {
     /// Create a new tracking job.
-    pub(crate) fn new(job_id: ObjectId, source_change: Option<SourceChange>) -> Self {
+    pub(crate) fn new(job_id: JobId, source_change: Option<SourceChange>) -> Self {
         Self {
             job_id,
             is_recovered: false,
@@ -290,7 +313,7 @@ impl TrackingJob {
     }
 
     /// Create a recovered tracking job.
-    pub(crate) fn recovered(job_id: ObjectId, source_change: Option<SourceChange>) -> Self {
+    pub(crate) fn recovered(job_id: JobId, source_change: Option<SourceChange>) -> Self {
         Self {
             job_id,
             is_recovered: true,
@@ -312,10 +335,6 @@ impl TrackingJob {
             source_manager.apply_source_change(source_change).await;
         }
         Ok(())
-    }
-
-    pub(crate) fn table_to_create(&self) -> TableId {
-        (self.job_id as u32).into()
     }
 }
 
@@ -354,9 +373,9 @@ pub(super) enum UpdateProgressResult {
 #[derive(Default, Debug)]
 pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the `TableId`.
-    progress_map: HashMap<TableId, (Progress, TrackingJob)>,
+    progress_map: HashMap<JobId, (Progress, TrackingJob)>,
 
-    actor_map: HashMap<ActorId, TableId>,
+    actor_map: HashMap<ActorId, JobId>,
 
     /// Stash of pending backfill nodes. They will start backfilling on checkpoint.
     pending_backfill_nodes: Vec<FragmentId>,
@@ -374,29 +393,23 @@ impl CreateMviewProgressTracker {
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
     pub fn recover(
-        jobs: impl IntoIterator<Item = (TableId, (String, &StreamJobFragments, BackfillOrderState))>,
+        jobs: impl IntoIterator<
+            Item = (
+                JobId,
+                (String, &InflightStreamingJobInfo, BackfillOrderState),
+            ),
+        >,
         version_stats: &HummockVersionStats,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        for (creating_table_id, (definition, table_fragments, backfill_order_state)) in jobs {
-            let mut states = HashMap::new();
-            let mut backfill_upstream_types = HashMap::new();
-            let actors = table_fragments.tracking_progress_actor_ids();
-            for (actor, backfill_upstream_type) in actors {
-                actor_map.insert(actor, creating_table_id);
-                states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
-                backfill_upstream_types.insert(actor, backfill_upstream_type);
-            }
-            let source_backfill_fragments = table_fragments.source_backfill_fragments();
-
-            let progress = Self::recover_progress(
-                states,
-                backfill_upstream_types,
-                table_fragments.upstream_table_counts(),
-                definition,
-                version_stats,
-                backfill_order_state,
+        let mut finished_jobs = vec![];
+        for (creating_job_id, (definition, job_info, backfill_order_state)) in jobs {
+            let source_backfill_fragments = StreamJobFragments::source_backfill_fragments_impl(
+                job_info
+                    .fragment_infos
+                    .iter()
+                    .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes)),
             );
             let source_change = if source_backfill_fragments.is_empty() {
                 None
@@ -405,15 +418,44 @@ impl CreateMviewProgressTracker {
                     finished_backfill_fragments: source_backfill_fragments,
                 })
             };
-            let tracking_job =
-                TrackingJob::recovered(creating_table_id.table_id as _, source_change);
-            progress_map.insert(creating_table_id, (progress, tracking_job));
+            let tracking_job = TrackingJob::recovered(creating_job_id, source_change);
+            let actors = job_info.tracking_progress_actor_ids();
+            if actors.is_empty() {
+                finished_jobs.push(tracking_job);
+            } else {
+                let mut states = HashMap::new();
+                let mut backfill_upstream_types = HashMap::new();
+
+                for (actor, backfill_upstream_type) in actors {
+                    actor_map.insert(actor, creating_job_id);
+                    states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0, 0));
+                    backfill_upstream_types.insert(actor, backfill_upstream_type);
+                }
+
+                let progress = Self::recover_progress(
+                    states,
+                    backfill_upstream_types,
+                    StreamJobFragments::upstream_table_counts_impl(
+                        job_info
+                            .fragment_infos
+                            .values()
+                            .map(|fragment| &fragment.nodes),
+                    ),
+                    definition,
+                    version_stats,
+                    backfill_order_state,
+                );
+                progress_map.insert(creating_job_id, (progress, tracking_job));
+            }
         }
         Self {
             progress_map,
             actor_map,
             pending_backfill_nodes: Vec::new(),
-            staging_commit_info: StagingCommitInfo::default(),
+            staging_commit_info: StagingCommitInfo {
+                finished_jobs,
+                table_ids_to_truncate: vec![],
+            },
         }
     }
 
@@ -441,23 +483,23 @@ impl CreateMviewProgressTracker {
             upstream_mvs_total_key_count,
             mv_backfill_consumed_rows: 0, // Fill only after first barrier pass
             source_backfill_consumed_rows: 0, // Fill only after first barrier pass
+            mv_backfill_buffered_rows: 0, // Fill only after first barrier pass
             definition,
             create_type: CreateType::Background,
         }
     }
 
-    pub fn gen_ddl_progress(&self) -> HashMap<u32, DdlProgress> {
+    pub fn gen_ddl_progress(&self) -> HashMap<JobId, DdlProgress> {
         self.progress_map
             .iter()
-            .map(|(table_id, (x, _))| {
-                let table_id = table_id.table_id;
+            .map(|(job_id, (x, _))| {
                 let ddl_progress = DdlProgress {
-                    id: table_id as u64,
+                    id: job_id.as_raw_id() as u64,
                     statement: x.definition.clone(),
                     create_type: x.create_type.as_str().to_owned(),
                     progress: x.calculate_progress(),
                 };
-                (table_id, ddl_progress)
+                (*job_id, ddl_progress)
             })
             .collect()
     }
@@ -548,10 +590,10 @@ impl CreateMviewProgressTracker {
                 .flat_map(|resp| resp.create_mview_progress.iter()),
             version_stats,
         );
-        for table_id in command.map(Command::jobs_to_drop).into_iter().flatten() {
+        for job_id in command.map(Command::jobs_to_drop).into_iter().flatten() {
             // the cancelled command is possibly stashed in `finished_commands` and waiting
             // for checkpoint, we should also clear it.
-            self.cancel_command(table_id);
+            self.cancel_command(job_id);
         }
         if barrier_info.kind.is_checkpoint() {
             Some(take(&mut self.staging_commit_info))
@@ -572,11 +614,11 @@ impl CreateMviewProgressTracker {
         !self.staging_commit_info.finished_jobs.is_empty()
     }
 
-    pub(super) fn cancel_command(&mut self, id: TableId) {
+    pub(super) fn cancel_command(&mut self, id: JobId) {
         let _ = self.progress_map.remove(&id);
         self.staging_commit_info
             .finished_jobs
-            .retain(|x| x.table_to_create() != id);
+            .retain(|x| x.job_id != id);
         self.actor_map.retain(|_, table_id| *table_id != id);
     }
 
@@ -605,7 +647,7 @@ impl CreateMviewProgressTracker {
             if actors.is_empty() {
                 // The command can be finished immediately.
                 return Some(TrackingJob::new(
-                    info.stream_job_fragments.stream_job_id.table_id as _,
+                    info.stream_job_fragments.stream_job_id,
                     Some(SourceChange::CreateJobFinished {
                         finished_backfill_fragments: stream_job_fragments
                             .source_backfill_fragments(),
@@ -651,7 +693,7 @@ impl CreateMviewProgressTracker {
             (
                 progress,
                 TrackingJob::new(
-                    creating_job_id.table_id as _,
+                    creating_job_id,
                     Some(SourceChange::CreateJobFinished {
                         finished_backfill_fragments: table_fragments.source_backfill_fragments(),
                     }),
@@ -687,22 +729,26 @@ impl CreateMviewProgressTracker {
         };
 
         let new_state = if progress.done {
-            BackfillState::Done(progress.consumed_rows)
+            BackfillState::Done(progress.consumed_rows, progress.buffered_rows)
         } else {
-            BackfillState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
+            BackfillState::ConsumingUpstream(
+                progress.consumed_epoch.into(),
+                progress.consumed_rows,
+                progress.buffered_rows,
+            )
         };
 
         match self.progress_map.entry(table_id) {
             Entry::Occupied(mut o) => {
-                let progress = &mut o.get_mut().0;
+                let progress_state = &mut o.get_mut().0;
 
                 let upstream_total_key_count: u64 =
-                    calculate_total_key_count(&progress.upstream_mv_count, version_stats);
+                    calculate_total_key_count(&progress_state.upstream_mv_count, version_stats);
 
                 tracing::debug!(?table_id, "updating progress for table");
-                let pending = progress.update(actor, new_state, upstream_total_key_count);
+                let pending = progress_state.update(actor, new_state, upstream_total_key_count);
 
-                if progress.is_done() {
+                if progress_state.is_done() {
                     tracing::debug!(
                         "all actors done for creating mview with table_id {}!",
                         table_id
@@ -743,7 +789,7 @@ fn calculate_total_key_count(
             *count as u64
                 * version_stats
                     .table_stats
-                    .get(&table_id.table_id)
+                    .get(&table_id.as_raw_id())
                     .map_or(0, |stat| stat.total_key_count as u64)
         })
         .sum()

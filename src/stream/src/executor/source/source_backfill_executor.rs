@@ -469,7 +469,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .state_store()
             .state_store()
             .clone();
-        let table_id = self.backfill_state_store.state_store().table_id().into();
+        let table_id = self.backfill_state_store.state_store().table_id();
         let mut state_table_initialized = false;
         {
             let source_backfill_row_count = self
@@ -581,7 +581,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         }
                                         Mutation::ConnectorPropsChange(maybe_mutation) => {
                                             if let Some(props_plaintext) =
-                                                maybe_mutation.get(&self.source_id.table_id())
+                                                maybe_mutation.get(&self.source_id.as_raw_id())
                                             {
                                                 source_desc
                                                     .update_reader(props_plaintext.clone())?;
@@ -1171,7 +1171,7 @@ impl<S: StateStore> Debug for SourceBackfillExecutorInner<S> {
         f.debug_struct("SourceBackfillExecutor")
             .field("source_id", &self.source_id)
             .field("column_ids", &self.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("stream_key", &self.info.stream_key)
             .finish()
     }
 }

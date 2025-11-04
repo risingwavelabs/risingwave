@@ -133,7 +133,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
 
                     // Empty chunk should not be processed.
                     if chunk.cardinality() == 0 {
@@ -491,7 +491,7 @@ mod tests {
         let ctx = ActorContext::for_test(123);
         let info = ExecutorInfo::for_test(
             source.schema().clone(),
-            source.pk_indices().to_vec(),
+            source.stream_key().to_vec(),
             "WatermarkFilterExecutor".to_owned(),
             0,
         );
@@ -555,7 +555,7 @@ mod tests {
         tx.push_chunk(chunk1);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 1 2022-11-07T00:00:00
@@ -579,7 +579,7 @@ mod tests {
         tx.push_chunk(chunk2);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 4 2022-11-07T00:00:00
@@ -622,7 +622,7 @@ mod tests {
         tx.push_chunk(chunk3);
         let chunk = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk.into_chunk().unwrap().compact(),
+            chunk.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
                 "  I TS
                  + 7 2022-11-14T00:00:00

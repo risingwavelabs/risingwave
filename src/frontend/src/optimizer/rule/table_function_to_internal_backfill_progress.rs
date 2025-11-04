@@ -181,7 +181,7 @@ struct BackfillInfo {
 
 impl BackfillInfo {
     fn new(table: &TableCatalog) -> anyhow::Result<Self> {
-        let Some(job_id) = table.job_id.map(|id| id.table_id) else {
+        let Some(job_id) = table.job_id.map(|id| id.as_raw_id()) else {
             bail!("`job_id` column not found in backfill table");
         };
         let Some(row_count_column_index) = table
@@ -199,7 +199,7 @@ impl BackfillInfo {
             .iter()
             .position(|c| c.name() == StreamTableScan::EPOCH_COLUMN_NAME);
         let fragment_id = table.fragment_id;
-        let table_id = table.id.table_id;
+        let table_id = table.id.as_raw_id();
 
         Ok(Self {
             job_id,

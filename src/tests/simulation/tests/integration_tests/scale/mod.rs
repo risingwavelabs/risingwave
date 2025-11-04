@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod adaptive_strategy;
+mod alter_fragment;
 mod auto_parallelism;
 mod background_ddl;
 mod cascade_materialized_view;
