@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Check breaking changes in Protobuf files
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: bufbuild/buf-setup-action@v1
         with:
           github_token: ${{ github.token }}
