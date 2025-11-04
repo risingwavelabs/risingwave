@@ -57,7 +57,7 @@ struct ExecutorInner<S: StateStore> {
     order_key_indices: Vec<usize>,
     order_key_data_types: Vec<DataType>,
     order_key_order_types: Vec<OrderType>,
-    input_pk_indices: Vec<usize>,
+    input_stream_key: Vec<usize>,
     state_key_to_table_sub_pk_proj: Vec<usize>,
 
     state_table: StateTable<S>,
@@ -98,7 +98,7 @@ impl<S: StateStore> ExecutorInner<S> {
     }
 
     fn get_input_pk(&self, full_row: impl Row) -> OwnedRow {
-        full_row.project(&self.input_pk_indices).into_owned_row()
+        full_row.project(&self.input_stream_key).into_owned_row()
     }
 
     /// `full_row` can be an input row or state table row.
@@ -232,7 +232,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let state_key_to_table_sub_pk_proj = RowConverter::calc_state_key_to_table_sub_pk_proj(
             &args.partition_key_indices,
             &args.order_key_indices,
-            &input_info.pk_indices,
+            &input_info.stream_key,
         );
 
         let deduped_part_key_indices = {
@@ -254,7 +254,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 order_key_indices: args.order_key_indices,
                 order_key_data_types,
                 order_key_order_types: args.order_key_order_types,
-                input_pk_indices: input_info.pk_indices,
+                input_stream_key: input_info.stream_key,
                 state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
                 watermark_sequence: args.watermark_epoch,
@@ -424,7 +424,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     order_key_indices: &this.order_key_indices,
                     order_key_data_types: &this.order_key_data_types,
                     order_key_order_types: &this.order_key_order_types,
-                    input_pk_indices: &this.input_pk_indices,
+                    input_stream_key_indices: &this.input_stream_key,
                 },
             );
 
@@ -661,7 +661,7 @@ pub(super) struct RowConverter<'a> {
     order_key_indices: &'a [usize],
     order_key_data_types: &'a [DataType],
     order_key_order_types: &'a [OrderType],
-    input_pk_indices: &'a [usize],
+    input_stream_key_indices: &'a [usize],
 }
 
 impl<'a> RowConverter<'a> {
@@ -671,14 +671,15 @@ impl<'a> RowConverter<'a> {
     pub(super) fn calc_state_key_to_table_sub_pk_proj(
         partition_key_indices: &[usize],
         order_key_indices: &[usize],
-        input_pk_indices: &'a [usize],
+        input_stream_key_indices: &'a [usize],
     ) -> Vec<usize> {
         // This process is corresponding to `StreamOverWindow::infer_state_table`.
-        let mut projection = Vec::with_capacity(order_key_indices.len() + input_pk_indices.len());
+        let mut projection =
+            Vec::with_capacity(order_key_indices.len() + input_stream_key_indices.len());
         let mut col_dedup: HashSet<usize> = partition_key_indices.iter().copied().collect();
         for (proj_idx, key_idx) in order_key_indices
             .iter()
-            .chain(input_pk_indices.iter())
+            .chain(input_stream_key_indices.iter())
             .enumerate()
         {
             if col_dedup.insert(*key_idx) {
@@ -715,7 +716,7 @@ impl<'a> RowConverter<'a> {
                 self.order_key_order_types,
             )?,
             pk: full_row
-                .project(self.input_pk_indices)
+                .project(self.input_stream_key_indices)
                 .into_owned_row()
                 .into(),
         })

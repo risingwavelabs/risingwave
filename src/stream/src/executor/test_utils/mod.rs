@@ -49,7 +49,7 @@ pub mod prelude {
     pub use crate::common::table::state_table::StateTable;
     pub use crate::executor::test_utils::expr::build_from_pretty;
     pub use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    pub use crate::executor::{ActorContext, BoxedMessageStream, Execute, PkIndices};
+    pub use crate::executor::{ActorContext, BoxedMessageStream, Execute, StreamKey};
 }
 
 /// Trait for testing `StreamExecutor` more easily.

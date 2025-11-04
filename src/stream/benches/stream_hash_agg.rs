@@ -29,7 +29,7 @@ use risingwave_storage::StateStore;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 use risingwave_stream::executor::test_utils::*;
-use risingwave_stream::executor::{Executor, PkIndices};
+use risingwave_stream::executor::{Executor, StreamKey};
 use tokio::runtime::Runtime;
 
 risingwave_expr_impl::enable!();
@@ -123,7 +123,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> Executor {
 
     // ---- Create MockSourceExecutor ----
     let (mut tx, source) = MockSource::channel();
-    let source = source.into_executor(schema, PkIndices::new());
+    let source = source.into_executor(schema, StreamKey::new());
     tx.push_barrier(test_epoch(1), false);
     for chunk in chunks {
         tx.push_chunk(chunk);
@@ -132,7 +132,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> Executor {
 
     // ---- Create HashAggExecutor to be benchmarked ----
     let row_count_index = 0;
-    let pk_indices = vec![];
+    let stream_key = vec![];
     let extreme_cache_size = 1024;
     let executor_id = 1;
 
@@ -143,7 +143,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> Executor {
         agg_calls,
         row_count_index,
         group_key_indices,
-        pk_indices,
+        stream_key,
         extreme_cache_size,
         false,
         executor_id,

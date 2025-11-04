@@ -33,7 +33,7 @@ async fn create_executor<S: StateStore>(
         Field::unnamed(DataType::Int64),   // pk
         Field::unnamed(DataType::Int32),   // x
     ]);
-    let input_pk_indices = vec![2];
+    let input_stream_key = vec![2];
     let partition_key_indices = vec![1];
     let order_key_indices = vec![0];
     let order_key_order_types = vec![OrderType::ascending()];
@@ -79,7 +79,7 @@ async fn create_executor<S: StateStore>(
     .await;
 
     let (tx, source) = MockSource::channel();
-    let source = source.into_executor(input_schema, input_pk_indices.clone());
+    let source = source.into_executor(input_schema, input_stream_key.clone());
     let executor = OverWindowExecutor::new(OverWindowExecutorArgs {
         actor_ctx: ActorContext::for_test(123),
 

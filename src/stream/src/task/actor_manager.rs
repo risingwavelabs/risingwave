@@ -77,7 +77,7 @@ impl StreamActorManager {
     fn get_executor_info(node: &StreamNode, executor_id: u64) -> ExecutorInfo {
         let schema: Schema = node.fields.iter().map(Field::from).collect();
 
-        let pk_indices = node
+        let stream_key = node
             .get_stream_key()
             .iter()
             .map(|idx| *idx as usize)
@@ -89,7 +89,7 @@ impl StreamActorManager {
 
         ExecutorInfo {
             schema,
-            pk_indices,
+            stream_key,
             stream_kind,
             identity,
             id: executor_id,

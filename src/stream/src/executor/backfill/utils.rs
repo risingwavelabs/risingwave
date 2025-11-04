@@ -42,7 +42,7 @@ use risingwave_storage::table::collect_data_chunk_with_builder;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
 use crate::executor::{
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
+    Message, StreamExecutorError, StreamExecutorResult, StreamKeyRef, Watermark,
 };
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
@@ -302,7 +302,7 @@ impl BackfillProgressPerVnode {
 pub(crate) fn mark_chunk(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: StreamKeyRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamChunk {
     let chunk = chunk.compact_vis();
@@ -313,7 +313,7 @@ pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: StreamKeyRef<'_>,
     pk_order: &[OrderType],
     last_cdc_offset: Option<CdcOffset>,
 ) -> StreamExecutorResult<StreamChunk> {
@@ -335,7 +335,7 @@ pub(crate) fn mark_cdc_chunk(
 pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
     chunk: &StreamChunk,
     backfill_state: &BackfillState,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: StreamKeyRef<'_>,
     upstream_table: &ReplicatedStateTable<S, SD>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
@@ -393,7 +393,7 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
 fn mark_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: StreamKeyRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamChunk {
     let (data, ops) = chunk.into_parts();
@@ -471,7 +471,7 @@ fn mark_cdc_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     last_cdc_offset: Option<CdcOffset>,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: StreamKeyRef<'_>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
     let (data, ops) = chunk.into_parts();

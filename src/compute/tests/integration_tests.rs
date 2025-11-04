@@ -53,7 +53,7 @@ use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source::DummySourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, StreamKey,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -145,7 +145,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
-    let pk_indices = PkIndices::from([0]);
+    let pk_indices = StreamKey::from([0]);
     let column_descs = all_column_ids
         .iter()
         .zip_eq_fast(all_schema.fields.iter().cloned())

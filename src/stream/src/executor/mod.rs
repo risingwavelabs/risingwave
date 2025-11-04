@@ -217,7 +217,7 @@ pub struct ExecutorInfo {
     /// The primary key indices of the OUTPUT of the executor.
     /// Schema is used by both OLAP and streaming, therefore
     /// pk indices are maintained independently.
-    pub pk_indices: PkIndices,
+    pub stream_key: StreamKey,
 
     /// The stream kind of the OUTPUT of the executor.
     pub stream_kind: PbStreamKind,
@@ -230,10 +230,10 @@ pub struct ExecutorInfo {
 }
 
 impl ExecutorInfo {
-    pub fn for_test(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
+    pub fn for_test(schema: Schema, stream_key: StreamKey, identity: String, id: u64) -> Self {
         Self {
             schema,
-            pk_indices,
+            stream_key,
             stream_kind: PbStreamKind::Retract, // dummy value for test
             identity,
             id,
@@ -277,8 +277,8 @@ impl Executor {
         &self.info.schema
     }
 
-    pub fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
+    pub fn stream_key(&self) -> StreamKeyRef<'_> {
+        &self.info.stream_key
     }
 
     pub fn stream_kind(&self) -> PbStreamKind {
@@ -1460,9 +1460,9 @@ impl DispatcherMessageBatch {
     }
 }
 
-pub type PkIndices = Vec<usize>;
-pub type PkIndicesRef<'a> = &'a [usize];
-pub type PkDataTypes = SmallVec<[DataType; 1]>;
+pub type StreamKey = Vec<usize>;
+pub type StreamKeyRef<'a> = &'a [usize];
+pub type StreamKeyDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
 pub async fn expect_first_barrier<M: Debug>(

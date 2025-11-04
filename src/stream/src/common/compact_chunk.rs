@@ -109,10 +109,10 @@ impl StreamChunkCompactor {
 /// This is the same as [`StreamChunkCompactor::into_compacted_chunks_inline`] with only one chunk.
 pub fn compact_chunk_inline(
     stream_chunk: StreamChunk,
-    pk_indices: &[usize],
+    key_indices: &[usize],
     ib: InconsistencyBehavior,
 ) -> StreamChunk {
-    let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), vec![stream_chunk]);
+    let compactor = StreamChunkCompactor::new(key_indices.to_vec(), vec![stream_chunk]);
     compactor.into_compacted_chunks_inline(ib).next().unwrap()
 }
 
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_compact_chunk_inline() {
-        let pk_indices = [0, 1];
+        let key = [0, 1];
         let chunks = vec![
             StreamChunk::from_pretty(
                 " I I I
@@ -147,7 +147,7 @@ mod tests {
                 + 9 9 1",
             ),
         ];
-        let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
+        let compactor = StreamChunkCompactor::new(key.to_vec(), chunks);
         let mut iter = compactor.into_compacted_chunks_inline(InconsistencyBehavior::Panic);
 
         let chunk = iter.next().unwrap().compact_vis();
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_compact_chunk_reconstructed() {
-        let pk_indices = [0, 1];
+        let key = [0, 1];
         let chunks = vec![
             StreamChunk::from_pretty(
                 " I I I
@@ -204,7 +204,7 @@ mod tests {
             + 9 9 1",
             ),
         ];
-        let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
+        let compactor = StreamChunkCompactor::new(key.to_vec(), chunks);
 
         let chunks = compactor.into_compacted_chunks_reconstructed(
             100,
