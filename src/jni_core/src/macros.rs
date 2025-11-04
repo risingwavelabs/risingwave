@@ -879,6 +879,7 @@ mod tests {
                 defaultVnodeCount                        ()I,
                 iteratorNewStreamChunk                   (J)J,
                 iteratorNext                             (J)Z,
+                initObjectStoreForTest                   (Ljava/lang/String;Ljava/lang/String;)V,
                 putObject                                (Ljava/lang/String;[B)V,
                 getObjectStoreType                       ()Ljava/lang/String;,
                 deleteObjects                            (Ljava/lang/String;)V,
