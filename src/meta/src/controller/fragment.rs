@@ -996,6 +996,7 @@ impl CatalogController {
             FragmentModel::find()
                 .select_only()
                 .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+                .column(fragment::Column::FragmentId)
                 .column_as(object::Column::Oid, "job_id")
                 .column_as(object::Column::SchemaId, "schema_id")
                 .column_as(object::Column::ObjType, "type")
