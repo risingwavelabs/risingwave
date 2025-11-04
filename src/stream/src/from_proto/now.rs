@@ -71,7 +71,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
         };
 
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, None)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.actor_context.config)
             .build()
             .await;
         let barrier_interval_ms = params

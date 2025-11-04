@@ -124,21 +124,21 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let state_table_l = StateTableBuilder::new(table_l, store.clone(), Some(vnodes.clone()))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.actor_context.config)
             .build()
             .await;
         let degree_state_table_l =
             StateTableBuilder::new(degree_table_l, store.clone(), Some(vnodes.clone()))
-                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .enable_preload_all_rows_by_config(&params.actor_context.config)
                 .build()
                 .await;
 
         let state_table_r = StateTableBuilder::new(table_r, store.clone(), Some(vnodes.clone()))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.actor_context.config)
             .build()
             .await;
         let degree_state_table_r = StateTableBuilder::new(degree_table_r, store, Some(vnodes))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.actor_context.config)
             .build()
             .await;
 

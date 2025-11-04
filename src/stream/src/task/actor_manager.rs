@@ -130,12 +130,11 @@ impl StreamActorManager {
         node: &StreamScanNode,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-        env: StreamEnvironment,
         local_barrier_manager: &LocalBarrierManager,
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
-        let chunk_size = actor_context.streaming_config.developer.chunk_size;
+        let chunk_size = actor_context.config.developer.chunk_size;
         let upstream = self
             .create_snapshot_backfill_input(
                 upstream_node,
@@ -169,7 +168,7 @@ impl StreamActorManager {
 
         let state_table = node.get_state_table()?;
         let state_table = StateTableBuilder::new(state_table, state_store.clone(), vnodes)
-            .enable_preload_all_rows_by_config(&actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&actor_context.config)
             .build()
             .await;
 
@@ -230,7 +229,6 @@ impl StreamActorManager {
                     stream_scan,
                     actor_context,
                     vnode_bitmap,
-                    env,
                     local_barrier_manager,
                     store,
                 )
@@ -334,7 +332,7 @@ impl StreamActorManager {
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
             local_barrier_manager: local_barrier_manager.clone(),
-            config: actor_context.streaming_config.clone(),
+            config: actor_context.config.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -590,7 +588,9 @@ pub struct ExecutorParams {
 
     pub local_barrier_manager: LocalBarrierManager,
 
-    /// Same as `actor_context.streaming_config`.
+    /// The local streaming configuration for this specific actor. Same as `actor_context.config`.
+    ///
+    /// Compared to `stream_env.global_config`, this config can have some entries overridden by the user.
     pub config: Arc<StreamingConfig>,
 }
 

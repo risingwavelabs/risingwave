@@ -33,7 +33,10 @@ pub struct StreamEnvironment {
     server_addr: HostAddr,
 
     /// Streaming related configurations.
-    config: Arc<StreamingConfig>, // rename to `global_config`
+    ///
+    /// This is the global config for the whole compute node. Actor may have its config overridden.
+    /// In executor, prefer using `actor_context.streaming_config` instead.
+    global_config: Arc<StreamingConfig>,
 
     /// Current worker node id.
     worker_id: WorkerNodeId,
@@ -64,7 +67,7 @@ impl StreamEnvironment {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         server_addr: HostAddr,
-        config: Arc<StreamingConfig>,
+        global_config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
         dml_manager: DmlManagerRef,
@@ -75,7 +78,7 @@ impl StreamEnvironment {
     ) -> Self {
         StreamEnvironment {
             server_addr,
-            config,
+            global_config,
             worker_id,
             state_store,
             dml_manager,
@@ -95,7 +98,7 @@ impl StreamEnvironment {
         use risingwave_storage::monitor::MonitoredStorageMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:2333".parse().unwrap(),
-            config: Arc::new(StreamingConfig::default()),
+            global_config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 MonitoredStorageMetrics::unused(),
@@ -114,7 +117,7 @@ impl StreamEnvironment {
     }
 
     pub fn global_config(&self) -> &Arc<StreamingConfig> {
-        &self.config
+        &self.global_config
     }
 
     pub fn worker_id(&self) -> WorkerNodeId {

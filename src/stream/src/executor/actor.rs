@@ -67,7 +67,10 @@ pub struct ActorContext {
     // Meta client. currently used for auto schema change. `None` for test only
     pub meta_client: Option<MetaClient>,
 
-    pub streaming_config: Arc<StreamingConfig>,
+    /// The local streaming configuration for this specific actor.
+    ///
+    /// Compared to `stream_env.global_config`, this config can have some entries overridden by the user.
+    pub config: Arc<StreamingConfig>,
 
     pub stream_env: StreamEnvironment,
 }
@@ -90,7 +93,7 @@ impl ActorContext {
             initial_subscriber_ids: Default::default(),
             initial_upstream_actors: Default::default(),
             meta_client: None,
-            streaming_config: Arc::new(StreamingConfig::default()),
+            config: Arc::new(StreamingConfig::default()),
             stream_env: StreamEnvironment::for_test(),
         })
     }
@@ -125,7 +128,7 @@ impl ActorContext {
                 .collect(),
             initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
             meta_client,
-            streaming_config,
+            config: streaming_config,
             stream_env,
         })
     }
@@ -200,7 +203,7 @@ where
         let expr_context = self.expr_context.clone();
         let fragment_id = self.actor_context.fragment_id;
         let vnode_count = self.actor_context.vnode_count;
-        let config = self.actor_context.streaming_config.clone();
+        let config = self.actor_context.config.clone();
 
         let run = async move {
             tokio::join!(

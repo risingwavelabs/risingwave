@@ -38,11 +38,11 @@ impl ExecutorBuilder for GlobalApproxPercentileExecutorBuilder {
             .as_ref()
             .expect("count_state_table not provided");
         let bucket_state_table = StateTableBuilder::new(bucket_table, store.clone(), None)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.actor_context.config)
             .build()
             .await;
         let count_state_table = StateTableBuilder::new(count_table, store, None)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.actor_context.config)
             .build()
             .await;
         let exec = GlobalApproxPercentileExecutor::new(

@@ -43,7 +43,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTableBuilder::new(table, store, vnodes)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.actor_context.config)
             .build()
             .await;
         let storage_key = table

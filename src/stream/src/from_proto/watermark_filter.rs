@@ -60,7 +60,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             BatchTable::new_partial(store.clone(), column_ids, Some(other_vnodes), &desc);
 
         let table = StateTableBuilder::new(&table, store, Some(vnodes))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.actor_context.config)
             .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
             .build()
             .await;

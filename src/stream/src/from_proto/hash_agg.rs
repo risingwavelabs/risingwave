@@ -79,7 +79,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             node.get_agg_call_states(),
             store.clone(),
             vnodes.clone(),
-            &params.actor_context.streaming_config,
+            &params.actor_context.config,
         )
         .await;
         // disable sanity check so that old value is not required when updating states
@@ -88,14 +88,14 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             store.clone(),
             vnodes.clone(),
         )
-        .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+        .enable_preload_all_rows_by_config(&params.actor_context.config)
         .build()
         .await;
         let distinct_dedup_tables = build_distinct_dedup_table_from_proto(
             node.get_distinct_dedup_tables(),
             store,
             vnodes,
-            &params.actor_context.streaming_config,
+            &params.actor_context.config,
         )
         .await;
 
