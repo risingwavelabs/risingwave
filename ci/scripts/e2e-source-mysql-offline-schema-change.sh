@@ -135,11 +135,12 @@ else
 fi
 
 echo "--- Verify t has 3 columns"
-COL_COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 't';" 2>&1 | xargs)
-if [ "$COL_COUNT" = "3" ]; then
+OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 3 THEN 'OK' ELSE 'FAIL' END FROM information_schema.columns WHERE table_name = 't';" 2>&1)
+if echo "$OUTPUT" | grep -q "OK"; then
     echo "✓ PASS: t has 3 columns after schema change"
 else
-    echo "✗ FAIL: t has $COL_COUNT columns, expected 3"
+    echo "✗ FAIL: t does not have 3 columns"
+    echo "Debug output: $OUTPUT"
     risedev psql -c "SELECT column_name FROM information_schema.columns WHERE table_name = 't';"
     exit 1
 fi
@@ -157,11 +158,12 @@ else
 fi
 
 echo "--- Verify t1 has 3 columns"
-COL_COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 't1';" 2>&1 | xargs)
-if [ "$COL_COUNT" = "3" ]; then
+OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 3 THEN 'OK' ELSE 'FAIL' END FROM information_schema.columns WHERE table_name = 't1';" 2>&1)
+if echo "$OUTPUT" | grep -q "OK"; then
     echo "✓ PASS: t1 has 3 columns after schema change"
 else
-    echo "✗ FAIL: t1 has $COL_COUNT columns, expected 3"
+    echo "✗ FAIL: t1 does not have 3 columns"
+    echo "Debug output: $OUTPUT"
     risedev psql -c "SELECT column_name FROM information_schema.columns WHERE table_name = 't1';"
     exit 1
 fi
