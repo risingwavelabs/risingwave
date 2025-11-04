@@ -915,6 +915,17 @@ profile:
         address: message_queue
         port: 29092
 
+  ci-1cn-1fe-ldap-with-recovery:
+    config-path: src/config/ci-ldap-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
   ci-meta-backup-test-sql:
     config-path: src/config/ci-meta-backup-test.toml
     steps:

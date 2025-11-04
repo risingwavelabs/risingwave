@@ -49,7 +49,8 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
+    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
+    StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -1619,33 +1620,95 @@ impl SessionManagerImpl {
                     "User does not have CONNECT privilege.",
                 )));
             }
-            let user_authenticator = match &user.auth_info {
-                None => UserAuthenticator::None,
-                Some(auth_info) => {
-                    if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
-                        UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
-                    } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
-                        let mut salt = [0; 4];
-                        let mut rng = rand::rng();
-                        rng.fill_bytes(&mut salt);
-                        UserAuthenticator::Md5WithSalt {
-                            encrypted_password: md5_hash_with_salt(
-                                &auth_info.encrypted_value,
-                                &salt,
-                            ),
-                            salt,
+
+            // Check HBA configuration for LDAP authentication
+            let (connection_type, client_addr) = match peer_addr.as_ref() {
+                Address::Tcp(socket_addr) => (ConnectionType::Host, Some(&socket_addr.ip())),
+                Address::Unix(_) => (ConnectionType::Local, None),
+            };
+            tracing::debug!(
+                "receive connection: type={:?}, client_addr={:?}",
+                connection_type,
+                client_addr
+            );
+
+            let hba_entry_opt = self.env.frontend_config().hba_config.find_matching_entry(
+                &connection_type,
+                database_name,
+                user_name,
+                client_addr,
+            );
+
+            // TODO: adding `FATAL` message support for no matching HBA entry.
+            let Some(hba_entry_opt) = hba_entry_opt else {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    format!(
+                        "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
+                    ),
+                )));
+            };
+
+            // Determine the user authenticator based on the user's auth info.
+            let authenticator_by_info = || -> std::result::Result<UserAuthenticator, BoxedError> {
+                let authenticator = match &user.auth_info {
+                    None => UserAuthenticator::None,
+                    Some(auth_info) => match auth_info.encryption_type() {
+                        EncryptionType::Plaintext => {
+                            UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                         }
-                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                        UserAuthenticator::OAuth {
+                        EncryptionType::Md5 => {
+                            let mut salt = [0; 4];
+                            let mut rng = rand::rng();
+                            rng.fill_bytes(&mut salt);
+                            UserAuthenticator::Md5WithSalt {
+                                encrypted_password: md5_hash_with_salt(
+                                    &auth_info.encrypted_value,
+                                    &salt,
+                                ),
+                                salt,
+                            }
+                        }
+                        EncryptionType::Oauth => UserAuthenticator::OAuth {
                             metadata: auth_info.metadata.clone(),
                             cluster_id: self.env.meta_client().cluster_id().to_owned(),
+                        },
+                        _ => {
+                            return Err(Box::new(Error::new(
+                                ErrorKind::Unsupported,
+                                format!(
+                                    "Unsupported auth type: {}",
+                                    auth_info.encryption_type().as_str_name()
+                                ),
+                            )));
                         }
-                    } else {
-                        return Err(Box::new(Error::new(
-                            ErrorKind::Unsupported,
-                            format!("Unsupported auth type: {}", auth_info.encryption_type),
-                        )));
-                    }
+                    },
+                };
+                Ok(authenticator)
+            };
+
+            let user_authenticator = match (&hba_entry_opt.auth_method, &user.auth_info) {
+                (AuthMethod::Trust, _) => UserAuthenticator::None,
+                // For backward compatibility, we allow password auth method to work with any auth info.
+                (AuthMethod::Password, _) => authenticator_by_info()?,
+                (AuthMethod::Md5, Some(auth_info))
+                    if auth_info.encryption_type() == EncryptionType::Md5 =>
+                {
+                    authenticator_by_info()?
+                }
+                (AuthMethod::OAuth, Some(auth_info))
+                    if auth_info.encryption_type() == EncryptionType::Oauth =>
+                {
+                    authenticator_by_info()?
+                }
+                (AuthMethod::Ldap, _) => {
+                    UserAuthenticator::Ldap(user_name.to_owned(), hba_entry_opt.clone())
+                }
+                _ => {
+                    return Err(Box::new(Error::new(
+                        ErrorKind::PermissionDenied,
+                        format!("password authentication failed for user \"{user_name}\""),
+                    )));
                 }
             };
 

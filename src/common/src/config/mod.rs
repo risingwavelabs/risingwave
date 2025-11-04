@@ -21,6 +21,8 @@ pub mod batch;
 pub use batch::BatchConfig;
 pub mod frontend;
 pub use frontend::FrontendConfig;
+pub mod hba;
+pub use hba::{AddressPattern, AuthMethod, ConnectionType, HbaConfig, HbaEntry};
 pub mod meta;
 pub use meta::{CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig, MetaStoreConfig};
 pub mod streaming;
