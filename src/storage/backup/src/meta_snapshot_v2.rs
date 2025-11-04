@@ -64,7 +64,8 @@ macro_rules! for_all_metadata_models_v2 {
             {exactly_once_iceberg_sinks, risingwave_meta_model::exactly_once_iceberg_sink},
             {iceberg_tables, risingwave_meta_model::iceberg_tables},
             {iceberg_namespace_properties, risingwave_meta_model::iceberg_namespace_properties},
-            {user_default_privilege, risingwave_meta_model::user_default_privilege}
+            {user_default_privilege, risingwave_meta_model::user_default_privilege},
+            {fragment_splits, risingwave_meta_model::fragment_splits}
         }
     };
 }
