@@ -214,9 +214,7 @@ pub struct ExecutorInfo {
     /// The schema of the OUTPUT of the executor.
     pub schema: Schema,
 
-    /// The primary key indices of the OUTPUT of the executor.
-    /// Schema is used by both OLAP and streaming, therefore
-    /// pk indices are maintained independently.
+    /// The stream key indices of the OUTPUT of the executor.
     pub stream_key: StreamKey,
 
     /// The stream kind of the OUTPUT of the executor.

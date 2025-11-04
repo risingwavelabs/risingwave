@@ -76,7 +76,7 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
     offset: usize,
 
     /// The storage key indices of the `AppendOnlyGroupTopNExecutor`
-    storage_key_indices: StreamKey,
+    storage_key_indices: Vec<usize>,
 
     managed_state: ManagedTopNState<S>,
 

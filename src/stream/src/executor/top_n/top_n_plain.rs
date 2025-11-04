@@ -80,7 +80,7 @@ pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     schema: Schema,
 
     /// The storage key indices of the `TopNExecutor`
-    storage_key_indices: StreamKey,
+    storage_key_indices: Vec<usize>,
 
     managed_state: ManagedTopNState<S>,
 

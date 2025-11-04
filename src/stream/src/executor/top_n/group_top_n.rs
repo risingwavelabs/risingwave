@@ -72,7 +72,7 @@ pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bo
     offset: usize,
 
     /// The storage key indices of the `GroupTopNExecutor`
-    storage_key_indices: StreamKey,
+    storage_key_indices: Vec<usize>,
 
     managed_state: ManagedTopNState<S>,
 

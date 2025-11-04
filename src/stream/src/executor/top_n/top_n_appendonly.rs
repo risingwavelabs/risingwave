@@ -61,7 +61,7 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     schema: Schema,
 
     /// The storage key indices of the `TopNExecutor`
-    storage_key_indices: StreamKey,
+    storage_key_indices: Vec<usize>,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
