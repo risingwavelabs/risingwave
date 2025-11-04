@@ -417,6 +417,12 @@ pub struct SessionConfig {
     /// The `ef_search` used in querying hnsw vector index
     #[parameter(default = 40_usize)] // default value borrowed from pg_vector
     batch_hnsw_ef_search: usize,
+
+    /// Unsafe: Enable storage retention for non-append-only tables.
+    /// Enabling this can lead to streaming inconsistency and node panic
+    /// if there is any row INSERT/UPDATE/DELETE operation corresponding to the ttled primary key.
+    #[parameter(default = false)]
+    unsafe_enable_storage_retention_for_non_append_only_tables: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
