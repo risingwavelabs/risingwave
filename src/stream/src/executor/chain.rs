@@ -114,7 +114,7 @@ mod test {
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{AddMutation, Barrier, Execute, Message, Mutation, PkIndices};
+    use crate::executor::{AddMutation, Barrier, Execute, Message, Mutation, StreamKey};
     use crate::task::CreateMviewProgressReporter;
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
@@ -131,7 +131,7 @@ mod test {
             StreamChunk::from_pretty("I\n + 2"),
         ])
         .stop_on_finish(false)
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let second = MockSource::with_messages(vec![
             Message::Barrier(Barrier::new_test_barrier(test_epoch(1)).with_mutation(
@@ -149,7 +149,7 @@ mod test {
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
             Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let chain = ChainExecutor::new(first, second, progress, false);
 

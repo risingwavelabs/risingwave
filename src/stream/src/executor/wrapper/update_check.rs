@@ -33,8 +33,8 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
             for record in chunk.records() {
                 // `chunk.records()` will check U-/U+ pairing
                 if let Record::Update { old_row, new_row } = record {
-                    let old_pk = old_row.project(&info.pk_indices);
-                    let new_pk = new_row.project(&info.pk_indices);
+                    let old_pk = old_row.project(&info.stream_key);
+                    let new_pk = new_row.project(&info.stream_key);
                     debug_assert_eq!(
                         old_pk,
                         new_pk,
@@ -49,7 +49,7 @@ executor: {}",
                         old_pk.display(),
                         new_row.display(),
                         new_pk.display(),
-                        info.pk_indices,
+                        info.stream_key,
                         info.identity
                     )
                 }
