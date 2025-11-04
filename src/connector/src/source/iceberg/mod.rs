@@ -935,8 +935,6 @@ pub async fn scan_task_to_chunk_with_deletes(
                     continue;
                 }
 
-                let mut removed = false;
-
                 for (field_indices, delete_key_set) in &delete_entries_info {
                     let mut row_key = Vec::with_capacity(field_indices.len());
                     for &col_idx in field_indices {
@@ -947,13 +945,8 @@ pub async fn scan_task_to_chunk_with_deletes(
                     if delete_key_set.contains(&row_key) {
                         *item = false;
                         deleted_count += 1;
-                        removed = true;
                         break;
                     }
-                }
-
-                if removed {
-                    continue;
                 }
             }
 
