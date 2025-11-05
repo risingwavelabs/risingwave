@@ -1,9 +1,6 @@
 control substitution on
 
 statement ok
-alter system set barrier_interval_ms = 200;
-
-statement ok
 create secret my_secret with (
   backend = 'meta'
 ) as 'hummockadmin';

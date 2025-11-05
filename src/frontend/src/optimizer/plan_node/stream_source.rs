@@ -97,11 +97,6 @@ impl StreamNode for StreamSource {
         let source_catalog = self.source_catalog();
 
         let source_inner = source_catalog.map(|source_catalog| {
-            tracing::info!(
-                "StreamSource to_stream_prost_body: source_id={:?}, associated_table_id={:?}",
-                source_catalog.id,
-                source_catalog.associated_table_id,
-            );
             let (with_properties, secret_refs) =
                 source_catalog.with_properties.clone().into_parts();
             PbStreamSource {
@@ -127,7 +122,7 @@ impl StreamNode for StreamSource {
                     columns: cols.iter().map(|c| c.to_protobuf()).collect_vec(),
                 }),
                 refresh_mode: source_catalog.refresh_mode,
-                associated_table_id: source_catalog.associated_table_id.map(|id| id.as_raw_id()),
+                associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))
