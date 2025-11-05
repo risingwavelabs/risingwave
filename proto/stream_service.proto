@@ -85,10 +85,12 @@ message BarrierCompleteResponse {
   // SourceExecutor reports the source load is finished, and then
   // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
   message LoadFinishedSource {
-    // The source identifier associated with the finished load.
-    uint32 associated_source_id = 1;
     // The actor that reported the completion event.
-    uint32 reporter_actor_id = 2;
+    uint32 reporter_actor_id = 1;
+    // The table ID for the refreshable batch source.
+    uint32 table_id = 2;
+    // The source identifier associated with the finished load.
+    uint32 associated_source_id = 3;
   }
   repeated LoadFinishedSource load_finished_sources = 11;
   map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
@@ -104,10 +106,12 @@ message BarrierCompleteResponse {
   // SourceExecutor reports the source list is finished, and then
   // meta will issue a ListFinish barrier to notify the source to start loading.
   message ListFinishedSource {
-    // The source identifier associated with the completed listing.
-    uint32 associated_source_id = 1;
     // The actor that reported the completion event.
-    uint32 reporter_actor_id = 2;
+    uint32 reporter_actor_id = 1;
+    // The table ID for the refreshable batch source.
+    uint32 table_id = 2;
+    // The source identifier associated with the completed listing.
+    uint32 associated_source_id = 3;
   }
   repeated ListFinishedSource list_finished_sources = 16;
 }

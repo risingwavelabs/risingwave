@@ -28,9 +28,6 @@ use risingwave_meta_model::{SourceId, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
-};
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use thiserror_ext::AsReport;
 use tracing::{debug, warn};
@@ -55,7 +52,7 @@ use crate::barrier::utils::{
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{REFRESH_TABLE_PROGRESS_TRACKER, SourceChange, fill_snapshot_backfill_epoch};
+use crate::stream::{SourceChange, fill_snapshot_backfill_epoch};
 use crate::{MetaError, MetaResult};
 
 pub(crate) struct CheckpointControl {
@@ -950,89 +947,143 @@ impl DatabaseCheckpointControl {
     }
 
     fn handle_refresh_table_info(&self, task: &mut Option<CompleteBarrierTask>, node: &EpochNode) {
-        let mut list_finished_sources_by_actor: HashMap<u32, HashSet<u32>> = HashMap::new();
-        for entry in node
+        let list_finished_info = node
             .state
             .resps
             .iter()
-            .flat_map(|resp| resp.list_finished_sources.iter())
-        {
-            list_finished_sources_by_actor
-                .entry(entry.associated_source_id)
-                .or_default()
-                .insert(entry.reporter_actor_id);
+            .flat_map(|resp| resp.list_finished_sources.clone())
+            .collect::<Vec<_>>();
+        if !list_finished_info.is_empty() {
+            let task = task.get_or_insert_default();
+            task.list_finished_source_ids.extend(list_finished_info);
         }
 
-        if !list_finished_sources_by_actor.is_empty() {
-            let list_finished_source_ids: Vec<PbListFinishedSource> =
-                list_finished_sources_by_actor
-                    .into_iter()
-                    .flat_map(|(associated_source_id, actor_ids)| {
-                        actor_ids
-                            .into_iter()
-                            .map(move |reporter_actor_id| PbListFinishedSource {
-                                associated_source_id,
-                                reporter_actor_id,
-                            })
-                    })
-                    .collect();
-            if !list_finished_source_ids.is_empty() {
-                // Add list_finished_source_ids to the task for processing
-                let task = task.get_or_insert_default();
-                task.list_finished_source_ids
-                    .extend(list_finished_source_ids);
-            }
-        }
-
-        let mut load_finished_sources_by_actor: HashMap<u32, HashSet<u32>> = HashMap::new();
-        for entry in node
+        let load_finished_info = node
             .state
             .resps
             .iter()
-            .flat_map(|resp| resp.load_finished_sources.iter())
-        {
-            load_finished_sources_by_actor
-                .entry(entry.associated_source_id)
-                .or_default()
-                .insert(entry.reporter_actor_id);
-        }
-        if !load_finished_sources_by_actor.is_empty() {
-            let load_finished_source_ids: Vec<PbLoadFinishedSource> =
-                load_finished_sources_by_actor
-                    .into_iter()
-                    .flat_map(|(associated_source_id, actor_ids)| {
-                        actor_ids
-                            .into_iter()
-                            .map(move |reporter_actor_id| PbLoadFinishedSource {
-                                associated_source_id,
-                                reporter_actor_id,
-                            })
-                    })
-                    .collect();
-            if !load_finished_source_ids.is_empty() {
-                // Add load_finished_source_ids to the task for processing
-                let task = task.get_or_insert_default();
-                task.load_finished_source_ids
-                    .extend(load_finished_source_ids);
-            }
+            .flat_map(|resp| resp.load_finished_sources.clone())
+            .collect::<Vec<_>>();
+        if !load_finished_info.is_empty() {
+            let task = task.get_or_insert_default();
+            task.load_finished_source_ids.extend(load_finished_info);
         }
 
-        let refresh_finished_table_ids: Vec<_> = node
+        let refresh_finished_table_ids: Vec<JobId> = node
             .state
             .resps
             .iter()
-            .flat_map(|resp| &resp.refresh_finished_tables)
-            .cloned()
-            .collect::<HashSet<_>>() // deduplicate
-            .into_iter()
-            .map(JobId::new)
-            .collect();
+            .flat_map(|resp| {
+                resp.refresh_finished_tables
+                    .iter()
+                    .map(|table_id| JobId::new(*table_id))
+            })
+            .collect::<Vec<_>>();
         if !refresh_finished_table_ids.is_empty() {
-            // Add refresh_finished_table_ids to the task for processing
             let task = task.get_or_insert_default();
             task.refresh_finished_table_job_ids
                 .extend(refresh_finished_table_ids);
         }
+        // Collect list_finished_sources directly without aggregation to preserve table_id
+
+        // let (list_finished_info, load_finished_info) = {
+        //     // (table_id, associated_source_id) -> reporter_actor_id
+        //     let mut list_finished_info: HashMap<(TableId, TableId), HashSet<u32>> = HashMap::new();
+        //     let mut load_finished_info: HashMap<(TableId, TableId), HashSet<u32>> = HashMap::new();
+
+        //     for resp in &node.state.resps {
+        //         for list_finished in &resp.list_finished_sources {
+        //             list_finished_info
+        //                 .entry((
+        //                     TableId::new(list_finished.table_id),
+        //                     TableId::new(list_finished.associated_source_id),
+        //                 ))
+        //                 .or_default()
+        //                 .insert(list_finished.reporter_actor_id);
+        //         }
+        //         for load_finished in &resp.load_finished_sources {
+        //             load_finished_info
+        //                 .entry((
+        //                     TableId::new(load_finished.table_id),
+        //                     TableId::new(load_finished.associated_source_id),
+        //                 ))
+        //                 .or_default()
+        //                 .insert(load_finished.reporter_actor_id);
+        //         }
+        //     }
+
+        //     (list_finished_info, load_finished_info)
+        // };
+
+        //     let mut refresh_table_guard = REFRESH_TABLE_PROGRESS_TRACKER.lock();
+        //     for ((table_id, source_id), actors) in list_finished_info {
+        //         if actors.is_empty() {
+        //             continue;
+        //         }
+        //         let single_task_tracker = refresh_table_guard.get_mut(&table_id).unwrap();
+        //         single_task_tracker
+        //             .report_list_finished(actors.iter().map(|x| *x as ActorId).collect());
+        //         match single_task_tracker.is_list_finished() {
+        //             Ok(_) => {
+        //                 let task = task.get_or_insert_default();
+        //                 task.list_finished_source_ids.push(
+        //                     // `handle_list_finished_source_ids` only checks table_id and associated_source_id
+        //                     PbListFinishedSource {
+        //                         table_id: table_id.as_raw_id(),
+        //                         associated_source_id: source_id.as_raw_id(),
+        //                         reporter_actor_id: actors.iter().next().unwrap().clone() as u32,
+        //                     },
+        //                 )
+        //             }
+        //             Err(e) => {
+        //                 tracing::error!(e = %e.as_report(), "failed to check report list finished");
+        //                 unreachable!();
+        //             }
+        //         }
+        //     }
+
+        //     for ((table_id, source_id), actors) in load_finished_info {
+        //         if actors.is_empty() {
+        //             continue;
+        //         }
+        //         let single_task_tracker = refresh_table_guard.get_mut(&table_id).unwrap();
+        //         single_task_tracker
+        //             .report_load_finished(actors.iter().map(|x| *x as ActorId).collect());
+        //         match single_task_tracker.is_load_finished() {
+        //             Ok(_) => {
+        //                 let task = task.get_or_insert_default();
+        //                 task.load_finished_source_ids.push(
+        //                     // `handle_list_finished_source_ids` only checks table_id and associated_source_id
+        //                     PbLoadFinishedSource {
+        //                         table_id: table_id.as_raw_id(),
+        //                         associated_source_id: source_id.as_raw_id(),
+        //                         reporter_actor_id: actors.iter().next().unwrap().clone() as u32,
+        //                     },
+        //                 )
+        //             }
+        //             Err(e) => {
+        //                 tracing::error!(e = %e.as_report(), "failed to check load finished status");
+        //                 unreachable!();
+        //             }
+        //         }
+        //     }
+
+        //     let refresh_finished_table_ids: Vec<_> = node
+        //         .state
+        //         .resps
+        //         .iter()
+        //         .flat_map(|resp| &resp.refresh_finished_tables)
+        //         .cloned()
+        //         .collect::<HashSet<_>>() // deduplicate
+        //         .into_iter()
+        //         .map(JobId::new) // For Table, job_id is table_id
+        //         .collect();
+        //     if !refresh_finished_table_ids.is_empty() {
+        //         // Add refresh_finished_table_ids to the task for processing
+        //         let task = task.get_or_insert_default();
+        //         task.refresh_finished_table_job_ids
+        //             .extend(refresh_finished_table_ids);
+        //     }
     }
 }
 

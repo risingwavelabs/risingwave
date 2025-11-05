@@ -28,9 +28,38 @@ use crate::barrier::{BarrierScheduler, Command, SharedActorInfos};
 use crate::manager::MetadataManager;
 use crate::{MetaError, MetaResult};
 
-pub static REFRESH_TABLE_PROGRESS_TRACKER: LazyLock<
-    Mutex<HashMap<TableId, SingleTableRefreshProgressTracker>>,
-> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Global, per-table refresh progress tracker.
+///
+/// Lifecycle for each entry (keyed by `TableId`):
+/// - Created at refresh start in `RefreshManager::refresh_table` before any `await`,
+///   populated with the expected source/fetch actor sets for that table.
+/// - Updated on each barrier in checkpoint control when executors report
+///   list/load progress; see `CheckpointControl::handle_refresh_table_info`.
+/// - Removed when the table is reported as refresh-finished by compute on a
+///   barrier (`refresh_finished_table_ids`).
+///
+/// Failure/retry notes:
+/// - If scheduling the refresh fails, the table state is reset to `Idle`
+pub static REFRESH_TABLE_PROGRESS_TRACKER: LazyLock<Mutex<GlobalRefreshTableProgressTracker>> =
+    LazyLock::new(|| Mutex::new(GlobalRefreshTableProgressTracker::default()));
+
+#[derive(Default)]
+pub struct GlobalRefreshTableProgressTracker {
+    pub inner: HashMap<TableId, SingleTableRefreshProgressTracker>,
+    pub table_id_by_database_id: HashMap<DatabaseId, HashSet<TableId>>,
+}
+
+impl GlobalRefreshTableProgressTracker {
+    pub fn remove_tracker_by_database_id(&mut self, database_id: DatabaseId) {
+        let table_ids = self
+            .table_id_by_database_id
+            .remove(&database_id)
+            .unwrap_or_default();
+        for table_id in table_ids {
+            self.inner.remove(&table_id);
+        }
+    }
+}
 
 /// # High level design for refresh table
 ///
@@ -161,10 +190,17 @@ impl RefreshManager {
                     );
                 }
             }
-            // Store tracker in global tracker before guard is dropped
-            REFRESH_TABLE_PROGRESS_TRACKER
-                .lock()
-                .insert(table_id, tracker);
+
+            {
+                // Store tracker in global tracker before guard is dropped
+                let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
+                lock_handle.inner.insert(table_id, tracker);
+                lock_handle
+                    .table_id_by_database_id
+                    .entry(database_id)
+                    .or_default()
+                    .insert(table_id);
+            }
 
             Ok::<_, MetaError>(())
         }?;
@@ -281,15 +317,39 @@ impl SingleTableRefreshProgressTracker {
         self.list_finished_actors.extend(actor_ids);
     }
 
-    pub fn is_list_finished(&self) -> bool {
-        self.expected_list_actors == self.list_finished_actors
+    pub fn is_list_finished(&self) -> MetaResult<bool> {
+        if self.list_finished_actors.len() >= self.expected_list_actors.len() {
+            if self.expected_list_actors == self.list_finished_actors {
+                Ok(true)
+            } else {
+                Err(MetaError::from(anyhow!(
+                    "list finished actors mismatch: expected: {:?}, actual: {:?}",
+                    self.expected_list_actors,
+                    self.list_finished_actors
+                )))
+            }
+        } else {
+            Ok(false)
+        }
     }
 
-    pub fn report_fetch_finished(&mut self, actor_ids: Vec<ActorId>) {
+    pub fn report_load_finished(&mut self, actor_ids: Vec<ActorId>) {
         self.fetch_finished_actors.extend(actor_ids);
     }
 
-    pub fn is_fetch_finished(&self) -> bool {
-        self.expected_fetch_actors == self.fetch_finished_actors
+    pub fn is_load_finished(&self) -> MetaResult<bool> {
+        if self.fetch_finished_actors.len() >= self.expected_fetch_actors.len() {
+            if self.expected_fetch_actors == self.fetch_finished_actors {
+                Ok(true)
+            } else {
+                Err(MetaError::from(anyhow!(
+                    "fetch finished actors mismatch: expected: {:?}, actual: {:?}",
+                    self.expected_fetch_actors,
+                    self.fetch_finished_actors
+                )))
+            }
+        } else {
+            Ok(false)
+        }
     }
 }

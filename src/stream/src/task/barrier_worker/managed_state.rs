@@ -314,14 +314,14 @@ pub(crate) struct PartialGraphManagedBarrierState {
     pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
     /// Record the source list finished reports for each epoch of concurrent checkpoints.
-    /// Used for refreshable batch source. The `HashMap` maps the associated source id to the
-    /// set of actors that reported the completion.
-    pub(crate) list_finished_source_ids: HashMap<u64, HashMap<u32, HashSet<ActorId>>>,
+    /// Used for refreshable batch source. The map key is epoch and the value is
+    /// a list of pb messages reported by actors.
+    pub(crate) list_finished_source_ids: HashMap<u64, Vec<PbListFinishedSource>>,
 
     /// Record the source load finished reports for each epoch of concurrent checkpoints.
-    /// Used for refreshable batch source. The `HashMap` maps the associated source id to the
-    /// set of actors that reported the completion.
-    pub(crate) load_finished_source_ids: HashMap<u64, HashMap<u32, HashSet<ActorId>>>,
+    /// Used for refreshable batch source. The map key is epoch and the value is
+    /// a list of pb messages reported by actors.
+    pub(crate) load_finished_source_ids: HashMap<u64, Vec<PbLoadFinishedSource>>,
 
     pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
 
@@ -890,8 +890,8 @@ impl DatabaseManagedBarrierState {
                     self.report_source_list_finished(
                         epoch,
                         actor_id,
-                        table_id.as_raw_id(),
-                        associated_source_id.as_raw_id(),
+                        table_id,
+                        associated_source_id,
                     );
                 }
                 LocalBarrierEvent::ReportSourceLoadFinished {
@@ -1029,8 +1029,8 @@ impl DatabaseManagedBarrierState {
         &mut self,
         epoch: EpochPair,
         actor_id: ActorId,
-        _table_id: u32,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: TableId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
@@ -1041,13 +1041,15 @@ impl DatabaseManagedBarrierState {
                 .list_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
-                .entry(associated_source_id)
-                .or_default()
-                .insert(actor_id);
+                .push(PbListFinishedSource {
+                    reporter_actor_id: actor_id,
+                    table_id: table_id.as_raw_id(),
+                    associated_source_id: associated_source_id.as_raw_id(),
+                });
         } else {
             warn!(
                 ?epoch,
-                actor_id, associated_source_id, "ignore source list finished"
+                actor_id, %table_id, %associated_source_id, "ignore source list finished"
             );
         }
     }
@@ -1057,10 +1059,9 @@ impl DatabaseManagedBarrierState {
         &mut self,
         epoch: EpochPair,
         actor_id: ActorId,
-        _table_id: TableId,
+        table_id: TableId,
         associated_source_id: TableId,
     ) {
-        let associated_source_id = associated_source_id.as_raw_id();
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
             && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
@@ -1070,13 +1071,15 @@ impl DatabaseManagedBarrierState {
                 .load_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
-                .entry(associated_source_id)
-                .or_default()
-                .insert(actor_id);
+                .push(PbLoadFinishedSource {
+                    reporter_actor_id: actor_id,
+                    table_id: table_id.as_raw_id(),
+                    associated_source_id: associated_source_id.as_raw_id(),
+                });
         } else {
             warn!(
                 ?epoch,
-                actor_id, associated_source_id, "ignore source load finished"
+                actor_id, %table_id, %associated_source_id, "ignore source load finished"
             );
         }
     }
@@ -1159,32 +1162,12 @@ impl PartialGraphManagedBarrierState {
             let list_finished_source_ids = self
                 .list_finished_source_ids
                 .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .flat_map(|(associated_source_id, actor_ids)| {
-                    actor_ids
-                        .into_iter()
-                        .map(move |reporter_actor_id| PbListFinishedSource {
-                            associated_source_id,
-                            reporter_actor_id,
-                        })
-                })
-                .collect();
+                .unwrap_or_default();
 
             let load_finished_source_ids = self
                 .load_finished_source_ids
                 .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .flat_map(|(associated_source_id, actor_ids)| {
-                    actor_ids
-                        .into_iter()
-                        .map(move |reporter_actor_id| PbLoadFinishedSource {
-                            associated_source_id,
-                            reporter_actor_id,
-                        })
-                })
-                .collect();
+                .unwrap_or_default();
 
             let cdc_table_backfill_progress = self
                 .cdc_table_backfill_progress
