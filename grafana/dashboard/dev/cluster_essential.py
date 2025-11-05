@@ -228,7 +228,7 @@ def _(outer_panels: Panels):
                     ),
                 ],
             ),
-            panels.timeseries_latency(
+            panels.timeseries_latency_ns(
                 "Actor Busy Time (Relative)",
                 "- (output_blocking time + input_blocking time) + max (output_blocking time + input_blocking time)",
                 [
