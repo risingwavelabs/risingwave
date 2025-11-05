@@ -212,7 +212,7 @@ def _(outer_panels: Panels):
                 ],
             ),
             panels.timeseries_percentage(
-                "Actor Busy Time",
+                "Actor Busy Rate",
                 "1 - output_blocking - input_blocking, clamped to 0%",
                 [
                     panels.target(
@@ -224,6 +224,23 @@ def _(outer_panels: Panels):
                             - (sum(rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id) \
                                 / sum({metric('stream_actor_count')}) by (fragment_id) / 1000000000), \
                             0)",
+                        "fragment {{fragment_id}}",
+                    ),
+                ],
+            ),
+            panels.timeseries_latency(
+                "Actor Busy Time (Relative)",
+                "- (output_blocking time + input_blocking time) + max (output_blocking time + input_blocking time)",
+                [
+                    panels.target(
+                        f"- ((sum({metric('stream_actor_output_buffer_blocking_duration_ns')}) by (fragment_id) "
+                        f"    or sum({metric('stream_actor_count')}) by (fragment_id) * 0) "
+                        f"   + sum({metric('stream_actor_input_buffer_blocking_duration_ns')}) by (fragment_id)) "
+                        f"  + ignoring(fragment_id) group_left() max( "
+                        f"    (sum({metric('stream_actor_output_buffer_blocking_duration_ns')}) by (fragment_id) "
+                        f"      or sum({metric('stream_actor_count')}) by (fragment_id) * 0) "
+                        f"    + sum({metric('stream_actor_input_buffer_blocking_duration_ns')}) by (fragment_id) "
+                        f"  )",
                         "fragment {{fragment_id}}",
                     ),
                 ],
