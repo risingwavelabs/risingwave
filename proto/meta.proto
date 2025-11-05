@@ -315,6 +315,22 @@ message ListActorSplitsResponse {
   repeated ActorSplit actor_splits = 1;
 }
 
+message GetFragmentVnodesRequest {
+  uint32 fragment_id = 1;
+}
+
+message GetFragmentVnodesResponse {
+  message ActorVNode {
+    uint32 actor_id = 1;
+    uint32 worker_id = 2;
+    repeated uint32 vnode_indices = 3;
+  }
+
+  uint32 fragment_id = 1;
+  uint32 vnode_count = 2;
+  repeated ActorVNode actors = 3;
+}
+
 message ListObjectDependenciesRequest {}
 
 message ListObjectDependenciesResponse {
@@ -398,6 +414,7 @@ service StreamManagerService {
   rpc ListCreatingFragmentDistribution(ListCreatingFragmentDistributionRequest) returns (ListCreatingFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
   rpc ListActorSplits(ListActorSplitsRequest) returns (ListActorSplitsResponse);
+  rpc GetFragmentVnodes(GetFragmentVnodesRequest) returns (GetFragmentVnodesResponse);
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);

@@ -508,6 +508,43 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListActorSplitsResponse { actor_splits }))
     }
 
+    async fn get_fragment_vnodes(
+        &self,
+        request: Request<GetFragmentVnodesRequest>,
+    ) -> TonicResponse<GetFragmentVnodesResponse> {
+        let fragment_id = request.into_inner().fragment_id;
+        let guard = self.env.shared_actor_infos().read_guard();
+        let Some(fragment) = guard.get_fragment(fragment_id as _) else {
+            return Err(Status::not_found(format!(
+                "fragment {} not found",
+                fragment_id
+            )));
+        };
+
+        let actors = fragment
+            .actors
+            .iter()
+            .map(|(actor_id, info)| {
+                let vnode_indices = info
+                    .vnode_bitmap
+                    .as_ref()
+                    .map(|bitmap| bitmap.iter_ones().map(|idx| idx as u32).collect())
+                    .unwrap_or_default();
+                risingwave_pb::meta::get_fragment_vnodes_response::ActorVNode {
+                    actor_id: *actor_id as u32,
+                    worker_id: info.worker_id as u32,
+                    vnode_indices,
+                }
+            })
+            .collect();
+
+        Ok(Response::new(GetFragmentVnodesResponse {
+            fragment_id,
+            vnode_count: fragment.vnode_count as u32,
+            actors,
+        }))
+    }
+
     async fn list_rate_limits(
         &self,
         _request: Request<ListRateLimitsRequest>,

@@ -1187,6 +1187,11 @@ impl MetaClient {
         Ok(resp.actor_splits)
     }
 
+    pub async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<GetFragmentVnodesResponse> {
+        let request = GetFragmentVnodesRequest { fragment_id };
+        self.inner.get_fragment_vnodes(request).await
+    }
+
     pub async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
         let resp = self
             .inner
@@ -2436,6 +2441,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_creating_fragment_distribution, ListCreatingFragmentDistributionRequest, ListCreatingFragmentDistributionResponse }
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
+            ,{ stream_client, get_fragment_vnodes, GetFragmentVnodesRequest, GetFragmentVnodesResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }

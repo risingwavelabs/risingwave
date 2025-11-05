@@ -141,6 +141,8 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
             TableFunctionToInternalSourceBackfillProgressRule::create(),
             // Apply internal get channel delta stats rule next
             TableFunctionToInternalGetChannelDeltaStatsRule::create(),
+            // Apply internal get fragment vnodes rule next
+            TableFunctionToInternalGetFragmentVnodesRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
@@ -199,6 +201,15 @@ static TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS: LazyLock<Optimization
         OptimizationStage::new(
             "Table Function To Internal Get Channel Delta Stats",
             vec![TableFunctionToInternalGetChannelDeltaStatsRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
+
+static TABLE_FUNCTION_TO_INTERNAL_GET_FRAGMENT_VNODES: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Get Fragment Vnodes",
+            vec![TableFunctionToInternalGetFragmentVnodesRule::create()],
             ApplyOrder::TopDown,
         )
     });
@@ -780,6 +791,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_GET_FRAGMENT_VNODES)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;

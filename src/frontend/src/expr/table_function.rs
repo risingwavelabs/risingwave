@@ -19,6 +19,7 @@ use itertools::Itertools;
 use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::fragment_vnode::fragment_vnode_columns;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{
@@ -637,6 +638,15 @@ impl TableFunction {
                 ("send_throughput".to_owned(), DataType::Float64),
             ])),
             function_type: TableFunctionType::InternalGetChannelDeltaStats,
+            user_defined: None,
+        }
+    }
+
+    pub fn new_internal_get_fragment_vnodes(args: Vec<ExprImpl>) -> Self {
+        Self {
+            args,
+            return_type: DataType::Struct(StructType::new(fragment_vnode_columns())),
+            function_type: TableFunctionType::InternalGetFragmentVnodes,
             user_defined: None,
         }
     }

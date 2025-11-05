@@ -38,8 +38,8 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse,
+    EventLog, FragmentDistribution, GetFragmentVnodesResponse, PbTableParallelism,
+    PbThrottleTarget, RecoveryStatus, RefreshRequest, RefreshResponse,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
@@ -78,6 +78,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
+
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<GetFragmentVnodesResponse>;
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
@@ -240,6 +242,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
         self.0.list_actor_splits().await
+    }
+
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<GetFragmentVnodesResponse> {
+        self.0.get_fragment_vnodes(fragment_id).await
     }
 
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {

@@ -21,6 +21,7 @@ use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
+use risingwave_common::fragment_vnode::FragmentVNodeReader;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::metrics_reader::MetricsReader;
@@ -29,6 +30,7 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::fragment_vnode_reader::FragmentVNodeReaderImpl;
 use crate::metrics_reader::MetricsReaderImpl;
 use crate::session::SessionImpl;
 
@@ -112,5 +114,11 @@ impl BatchTaskContext for FrontendBatchTaskContext {
             self.session.env().prometheus_client().cloned(),
             self.session.env().prometheus_selector().to_owned(),
         ))
+    }
+
+    fn fragment_vnode_reader(&self) -> Option<Arc<dyn FragmentVNodeReader>> {
+        Some(Arc::new(FragmentVNodeReaderImpl::new(
+            self.session.env().meta_client_ref(),
+        )))
     }
 }

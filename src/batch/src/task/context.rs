@@ -16,6 +16,7 @@ use std::sync::Arc;
 use prometheus::core::Atomic;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
+use risingwave_common::fragment_vnode::FragmentVNodeReader;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::metrics_reader::MetricsReader;
@@ -70,6 +71,9 @@ pub trait BatchTaskContext: Send + Sync + 'static {
 
     /// Get metrics reader for reading channel delta stats and other metrics.
     fn metrics_reader(&self) -> Arc<dyn MetricsReader>;
+
+    /// Get fragment vnode reader for inspecting vnode assignments via meta.
+    fn fragment_vnode_reader(&self) -> Option<Arc<dyn FragmentVNodeReader>>;
 }
 
 /// Batch task context on compute node.
@@ -136,6 +140,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn metrics_reader(&self) -> Arc<dyn MetricsReader> {
         unimplemented!("metrics_reader not supported in compute node context")
+    }
+
+    fn fragment_vnode_reader(&self) -> Option<Arc<dyn FragmentVNodeReader>> {
+        None
     }
 }
 

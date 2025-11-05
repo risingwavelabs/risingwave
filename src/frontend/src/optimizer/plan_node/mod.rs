@@ -972,6 +972,7 @@ mod batch_exchange;
 mod batch_expand;
 mod batch_filter;
 mod batch_get_channel_delta_stats;
+mod batch_get_fragment_vnodes;
 mod batch_group_topn;
 mod batch_hash_agg;
 mod batch_hash_join;
@@ -1008,6 +1009,7 @@ mod logical_expand;
 mod logical_filter;
 mod logical_gap_fill;
 mod logical_get_channel_delta_stats;
+mod logical_get_fragment_vnodes;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
@@ -1100,6 +1102,7 @@ pub use batch_expand::BatchExpand;
 pub use batch_file_scan::BatchFileScan;
 pub use batch_filter::BatchFilter;
 pub use batch_get_channel_delta_stats::BatchGetChannelDeltaStats;
+pub use batch_get_fragment_vnodes::BatchGetFragmentVnodes;
 pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
@@ -1142,6 +1145,7 @@ pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
 pub use logical_gap_fill::LogicalGapFill;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
+pub use logical_get_fragment_vnodes::LogicalGetFragmentVnodes;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
@@ -1280,6 +1284,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, GapFill }
             , { Logical, VectorSearch }
             , { Logical, GetChannelDeltaStats }
+            , { Logical, GetFragmentVnodes }
             , { Logical, LocalityProvider }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -1315,6 +1320,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
             , { Batch, GetChannelDeltaStats }
+            , { Batch, GetFragmentVnodes }
             , { Batch, VectorSearch }
             , { Stream, Project }
             , { Stream, Filter }

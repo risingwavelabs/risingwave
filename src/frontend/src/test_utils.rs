@@ -65,8 +65,8 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse, SystemParams,
+    EventLog, FragmentDistribution, GetFragmentVnodesResponse, PbTableParallelism,
+    PbThrottleTarget, RecoveryStatus, RefreshRequest, RefreshResponse, SystemParams,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -1083,6 +1083,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_actor_splits(&self) -> RpcResult<Vec<ActorSplit>> {
         Ok(vec![])
+    }
+
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> RpcResult<GetFragmentVnodesResponse> {
+        Ok(GetFragmentVnodesResponse {
+            fragment_id,
+            vnode_count: 0,
+            actors: vec![],
+        })
     }
 
     async fn list_object_dependencies(&self) -> RpcResult<Vec<PbObjectDependencies>> {

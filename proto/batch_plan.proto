@@ -417,6 +417,10 @@ message GetChannelDeltaStatsNode {
   optional uint64 time_offset = 2;
 }
 
+message GetFragmentVnodesNode {
+  uint32 fragment_id = 1;
+}
+
 message PlanNode {
   repeated PlanNode children = 1;
   reserved 22;
@@ -459,6 +463,7 @@ message PlanNode {
     AzblobFileScanNode azblob_file_scan = 43;
     VectorIndexNearestNode vector_index_nearest = 44;
     GetChannelDeltaStatsNode get_channel_delta_stats = 45;
+    GetFragmentVnodesNode get_fragment_vnodes = 46;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

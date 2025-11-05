@@ -1,0 +1,13 @@
+# Test for internal_get_fragment_vnodes table function
+
+statement error
+SELECT * FROM internal_get_fragment_vnodes();
+
+statement error
+SELECT * FROM internal_get_fragment_vnodes(1, 2);
+
+statement error
+SELECT * FROM internal_get_fragment_vnodes((SELECT fragment_id FROM rw_fragments LIMIT 1));
+
+statement error
+SELECT * FROM internal_get_fragment_vnodes(NULL);

@@ -84,6 +84,7 @@ pub mod config;
 pub mod constants;
 pub mod field_generator;
 pub mod gap_fill;
+pub mod fragment_vnode;
 pub mod global_jvm;
 pub mod hash;
 pub mod id;
@@ -102,6 +103,9 @@ pub mod test_prelude {
     pub use super::catalog::test_utils::ColumnDescTestExt;
 }
 
+pub use fragment_vnode::{
+    FragmentVNodeEntry, FragmentVNodeInfo, FragmentVNodeReader, fragment_vnode_columns,
+};
 pub use risingwave_common_metrics::{
     monitor, register_guarded_gauge_vec_with_registry,
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
