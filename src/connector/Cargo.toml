@@ -9,7 +9,14 @@ repository = { workspace = true }
 
 [features]
 default = []
-all-sinks = ["sink-bigquery", "sink-deltalake", "sink-google_pubsub", "sink-clickhouse"]
+all-sinks = [
+    "sink-bigquery",
+    "sink-deltalake",
+    "sink-google_pubsub",
+    "sink-clickhouse",
+    "sink-doris",
+    "sink-starrocks",
+]
 all-sources = []
 sink-bigquery = [
     "dep:gcp-bigquery-client",
@@ -24,6 +31,8 @@ sink-google_pubsub = [
     "dep:google-cloud-googleapis",
 ]
 sink-clickhouse = ["dep:clickhouse"]
+sink-doris = []
+sink-starrocks = []
 
 [dependencies]
 anyhow = "1"

@@ -19,7 +19,8 @@ feature_gated_sink_mod!(clickhouse, "clickhouse");
 pub mod coordinate;
 pub mod decouple_checkpoint_log_sink;
 feature_gated_sink_mod!(deltalake, "deltalake");
-pub mod doris;
+feature_gated_sink_mod!(doris, "doris");
+#[cfg(any(feature = "sink-doris", feature = "sink-starrocks"))]
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch_opensearch;
@@ -43,7 +44,7 @@ pub mod redis;
 pub mod remote;
 pub mod snowflake_redshift;
 pub mod sqlserver;
-pub mod starrocks;
+feature_gated_sink_mod!(starrocks, "starrocks");
 pub mod test_sink;
 pub mod trivial;
 pub mod utils;
