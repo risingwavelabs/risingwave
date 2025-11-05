@@ -92,6 +92,7 @@ create source s_unsigned_int_upcast with (
   debezium.bigint.unsigned.handling.mode = 'precise'
 );
 
+statement ok
 create source s_unsigned_int_to_signed with (
   ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
   username = '${RISEDEV_MYSQL_USER}',
@@ -115,6 +116,7 @@ create table rw_unsigned_int_upcast (
   snapshot.batch_size = 10,
 ) from s_unsigned_int_upcast table 'risedev.test_unsigned_int';
 
+statement ok
 create table rw_unsigned_int_to_signed (
   id bigint,
   unsigned_bigint bigint,
