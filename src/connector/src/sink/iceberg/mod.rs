@@ -239,6 +239,14 @@ pub struct IcebergConfig {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub max_snapshots_num_before_compaction: Option<usize>,
+
+    pub small_files_threshold_mb: Option<u64>,
+
+    pub delete_files_count_threshold: Option<usize>,
+
+    pub trigger_snapshot_count: Option<usize>,
+
+    pub target_file_size_mb: Option<u64>,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -345,6 +353,22 @@ impl IcebergConfig {
     pub fn snapshot_expiration_timestamp_ms(&self, current_time_ms: i64) -> Option<i64> {
         self.snapshot_expiration_max_age_millis
             .map(|max_age_millis| current_time_ms - max_age_millis)
+    }
+
+    pub fn trigger_snapshot_count(&self) -> usize {
+        self.trigger_snapshot_count.unwrap_or(16)
+    }
+
+    pub fn small_files_threshold_mb(&self) -> u64 {
+        self.small_files_threshold_mb.unwrap_or(64)
+    }
+
+    pub fn delete_files_count_threshold(&self) -> usize {
+        self.delete_files_count_threshold.unwrap_or(256)
+    }
+
+    pub fn target_file_size_mb(&self) -> u64 {
+        self.target_file_size_mb.unwrap_or(1024)
     }
 }
 
