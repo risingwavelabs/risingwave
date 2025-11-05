@@ -121,6 +121,7 @@ impl StreamNode for StreamSource {
                     columns: cols.iter().map(|c| c.to_protobuf()).collect_vec(),
                 }),
                 refresh_mode: source_catalog.refresh_mode,
+                associated_table_id: source_catalog.associated_table_id.map(|id| id.as_raw_id()),
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))

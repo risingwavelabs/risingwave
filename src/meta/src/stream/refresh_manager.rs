@@ -28,7 +28,7 @@ use crate::barrier::{BarrierScheduler, Command, SharedActorInfos};
 use crate::manager::MetadataManager;
 use crate::{MetaError, MetaResult};
 
-pub static REFRESH_PROGRESS_TRACKER: LazyLock<
+pub static REFRESH_TABLE_PROGRESS_TRACKER: LazyLock<
     Mutex<HashMap<TableId, SingleTableRefreshProgressTracker>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -162,7 +162,9 @@ impl RefreshManager {
                 }
             }
             // Store tracker in global tracker before guard is dropped
-            REFRESH_PROGRESS_TRACKER.lock().insert(table_id, tracker);
+            REFRESH_TABLE_PROGRESS_TRACKER
+                .lock()
+                .insert(table_id, tracker);
 
             Ok::<_, MetaError>(())
         }?;

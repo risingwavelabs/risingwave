@@ -122,6 +122,7 @@ impl StreamNode for StreamFsFetch {
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
                 refresh_mode: source_catalog.refresh_mode,
+                associated_table_id: source_catalog.associated_table_id.map(|id| id.as_raw_id()),
             }
         });
         NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {

@@ -55,7 +55,7 @@ use crate::barrier::utils::{
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{SourceChange, fill_snapshot_backfill_epoch};
+use crate::stream::{REFRESH_TABLE_PROGRESS_TRACKER, SourceChange, fill_snapshot_backfill_epoch};
 use crate::{MetaError, MetaResult};
 
 pub(crate) struct CheckpointControl {
@@ -850,89 +850,7 @@ impl DatabaseCheckpointControl {
                 assert!(node.state.creating_jobs_to_wait.is_empty());
                 assert!(node.state.node_to_collect.is_empty());
 
-                // Process list_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
-                let mut list_finished_sources_by_actor: HashMap<u32, HashSet<u32>> = HashMap::new();
-                for entry in node
-                    .state
-                    .resps
-                    .iter()
-                    .flat_map(|resp| resp.list_finished_sources.iter())
-                {
-                    list_finished_sources_by_actor
-                        .entry(entry.associated_source_id)
-                        .or_default()
-                        .insert(entry.reporter_actor_id);
-                }
-                if !list_finished_sources_by_actor.is_empty() {
-                    let list_finished_source_ids: Vec<PbListFinishedSource> =
-                        list_finished_sources_by_actor
-                            .into_iter()
-                            .flat_map(|(associated_source_id, actor_ids)| {
-                                actor_ids.into_iter().map(move |reporter_actor_id| {
-                                    PbListFinishedSource {
-                                        associated_source_id,
-                                        reporter_actor_id,
-                                    }
-                                })
-                            })
-                            .collect();
-                    if !list_finished_source_ids.is_empty() {
-                        // Add list_finished_source_ids to the task for processing
-                        let task = task.get_or_insert_default();
-                        task.list_finished_source_ids
-                            .extend(list_finished_source_ids);
-                    }
-                }
-                // Process load_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
-                let mut load_finished_sources_by_actor: HashMap<u32, HashSet<u32>> = HashMap::new();
-                for entry in node
-                    .state
-                    .resps
-                    .iter()
-                    .flat_map(|resp| resp.load_finished_sources.iter())
-                {
-                    load_finished_sources_by_actor
-                        .entry(entry.associated_source_id)
-                        .or_default()
-                        .insert(entry.reporter_actor_id);
-                }
-                if !load_finished_sources_by_actor.is_empty() {
-                    let load_finished_source_ids: Vec<PbLoadFinishedSource> =
-                        load_finished_sources_by_actor
-                            .into_iter()
-                            .flat_map(|(associated_source_id, actor_ids)| {
-                                actor_ids.into_iter().map(move |reporter_actor_id| {
-                                    PbLoadFinishedSource {
-                                        associated_source_id,
-                                        reporter_actor_id,
-                                    }
-                                })
-                            })
-                            .collect();
-                    if !load_finished_source_ids.is_empty() {
-                        // Add load_finished_source_ids to the task for processing
-                        let task = task.get_or_insert_default();
-                        task.load_finished_source_ids
-                            .extend(load_finished_source_ids);
-                    }
-                }
-                // Process refresh_finished_table_ids for all barrier types (checkpoint and non-checkpoint)
-                let refresh_finished_table_ids: Vec<_> = node
-                    .state
-                    .resps
-                    .iter()
-                    .flat_map(|resp| &resp.refresh_finished_tables)
-                    .cloned()
-                    .collect::<HashSet<_>>() // deduplicate
-                    .into_iter()
-                    .map(JobId::new)
-                    .collect();
-                if !refresh_finished_table_ids.is_empty() {
-                    // Add refresh_finished_table_ids to the task for processing
-                    let task = task.get_or_insert_default();
-                    task.refresh_finished_table_job_ids
-                        .extend(refresh_finished_table_ids);
-                }
+                self.handle_refresh_table_info(task, &node);
 
                 let staging_commit_info = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),
@@ -1028,6 +946,92 @@ impl DatabaseCheckpointControl {
                     .expect("should exist")
                     .ack_completed(epoch)
             }
+        }
+    }
+
+    fn handle_refresh_table_info(&self, task: &mut Option<CompleteBarrierTask>, node: &EpochNode) {
+        let mut list_finished_sources_by_actor: HashMap<u32, HashSet<u32>> = HashMap::new();
+        for entry in node
+            .state
+            .resps
+            .iter()
+            .flat_map(|resp| resp.list_finished_sources.iter())
+        {
+            list_finished_sources_by_actor
+                .entry(entry.associated_source_id)
+                .or_default()
+                .insert(entry.reporter_actor_id);
+        }
+
+        if !list_finished_sources_by_actor.is_empty() {
+            let list_finished_source_ids: Vec<PbListFinishedSource> =
+                list_finished_sources_by_actor
+                    .into_iter()
+                    .flat_map(|(associated_source_id, actor_ids)| {
+                        actor_ids
+                            .into_iter()
+                            .map(move |reporter_actor_id| PbListFinishedSource {
+                                associated_source_id,
+                                reporter_actor_id,
+                            })
+                    })
+                    .collect();
+            if !list_finished_source_ids.is_empty() {
+                // Add list_finished_source_ids to the task for processing
+                let task = task.get_or_insert_default();
+                task.list_finished_source_ids
+                    .extend(list_finished_source_ids);
+            }
+        }
+
+        let mut load_finished_sources_by_actor: HashMap<u32, HashSet<u32>> = HashMap::new();
+        for entry in node
+            .state
+            .resps
+            .iter()
+            .flat_map(|resp| resp.load_finished_sources.iter())
+        {
+            load_finished_sources_by_actor
+                .entry(entry.associated_source_id)
+                .or_default()
+                .insert(entry.reporter_actor_id);
+        }
+        if !load_finished_sources_by_actor.is_empty() {
+            let load_finished_source_ids: Vec<PbLoadFinishedSource> =
+                load_finished_sources_by_actor
+                    .into_iter()
+                    .flat_map(|(associated_source_id, actor_ids)| {
+                        actor_ids
+                            .into_iter()
+                            .map(move |reporter_actor_id| PbLoadFinishedSource {
+                                associated_source_id,
+                                reporter_actor_id,
+                            })
+                    })
+                    .collect();
+            if !load_finished_source_ids.is_empty() {
+                // Add load_finished_source_ids to the task for processing
+                let task = task.get_or_insert_default();
+                task.load_finished_source_ids
+                    .extend(load_finished_source_ids);
+            }
+        }
+
+        let refresh_finished_table_ids: Vec<_> = node
+            .state
+            .resps
+            .iter()
+            .flat_map(|resp| &resp.refresh_finished_tables)
+            .cloned()
+            .collect::<HashSet<_>>() // deduplicate
+            .into_iter()
+            .map(JobId::new)
+            .collect();
+        if !refresh_finished_table_ids.is_empty() {
+            // Add refresh_finished_table_ids to the task for processing
+            let task = task.get_or_insert_default();
+            task.refresh_finished_table_job_ids
+                .extend(refresh_finished_table_ids);
         }
     }
 }
