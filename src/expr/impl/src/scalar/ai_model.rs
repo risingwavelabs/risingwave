@@ -117,7 +117,7 @@ impl OpenAiEmbedding {
 #[async_trait::async_trait]
 impl Expression for OpenAiEmbedding {
     fn return_type(&self) -> DataType {
-        DataType::List(Box::new(DataType::Float32))
+        DataType::Float32.list()
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -151,10 +151,7 @@ impl Expression for OpenAiEmbedding {
         }
 
         // Map results back to original positions
-        let mut builder = ListArrayBuilder::with_type(
-            input.capacity(),
-            DataType::List(Box::new(DataType::Float32)),
-        );
+        let mut builder = ListArrayBuilder::with_type(input.capacity(), DataType::Float32.list());
         let mut embedding_idx = 0;
 
         for i in 0..input.capacity() {

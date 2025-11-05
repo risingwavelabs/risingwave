@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::id::JobId;
 use risingwave_pb::catalog::table::{
     CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
 };
@@ -24,8 +25,8 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
-    TableId, TableVersion, WebhookSourceInfo,
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, SourceId, TableId,
+    TableVersion, WebhookSourceInfo,
 };
 
 #[derive(
@@ -104,6 +105,53 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
             PbHandleConflictBehavior::Unspecified => {
                 unreachable!("Unspecified handle conflict behavior")
             }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum RefreshState {
+    /// The table is refreshable and the current state is `Pending`.
+    #[sea_orm(string_value = "IDLE")]
+    Idle,
+    /// The table is refreshable and the current state is `Refreshing` (`RefreshStart` barrier passed).
+    #[sea_orm(string_value = "REFRESHING")]
+    Refreshing,
+    /// The table is refreshable and the current state is `Finishing`. (`LoadFinish` barrier passed).
+    #[sea_orm(string_value = "FINISHING")]
+    Finishing,
+}
+
+impl From<RefreshState> for risingwave_pb::catalog::RefreshState {
+    fn from(refresh_state: RefreshState) -> Self {
+        match refresh_state {
+            RefreshState::Idle => Self::Idle,
+            RefreshState::Refreshing => Self::Refreshing,
+            RefreshState::Finishing => Self::Finishing,
+        }
+    }
+}
+
+impl From<risingwave_pb::catalog::RefreshState> for RefreshState {
+    fn from(refresh_state: risingwave_pb::catalog::RefreshState) -> Self {
+        match refresh_state {
+            risingwave_pb::catalog::RefreshState::Idle => Self::Idle,
+            risingwave_pb::catalog::RefreshState::Refreshing => Self::Refreshing,
+            risingwave_pb::catalog::RefreshState::Finishing => Self::Finishing,
+            risingwave_pb::catalog::RefreshState::Unspecified => {
+                unreachable!("Unspecified refresh state")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for RefreshState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefreshState::Idle => write!(f, "IDLE"),
+            RefreshState::Refreshing => write!(f, "REFRESHING"),
+            RefreshState::Finishing => write!(f, "FINISHING"),
         }
     }
 }
@@ -189,7 +237,7 @@ pub struct Model {
     pub name: String,
     pub optional_associated_source_id: Option<SourceId>,
     pub table_type: TableType,
-    pub belongs_to_job_id: Option<ObjectId>,
+    pub belongs_to_job_id: Option<JobId>,
     pub columns: ColumnCatalogArray,
     pub pk: ColumnOrderArray,
     pub distribution_key: I32Array,
@@ -219,6 +267,7 @@ pub struct Model {
     pub refreshable: bool,
     pub vector_index_info: Option<VectorIndexInfo>,
     pub cdc_table_type: Option<CdcTableType>,
+    pub refresh_state: Option<RefreshState>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -293,6 +342,7 @@ impl From<PbTable> for ActiveModel {
     fn from(pb_table: PbTable) -> Self {
         let table_type = pb_table.table_type();
         let handle_pk_conflict_behavior = pb_table.handle_pk_conflict_behavior();
+        let refresh_state = pb_table.refresh_state();
 
         // `PbTable` here should be sourced from the wire, not from persistence.
         // A placeholder `maybe_vnode_count` field should be treated as `NotSet`, instead of calling
@@ -321,11 +371,11 @@ impl From<PbTable> for ActiveModel {
             };
 
         Self {
-            table_id: Set(pb_table.id as _),
+            table_id: Set(pb_table.id.into()),
             name: Set(pb_table.name),
             optional_associated_source_id,
             table_type: Set(table_type.into()),
-            belongs_to_job_id: Set(pb_table.job_id.map(|x| x as _)),
+            belongs_to_job_id: Set(pb_table.job_id.map(|x| x.into())),
             columns: Set(pb_table.columns.into()),
             pk: Set(pb_table.pk.into()),
             distribution_key: Set(pb_table.distribution_key.into()),
@@ -376,6 +426,7 @@ impl From<PbTable> for ActiveModel {
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),
+            refresh_state: Set(Some(refresh_state.into())),
         }
     }
 }

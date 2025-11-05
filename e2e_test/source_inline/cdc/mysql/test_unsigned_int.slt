@@ -1,0 +1,220 @@
+# Test MySQL CDC with UNSIGNED BIGINT handling
+# This test verifies that UNSIGNED BIGINT values are handled correctly in CDC backfill
+# with debezium.bigint.unsigned.handling.mode='precise'
+
+control substitution on
+
+statement ok
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS test_unsigned_int;
+    CREATE TABLE test_unsigned_int (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        unsigned_bigint BIGINT UNSIGNED NOT NULL DEFAULT '0',
+        unsigned_int INT UNSIGNED NOT NULL DEFAULT '0',
+        unsigned_smallint SMALLINT UNSIGNED NOT NULL DEFAULT '0',
+        unsigned_tinyint TINYINT UNSIGNED NOT NULL DEFAULT '0',
+        info VARCHAR(50) NOT NULL DEFAULT '',
+        PRIMARY KEY (id, unsigned_bigint)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+"
+
+# Insert 50 backfill rows into MySQL (20 non-overflow + 30 overflow)
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO test_unsigned_int (unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info) VALUES
+        (1, 1, 1, 1, 'backfill'),
+        (12345, 12345, 12345, 123, 'backfill'),
+        (123456, 123456, 12345, 123, 'backfill'),
+        (1234567, 1234567, 12345, 123, 'backfill'),
+        (12345678, 12345678, 12345, 123, 'backfill'),
+        (123456789, 123456789, 12345, 123, 'backfill'),
+        (1234567890, 1234567890, 12345, 123, 'backfill'),
+        (12345678901, 1234567890, 12345, 123, 'backfill'),
+        (123456789012, 1234567890, 12345, 123, 'backfill'),
+        (1234567890123, 1234567890, 12345, 123, 'backfill'),
+        (12345678901234, 1234567890, 12345, 123, 'backfill'),
+        (123456789012345, 1234567890, 12345, 123, 'backfill'),
+        (1234567890123456, 1234567890, 12345, 123, 'backfill'),
+        (12345678901234567, 1234567890, 12345, 123, 'backfill'),
+        (123456789012345678, 1234567890, 12345, 123, 'backfill'),
+        (1234567890123456789, 1234567890, 12345, 123, 'backfill'),
+        (12345678901234567890, 1234567890, 12345, 123, 'backfill'),
+        (9223372036854775800, 2147483647, 65535, 255, 'backfill'),
+        (9223372036854775805, 2147483647, 65535, 255, 'backfill'),
+        (9223372036854775807, 2147483647, 65535, 255, 'backfill');
+    INSERT INTO test_unsigned_int (unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info) VALUES
+        (9223372036854775808, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775809, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775810, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775811, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775812, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775813, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775814, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775815, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775816, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775817, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775818, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775819, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775820, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775821, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775822, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775823, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775824, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775825, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775826, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775827, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775828, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775829, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775830, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775831, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775832, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775833, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775834, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775835, 4294967295, 65535, 255, 'backfill'),
+        (9223372036854775836, 4294967295, 65535, 255, 'backfill'),
+        (18446251075179777772, 4294967295, 65535, 255, 'backfill');
+"
+
+sleep 2s
+
+statement ok
+create source s_unsigned_int_upcast with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev',
+  debezium.bigint.unsigned.handling.mode = 'precise'
+);
+
+create source s_unsigned_int_to_signed with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev'
+);
+
+sleep 2s
+
+statement ok
+create table rw_unsigned_int_upcast (
+  id DECIMAL,
+  unsigned_bigint DECIMAL,
+  unsigned_int BIGINT,
+  unsigned_smallint INT,
+  unsigned_tinyint SMALLINT,
+  info VARCHAR,
+  primary key (id, unsigned_bigint)
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 10,
+) from s_unsigned_int_upcast table 'risedev.test_unsigned_int';
+
+create table rw_unsigned_int_to_signed (
+  id bigint,
+  unsigned_bigint bigint,
+  unsigned_int int,
+  unsigned_smallint SMALLINT,
+  unsigned_tinyint SMALLINT,
+  info VARCHAR,
+  primary key (id, unsigned_bigint)
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 10,
+) from s_unsigned_int_to_signed table 'risedev.test_unsigned_int';
+
+sleep 5s
+
+# Insert 3 incremental data (debezium)
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO test_unsigned_int (unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info) VALUES
+        (18446251075179777770, 4294967295, 65535, 255, 'debezium'),
+        (18446251075179777771, 4294967295, 65535, 255, 'debezium'),
+        (18446251075179777772, 4294967295, 65535, 255, 'debezium');
+"
+
+sleep 3s
+
+# Verify total count in RisingWave (50 backfill + 3 debezium = 53)
+query I
+select count(*) as row_cnt from rw_unsigned_int_upcast;
+----
+53
+
+query I
+select count(*) as row_cnt from rw_unsigned_int_to_signed;
+----
+53
+
+# Verify we have both backfill and debezium data
+query T
+select count(*) as backfill_count from rw_unsigned_int_upcast where info = 'backfill';
+----
+50
+
+query T
+select count(*) as backfill_count from rw_unsigned_int_to_signed where info = 'backfill';
+----
+50
+
+query T
+select count(*) as debezium_count from rw_unsigned_int_upcast where info = 'debezium';
+----
+3
+
+query T
+select count(*) as debezium_count from rw_unsigned_int_to_signed where info = 'debezium';
+----
+3
+
+# Verify specific rows match inserted data
+# Check id=50 for upcast table(last backfill row with overflow data)
+query TTTTTT
+select id, unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info from rw_unsigned_int_upcast where id = 50;
+----
+50	18446251075179777772	4294967295	65535	255	backfill
+
+# Check id=50 for (unsigned bigint->bigint) table
+query TTTTTT
+select id, unsigned_bigint, info from rw_unsigned_int_to_signed where id = 50;
+----
+50	-492998529773844	backfill
+
+# Check id=53 (last debezium row with overflow data)
+query TTTTTT
+select id, unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info from rw_unsigned_int_upcast where id = 53;
+----
+53	18446251075179777772	4294967295	65535	255	debezium
+
+# Check id=53 for unsigned bigint -> bigint table
+query TTTTTT
+select id, unsigned_bigint, info from rw_unsigned_int_to_signed where id = 53;
+----
+53	-492998529773844	debezium
+
+
+# Clean up
+statement ok
+drop table rw_unsigned_int_upcast;
+
+statement ok
+drop table rw_unsigned_int_to_signed;
+
+statement ok
+drop source s_unsigned_int_upcast cascade;
+
+statement ok
+drop source s_unsigned_int_to_signed cascade;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE IF EXISTS test_unsigned_int;
+"

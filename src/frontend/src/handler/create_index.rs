@@ -451,12 +451,12 @@ pub(crate) fn gen_create_index_plan(
 
     let index_prost = PbIndex {
         id: IndexId::placeholder().index_id,
-        schema_id: index_schema_id,
-        database_id: index_database_id,
+        schema_id: index_schema_id.into(),
+        database_id: index_database_id.into(),
         name: index_table_name,
         owner: index_table.owner,
-        index_table_id: TableId::placeholder().table_id,
-        primary_table_id: table.id.table_id,
+        index_table_id: TableId::placeholder().as_raw_id(),
+        primary_table_id: table.id.as_raw_id(),
         index_item,
         index_column_properties,
         index_columns_len,
@@ -692,8 +692,8 @@ pub async fn handle_create_index(
             .creating_streaming_job_tracker()
             .guard(CreatingStreamingJobInfo::new(
                 session.session_id(),
-                index.database_id,
-                index.schema_id,
+                index.database_id.into(),
+                index.schema_id.into(),
                 index.name.clone(),
             ));
 

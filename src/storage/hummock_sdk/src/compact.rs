@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::LevelType;
 
 use crate::compact_task::CompactTask;
@@ -60,12 +61,9 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     s.push_str("Input: \n");
-    let existing_table_ids: HashSet<u32> = compact_task
-        .existing_table_ids
-        .clone()
-        .into_iter()
-        .collect();
-    let mut input_sst_table_ids: HashSet<u32> = HashSet::new();
+    let existing_table_ids: HashSet<TableId> =
+        compact_task.existing_table_ids.iter().copied().collect();
+    let mut input_sst_table_ids: HashSet<TableId> = HashSet::new();
     let mut dropped_table_ids = HashSet::new();
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry

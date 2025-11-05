@@ -387,7 +387,7 @@ impl BigQuerySink {
                 Ok(format!("STRUCT<{}>", elements_vec.join(", ")))
             }
             DataType::List(l) => {
-                let element_string = Self::get_string_and_check_support_from_datatype(l.as_ref())?;
+                let element_string = Self::get_string_and_check_support_from_datatype(l.elem())?;
                 Ok(format!("ARRAY<{}>", element_string))
             }
             DataType::Bytea => Ok("BYTES".to_owned()),
@@ -437,8 +437,9 @@ impl BigQuerySink {
                 }
                 TableFieldSchema::record(&rw_field.name, sub_fields)
             }
-            DataType::List(dt) => {
-                let inner_field = Self::map_field(&Field::with_name(*dt.clone(), &rw_field.name))?;
+            DataType::List(lt) => {
+                let inner_field =
+                    Self::map_field(&Field::with_name(lt.elem().clone(), &rw_field.name))?;
                 TableFieldSchema {
                     mode: Some("REPEATED".to_owned()),
                     ..inner_field
@@ -607,13 +608,9 @@ impl TryFrom<SinkParam> for BigQuerySink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = BigQueryConfig::from_btreemap(param.properties)?;
-        BigQuerySink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        BigQuerySink::new(config, schema, pk_indices, param.sink_type.is_append_only())
     }
 }
 
@@ -864,7 +861,7 @@ impl StorageWriterClient {
 
     pub fn append_rows(&mut self, row: AppendRowsRequestRows, write_stream: String) -> Result<()> {
         let append_req = AppendRowsRequest {
-            write_stream: write_stream.clone(),
+            write_stream,
             offset: None,
             trace_id: Uuid::new_v4().hyphenated().to_string(),
             missing_value_interpretations: HashMap::default(),
@@ -958,7 +955,7 @@ fn build_protobuf_field(
             return Ok((field, Some(sub_proto)));
         }
         DataType::List(l) => {
-            let (mut field, proto) = build_protobuf_field(l.as_ref(), index, name.clone())?;
+            let (mut field, proto) = build_protobuf_field(l.elem(), index, name)?;
             field.label = Some(field_descriptor_proto::Label::Repeated.into());
             return Ok((field, proto));
         }
@@ -993,8 +990,8 @@ mod test {
     #[tokio::test]
     async fn test_type_check() {
         let big_query_type_string = "ARRAY<STRUCT<v1 ARRAY<INT64>, v2 STRUCT<v1 INT64, v2 INT64>>>";
-        let rw_datatype = DataType::List(Box::new(DataType::Struct(StructType::new(vec![
-            ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
+        let rw_datatype = DataType::list(DataType::Struct(StructType::new(vec![
+            ("v1".to_owned(), DataType::Int64.list()),
             (
                 "v2".to_owned(),
                 DataType::Struct(StructType::new(vec![
@@ -1002,7 +999,7 @@ mod test {
                     ("v2".to_owned(), DataType::Int64),
                 ])),
             ),
-        ]))));
+        ])));
         assert_eq!(
             BigQuerySink::get_string_and_check_support_from_datatype(&rw_datatype).unwrap(),
             big_query_type_string
@@ -1016,8 +1013,8 @@ mod test {
                 Field::with_name(DataType::Int64, "v1"),
                 Field::with_name(DataType::Float64, "v2"),
                 Field::with_name(
-                    DataType::List(Box::new(DataType::Struct(StructType::new(vec![
-                        ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
+                    DataType::list(DataType::Struct(StructType::new(vec![
+                        ("v1".to_owned(), DataType::Int64.list()),
                         (
                             "v3".to_owned(),
                             DataType::Struct(StructType::new(vec![
@@ -1025,7 +1022,7 @@ mod test {
                                 ("v2".to_owned(), DataType::Int64),
                             ])),
                         ),
-                    ])))),
+                    ]))),
                     "v3",
                 ),
             ],

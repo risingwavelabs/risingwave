@@ -389,11 +389,12 @@ impl TryFrom<SinkParam> for ClickHouseSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = ClickHouseConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
             is_append_only: param.sink_type.is_append_only(),
         })
     }
@@ -495,7 +496,7 @@ impl ClickHouseSink {
                 "struct needs to be converted into a list".to_owned(),
             )),
             risingwave_common::types::DataType::List(list) => {
-                Self::check_and_correct_column_type(list.as_ref(), ck_column)?;
+                Self::check_and_correct_column_type(list.elem(), ck_column)?;
                 Ok(ck_column.r#type.contains("Array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::ClickHouse(
@@ -1123,7 +1124,7 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
                 } else {
                     vec.push((
                         format!("{}.{}", field.name, name),
-                        DataType::List(Box::new(data_type.clone())),
+                        DataType::list(data_type.clone()),
                     ))
                 }
             }

@@ -38,7 +38,7 @@ impl CatalogController {
         assert_eq!(obj.obj_type, object_type);
         let drop_database = object_type == ObjectType::Database;
         let database_id = if object_type == ObjectType::Database {
-            object_id
+            DatabaseId::new(object_id as _)
         } else {
             obj.database_id
                 .ok_or_else(|| anyhow!("dropped object should have database_id"))?
@@ -54,7 +54,7 @@ impl CatalogController {
             DropMode::Restrict => match object_type {
                 ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
                 ObjectType::Schema => {
-                    ensure_schema_empty(object_id, &txn).await?;
+                    ensure_schema_empty(SchemaId::new(object_id as _), &txn).await?;
                     Default::default()
                 }
                 ObjectType::Table => {
@@ -138,7 +138,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
 
                 if let Some(target_table) = sink.target_table
-                    && !removed_object_ids.contains(&target_table)
+                    && !removed_object_ids.contains(&(target_table.as_raw_id() as _))
                     && !has_table_been_migrated(&txn, target_table).await?
                 {
                     return Err(anyhow::anyhow!(
@@ -155,7 +155,7 @@ impl CatalogController {
             for obj in &removed_objects {
                 // if the obj is iceberg engine table, bail out
                 if obj.obj_type == ObjectType::Table {
-                    let table = Table::find_by_id(obj.oid)
+                    let table = Table::find_by_id(TableId::new(obj.oid as _))
                         .one(&txn)
                         .await?
                         .ok_or_else(|| MetaError::catalog_id_not_found("table", obj.oid))?;
@@ -172,9 +172,9 @@ impl CatalogController {
         let removed_table_ids = removed_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
-            .map(|obj| obj.oid);
+            .map(|obj| TableId::new(obj.oid as _));
 
-        let removed_streaming_job_ids: Vec<ObjectId> = StreamingJob::find()
+        let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(streaming_job::Column::JobId.is_in(removed_object_ids))
@@ -248,7 +248,11 @@ impl CatalogController {
                 .all(&txn)
                 .await?;
 
-            removed_state_table_ids.extend(removed_internal_table_objs.iter().map(|obj| obj.oid));
+            removed_state_table_ids.extend(
+                removed_internal_table_objs
+                    .iter()
+                    .map(|obj| TableId::new(obj.oid as _)),
+            );
             removed_objects.extend(removed_internal_table_objs);
         }
 
@@ -269,7 +273,12 @@ impl CatalogController {
         }
 
         let (removed_source_fragments, removed_sink_fragments, removed_actors, removed_fragments) =
-            get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
+            get_fragments_for_jobs(
+                &txn,
+                self.env.shared_actor_infos(),
+                removed_streaming_job_ids.clone(),
+            )
+            .await?;
 
         let sink_target_fragments = fetch_target_fragments(&txn, removed_sink_fragments).await?;
         let mut removed_sink_fragment_by_targets = HashMap::new();
@@ -304,7 +313,7 @@ impl CatalogController {
                     removed_state_table_ids
                         .iter()
                         .copied()
-                        .collect::<HashSet<ObjectId>>(),
+                        .collect::<HashSet<TableId>>(),
                 ),
             )
             .all(&txn)
@@ -330,7 +339,7 @@ impl CatalogController {
         self.notify_users_update(user_infos).await;
         inner
             .dropped_tables
-            .extend(dropped_tables.map(|t| (TableId::try_from(t.id).unwrap(), t)));
+            .extend(dropped_tables.map(|t| (t.id.into(), t)));
 
         let version = match object_type {
             ObjectType::Database => {
@@ -338,7 +347,7 @@ impl CatalogController {
                 self.notify_frontend(
                     NotificationOperation::Delete,
                     NotificationInfo::Database(PbDatabase {
-                        id: database_id as _,
+                        id: database_id.into(),
                         ..Default::default()
                     }),
                 )

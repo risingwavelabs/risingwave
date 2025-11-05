@@ -24,7 +24,7 @@ pub(crate) async fn update_internal_tables(
     new_value: Value,
     objects_to_notify: &mut Vec<PbObjectInfo>,
 ) -> MetaResult<()> {
-    let internal_tables = get_internal_tables_by_id(object_id, txn).await?;
+    let internal_tables = get_internal_tables_by_id(JobId::new(object_id as _), txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
@@ -92,8 +92,8 @@ impl CatalogController {
             match extract_external_table_name_from_definition(&definition) {
                 None => {
                     tracing::warn!(
-                        table_id = table_id,
-                        definition = definition,
+                        %table_id,
+                        definition,
                         "failed to extract cdc table name from table definition.",
                     )
                 }
@@ -197,7 +197,7 @@ impl CatalogController {
         };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
-                object_id: table_id as _,
+                object_id: table_id.as_raw_id(),
                 referenced_object_id: sink_id as _,
             }
         }));
@@ -225,7 +225,7 @@ impl CatalogController {
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
             |(subscription_id, table_id)| PbObjectDependencies {
                 object_id: subscription_id as _,
-                referenced_object_id: table_id as _,
+                referenced_object_id: table_id.as_raw_id(),
             },
         ));
 
@@ -267,7 +267,7 @@ impl CatalogController {
                 .await?;
             for (table_id, name, definition) in table_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: table_id as _,
+                    id: table_id.as_raw_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -329,10 +329,7 @@ impl CatalogController {
         Ok(())
     }
 
-    /// Returns the IDs of tables whose catalogs have been updated.
-    pub(crate) async fn clean_dirty_sink_downstreams(
-        txn: &DatabaseTransaction,
-    ) -> MetaResult<Vec<TableId>> {
+    pub(crate) async fn clean_dirty_sink_downstreams(txn: &DatabaseTransaction) -> MetaResult<()> {
         // clean incoming sink from (table)
         // clean upstream fragment ids from (fragment)
         // clean stream node from (fragment)
@@ -366,13 +363,11 @@ impl CatalogController {
 
         // no need to update, returning
         if table_with_incoming_sinks.is_empty() {
-            return Ok(vec![]);
+            return Ok(());
         }
 
-        let mut updated_table_ids = vec![];
         for table_id in table_with_incoming_sinks {
             tracing::info!("cleaning dirty table sink downstream table {}", table_id);
-            updated_table_ids.push(table_id);
 
             let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
                 .select_only()
@@ -453,7 +448,7 @@ impl CatalogController {
             }
         }
 
-        Ok(updated_table_ids)
+        Ok(())
     }
 
     pub async fn has_any_streaming_jobs(&self) -> MetaResult<bool> {
@@ -516,11 +511,7 @@ impl CatalogController {
         Ok(infos
             .into_iter()
             .flat_map(|info| {
-                job_mapping.remove(&(
-                    info.database_id as _,
-                    info.schema_id as _,
-                    info.name.clone(),
-                ))
+                job_mapping.remove(&(info.database_id.into(), info.schema_id.into(), info.name))
             })
             .collect())
     }

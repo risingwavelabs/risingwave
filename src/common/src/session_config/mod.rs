@@ -421,6 +421,21 @@ pub struct SessionConfig {
     /// Enable index selection for queries
     #[parameter(default = true)]
     enable_index_selection: bool,
+
+    /// Enable locality backfill for streaming queries. Defaults to false.
+    #[parameter(default = false)]
+    enable_locality_backfill: bool,
+
+    /// Duration in seconds before notifying the user that a long-running DDL operation (e.g., DROP TABLE, CANCEL JOBS)
+    /// is still running. Set to 0 to disable notifications. Defaults to 30 seconds.
+    #[parameter(default = 30u32)]
+    slow_ddl_notification_secs: u32,
+
+    /// Unsafe: Enable storage retention for non-append-only tables.
+    /// Enabling this can lead to streaming inconsistency and node panic
+    /// if there is any row INSERT/UPDATE/DELETE operation corresponding to the ttled primary key.
+    #[parameter(default = false)]
+    unsafe_enable_storage_retention_for_non_append_only_tables: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

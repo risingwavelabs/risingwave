@@ -188,7 +188,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
     //         .map_err(|e| anyhow::anyhow!(e))?;
     // }
     if is_remote_es_sink(sink_name)
-        && param.downstream_pk.len() > 1
+        && param.downstream_pk_or_empty().len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
         bail!("Es sink only supports single pk or pk with delimiter option");
@@ -212,7 +212,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
             DataType::List(list) => {
-                if is_remote_es_sink(sink_name) || matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+                if is_remote_es_sink(sink_name) || matches!(list.elem(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
@@ -317,7 +317,7 @@ impl RemoteLogSinker {
             stream_chunk_converter: StreamChunkConverter::new(
                 sink_name,
                 sink_param.schema(),
-                &sink_param.downstream_pk,
+                &sink_param.downstream_pk_or_empty(),
                 &sink_param.properties,
                 sink_param.sink_type.is_append_only(),
             )?,

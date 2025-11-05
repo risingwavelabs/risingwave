@@ -19,19 +19,15 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio::time::sleep;
 
-use crate::sink::utils::{
-    CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSink, SimulationTestSource,
-    start_sink_test_cluster,
-};
+use crate::sink::utils::*;
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
-#[tokio::test]
-async fn test_sink_decouple_rate_limit() -> Result<()> {
+async fn test_sink_decouple_rate_limit_inner(test_type: TestSinkType) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new(false);
+    let test_sink = SimulationTestSink::register_new(test_type);
     // There will be 1000 * 0.2 = 200 rows generated
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..1000, 0.2, 20);
 
@@ -86,4 +82,14 @@ async fn test_sink_decouple_rate_limit() -> Result<()> {
     assert!(test_sink.store.checkpoint_count() > 0);
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_sink_writer_decouple_rate_limit() -> Result<()> {
+    test_sink_decouple_rate_limit_inner(TestSinkType::SinkWriter).await
+}
+
+#[tokio::test]
+async fn test_async_truncate_decouple_rate_limit() -> Result<()> {
+    test_sink_decouple_rate_limit_inner(TestSinkType::AsyncTruncate).await
 }

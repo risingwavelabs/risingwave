@@ -869,7 +869,7 @@ impl Parser<'_> {
             self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
             let order_by = self.parse_order_by_expr()?;
             self.expect_token(&Token::RParen)?;
-            Some(Box::new(order_by.clone()))
+            Some(Box::new(order_by))
         } else {
             None
         };
@@ -2413,9 +2413,7 @@ impl Parser<'_> {
     }
 
     pub fn parse_with_properties(&mut self) -> ModalResult<Vec<SqlOption>> {
-        Ok(self
-            .parse_options_with_preceding_keyword(Keyword::WITH)?
-            .to_vec())
+        self.parse_options_with_preceding_keyword(Keyword::WITH)
     }
 
     pub fn parse_discard(&mut self) -> ModalResult<Statement> {
@@ -2756,7 +2754,7 @@ impl Parser<'_> {
                 if wildcard_idx.is_none() {
                     wildcard_idx = Some(columns.len());
                 } else {
-                    parser_err!("At most 1 wildcard is allowed in source definetion");
+                    parser_err!("At most 1 wildcard is allowed in source definition");
                 }
             } else if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
@@ -3812,14 +3810,25 @@ impl Parser<'_> {
     }
 
     pub fn parse_alter_fragment(&mut self) -> ModalResult<Statement> {
-        let fragment_id = self.parse_literal_u32()?;
+        let mut fragment_ids = vec![self.parse_literal_u32()?];
+        while self.consume_token(&Token::Comma) {
+            fragment_ids.push(self.parse_literal_u32()?);
+        }
         if !self.parse_keyword(Keyword::SET) {
             return self.expected("SET after ALTER FRAGMENT");
         }
-        let rate_limit = self.parse_alter_fragment_rate_limit()?;
-        let operation = AlterFragmentOperation::AlterBackfillRateLimit { rate_limit };
+        let operation = if self.parse_keyword(Keyword::PARALLELISM) {
+            if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+                return self.expected("TO or = after ALTER FRAGMENT SET PARALLELISM");
+            }
+            let parallelism = self.parse_set_variable()?;
+            AlterFragmentOperation::SetParallelism { parallelism }
+        } else {
+            let rate_limit = self.parse_alter_fragment_rate_limit()?;
+            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit }
+        };
         Ok(Statement::AlterFragment {
-            fragment_id,
+            fragment_ids,
             operation,
         })
     }
@@ -3846,16 +3855,30 @@ impl Parser<'_> {
 
     /// Parse a copy statement
     pub fn parse_copy(&mut self) -> ModalResult<Statement> {
-        let table_name = self.parse_object_name()?;
-        let columns = self.parse_parenthesized_column_list(Optional)?;
-        self.expect_keywords(&[Keyword::FROM, Keyword::STDIN])?;
-        self.expect_token(&Token::SemiColon)?;
-        let values = self.parse_tsv();
-        Ok(Statement::Copy {
-            table_name,
-            columns,
-            values,
-        })
+        let entity = if self.consume_token(&Token::LParen) {
+            let query = self.parse_query()?;
+            self.expect_token(&Token::RParen)?;
+            CopyEntity::Query(query.into())
+        } else {
+            let table_name = self.parse_object_name()?;
+            let columns = self.parse_parenthesized_column_list(Optional)?;
+            CopyEntity::Table {
+                table_name,
+                columns,
+            }
+        };
+
+        let target = if self.parse_keywords(&[Keyword::FROM, Keyword::STDIN]) {
+            self.expect_token(&Token::SemiColon)?;
+            let values = self.parse_tsv();
+            CopyTarget::Stdin { values }
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::STDOUT]) {
+            CopyTarget::Stdout
+        } else {
+            return self.expected("FROM STDIN or TO STDOUT");
+        };
+
+        Ok(Statement::Copy { entity, target })
     }
 
     /// Parse a tab separated values in
@@ -4363,62 +4386,68 @@ impl Parser<'_> {
         let mut options = ExplainOptions::default();
         let mut analyze_duration = None;
 
-        let explain_key_words = [
-            Keyword::BACKFILL,
-            Keyword::VERBOSE,
-            Keyword::TRACE,
-            Keyword::TYPE,
-            Keyword::LOGICAL,
-            Keyword::PHYSICAL,
-            Keyword::DISTSQL,
-            Keyword::FORMAT,
-            Keyword::DURATION_SECS,
+        const BACKFILL: &str = "backfill";
+        const VERBOSE: &str = "verbose";
+        const TRACE: &str = "trace";
+        const TYPE: &str = "type";
+        const LOGICAL: &str = "logical";
+        const PHYSICAL: &str = "physical";
+        const DISTSQL: &str = "distsql";
+        const FORMAT: &str = "format";
+        const DURATION_SECS: &str = "duration_secs";
+
+        let explain_options_identifiers = [
+            BACKFILL,
+            VERBOSE,
+            TRACE,
+            TYPE,
+            LOGICAL,
+            PHYSICAL,
+            DISTSQL,
+            FORMAT,
+            DURATION_SECS,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> ModalResult<()> {
-            let keyword = parser.expect_one_of_keywords(&explain_key_words)?;
-            match keyword {
-                Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
-                Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
-                Keyword::BACKFILL => options.backfill = parser.parse_optional_boolean(true),
-                Keyword::TYPE => {
-                    let explain_type = parser.expect_one_of_keywords(&[
-                        Keyword::LOGICAL,
-                        Keyword::PHYSICAL,
-                        Keyword::DISTSQL,
-                    ])?;
-                    match explain_type {
-                        Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
-                        Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                        Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
-                        _ => unreachable!("{}", keyword),
-                    }
-                }
-                Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
-                Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
-                Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
-                Keyword::FORMAT => {
-                    options.explain_format = {
-                        match parser.expect_one_of_keywords(&[
-                            Keyword::TEXT,
-                            Keyword::JSON,
-                            Keyword::XML,
-                            Keyword::YAML,
-                            Keyword::DOT,
-                        ])? {
-                            Keyword::TEXT => ExplainFormat::Text,
-                            Keyword::JSON => ExplainFormat::Json,
-                            Keyword::XML => ExplainFormat::Xml,
-                            Keyword::YAML => ExplainFormat::Yaml,
-                            Keyword::DOT => ExplainFormat::Dot,
-                            _ => unreachable!("{}", keyword),
+            match parser.parse_identifier()?.real_value().as_str() {
+                VERBOSE => options.verbose = parser.parse_optional_boolean(true),
+                TRACE => options.trace = parser.parse_optional_boolean(true),
+                BACKFILL => options.backfill = parser.parse_optional_boolean(true),
+                TYPE => {
+                    let explain_type = parser.parse_identifier()?.real_value();
+                    match explain_type.as_str() {
+                        LOGICAL => options.explain_type = ExplainType::Logical,
+                        PHYSICAL => options.explain_type = ExplainType::Physical,
+                        DISTSQL => options.explain_type = ExplainType::DistSql,
+                        unexpected => {
+                            parser_err!("unexpected explain type: [{unexpected}]")
                         }
                     }
                 }
-                Keyword::DURATION_SECS => {
+                LOGICAL => options.explain_type = ExplainType::Logical,
+                PHYSICAL => options.explain_type = ExplainType::Physical,
+                DISTSQL => options.explain_type = ExplainType::DistSql,
+                FORMAT => {
+                    options.explain_format = {
+                        let format = parser.parse_identifier()?.real_value();
+                        match format.as_str() {
+                            "text" => ExplainFormat::Text,
+                            "json" => ExplainFormat::Json,
+                            "xml" => ExplainFormat::Xml,
+                            "yaml" => ExplainFormat::Yaml,
+                            "dot" => ExplainFormat::Dot,
+                            unexpected => {
+                                parser_err!("unexpected explain format [{unexpected}]")
+                            }
+                        }
+                    }
+                }
+                DURATION_SECS => {
                     analyze_duration = Some(parser.parse_literal_u64()?);
                 }
-                _ => unreachable!("{}", keyword),
+                unexpected => {
+                    parser_err!("unexpected explain options: [{unexpected}]")
+                }
             };
             Ok(())
         };
@@ -4426,9 +4455,11 @@ impl Parser<'_> {
         // In order to support following statement, we need to peek before consume.
         // explain (select 1) union (select 1)
         if self.peek_token() == Token::LParen
-            && self.peek_nth_any_of_keywords(1, &explain_key_words)
-            && self.consume_token(&Token::LParen)
+            && let Token::Word(word) = self.peek_nth_token(1).token
+            && let Ok(ident) = word.to_ident()
+            && explain_options_identifiers.contains(&ident.real_value().as_str())
         {
+            assert!(self.consume_token(&Token::LParen));
             self.parse_comma_separated(parse_explain_option)?;
             self.expect_token(&Token::RParen)?;
         }

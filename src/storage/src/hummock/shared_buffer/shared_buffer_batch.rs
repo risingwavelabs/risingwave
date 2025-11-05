@@ -1301,7 +1301,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_imms_basic() {
-        let table_id = TableId { table_id: 1004 };
+        let table_id = TableId::new(1004);
         let shared_buffer_items1: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![
             (
                 iterator_test_table_key_of(1),
@@ -1445,6 +1445,7 @@ mod tests {
             }
 
             let mut expected = vec![];
+            #[expect(clippy::needless_range_loop)]
             for key_idx in 0..=2 {
                 for epoch in (1..=3).rev() {
                     let item = batch_items[epoch - 1][key_idx].clone();
@@ -1476,7 +1477,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_imms_with_old_values() {
-        let table_id = TableId { table_id: 1004 };
+        let table_id = TableId::new(1004);
         let key_value1: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![
             (
                 iterator_test_table_key_of(1),
@@ -1632,6 +1633,7 @@ mod tests {
             }
 
             let mut expected = vec![];
+            #[expect(clippy::needless_range_loop)]
             for key_idx in 0..=2 {
                 for epoch in (1..=3).rev() {
                     let item = batch_items[epoch - 1][key_idx].clone();

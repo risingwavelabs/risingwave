@@ -71,7 +71,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect_vec(),
         );
-        let null_safe = node.get_null_safe().to_vec();
+        let null_safe = node.get_null_safe().clone();
         let output_indices = node
             .get_output_indices()
             .iter()

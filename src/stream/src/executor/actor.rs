@@ -22,7 +22,6 @@ use futures::FutureExt;
 use futures::future::join_all;
 use hytra::TrAdder;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::log::LogSuppresser;
@@ -42,7 +41,7 @@ use super::StreamConsumer;
 use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
 use crate::error::StreamResult;
-use crate::task::{ActorId, FragmentId, LocalBarrierManager};
+use crate::task::{ActorId, FragmentId, LocalBarrierManager, StreamEnvironment};
 
 /// Shared by all operators of an actor.
 pub struct ActorContext {
@@ -61,13 +60,15 @@ pub struct ActorContext {
     /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
     pub initial_dispatch_num: usize,
     // mv_table_id to subscription id
-    pub related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+    pub initial_subscriber_ids: HashSet<u32>,
     pub initial_upstream_actors: HashMap<FragmentId, UpstreamActors>,
 
     // Meta client. currently used for auto schema change. `None` for test only
     pub meta_client: Option<MetaClient>,
 
     pub streaming_config: Arc<StreamingConfig>,
+
+    pub stream_env: StreamEnvironment,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -85,21 +86,23 @@ impl ActorContext {
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             // Set 1 for test to enable sanity check on table
             initial_dispatch_num: 1,
-            related_subscriptions: HashMap::new().into(),
+            initial_subscriber_ids: Default::default(),
             initial_upstream_actors: Default::default(),
             meta_client: None,
             streaming_config: Arc::new(StreamingConfig::default()),
+            stream_env: StreamEnvironment::for_test(),
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         stream_actor: &BuildActorInfo,
         fragment_id: FragmentId,
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
-        related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         meta_client: Option<MetaClient>,
         streaming_config: Arc<StreamingConfig>,
+        stream_env: StreamEnvironment,
     ) -> ActorContextRef {
         Arc::new(Self {
             id: stream_actor.actor_id,
@@ -114,10 +117,15 @@ impl ActorContext {
             total_mem_val,
             streaming_metrics,
             initial_dispatch_num: stream_actor.dispatchers.len(),
-            related_subscriptions,
+            initial_subscriber_ids: stream_actor
+                .initial_subscriber_ids
+                .iter()
+                .copied()
+                .collect(),
             initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
             meta_client,
             streaming_config,
+            stream_env,
         })
     }
 

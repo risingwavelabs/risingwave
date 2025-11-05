@@ -335,7 +335,7 @@ impl HummockEventHandler {
         };
 
         let uploader = HummockUploader::new(
-            state_store_metrics.clone(),
+            state_store_metrics,
             recent_versions.latest_version().clone(),
             spawn_upload_task,
             buffer_tracker,
@@ -868,7 +868,7 @@ impl SyncedData {
             SyncResult {
                 sync_size,
                 uncommitted_ssts,
-                table_watermarks: table_watermarks.clone(),
+                table_watermarks,
                 old_value_ssts,
                 vector_index_adds,
             }
@@ -922,7 +922,7 @@ mod tests {
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 1,
                 state_table_info: HashMap::from_iter([(
-                    TEST_TABLE_ID.table_id,
+                    TEST_TABLE_ID.as_raw_id(),
                     StateTableInfo {
                         committed_epoch: epoch0,
                         compaction_group_id: StaticCompactionGroupId::StateDefault as _,
@@ -1077,14 +1077,14 @@ mod tests {
                 id: 1,
                 state_table_info: HashMap::from_iter([
                     (
-                        table_id1.table_id,
+                        table_id1.as_raw_id(),
                         StateTableInfo {
                             committed_epoch: epoch0,
                             compaction_group_id: StaticCompactionGroupId::StateDefault as _,
                         },
                     ),
                     (
-                        table_id2.table_id,
+                        table_id2.as_raw_id(),
                         StateTableInfo {
                             committed_epoch: epoch0,
                             compaction_group_id: StaticCompactionGroupId::StateDefault as _,

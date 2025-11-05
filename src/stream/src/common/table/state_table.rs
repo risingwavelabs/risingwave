@@ -150,7 +150,7 @@ pub struct StateTableInner<
     /// Used for:
     /// 1. Computing `output_value_indices` to ser/de replicated rows.
     /// 2. Computing output pk indices to used them for backfill state.
-    output_indices: Vec<usize>,
+    pub output_indices: Vec<usize>,
 
     op_consistency_level: StateTableOpConsistencyLevel,
 
@@ -568,7 +568,6 @@ where
     }
 
     /// Create state table from table catalog and store with sanity check disabled.
-    #[cfg(any(test, feature = "test"))]
     pub async fn from_table_catalog_inconsistent_op(
         table_catalog: &Table,
         store: S,
@@ -820,8 +819,8 @@ where
         &self.data_types
     }
 
-    pub fn table_id(&self) -> u32 {
-        self.table_id.table_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -968,12 +967,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             ..Default::default()
         };
 
-        // TODO: avoid clone when `on_key_value_fn` can be non-static
-        let row_serde = self.row_serde.clone();
-
         self.state_store
             .on_key_value(key_bytes, read_options, move |_, value| {
-                let row = row_serde.deserialize(value)?;
+                let row = self.row_serde.deserialize(value)?;
                 Ok(OwnedRow::new(row))
             })
             .await
@@ -1327,7 +1323,7 @@ where
                     ?new_epoch,
                     prev_op_consistency_level = ?self.op_consistency_level,
                     ?op_consistency_level,
-                    table_id = self.table_id.table_id,
+                    table_id = %self.table_id,
                     "switch to new op consistency level"
                 );
             }
@@ -1525,9 +1521,15 @@ where
     }
 }
 
-pub trait RowStream<'a> = Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
-pub trait KeyedRowStream<'a> = Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
-pub trait PkRowStream<'a, K> = Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a;
+// Manually expand trait alias for better IDE experience.
+pub trait RowStream<'a>: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a {}
+impl<'a, S: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a> RowStream<'a> for S {}
+
+pub trait KeyedRowStream<'a>: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {}
+impl<'a, S: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a> KeyedRowStream<'a> for S {}
+
+pub trait PkRowStream<'a, K>: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a {}
+impl<'a, K, S: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a> PkRowStream<'a, K> for S {}
 
 pub trait FromVnodeBytes {
     fn from_vnode_bytes(vnode: VirtualNode, bytes: &Bytes) -> Self;
@@ -1595,6 +1597,10 @@ where
 }
 
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
+    // The lowest-level API.
+    /// Middle-level APIs:
+    /// - [`StateTableInner::iter_with_prefix_inner`]
+    /// - [`StateTableInner::iter_kv_with_pk_range`]
     async fn iter_kv<K: CopyFromSlice + FromVnodeBytes>(
         &self,
         vnode: VirtualNode,

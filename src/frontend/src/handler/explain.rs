@@ -132,7 +132,9 @@ pub async fn do_handle_explain(
             _ => {
                 let context: OptimizerContextRef =
                     OptimizerContext::new(handler_args, explain_options).into();
-                let (plan, table) = match stmt {
+                let context_clone = context.clone();
+
+                let res = match stmt {
                     // -- Streaming DDLs --
                     Statement::CreateView {
                         or_replace: false,
@@ -142,15 +144,8 @@ pub async fn do_handle_explain(
                         columns,
                         emit_mode,
                         ..
-                    } => gen_create_mv_plan(
-                        &session,
-                        context.clone(),
-                        *query,
-                        name,
-                        columns,
-                        emit_mode,
-                    )
-                    .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
+                    } => gen_create_mv_plan(&session, context, *query, name, columns, emit_mode)
+                        .map(|(plan, table)| (PhysicalPlanRef::Stream(plan), Some(table))),
                     Statement::CreateView {
                         materialized: false,
                         ..
@@ -180,7 +175,7 @@ pub async fn do_handle_explain(
                             resolve_index_schema(&session, name, table_name)?;
                         gen_create_index_plan(
                             &session,
-                            context.clone(),
+                            context,
                             schema_name,
                             table,
                             index_table_name,
@@ -204,22 +199,20 @@ pub async fn do_handle_explain(
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
-                }?;
-
-                let context = match &plan {
-                    PhysicalPlanRef::Stream(plan) => plan.ctx(),
-                    PhysicalPlanRef::Batch(plan) => plan.ctx(),
                 };
 
-                (Ok(plan) as Result<_>, table, context)
+                match res {
+                    Ok((plan, table)) => (Ok(plan), table, context_clone),
+                    Err(e) => (Err(e), None, context_clone),
+                }
             }
         };
 
-        let explain_trace = context.is_explain_trace();
-        let explain_verbose = context.is_explain_verbose();
-        let explain_backfill = context.is_explain_backfill();
-        let explain_type = context.explain_type();
-        let explain_format = context.explain_format();
+        let explain_trace = explain_options.trace;
+        let explain_verbose = explain_options.verbose;
+        let explain_backfill = explain_options.backfill;
+        let explain_type = explain_options.explain_type;
+        let explain_format = explain_options.explain_format;
 
         if explain_trace {
             let trace = context.take_trace();
@@ -239,7 +232,7 @@ pub async fn do_handle_explain(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
                                 session.config().batch_parallelism().0,
-                                session.config().timezone().to_owned(),
+                                session.config().timezone(),
                                 plan.clone(),
                             )?);
                             batch_plan_fragmenter_fmt = if explain_format == ExplainFormat::Dot {
@@ -353,7 +346,7 @@ pub async fn handle_explain(
     }
 
     let mut blocks = Vec::new();
-    let result = do_handle_explain(handler_args, options.clone(), stmt, &mut blocks).await;
+    let result = do_handle_explain(handler_args, options, stmt, &mut blocks).await;
 
     if let Err(e) = result {
         if options.trace {

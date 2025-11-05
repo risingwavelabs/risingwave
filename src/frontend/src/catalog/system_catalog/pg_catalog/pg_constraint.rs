@@ -21,7 +21,7 @@ use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemTableCatalog};
 use crate::error::Result;
 
 /// The catalog `pg_constraint` records information about table and index inheritance hierarchies.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-constraint.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-constraint.html`
 /// This is introduced only for pg compatibility and is not used in our system.
 #[derive(Fields)]
 struct PgConstraint {
@@ -58,16 +58,16 @@ impl PgConstraint {
         // List of the constrained columns. First column starts from 1.
         let conkey: Vec<_> = table.pk.iter().map(|i| (*i + 1) as i16).collect();
         PgConstraint {
-            oid: table.id.table_id() as i32, // Use table_id as a mock oid of constraint here.
+            oid: table.id.as_raw_id() as i32, // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
-            connamespace: schema.id() as i32,
+            connamespace: schema.id().as_raw_id() as i32,
             contype: "p".to_owned(), // p = primary key constraint
             condeferrable: false,
             convalidated: true,
-            conrelid: table.id.table_id() as i32,
+            conrelid: table.id.as_raw_id() as i32,
             contypid: 0,
             // Use table_id as a mock index oid of constraint here.
-            conindid: table.id.table_id() as i32,
+            conindid: table.id.as_raw_id() as i32,
             conparentid: 0,
             confrelid: 0,
             confupdtype: " ".to_owned(),
@@ -95,16 +95,16 @@ impl PgConstraint {
             .map(|i| (i.column_index + 1) as i16)
             .collect();
         PgConstraint {
-            oid: table.id.table_id() as i32, // Use table_id as a mock oid of constraint here.
+            oid: table.id.as_raw_id() as i32, // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
-            connamespace: schema.id() as i32,
+            connamespace: schema.id().as_raw_id() as i32,
             contype: "p".to_owned(), // p = primary key constraint
             condeferrable: false,
             convalidated: true,
-            conrelid: table.id.table_id() as i32,
+            conrelid: table.id.as_raw_id() as i32,
             contypid: 0,
             // Use table_id as a mock index oid of constraint here.
-            conindid: table.id.table_id() as i32,
+            conindid: table.id.as_raw_id() as i32,
             conparentid: 0,
             confrelid: 0,
             confupdtype: " ".to_owned(),

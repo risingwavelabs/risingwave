@@ -22,6 +22,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -67,7 +68,7 @@ use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
 use crate::store::{
-    OnNearestItemFn, ReadLogOptions, ReadOptions, Vector, VectorNearestOptions, gen_min_epoch,
+    OnNearestItemFn, ReadLogOptions, ReadOptions, VectorNearestOptions, gen_min_epoch,
 };
 use crate::vector::hnsw::nearest;
 use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
@@ -588,14 +589,14 @@ impl HummockVersionReader {
 const SLOW_ITER_FETCH_META_DURATION_SECOND: f64 = 5.0;
 
 impl HummockVersionReader {
-    pub async fn get<O>(
-        &self,
+    pub async fn get<'a, O>(
+        &'a self,
         table_key: TableKey<Bytes>,
         epoch: u64,
         table_id: TableId,
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
-        on_key_value_fn: impl crate::store::KeyValueFn<O>,
+        on_key_value_fn: impl crate::store::KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
 
@@ -640,10 +641,9 @@ impl HummockVersionReader {
         }
 
         // 2. order guarantee: imm -> sst
-        let dist_key_hash = read_options
-            .prefix_hint
-            .as_ref()
-            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref(), table_id.table_id()));
+        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+            Sstable::hash_for_bloom_filter(dist_key.as_ref(), table_id.as_raw_id())
+        });
 
         // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
         // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
@@ -957,7 +957,7 @@ impl HummockVersionReader {
         let bloom_filter_prefix_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|hint| Sstable::hash_for_bloom_filter(hint, table_id.table_id()));
+            .map(|hint| Sstable::hash_for_bloom_filter(hint, table_id.as_raw_id()));
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
         if read_options.prefetch_options.prefetch {
             sst_read_options.must_iterated_end_user_key =
@@ -1000,12 +1000,9 @@ impl HummockVersionReader {
             }
 
             if level.level_type == LevelType::Nonoverlapping {
-                let mut table_infos = prune_nonoverlapping_ssts(
-                    &level.table_infos,
-                    user_key_range_ref,
-                    table_id.table_id(),
-                )
-                .peekable();
+                let mut table_infos =
+                    prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref, table_id)
+                        .peekable();
 
                 if table_infos.peek().is_none() {
                     continue;
@@ -1120,7 +1117,7 @@ impl HummockVersionReader {
                 warn!(
                     max_epoch,
                     change_log_epochs = ?change_log.iter().flat_map(|epoch_log| epoch_log.epochs()).collect_vec(),
-                    table_id = options.table_id.table_id,
+                    table_id = %options.table_id,
                     "max_epoch does not exist"
                 );
             }
@@ -1201,13 +1198,13 @@ impl HummockVersionReader {
         .await
     }
 
-    pub async fn nearest<M: MeasureDistanceBuilder, O: Send>(
-        &self,
+    pub async fn nearest<'a, M: MeasureDistanceBuilder, O: Send>(
+        &'a self,
         version: PinnedVersion,
         table_id: TableId,
-        target: Vector,
+        target: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
     ) -> HummockResult<Vec<O>> {
         let Some(index) = version.vector_indexes.get(&table_id) else {
             return Ok(vec![]);
@@ -1221,7 +1218,7 @@ impl HummockVersionReader {
         }
         match &index.inner {
             VectorIndexImpl::Flat(flat) => {
-                let mut builder = NearestBuilder::<'_, O, M>::new(target.to_ref(), options.top_n);
+                let mut builder = NearestBuilder::<'_, O, M>::new(target, options.top_n);
                 for vector_file in &flat.vector_store_info.vector_files {
                     let meta = self.sstable_store.get_vector_file_meta(vector_file).await?;
                     for (i, block_meta) in meta.block_metas.iter().enumerate() {
@@ -1246,7 +1243,7 @@ impl HummockVersionReader {
                 let (items, _stats) = nearest::<O, M>(
                     &vector_store,
                     &*graph,
-                    target.to_ref(),
+                    target,
                     on_nearest_item_fn,
                     options.hnsw_ef_search,
                     options.top_n,

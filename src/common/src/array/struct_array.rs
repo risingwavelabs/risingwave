@@ -837,7 +837,7 @@ mod tests {
 
             let mut builder = StructArrayBuilder::with_type(
                 0,
-                DataType::Struct(StructType::unnamed(fields.to_vec())),
+                DataType::Struct(StructType::unnamed(fields.clone())),
             );
             builder.append(Some(StructRef::ValueRef { val: &lhs }));
             builder.append(Some(StructRef::ValueRef { val: &rhs }));

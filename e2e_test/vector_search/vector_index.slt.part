@@ -1,0 +1,8 @@
+include create_embedding_udf.slt.part
+
+include raw_column_index.slt.part
+include expression_column_index.slt.part
+include hnsw_index.slt.part
+include time_travel.slt.part
+
+include drop_embedding_udf.slt.part

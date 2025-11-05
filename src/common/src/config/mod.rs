@@ -21,6 +21,8 @@ pub mod batch;
 pub use batch::BatchConfig;
 pub mod frontend;
 pub use frontend::FrontendConfig;
+pub mod hba;
+pub use hba::{AddressPattern, AuthMethod, ConnectionType, HbaConfig, HbaEntry};
 pub mod meta;
 pub use meta::{CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig, MetaStoreConfig};
 pub mod streaming;
@@ -188,6 +190,10 @@ pub mod default {
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
+            10
+        }
+
+        pub fn stream_topn_cache_min_capacity() -> usize {
             10
         }
 
@@ -481,8 +487,7 @@ pub mod tests {
     ) {
         // Set the default value if it's a config name-value pair, otherwise it's a sub-section (Table) that should be recursively processed.
         if let toml::Value::Table(table) = value {
-            let section_configs: BTreeMap<String, toml::Value> =
-                table.clone().into_iter().collect();
+            let section_configs: BTreeMap<String, toml::Value> = table.into_iter().collect();
             let sub_section = if section.is_empty() {
                 name
             } else {

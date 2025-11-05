@@ -20,7 +20,7 @@ use crate::catalog::system_catalog::rw_catalog::rw_types::read_rw_types;
 use crate::error::Result;
 
 /// The catalog `pg_type` stores information about data types.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-type.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-type.html`
 
 // TODO: Make it a view atop of `rw_types` to reduce code duplication of the
 // `read` function, while reserving the property that `oid` acts as the
@@ -77,7 +77,8 @@ fn read_pg_type(reader: &SysCatalogReaderImpl) -> Result<Vec<PgType>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let pg_catalog_id = catalog_reader
         .get_schema_by_name(&reader.auth_context.database, "pg_catalog")?
-        .id() as i32;
+        .id()
+        .as_raw_id() as i32;
 
     let rw_types = read_rw_types(reader)?;
 

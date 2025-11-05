@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::slice;
+use std::sync::LazyLock;
 
 use bytes::{Buf, BufMut};
 use itertools::{Itertools, repeat_n};
@@ -28,13 +29,17 @@ use serde::{Deserialize, Serialize};
 
 use super::{Array, ArrayBuilder};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, Scalar, ScalarRef, ToText};
+use crate::types::{DataType, ListType, Scalar, ScalarRef, ToText};
 use crate::vector::{VectorInner, decode_vector_payload, encode_vector_payload};
 
 pub type VectorItemType = F32;
 pub type VectorDistanceType = f64;
 pub const VECTOR_ITEM_TYPE: DataType = DataType::Float32;
 pub const VECTOR_DISTANCE_TYPE: DataType = DataType::Float64;
+
+/// Sometimes we can interpret a vector as a list to reuse some code, pass this type around.
+pub static VECTOR_AS_LIST_TYPE: LazyLock<ListType> =
+    LazyLock::new(|| ListType::new(VECTOR_ITEM_TYPE));
 
 #[derive(Debug, Clone, EstimateSize)]
 pub struct VectorArrayBuilder {
@@ -414,6 +419,13 @@ impl<'a> VectorRef<'a> {
             item.serialize(&mut *serializer)?;
         }
         Ok(())
+    }
+
+    pub fn subvector(&self, start: usize, end: usize) -> VectorVal {
+        let slice = &self.inner[start..end];
+        VectorInner {
+            inner: slice.to_vec().into_boxed_slice(),
+        }
     }
 }
 

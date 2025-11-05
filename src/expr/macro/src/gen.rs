@@ -94,7 +94,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
                 // infer as the element type of "anyarray" argument
-                return Ok(quote! { |args| Ok(args[#i].as_list_element_type().clone()) });
+                return Ok(quote! { |args| Ok(args[#i].as_list_elem().clone()) });
             }
         } else if self.ret == "anyarray" {
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
@@ -103,7 +103,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "any") {
                 // infer as the array type of "any" argument
-                return Ok(quote! { |args| Ok(DataType::List(Box::new(args[#i].clone()))) });
+                return Ok(quote! { |args| Ok(DataType::list(args[#i].clone())) });
             }
         } else if self.ret == "struct" {
             if let Some(i) = self.args.iter().position(|t| t == "struct") {
@@ -538,7 +538,7 @@ impl FunctionAttr {
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
-                if input.is_compacted() {
+                if input.is_vis_compacted() {
                     for i in 0..input.capacity() {
                         #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
@@ -962,7 +962,7 @@ impl FunctionAttr {
                         assert!(range.end <= input.capacity());
                         #(#let_arrays)*
                         #downcast_state
-                        if input.is_compacted() {
+                        if input.is_vis_compacted() {
                             for row_id in range {
                                 let op = unsafe { *input.ops().get_unchecked(row_id) };
                                 #(#let_values)*
@@ -1321,7 +1321,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
 fn data_type(ty: &str) -> TokenStream2 {
     if let Some(ty) = ty.strip_suffix("[]") {
         let inner_type = data_type(ty);
-        return quote! { DataType::List(Box::new(#inner_type)) };
+        return quote! { DataType::list(#inner_type) };
     }
     if ty.starts_with("struct<") {
         return quote! { DataType::Struct(#ty.parse().expect("invalid struct type")) };

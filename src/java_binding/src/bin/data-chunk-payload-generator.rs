@@ -28,7 +28,7 @@ fn build_row(index: usize) -> OwnedRow {
     row_value.push(Some(ScalarImpl::Int64(index as i64)));
     row_value.push(Some(ScalarImpl::Float32(F32::from(index as f32))));
     row_value.push(Some(ScalarImpl::Float64(F64::from(index as f64))));
-    row_value.push(Some(ScalarImpl::Bool(index % 3 == 0)));
+    row_value.push(Some(ScalarImpl::Bool(index.is_multiple_of(3))));
     row_value.push(Some(ScalarImpl::Utf8(
         format!("{}", index).repeat((index % 10) + 1).into(),
     )));
@@ -36,7 +36,7 @@ fn build_row(index: usize) -> OwnedRow {
         Timestamp::from_timestamp_uncheck(index as _, 0),
     )));
     row_value.push(Some(ScalarImpl::Decimal(index.into())));
-    row_value.push(if index % 5 == 0 {
+    row_value.push(if index.is_multiple_of(5) {
         None
     } else {
         Some(ScalarImpl::Int64(index as i64))

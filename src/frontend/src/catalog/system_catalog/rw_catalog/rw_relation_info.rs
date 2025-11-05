@@ -56,13 +56,13 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             schema_catalog
                 .iter_created_mvs_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.id.table_id);
+                    table_ids.push(t.id.as_raw_id());
                 });
 
             schema_catalog
                 .iter_user_table_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.id.table_id);
+                    table_ids.push(t.id.as_raw_id());
                 });
 
             schema_catalog
@@ -81,7 +81,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             schema_catalog
                 .iter_index_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.index_table().id.table_id);
+                    table_ids.push(t.index_table().id.as_raw_id());
                 });
         }
     }
@@ -100,14 +100,14 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         schema_catalog
             .iter_created_mvs_with_acl(current_user)
             .for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.table_id) {
+                if let Some(fragments) = table_fragments.get(&t.id.as_raw_id()) {
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
                         relationowner: t.owner as i32,
                         definition: t.create_sql(),
                         relationtype: "MATERIALIZED VIEW".into(),
-                        relationid: t.id.table_id as i32,
+                        relationid: t.id.as_raw_id() as i32,
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -121,14 +121,14 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         schema_catalog
             .iter_user_table_with_acl(current_user)
             .for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.table_id) {
+                if let Some(fragments) = table_fragments.get(&t.id.as_raw_id()) {
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
                         relationowner: t.owner as i32,
                         definition: t.create_sql_purified(),
                         relationtype: "TABLE".into(),
-                        relationid: t.id.table_id as i32,
+                        relationid: t.id.as_raw_id() as i32,
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -163,7 +163,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         schema_catalog
             .iter_index_with_acl(current_user)
             .for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.index_table().id.table_id) {
+                if let Some(fragments) = table_fragments.get(&t.index_table().id.as_raw_id()) {
                     let index_table = t.index_table();
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
@@ -171,7 +171,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: index_table.owner as i32,
                         definition: index_table.create_sql(),
                         relationtype: "INDEX".into(),
-                        relationid: index_table.id.table_id as i32,
+                        relationid: index_table.id.as_raw_id() as i32,
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),

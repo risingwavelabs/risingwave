@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The view `pg_views` provides access to useful information about each view in the database.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-views.html`]
+/// Ref: `https://www.postgresql.org/docs/current/view-pg-views.html`
 #[system_catalog(
     view,
     "pg_catalog.pg_views",

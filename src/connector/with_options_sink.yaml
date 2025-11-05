@@ -232,6 +232,12 @@ DorisConfig:
   - name: r#type
     field_type: String
     required: true
+  - name: doris.stream_load.http.timeout.ms
+    field_type: u64
+    comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    required: false
+    default: 30 * 1000
+    allow_alter_on_fly: true
 DynamoDbConfig:
   fields:
   - name: table
@@ -464,6 +470,15 @@ IcebergConfig:
   - name: azblob.endpoint_url
     field_type: String
     required: false
+  - name: adlsgen2.account_name
+    field_type: String
+    required: false
+  - name: adlsgen2.account_key
+    field_type: String
+    required: false
+  - name: adlsgen2.endpoint
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
@@ -482,13 +497,6 @@ IcebergConfig:
     field_type: String
     comments: URI of iceberg catalog, only applicable in rest catalog.
     required: false
-  - name: database.name
-    field_type: String
-    required: false
-  - name: table.name
-    field_type: String
-    comments: Full name of table, must include schema name.
-    required: true
   - name: catalog.credential
     field_type: String
     comments: |-
@@ -550,6 +558,18 @@ IcebergConfig:
       - Each header is a key-value pair, separated by an '='.
       - Multiple headers can be specified, separated by a ';'.
     required: false
+  - name: vended_credentials
+    field_type: bool
+    comments: Enable vended credentials for iceberg REST catalog.
+    required: false
+    default: Default::default
+  - name: database.name
+    field_type: String
+    required: false
+  - name: table.name
+    field_type: String
+    comments: Full name of table, must include schema name when database is provided.
+    required: true
   - name: primary_key
     field_type: Vec<String>
     required: false
@@ -563,9 +583,9 @@ IcebergConfig:
     default: Default::default
   - name: commit_checkpoint_interval
     field_type: u64
-    comments: Commit every n(>0) checkpoints, default is 10.
+    comments: Commit every n(>0) checkpoints, default is 60.
     required: false
-    default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
+    default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
     allow_alter_on_fly: true
   - name: create_table_if_not_exists
     field_type: bool
@@ -573,9 +593,9 @@ IcebergConfig:
     default: Default::default
   - name: is_exactly_once
     field_type: bool
-    comments: Whether it is `exactly_once`, the default is not.
+    comments: Whether it is `exactly_once`, the default is true.
     required: false
-    default: Default::default
+    default: Some (true)
   - name: commit_retry_num
     field_type: u32
     required: false
@@ -626,6 +646,14 @@ IcebergConfig:
     field_type: bool
     required: false
     default: 'true'
+    allow_alter_on_fly: true
+  - name: max_snapshots_num_before_compaction
+    field_type: usize
+    comments: |-
+      The maximum number of snapshots allowed since the last rewrite operation
+      If set, sink will check snapshot count and wait if exceeded
+    required: false
+    default: Default::default
     allow_alter_on_fly: true
 KafkaConfig:
   fields:
@@ -1453,6 +1481,18 @@ SnowflakeV2Config:
   - name: password
     field_type: String
     required: false
+  - name: auth.method
+    field_type: String
+    required: false
+  - name: private_key_file
+    field_type: String
+    required: false
+  - name: private_key_file_pwd
+    field_type: String
+    required: false
+  - name: private_key_pem
+    field_type: String
+    required: false
   - name: commit_checkpoint_interval
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 10.
@@ -1592,6 +1632,7 @@ StarrocksConfig:
     comments: The timeout in milliseconds for stream load http request, defaults to 10 seconds.
     required: false
     default: 30 * 1000
+    allow_alter_on_fly: true
   - name: commit_checkpoint_interval
     field_type: u64
     comments: |-

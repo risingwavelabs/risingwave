@@ -55,7 +55,7 @@ impl ObserverState for HummockObserverNode {
                         PbObjectInfo::Table(table_catalog) => {
                             self.handle_catalog_notification(resp.operation(), table_catalog);
                         }
-                        _ => panic!("error type notification"),
+                        info => panic!("invalid notification info: {info}"),
                     };
                 }
                 assert!(
@@ -90,12 +90,12 @@ impl ObserverState for HummockObserverNode {
                     .update_write_limits(write_limits.write_limits);
             }
 
-            Info::ComputeNodeTotalCpuCount(count) => {
-                LicenseManager::get().update_cpu_core_count(count as _);
+            Info::ClusterResource(resource) => {
+                LicenseManager::get().update_cluster_resource(resource);
             }
 
-            _ => {
-                panic!("error type notification");
+            info => {
+                panic!("invalid notification info: {info}");
             }
         }
     }
@@ -135,7 +135,7 @@ impl ObserverState for HummockObserverNode {
             });
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;
-        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
+        LicenseManager::get().update_cluster_resource(snapshot.cluster_resource.unwrap());
     }
 }
 
@@ -157,18 +157,19 @@ impl HummockObserverNode {
 
     fn handle_catalog_snapshot(&mut self, tables: Vec<Table>) {
         self.compaction_catalog_manager
-            .sync(tables.into_iter().map(|t| (t.id, t)).collect());
+            .sync(tables.into_iter().map(|t| (t.id.into(), t)).collect());
     }
 
     fn handle_catalog_notification(&mut self, operation: Operation, table_catalog: Table) {
         match operation {
             Operation::Add | Operation::Update => {
                 self.compaction_catalog_manager
-                    .update(table_catalog.id, table_catalog);
+                    .update(table_catalog.id.into(), table_catalog);
             }
 
             Operation::Delete => {
-                self.compaction_catalog_manager.remove(table_catalog.id);
+                self.compaction_catalog_manager
+                    .remove(table_catalog.id.into());
             }
 
             _ => panic!("receive an unsupported notify {:?}", operation),

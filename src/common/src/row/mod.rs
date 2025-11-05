@@ -27,7 +27,7 @@ use crate::util::row_serde::OrderedRowSerde;
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
-pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
+pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq + Send + Sync {
     /// Returns the [`DatumRef`] at the given `index`.
     fn datum_at(&self, index: usize) -> DatumRef<'_>;
 
@@ -186,17 +186,18 @@ pub trait RowExt: Row {
         assert_row(Slice::new(self, range))
     }
 
+    /// Returns a displayable wrapper for the row.
     fn display(&self) -> impl Display + '_ {
         struct D<'a, T: Row>(&'a T);
         impl<T: Row> Display for D<'_, T> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(
                     f,
-                    "{}",
-                    self.0.iter().format_with(" | ", |datum, f| {
+                    "[{}]",
+                    self.0.iter().format_with(", ", |datum, f| {
                         match datum {
                             None => f(&"NULL"),
-                            Some(scalar) => f(&format_args!("{}", scalar.to_text())),
+                            Some(scalar) => f(&scalar.text_display()),
                         }
                     })
                 )

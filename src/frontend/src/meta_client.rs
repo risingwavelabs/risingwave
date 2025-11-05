@@ -38,8 +38,8 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus, RefreshRequest,
-    RefreshResponse,
+    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
+    RefreshRequest, RefreshResponse,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
@@ -132,6 +132,12 @@ pub trait FrontendMetaClient: Send + Sync {
         rate_limit: Option<u32>,
     ) -> Result<()>;
 
+    async fn alter_fragment_parallelism(
+        &self,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
+    ) -> Result<()>;
+
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
@@ -181,6 +187,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
+
+    fn cluster_id(&self) -> &str;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -353,6 +361,16 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .map(|_| ())
     }
 
+    async fn alter_fragment_parallelism(
+        &self,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
+    ) -> Result<()> {
+        self.0
+            .alter_fragment_parallelism(fragment_ids, parallelism)
+            .await
+    }
+
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
         self.0.get_cluster_recovery_status().await
     }
@@ -454,5 +472,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.0.refresh(request).await
+    }
+
+    fn cluster_id(&self) -> &str {
+        self.0.cluster_id()
     }
 }

@@ -37,7 +37,7 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common::{DATA_DIRECTORY, GIT_SHA, RW_VERSION, STATE_STORE_URL};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::iceberg::GLOBAL_ICEBERG_SCAN_METRICS;
@@ -131,7 +131,7 @@ pub async fn compute_node_serve(
             internal_rpc_host_addr: "".to_owned(),
             resource_group: Some(opts.resource_group.clone()),
         },
-        &config.meta,
+        Arc::new(config.meta.clone()),
     )
     .await;
     // TODO(shutdown): remove this as there's no need to gracefully shutdown the sub-tasks.
@@ -142,6 +142,7 @@ pub async fn compute_node_serve(
     ));
 
     let state_store_url = system_params.state_store();
+    let data_directory = system_params.data_directory();
 
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
@@ -207,7 +208,23 @@ pub async fn compute_node_serve(
             .build()
             .ok(),
     };
+    // Store the state_store_url in a static OnceLock for later use in JNI crate
+    // Check the return value and if the variable is set, assert that the value is the same.
+    if let Err(existing_url) = STATE_STORE_URL.set(state_store_url.to_owned()) {
+        assert_eq!(
+            existing_url, state_store_url,
+            "STATE_STORE_URL already set with different value"
+        );
+    }
 
+    // Store the data_directory in a static OnceLock for later use in JNI crate
+    // To be extra safe, check the return value and if the variable is set, assert that the value is the same
+    if let Err(existing_dir) = DATA_DIRECTORY.set(data_directory.to_owned()) {
+        assert_eq!(
+            existing_dir, data_directory,
+            "DATA_DIRECTORY already set with different value"
+        );
+    }
     LicenseManager::get().refresh(system_params.license_key());
     let state_store = Box::pin(StateStoreImpl::new(
         state_store_url,
@@ -267,7 +284,7 @@ pub async fn compute_node_serve(
                 compactor_context,
                 hummock_meta_client.clone(),
                 storage.object_id_manager().clone(),
-                storage.compaction_catalog_manager_ref().clone(),
+                storage.compaction_catalog_manager_ref(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }

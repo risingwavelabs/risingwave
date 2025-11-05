@@ -41,6 +41,15 @@ IcebergConnection:
   - name: azblob.endpoint_url
     field_type: String
     required: false
+  - name: adlsgen2.account_name
+    field_type: String
+    required: false
+  - name: adlsgen2.account_key
+    field_type: String
+    required: false
+  - name: adlsgen2.endpoint
+    field_type: String
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
@@ -48,7 +57,7 @@ IcebergConnection:
   - name: glue.id
     field_type: String
     comments: |-
-      Catalog id, can be omitted for storage catalog or when
+      AWS Client id, can be omitted for storage catalog or when
       caller's AWS account ID matches glue id
     required: false
   - name: catalog.name
@@ -100,12 +109,6 @@ IcebergConnection:
     field_type: bool
     required: false
     default: Default::default
-  - name: catalog.jdbc.user
-    field_type: String
-    required: false
-  - name: catalog.jdbc.password
-    field_type: String
-    required: false
   - name: enable_config_load
     field_type: bool
     comments: Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
@@ -125,6 +128,17 @@ IcebergConnection:
       explain the format of the header:
       - Each header is a key-value pair, separated by an '='.
       - Multiple headers can be specified, separated by a ';'.
+    required: false
+  - name: vended_credentials
+    field_type: bool
+    comments: Enable vended credentials for iceberg REST catalog.
+    required: false
+    default: Default::default
+  - name: catalog.jdbc.user
+    field_type: String
+    required: false
+  - name: catalog.jdbc.password
+    field_type: String
     required: false
 KafkaConnection:
   fields:

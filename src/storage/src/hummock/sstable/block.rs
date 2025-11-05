@@ -520,7 +520,7 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
-        let input_table_id = full_key.user_key.table_id.table_id();
+        let input_table_id = full_key.user_key.table_id.as_raw_id();
         match self.table_id {
             Some(current_table_id) => assert_eq!(current_table_id, input_table_id),
             None => self.table_id = Some(input_table_id),
@@ -559,7 +559,7 @@ impl BlockBuilder {
             true
         };
 
-        let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
+        let diff_key = if self.entry_count.is_multiple_of(self.restart_count) || type_mismatch {
             let offset = utils::checked_into_u32(self.buf.len()).unwrap_or_else(|_| {
                 panic!(
                     "WARN overflow can't convert buf_len {} into u32 table {:?}",

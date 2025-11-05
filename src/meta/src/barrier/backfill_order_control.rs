@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use risingwave_common::catalog::FragmentTypeFlag;
+use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 
 use crate::model::{FragmentId, StreamJobFragments};
 
@@ -45,6 +45,8 @@ pub struct BackfillOrderState {
     remaining_backfill_nodes: HashMap<FragmentId, BackfillNode>,
     // The mapping between actors and fragment_ids
     actor_to_fragment_id: HashMap<ActorId, FragmentId>,
+    // The mapping between fragment_ids and table_ids of locality provider fragments
+    locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
 }
 
 /// Get nodes with some dependencies.
@@ -60,6 +62,7 @@ impl BackfillOrderState {
     pub fn new(
         backfill_orders: HashMap<FragmentId, Vec<FragmentId>>,
         stream_job_fragments: &StreamJobFragments,
+        locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> Self {
         tracing::debug!(?backfill_orders, "initialize backfill order state");
         let actor_to_fragment_id = stream_job_fragments.actor_fragment_mapping();
@@ -67,10 +70,11 @@ impl BackfillOrderState {
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
         for fragment in stream_job_fragments.fragments() {
-            if fragment
-                .fragment_type_mask
-                .contains_any([FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan])
-            {
+            if fragment.fragment_type_mask.contains_any([
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::LocalityProvider,
+            ]) {
                 let fragment_id = fragment.fragment_id;
                 backfill_nodes.insert(
                     fragment_id,
@@ -112,6 +116,7 @@ impl BackfillOrderState {
             current_backfill_nodes,
             remaining_backfill_nodes,
             actor_to_fragment_id,
+            locality_fragment_state_table_mapping,
         }
     }
 }
@@ -193,5 +198,13 @@ impl BackfillOrderState {
             return vec![];
         }
         newly_scheduled
+    }
+
+    pub fn current_backfill_node_fragment_ids(&self) -> Vec<FragmentId> {
+        self.current_backfill_nodes.keys().copied().collect()
+    }
+
+    pub fn get_locality_fragment_state_table_mapping(&self) -> &HashMap<FragmentId, Vec<TableId>> {
+        &self.locality_fragment_state_table_mapping
     }
 }

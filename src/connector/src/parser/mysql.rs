@@ -117,7 +117,6 @@ pub fn mysql_datum_to_rw_datum(
             // before https://github.com/risingwavelabs/risingwave/pull/19071
             // we permit boolean and tinyint(1) to be equivalent to boolean in RW.
             if let Some(Ok(val)) = mysql_row.get_opt::<Option<bool>, _>(mysql_datum_index) {
-                let _ = mysql_row.take::<bool, _>(mysql_datum_index);
                 return Ok(val.map(ScalarImpl::from));
             }
             // Bit(1)
@@ -135,7 +134,7 @@ pub fn mysql_datum_to_rw_datum(
                         _ => Err(anyhow!("invalid value for boolean: {:?}", val)),
                     },
                 },
-                Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                Some(Err(e)) => Err(anyhow::Error::new(e)
                     .context("failed to deserialize MySQL value into rust value")
                     .context(format!(
                         "column: {}, index: {}, rust_type: Vec<u8>",
@@ -201,7 +200,7 @@ pub fn mysql_datum_to_rw_datum(
                 Some(Ok(val)) => Ok(val.map(|v| {
                     ScalarImpl::from(Timestamptz::from_micros(v.and_utc().timestamp_micros()))
                 })),
-                Some(Err(err)) => Err(anyhow::Error::new(err.clone())
+                Some(Err(err)) => Err(anyhow::Error::new(err)
                     .context("failed to deserialize MySQL value into rust value")
                     .context(format!(
                         "column: {}, index: {}, rust_type: chrono::NaiveDateTime",
@@ -216,7 +215,7 @@ pub fn mysql_datum_to_rw_datum(
                 mysql_datum_index
             ),
             Some(Ok(val)) => Ok(val.map(ScalarImpl::from)),
-            Some(Err(err)) => Err(anyhow::Error::new(err.clone())
+            Some(Err(err)) => Err(anyhow::Error::new(err)
                 .context("failed to deserialize MySQL value into rust value")
                 .context(format!(
                     "column: {}, index: {}, rust_type: Vec<u8>",

@@ -62,7 +62,7 @@ fn fetch_schema_info(
         .into());
     };
     let (source_def, _) =
-        reader.get_source_by_id(db_name.as_str(), schema_path, &source_id.table_id())?;
+        reader.get_source_by_id(db_name.as_str(), schema_path, &source_id.as_raw_id())?;
     Ok((table_def.clone(), source_def.clone()))
 }
 
@@ -128,10 +128,10 @@ fn rewrite_table_definition(
         or_replace,
         temporary,
         if_not_exists,
-        name: name.clone(),
+        name,
         columns: columns.clone(),
         wildcard_idx,
-        constraints: constraints.clone(),
+        constraints,
         with_options: {
             with_options.retain(|item| {
                 TABLE_PROPS.contains(item.name.real_value().to_lowercase().as_str())

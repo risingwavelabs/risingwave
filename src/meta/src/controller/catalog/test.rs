@@ -18,8 +18,8 @@ mod tests {
 
     use crate::controller::catalog::*;
 
-    const TEST_DATABASE_ID: DatabaseId = 1;
-    const TEST_SCHEMA_ID: SchemaId = 2;
+    const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
+    const TEST_SCHEMA_ID: SchemaId = SchemaId::new(2);
     const TEST_OWNER_ID: UserId = 1;
 
     #[tokio::test]
@@ -41,7 +41,7 @@ mod tests {
             .await?
             .unwrap();
 
-        mgr.alter_name(ObjectType::Database, database_id, "db2")
+        mgr.alter_name(ObjectType::Database, database_id.as_raw_id() as _, "db2")
             .await?;
         let database = Database::find_by_id(database_id)
             .one(&mgr.inner.read().await.db)
@@ -49,8 +49,12 @@ mod tests {
             .unwrap();
         assert_eq!(database.name, "db2");
 
-        mgr.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
-            .await?;
+        mgr.drop_object(
+            ObjectType::Database,
+            database_id.as_raw_id() as _,
+            DropMode::Cascade,
+        )
+        .await?;
 
         Ok(())
     }
@@ -59,7 +63,7 @@ mod tests {
     async fn test_schema_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_schema = PbSchema {
-            database_id: TEST_DATABASE_ID as _,
+            database_id: TEST_DATABASE_ID.as_raw_id() as _,
             name: "schema1".to_owned(),
             owner: TEST_OWNER_ID as _,
             ..Default::default()
@@ -76,15 +80,19 @@ mod tests {
             .await?
             .unwrap();
 
-        mgr.alter_name(ObjectType::Schema, schema_id, "schema2")
+        mgr.alter_name(ObjectType::Schema, schema_id.as_raw_id() as _, "schema2")
             .await?;
         let schema = Schema::find_by_id(schema_id)
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
         assert_eq!(schema.name, "schema2");
-        mgr.drop_object(ObjectType::Schema, schema_id, DropMode::Restrict)
-            .await?;
+        mgr.drop_object(
+            ObjectType::Schema,
+            schema_id.as_raw_id() as _,
+            DropMode::Restrict,
+        )
+        .await?;
 
         Ok(())
     }
@@ -93,8 +101,8 @@ mod tests {
     async fn test_create_view() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_view = PbView {
-            schema_id: TEST_SCHEMA_ID as _,
-            database_id: TEST_DATABASE_ID as _,
+            schema_id: TEST_SCHEMA_ID.as_raw_id() as _,
+            database_id: TEST_DATABASE_ID.as_raw_id() as _,
             name: "view".to_owned(),
             owner: TEST_OWNER_ID as _,
             sql: "CREATE VIEW view AS SELECT 1".to_owned(),
@@ -125,8 +133,8 @@ mod tests {
         };
         let arg_types = vec![test_data_type.clone()];
         let pb_function = PbFunction {
-            schema_id: TEST_SCHEMA_ID as _,
-            database_id: TEST_DATABASE_ID as _,
+            schema_id: TEST_SCHEMA_ID.as_raw_id() as _,
+            database_id: TEST_DATABASE_ID.as_raw_id() as _,
             name: "test_function".to_owned(),
             owner: TEST_OWNER_ID as _,
             arg_types,
@@ -175,8 +183,8 @@ mod tests {
     async fn test_alter_relation_rename() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_source = PbSource {
-            schema_id: TEST_SCHEMA_ID as _,
-            database_id: TEST_DATABASE_ID as _,
+            schema_id: TEST_SCHEMA_ID.as_raw_id() as _,
+            database_id: TEST_DATABASE_ID.as_raw_id() as _,
             name: "s1".to_owned(),
             owner: TEST_OWNER_ID as _,
             definition: r#"CREATE SOURCE s1 (v1 int) with (
@@ -202,8 +210,8 @@ mod tests {
             .unwrap();
 
         let pb_view = PbView {
-            schema_id: TEST_SCHEMA_ID as _,
-            database_id: TEST_DATABASE_ID as _,
+            schema_id: TEST_SCHEMA_ID.as_raw_id() as _,
+            database_id: TEST_DATABASE_ID.as_raw_id() as _,
             name: "view_1".to_owned(),
             owner: TEST_OWNER_ID as _,
             sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_owned(),

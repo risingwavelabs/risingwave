@@ -58,6 +58,78 @@ pub fn rtrim_characters(s: &str, characters: &str, writer: &mut impl Write) {
     writer.write_str(s.trim_end_matches(pattern)).unwrap();
 }
 
+fn trim_bound(bytes: &[u8], bytesremoved: &[u8]) -> (usize, usize) {
+    let existed = |b: &u8| bytesremoved.contains(b);
+
+    let start = bytes
+        .iter()
+        .position(|b| !existed(b))
+        .unwrap_or(bytes.len());
+
+    let end = bytes
+        .iter()
+        .rposition(|b| !existed(b))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+
+    (start, end)
+}
+
+///  Removes the longest string containing only bytes appearing in bytesremoved from the start,
+///  end, or both ends (BOTH is the default) of bytes.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT trim('\x9012'::bytea from '\x1234567890'::bytea);
+/// ----
+/// \x345678
+/// ```
+#[function("trim(bytea, bytea) -> bytea")]
+pub fn trim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+    let (start, end) = trim_bound(bytes, bytesremoved);
+
+    bytes
+        .get(start..end)
+        .map(|s| s.iter().copied().collect())
+        .unwrap_or_else(|| Box::<[u8]>::from([]))
+}
+
+/// Removes the longest string containing only bytes appearing in bytesremoved
+/// from the start of bytes.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT ltrim('\x1234567890'::bytea, '\x9012'::bytea);
+/// ----
+/// \x34567890
+/// ```
+#[function("ltrim(bytea, bytea) -> bytea")]
+pub fn ltrim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+    let (start, _) = trim_bound(bytes, bytesremoved);
+    bytes[start..].iter().copied().collect()
+}
+
+/// Removes the longest string containing only bytes appearing in bytesremoved
+/// from the end of bytes.
+///
+/// # Example
+///
+/// ```slt
+/// query T
+/// SELECT rtrim('\x1234567890'::bytea, '\x9012'::bytea);
+/// ----
+/// \x12345678
+/// ```
+#[function("rtrim(bytea, bytea) -> bytea")]
+pub fn rtrim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+    let (_, end) = trim_bound(bytes, bytesremoved);
+    bytes[..end].iter().copied().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

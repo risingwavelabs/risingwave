@@ -35,6 +35,7 @@ use pgwire::pg_server::{
     UserAuthenticator,
 };
 use pgwire::types::{Format, FormatIterator};
+use prometheus_http_query::Client as PrometheusClient;
 use rand::RngCore;
 use risingwave_batch::monitor::{BatchSpillMetrics, GLOBAL_BATCH_SPILL_METRICS};
 use risingwave_batch::spill::spill_op::SpillOp;
@@ -48,7 +49,8 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{
-    BatchConfig, FrontendConfig, MetaConfig, MetricLevel, StreamingConfig, UdfConfig, load_config,
+    AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
+    StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
@@ -81,13 +83,13 @@ use risingwave_rpc_client::{
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tracing::info;
-use tracing::log::error;
+use tracing::{error, info};
 
 use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
@@ -185,6 +187,12 @@ pub(crate) struct FrontendEnv {
 
     /// address of the serverless backfill controller.
     serverless_backfill_controller_addr: String,
+
+    /// Prometheus client for querying metrics.
+    prometheus_client: Option<PrometheusClient>,
+
+    /// The additional selector used when querying Prometheus.
+    prometheus_selector: String,
 }
 
 /// Session map identified by `(process_id, secret_key)`
@@ -254,7 +262,7 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             frontend_client_pool,
-            sessions_map: sessions_map.clone(),
+            sessions_map,
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
             batch_config: BatchConfig::default(),
@@ -268,6 +276,8 @@ impl FrontendEnv {
             compute_runtime,
             mem_context: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
+            prometheus_client: None,
+            prometheus_selector: String::new(),
         }
     }
 
@@ -307,7 +317,7 @@ impl FrontendEnv {
                 internal_rpc_host_addr: internal_rpc_host_addr.to_string(),
                 ..Default::default()
             },
-            &config.meta,
+            Arc::new(config.meta.clone()),
         )
         .await;
 
@@ -486,6 +496,28 @@ impl FrontendEnv {
             batch_memory_limit as u64,
         );
 
+        // Initialize Prometheus client if endpoint is provided
+        let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
+            match PrometheusClient::try_from(endpoint.as_str()) {
+                Ok(client) => {
+                    info!("Prometheus client initialized with endpoint: {}", endpoint);
+                    Some(client)
+                }
+                Err(e) => {
+                    error!(
+                        error = %e.as_report(),
+                        "failed to initialize Prometheus client",
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Initialize Prometheus selector
+        let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
+
         info!(
             "Frontend  total_memory: {} batch_memory: {}",
             convert(total_memory_bytes as _),
@@ -521,6 +553,8 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                prometheus_client,
+                prometheus_selector,
             },
             join_handles,
             shutdown_senders,
@@ -583,6 +617,16 @@ impl FrontendEnv {
 
     pub fn sbc_address(&self) -> &String {
         &self.serverless_backfill_controller_addr
+    }
+
+    /// Get a reference to the Prometheus client if available.
+    pub fn prometheus_client(&self) -> Option<&PrometheusClient> {
+        self.prometheus_client.as_ref()
+    }
+
+    /// Get the Prometheus selector string.
+    pub fn prometheus_selector(&self) -> &str {
+        &self.prometheus_selector
     }
 
     pub fn server_address(&self) -> &HostAddr {
@@ -705,6 +749,9 @@ pub struct SessionImpl {
 
     /// temporary sources for the current session
     temporary_source_manager: Arc<Mutex<TemporarySourceManager>>,
+
+    /// staging catalogs for the current session
+    staging_catalog_manager: Arc<Mutex<StagingCatalogManager>>,
 }
 
 /// If TEMPORARY or TEMP is specified, the source is created as a temporary source.
@@ -741,6 +788,33 @@ impl TemporarySourceManager {
 
     pub fn keys(&self) -> Vec<String> {
         self.sources.keys().cloned().collect()
+    }
+}
+
+/// Staging catalog manager is used to manage the tables creating in the current session.
+#[derive(Default, Clone)]
+pub struct StagingCatalogManager {
+    // staging tables creating in the current session.
+    tables: HashMap<String, TableCatalog>,
+}
+
+impl StagingCatalogManager {
+    pub fn new() -> Self {
+        Self {
+            tables: HashMap::new(),
+        }
+    }
+
+    pub fn create_table(&mut self, name: String, table: TableCatalog) {
+        self.tables.insert(name, table);
+    }
+
+    pub fn drop_table(&mut self, name: &str) {
+        self.tables.remove(name);
+    }
+
+    pub fn get_table(&self, name: &str) -> Option<&TableCatalog> {
+        self.tables.get(name)
     }
 }
 
@@ -788,6 +862,7 @@ impl SessionImpl {
             last_idle_instant: Default::default(),
             cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
             temporary_source_manager: Default::default(),
+            staging_catalog_manager: Default::default(),
         }
     }
 
@@ -818,8 +893,9 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
+            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics)),
             temporary_source_manager: Default::default(),
+            staging_catalog_manager: Default::default(),
         }
     }
 
@@ -1041,7 +1117,7 @@ impl SessionImpl {
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         if catalog_reader
-            .get_schema_by_id(&database_id, &schema_id)?
+            .get_schema_by_id(database_id, schema_id)?
             .get_function_by_name_args(&function_name, arg_types)
             .is_some()
         {
@@ -1088,7 +1164,7 @@ impl SessionImpl {
             schema.owner(),
             AclMode::Create,
             schema_name,
-            Object::SchemaId(schema.id()),
+            schema.id(),
         )])?;
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
@@ -1128,7 +1204,7 @@ impl SessionImpl {
 
         let catalog_reader = self.env().catalog_reader().read_guard();
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        let schema = catalog_reader.get_schema_by_id(&db_id, &schema_id)?;
+        let schema = catalog_reader.get_schema_by_id(db_id, schema_id)?;
         let subscription = schema
             .get_subscription_by_name(subscription_name)
             .ok_or_else(|| {
@@ -1164,12 +1240,12 @@ impl SessionImpl {
     pub fn get_table_by_name(
         &self,
         table_name: &str,
-        db_id: u32,
-        schema_id: u32,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
     ) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
         let table = catalog_reader
-            .get_schema_by_id(&DatabaseId::from(db_id), &SchemaId::from(schema_id))?
+            .get_schema_by_id(db_id, schema_id)?
             .get_created_table_by_name(table_name)
             .ok_or_else(|| {
                 Error::new(
@@ -1182,7 +1258,7 @@ impl SessionImpl {
             table.owner(),
             AclMode::Select,
             table_name.to_owned(),
-            Object::TableId(table.id.table_id()),
+            table.id,
         )])?;
 
         Ok(table.clone())
@@ -1213,7 +1289,7 @@ impl SessionImpl {
 
     pub fn list_change_log_epochs(
         &self,
-        table_id: u32,
+        table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
@@ -1324,6 +1400,20 @@ impl SessionImpl {
         self.temporary_source_manager.lock().clone()
     }
 
+    pub fn create_staging_table(&self, table: TableCatalog) {
+        self.staging_catalog_manager
+            .lock()
+            .create_table(table.name.clone(), table);
+    }
+
+    pub fn drop_staging_table(&self, name: &str) {
+        self.staging_catalog_manager.lock().drop_table(name);
+    }
+
+    pub fn staging_catalog_manager(&self) -> StagingCatalogManager {
+        self.staging_catalog_manager.lock().clone()
+    }
+
     pub async fn check_cluster_limits(&self) -> Result<()> {
         if self.config().bypass_cluster_limits() {
             return Ok(());
@@ -1395,7 +1485,7 @@ impl SessionManager for SessionManagerImpl {
 
     fn create_dummy_session(
         &self,
-        database_id: u32,
+        database_id: DatabaseId,
         user_id: u32,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let dummy_addr = Address::Tcp(SocketAddr::new(
@@ -1498,14 +1588,14 @@ impl SessionManagerImpl {
 
     fn connect_inner(
         &self,
-        database_id: u32,
+        database_id: DatabaseId,
         user_name: &str,
         peer_addr: AddressRef,
     ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
         let (database_name, database_owner) = {
-            let db = reader.get_database_by_id(&database_id).map_err(|_| {
+            let db = reader.get_database_by_id(database_id).map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("database \"{}\" does not exist", database_id),
@@ -1523,38 +1613,102 @@ impl SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let has_privilege =
-                user.has_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
+            let has_privilege = user.has_privilege(database_id, AclMode::Connect);
             if !user.is_super && database_owner != user.id && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
                     "User does not have CONNECT privilege.",
                 )));
             }
-            let user_authenticator = match &user.auth_info {
-                None => UserAuthenticator::None,
-                Some(auth_info) => {
-                    if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
-                        UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
-                    } else if auth_info.encryption_type == EncryptionType::Md5 as i32 {
-                        let mut salt = [0; 4];
-                        let mut rng = rand::rng();
-                        rng.fill_bytes(&mut salt);
-                        UserAuthenticator::Md5WithSalt {
-                            encrypted_password: md5_hash_with_salt(
-                                &auth_info.encrypted_value,
-                                &salt,
-                            ),
-                            salt,
+
+            // Check HBA configuration for LDAP authentication
+            let (connection_type, client_addr) = match peer_addr.as_ref() {
+                Address::Tcp(socket_addr) => (ConnectionType::Host, Some(&socket_addr.ip())),
+                Address::Unix(_) => (ConnectionType::Local, None),
+            };
+            tracing::debug!(
+                "receive connection: type={:?}, client_addr={:?}",
+                connection_type,
+                client_addr
+            );
+
+            let hba_entry_opt = self.env.frontend_config().hba_config.find_matching_entry(
+                &connection_type,
+                database_name,
+                user_name,
+                client_addr,
+            );
+
+            // TODO: adding `FATAL` message support for no matching HBA entry.
+            let Some(hba_entry_opt) = hba_entry_opt else {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    format!(
+                        "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
+                    ),
+                )));
+            };
+
+            // Determine the user authenticator based on the user's auth info.
+            let authenticator_by_info = || -> std::result::Result<UserAuthenticator, BoxedError> {
+                let authenticator = match &user.auth_info {
+                    None => UserAuthenticator::None,
+                    Some(auth_info) => match auth_info.encryption_type() {
+                        EncryptionType::Plaintext => {
+                            UserAuthenticator::ClearText(auth_info.encrypted_value.clone())
                         }
-                    } else if auth_info.encryption_type == EncryptionType::Oauth as i32 {
-                        UserAuthenticator::OAuth(auth_info.metadata.clone())
-                    } else {
-                        return Err(Box::new(Error::new(
-                            ErrorKind::Unsupported,
-                            format!("Unsupported auth type: {}", auth_info.encryption_type),
-                        )));
-                    }
+                        EncryptionType::Md5 => {
+                            let mut salt = [0; 4];
+                            let mut rng = rand::rng();
+                            rng.fill_bytes(&mut salt);
+                            UserAuthenticator::Md5WithSalt {
+                                encrypted_password: md5_hash_with_salt(
+                                    &auth_info.encrypted_value,
+                                    &salt,
+                                ),
+                                salt,
+                            }
+                        }
+                        EncryptionType::Oauth => UserAuthenticator::OAuth {
+                            metadata: auth_info.metadata.clone(),
+                            cluster_id: self.env.meta_client().cluster_id().to_owned(),
+                        },
+                        _ => {
+                            return Err(Box::new(Error::new(
+                                ErrorKind::Unsupported,
+                                format!(
+                                    "Unsupported auth type: {}",
+                                    auth_info.encryption_type().as_str_name()
+                                ),
+                            )));
+                        }
+                    },
+                };
+                Ok(authenticator)
+            };
+
+            let user_authenticator = match (&hba_entry_opt.auth_method, &user.auth_info) {
+                (AuthMethod::Trust, _) => UserAuthenticator::None,
+                // For backward compatibility, we allow password auth method to work with any auth info.
+                (AuthMethod::Password, _) => authenticator_by_info()?,
+                (AuthMethod::Md5, Some(auth_info))
+                    if auth_info.encryption_type() == EncryptionType::Md5 =>
+                {
+                    authenticator_by_info()?
+                }
+                (AuthMethod::OAuth, Some(auth_info))
+                    if auth_info.encryption_type() == EncryptionType::Oauth =>
+                {
+                    authenticator_by_info()?
+                }
+                (AuthMethod::Ldap, _) => {
+                    UserAuthenticator::Ldap(user_name.to_owned(), hba_entry_opt.clone())
+                }
+                _ => {
+                    return Err(Box::new(Error::new(
+                        ErrorKind::PermissionDenied,
+                        format!("password authentication failed for user \"{user_name}\""),
+                    )));
                 }
             };
 

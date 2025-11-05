@@ -177,7 +177,7 @@ impl SchemaCatalog {
             self.indexes_by_table_id.remove(&table_ref.id);
         } else {
             tracing::warn!(
-                id = ?id.table_id,
+                %id,
                 "table not found when dropping, frontend might not be notified yet"
             );
         }
@@ -567,9 +567,7 @@ impl SchemaCatalog {
         self.secret_by_id
             .try_insert(id, secret_ref.clone())
             .unwrap();
-        self.secret_by_name
-            .try_insert(name, secret_ref.clone())
-            .unwrap();
+        self.secret_by_name.try_insert(name, secret_ref).unwrap();
     }
 
     pub fn update_secret(&mut self, prost: &PbSecret) {
@@ -613,9 +611,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name.values().filter(|v| {
-            v.is_user_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
-        })
+        self.table_by_name
+            .values()
+            .filter(|v| v.is_user_table() && has_access_to_object(user, v.id.as_raw_id(), v.owner))
     }
 
     pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
@@ -629,7 +627,7 @@ impl SchemaCatalog {
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name.values().filter(|v| {
-            v.is_internal_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+            v.is_internal_table() && has_access_to_object(user, v.id.as_raw_id(), v.owner)
         })
     }
 
@@ -645,7 +643,7 @@ impl SchemaCatalog {
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name.values().filter(|v| {
-            !v.is_internal_table() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+            !v.is_internal_table() && has_access_to_object(user, v.id.as_raw_id(), v.owner)
         })
     }
 
@@ -658,9 +656,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name.values().filter(|v| {
-            v.is_mview() && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
-        })
+        self.table_by_name
+            .values()
+            .filter(|v| v.is_mview() && has_access_to_object(user, v.id.as_raw_id(), v.owner))
     }
 
     /// Iterate created materialized views, excluding the indices.
@@ -675,9 +673,7 @@ impl SchemaCatalog {
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name.values().filter(|v| {
-            v.is_mview()
-                && v.is_created()
-                && has_access_to_object(user, &self.name, v.id.table_id, v.owner)
+            v.is_mview() && v.is_created() && has_access_to_object(user, v.id.as_raw_id(), v.owner)
         })
     }
 
@@ -692,7 +688,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<IndexCatalog>> {
         self.index_by_name
             .values()
-            .filter(|idx| has_access_to_object(user, &self.name, idx.id.index_id, idx.owner()))
+            .filter(|idx| has_access_to_object(user, idx.id.index_id, idx.owner()))
     }
 
     /// Iterate all sources
@@ -706,7 +702,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SourceCatalog>> {
         self.source_by_name
             .values()
-            .filter(|s| has_access_to_object(user, &self.name, s.id, s.owner))
+            .filter(|s| has_access_to_object(user, s.id, s.owner))
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
@@ -719,7 +715,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SinkCatalog>> {
         self.sink_by_name
             .values()
-            .filter(|s| has_access_to_object(user, &self.name, s.id.sink_id, s.owner.user_id))
+            .filter(|s| has_access_to_object(user, s.id.sink_id, s.owner.user_id))
     }
 
     pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
@@ -730,9 +726,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<SubscriptionCatalog>> {
-        self.subscription_by_name.values().filter(|s| {
-            has_access_to_object(user, &self.name, s.id.subscription_id, s.owner.user_id)
-        })
+        self.subscription_by_name
+            .values()
+            .filter(|s| has_access_to_object(user, s.id.subscription_id, s.owner.user_id))
     }
 
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
@@ -745,19 +741,47 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<ViewCatalog>> {
         self.view_by_name
             .values()
-            .filter(|v| v.is_system_view() || has_access_to_object(user, &self.name, v.id, v.owner))
+            .filter(|v| v.is_system_view() || has_access_to_object(user, v.id, v.owner))
     }
 
     pub fn iter_function(&self) -> impl Iterator<Item = &Arc<FunctionCatalog>> {
         self.function_by_name.values().flat_map(|v| v.values())
     }
 
+    pub fn iter_function_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<FunctionCatalog>> {
+        self.function_by_name
+            .values()
+            .flat_map(|v| v.values())
+            .filter(|f| has_access_to_object(user, f.id.function_id(), f.owner))
+    }
+
     pub fn iter_connections(&self) -> impl Iterator<Item = &Arc<ConnectionCatalog>> {
         self.connection_by_name.values()
     }
 
+    pub fn iter_connections_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<ConnectionCatalog>> {
+        self.connection_by_name
+            .values()
+            .filter(|c| has_access_to_object(user, c.id, c.owner))
+    }
+
     pub fn iter_secret(&self) -> impl Iterator<Item = &Arc<SecretCatalog>> {
         self.secret_by_name.values()
+    }
+
+    pub fn iter_secret_with_acl<'a>(
+        &'a self,
+        user: &'a UserCatalog,
+    ) -> impl Iterator<Item = &'a Arc<SecretCatalog>> {
+        self.secret_by_name
+            .values()
+            .filter(|s| has_access_to_object(user, s.id.secret_id(), s.owner))
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &Arc<SystemTableCatalog>> {
@@ -1074,10 +1098,10 @@ impl OwnedByUserCatalog for SchemaCatalog {
 impl From<&PbSchema> for SchemaCatalog {
     fn from(schema: &PbSchema) -> Self {
         Self {
-            id: schema.id,
+            id: schema.id.into(),
             owner: schema.owner,
             name: schema.name.clone(),
-            database_id: schema.database_id,
+            database_id: schema.database_id.into(),
             table_by_name: HashMap::new(),
             table_by_id: HashMap::new(),
             source_by_name: HashMap::new(),

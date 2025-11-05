@@ -115,6 +115,7 @@ impl Strong {
             | ExprType::VecConcat
             | ExprType::L2Norm
             | ExprType::L2Normalize
+            | ExprType::Subvector
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
             // ALL: This kind of expression is null if and only if all of its arguments are null.
@@ -233,6 +234,11 @@ impl Strong {
             | ExprType::Sha256
             | ExprType::Sha384
             | ExprType::Sha512
+            | ExprType::GetBit
+            | ExprType::GetByte
+            | ExprType::SetBit
+            | ExprType::SetByte
+            | ExprType::BitCount
             | ExprType::Hmac
             | ExprType::SecureCompare
             | ExprType::Left
@@ -340,6 +346,7 @@ impl Strong {
             | ExprType::PgIsInRecovery
             | ExprType::PgTableIsVisible
             | ExprType::RwRecoveryStatus
+            | ExprType::RwClusterId
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
             | ExprType::HasFunctionPrivilege
