@@ -15,6 +15,7 @@
 use std::cmp::{Ordering, max, min};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering as AtomicOrdering;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
@@ -418,6 +419,10 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
+                        self.env
+                            .actor_id_generator()
+                            .store(0, AtomicOrdering::Relaxed);
+
                         self.resolve_database_info(None, &active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
