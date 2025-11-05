@@ -23,6 +23,7 @@ mod rw_description;
 mod rw_event_logs;
 mod rw_features;
 mod rw_fragment_parallelism;
+mod rw_fragment_vnodes;
 mod rw_fragments;
 mod rw_functions;
 mod rw_hummock_branched_objects;

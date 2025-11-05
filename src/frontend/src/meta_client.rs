@@ -31,6 +31,7 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_actor_vnodes_response::ActorVnodes;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
@@ -76,6 +77,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_creating_fragment_distribution(&self) -> Result<Vec<FragmentDistribution>>;
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
+
+    async fn list_actor_vnodes(&self) -> Result<Vec<ActorVnodes>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
 
@@ -236,6 +239,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         self.0.list_actor_states().await
+    }
+
+    async fn list_actor_vnodes(&self) -> Result<Vec<ActorVnodes>> {
+        Ok(self.0.list_actor_vnodes().await?.actor_vnodes)
     }
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {

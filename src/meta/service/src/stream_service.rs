@@ -386,6 +386,28 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListActorStatesResponse { states }))
     }
 
+    async fn list_actor_vnodes(
+        &self,
+        _request: Request<ListActorVnodesRequest>,
+    ) -> Result<Response<ListActorVnodesResponse>, Status> {
+        let guard = self.env.shared_actor_infos().read_guard();
+        let actor_vnodes = guard
+            .iter_over_fragments()
+            .flat_map(|(fragment_id, fragment)| {
+                fragment.actors.iter().filter_map(move |(actor_id, actor)| {
+                    actor.vnode_bitmap.as_ref().map(|bitmap| {
+                        list_actor_vnodes_response::ActorVnodes {
+                            actor_id: *actor_id,
+                            fragment_id: *fragment_id,
+                            vnode_bitmap: Some(bitmap.to_protobuf()),
+                        }
+                    })
+                })
+            })
+            .collect_vec();
+        Ok(Response::new(ListActorVnodesResponse { actor_vnodes }))
+    }
+
     async fn list_object_dependencies(
         &self,
         _request: Request<ListObjectDependenciesRequest>,
