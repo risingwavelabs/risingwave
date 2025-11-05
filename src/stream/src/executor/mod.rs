@@ -55,13 +55,14 @@ use risingwave_pb::stream_plan::{
 };
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
 
 use crate::error::StreamResult;
 use crate::executor::exchange::input::{
     BoxedActorInput, BoxedInput, apply_dispatcher_barrier, assert_equal_dispatcher_barrier,
     new_input,
 };
+use crate::executor::monitor::ActorInputMetrics;
 use crate::executor::prelude::StreamingMetrics;
 use crate::executor::watermark::BufferedWatermarks;
 use crate::task::{ActorId, FragmentId, LocalBarrierManager};
@@ -1734,18 +1735,34 @@ impl DispatchBarrierBuffer {
     pub async fn await_next_message(
         &mut self,
         stream: &mut (impl Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin),
+        metrics: &ActorInputMetrics,
     ) -> StreamExecutorResult<DispatcherMessage> {
-        tokio::select! {
-            biased;
+        let mut start_time = Instant::now();
+        let interval_duration = Duration::from_secs(15);
+        let mut interval =
+            tokio::time::interval_at(start_time + interval_duration, interval_duration);
 
-            msg = stream.try_next() => {
-                msg?.ok_or_else(
-                    || StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
-                )
-            }
+        loop {
+            tokio::select! {
+                biased;
+                msg = stream.try_next() => {
+                    metrics
+                        .actor_input_buffer_blocking_duration_ns
+                        .inc_by(start_time.elapsed().as_nanos() as u64);
+                    return msg?.ok_or_else(
+                        || StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
+                    );
+                }
 
-            e = self.continuously_fetch_barrier_rx() => {
-                Err(e)
+                e = self.continuously_fetch_barrier_rx() => {
+                    return Err(e);
+                }
+
+                _ = interval.tick() => {
+                    start_time = Instant::now();
+                    metrics.actor_input_buffer_blocking_duration_ns.inc_by(interval_duration.as_nanos() as u64);
+                    continue;
+                }
             }
         }
     }

@@ -201,9 +201,48 @@ def _(outer_panels: Panels):
                 "Actor Input Blocking Time Ratio",
                 "",
                 [
+                    # The metrics might be pre-aggregated locally on each compute node when `actor_id` is masked due to metrics level settings.
+                    # Thus to calculate the average, we need to manually divide the actor count.
                     panels.target(
-                        f"avg(rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, upstream_fragment_id) / 1000000000",
+                        f"sum(rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, upstream_fragment_id) \
+                            / ignoring (upstream_fragment_id) group_left sum({metric('stream_actor_count')}) by (fragment_id) \
+                            / 1000000000",
                         "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
+                    ),
+                ],
+            ),
+            panels.subheader("Busy Rate"),
+            panels.timeseries_percentage(
+                "Actor Busy Rate",
+                "1 - output_blocking - input_blocking, clamped to 0%",
+                [
+                    panels.target(
+                        f"clamp_min( \
+                            1 \
+                            - ((sum(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id) \
+                                / sum({metric('stream_actor_count')}) by (fragment_id) / 1000000000) \
+                               or sum({metric('stream_actor_count')}) by (fragment_id) * 0) \
+                            - (sum(rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id) \
+                                / sum({metric('stream_actor_count')}) by (fragment_id) / 1000000000), \
+                            0)",
+                        "fragment {{fragment_id}}",
+                    ),
+                ],
+            ),
+            panels.timeseries_latency_ns(
+                "Actor Busy Time (Relative)",
+                "- (output_blocking time + input_blocking time) + max (output_blocking time + input_blocking time)",
+                [
+                    panels.target(
+                        f"- ((sum({metric('stream_actor_output_buffer_blocking_duration_ns')}) by (fragment_id) "
+                        f"    or sum({metric('stream_actor_count')}) by (fragment_id) * 0) "
+                        f"   + sum({metric('stream_actor_input_buffer_blocking_duration_ns')}) by (fragment_id)) "
+                        f"  + ignoring(fragment_id) group_left() max( "
+                        f"    (sum({metric('stream_actor_output_buffer_blocking_duration_ns')}) by (fragment_id) "
+                        f"      or sum({metric('stream_actor_count')}) by (fragment_id) * 0) "
+                        f"    + sum({metric('stream_actor_input_buffer_blocking_duration_ns')}) by (fragment_id) "
+                        f"  )",
+                        "fragment {{fragment_id}}",
                     ),
                 ],
             ),
