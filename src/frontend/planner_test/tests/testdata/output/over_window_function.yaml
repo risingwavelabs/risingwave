@@ -697,10 +697,11 @@
       └─BatchExchange { order: [], dist: HashShard(t.x) }
         └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [x], pk_columns: [x], pk_conflict: NoCheck }
-    └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
-      └─StreamExchange { dist: HashShard(t.x) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y], stream_key: [x], pk_columns: [x], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y] }
+      └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
+        └─StreamExchange { dist: HashShard(t.x) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN with intersected partition key and order key
   sql: |
     create table t (x int, y int, z int);
@@ -1093,9 +1094,10 @@
     StreamMaterialize { columns: [t1x, t2x, t1z, t2y, t2z, t._row_id(hidden)], stream_key: [t1x, t._row_id], pk_columns: [t1x, t._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.x, t._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t.x = t.x, output: [t.x, t.x, t.z, t.y, t.z, t._row_id] }
-        ├─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
-        │ └─StreamExchange { dist: HashShard(t.x) }
-        │   └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        ├─StreamProject { exprs: [t.x, t.y, t.z] }
+        │ └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
+        │   └─StreamExchange { dist: HashShard(t.x) }
+        │     └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard(t.x) }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: split calls with different ORDER BY or PARTITION BY

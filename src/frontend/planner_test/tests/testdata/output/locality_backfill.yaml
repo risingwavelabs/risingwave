@@ -125,11 +125,12 @@
         FROM t
     ) WHERE rank <= 1;
   stream_plan: |-
-    StreamMaterialize { columns: [a, b, c, t._row_id(hidden), rank], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [a, b, c, rank], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamLocalityProvider { locality_columns: [t.a] }
         └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.a) }
-          └─StreamGroupTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
-            └─StreamLocalityProvider { locality_columns: [t.a] }
-              └─StreamExchange { dist: HashShard(t.a) }
-                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamProject { exprs: [t.a, t.b, t.c] }
+            └─StreamGroupTopN { order: [t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
+              └─StreamLocalityProvider { locality_columns: [t.a] }
+                └─StreamExchange { dist: HashShard(t.a) }
+                  └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

@@ -3792,8 +3792,8 @@
                           └─BatchFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < '1995-01-01 00:00:00':Timestamp) }
                             └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), supplier.s_nationkey(hidden)], stream_key: [], pk_columns: [s_name], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [supplier.s_name, supplier.s_address, supplier.s_suppkey, supplier.s_nationkey] }
+    StreamMaterialize { columns: [s_name, s_address], stream_key: [], pk_columns: [s_name], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [supplier.s_name, supplier.s_address] }
       └─StreamTopN { order: [supplier.s_name ASC], limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [supplier.s_name ASC], limit: 1, offset: 0, group_key: [_vnode] }
@@ -3828,8 +3828,8 @@
                           └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], stream_scan_type: ArrangementBackfill, stream_key: [part.p_partkey], pk: [p_partkey], dist: UpstreamHashShard(part.p_partkey) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), supplier.s_nationkey(hidden)], stream_key: [], pk_columns: [s_name], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [supplier.s_name, supplier.s_address, supplier.s_suppkey, supplier.s_nationkey] }
+    StreamMaterialize { columns: [s_name, s_address], stream_key: [], pk_columns: [s_name], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [supplier.s_name, supplier.s_address] }
         └── StreamTopN { order: [supplier.s_name ASC], limit: 1, offset: 0 } { tables: [ TopN: 0 ] }
             └── StreamExchange Single from 1
 
@@ -3944,7 +3944,7 @@
 
     Table 23 { columns: [ vnode, p_partkey, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ s_name, s_address, supplier.s_suppkey, supplier.s_nationkey, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ s_name, s_address, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q21
   before:
