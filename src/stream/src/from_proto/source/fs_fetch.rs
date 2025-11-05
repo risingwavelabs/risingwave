@@ -60,7 +60,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             source_options_with_secret,
             source_info.clone(),
             params.env.config().developer.connector_message_buffer_size,
-            params.info.pk_indices.clone(),
+            params.info.stream_key.clone(),
         );
 
         let source_column_ids: Vec<_> = source_desc_builder

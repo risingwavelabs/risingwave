@@ -1019,6 +1019,23 @@ message LocalityProviderNode {
   optional catalog.Table progress_table = 3;
 }
 
+message EowcGapFillNode {
+  uint32 time_column_index = 1;
+  expr.ExprNode interval = 2;
+  repeated uint32 fill_columns = 3;
+  repeated string fill_strategies = 4;
+  catalog.Table buffer_table = 5;
+  catalog.Table prev_row_table = 6;
+}
+
+message GapFillNode {
+  uint32 time_column_index = 1;
+  expr.ExprNode interval = 2;
+  repeated uint32 fill_columns = 3;
+  repeated string fill_strategies = 4;
+  catalog.Table state_table = 5;
+}
+
 message StreamNode {
   // This field used to be a `bool append_only`.
   // Enum variants are ordered for backwards compatibility.
@@ -1082,6 +1099,8 @@ message StreamNode {
     VectorIndexWriteNode vector_index_write = 150;
     UpstreamSinkUnionNode upstream_sink_union = 151;
     LocalityProviderNode locality_provider = 152;
+    EowcGapFillNode eowc_gap_fill = 153;
+    GapFillNode gap_fill = 154;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

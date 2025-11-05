@@ -72,7 +72,7 @@ impl FrontendHummockVersion {
                 .iter()
                 .map(|(table_id, change_log)| {
                     (
-                        table_id.table_id,
+                        table_id.as_raw_id(),
                         PbTableChangeLog {
                             change_logs: change_log
                                 .iter()
@@ -196,14 +196,14 @@ impl FrontendHummockVersionDelta {
             removed_table_ids: self
                 .removed_table_id
                 .iter()
-                .map(|table_id| table_id.table_id)
+                .map(|table_id| table_id.as_raw_id())
                 .collect(),
             change_log_delta: self
                 .change_log_delta
                 .iter()
                 .map(|(table_id, delta)| {
                     (
-                        table_id.table_id,
+                        table_id.as_raw_id(),
                         PbChangeLogDelta {
                             new_log: Some(PbEpochNewChangeLog {
                                 // Here we need to determine if value is null but don't care what the value is, so we fill him in using `PbSstableInfo::default()`
@@ -225,7 +225,7 @@ impl FrontendHummockVersionDelta {
             state_table_info_delta: self
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, *delta))
+                .map(|(table_id, delta)| (table_id.as_raw_id(), *delta))
                 .collect(),
             vector_index_delta: Default::default(),
         }

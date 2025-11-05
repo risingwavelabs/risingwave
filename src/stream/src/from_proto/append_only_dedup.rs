@@ -43,7 +43,7 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
         let exec = AppendOnlyDedupExecutor::new(
             params.actor_context,
             input,
-            params.info.pk_indices.clone(), /* TODO(rc): should change to use `dedup_column_indices`, but need to check backward compatibility */
+            params.info.stream_key.clone(), /* TODO(rc): should change to use `dedup_column_indices`, but need to check backward compatibility */
             state_table,
             params.watermark_epoch,
             params.executor_stats.clone(),

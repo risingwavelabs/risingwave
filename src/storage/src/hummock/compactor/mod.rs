@@ -59,7 +59,7 @@ pub use context::{
 use futures::{StreamExt, pin_mut};
 // Import iceberg compactor runner types from the local `iceberg_compaction` module.
 use iceberg_compaction::iceberg_compactor_runner::{
-    IcebergCompactorRunner, IcebergCompactorRunnerConfigBuilder,
+    IcebergCompactorRunnerConfigBuilder, create_plan_runners,
 };
 use iceberg_compaction::{IcebergTaskQueue, PushResult};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -103,6 +103,56 @@ use crate::hummock::{
     UnifiedSstableWriterFactory, validate_ssts,
 };
 use crate::monitor::CompactorMetrics;
+
+/// Heartbeat logging interval for compaction tasks
+const COMPACTION_HEARTBEAT_LOG_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Represents the compaction task state for logging purposes
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompactionLogState {
+    running_parallelism: u32,
+    pull_task_ack: bool,
+    pending_pull_task_count: u32,
+}
+
+/// Represents the iceberg compaction task state for logging purposes
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IcebergCompactionLogState {
+    running_parallelism: u32,
+    waiting_parallelism: u32,
+    available_parallelism: u32,
+    pull_task_ack: bool,
+    pending_pull_task_count: u32,
+}
+
+/// Controls periodic logging with state change detection
+struct LogThrottler<T: PartialEq> {
+    last_logged_state: Option<T>,
+    last_heartbeat: Instant,
+    heartbeat_interval: Duration,
+}
+
+impl<T: PartialEq> LogThrottler<T> {
+    fn new(heartbeat_interval: Duration) -> Self {
+        Self {
+            last_logged_state: None,
+            last_heartbeat: Instant::now(),
+            heartbeat_interval,
+        }
+    }
+
+    /// Returns true if logging should occur (state changed or heartbeat interval elapsed)
+    fn should_log(&self, current_state: &T) -> bool {
+        self.last_logged_state.as_ref() != Some(current_state)
+            || self.last_heartbeat.elapsed() >= self.heartbeat_interval
+    }
+
+    /// Updates the state and heartbeat timestamp after logging
+    fn update(&mut self, current_state: T) {
+        self.last_logged_state = Some(current_state);
+        self.last_heartbeat = Instant::now();
+    }
+}
 
 /// Implementation of Hummock compaction.
 pub struct Compactor {
@@ -333,6 +383,10 @@ pub fn start_iceberg_compactor(
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
 
+        // Track last logged state to avoid duplicate logs
+        let mut log_throttler =
+            LogThrottler::<IcebergCompactionLogState>::new(COMPACTION_HEARTBEAT_LOG_INTERVAL);
+
         // This outer loop is to recreate stream.
         'start_stream: loop {
             // reset state
@@ -410,6 +464,7 @@ pub fn start_iceberg_compactor(
                             max_task_parallelism,
                             max_pull_task_count,
                             &request_sender,
+                            &mut log_throttler,
                         );
 
                         if should_restart_stream {
@@ -461,13 +516,19 @@ pub fn start_iceberg_compactor(
                                     .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
                                     .write_parquet_properties(write_parquet_properties)
                                     .small_file_threshold(compactor_context.storage_opts.iceberg_compaction_small_file_threshold_mb as u64 * 1024 * 1024)
-                                    .max_task_total_size(
-                                        compactor_context.storage_opts.iceberg_compaction_max_task_total_size_mb as u64 * 1024 * 1024,
-                                    )
                                     .enable_heuristic_output_parallelism(compactor_context.storage_opts.iceberg_compaction_enable_heuristic_output_parallelism)
                                     .max_concurrent_closes(compactor_context.storage_opts.iceberg_compaction_max_concurrent_closes)
                                     .enable_dynamic_size_estimation(compactor_context.storage_opts.iceberg_compaction_enable_dynamic_size_estimation)
                                     .size_estimation_smoothing_factor(compactor_context.storage_opts.iceberg_compaction_size_estimation_smoothing_factor)
+                                    .target_binpack_group_size_mb(
+                                        compactor_context.storage_opts.iceberg_compaction_target_binpack_group_size_mb
+                                    )
+                                    .min_group_size_mb(
+                                        compactor_context.storage_opts.iceberg_compaction_min_group_size_mb
+                                    )
+                                    .min_group_file_count(
+                                        compactor_context.storage_opts.iceberg_compaction_min_group_file_count
+                                    )
                                     .build() {
                                     Ok(config) => config,
                                     Err(e) => {
@@ -476,80 +537,87 @@ pub fn start_iceberg_compactor(
                                     }
                                 };
 
-                                let iceberg_runner = match IcebergCompactorRunner::new(
+                                // Create multiple plan runners from the task
+                                let plan_runners = match create_plan_runners(
                                     iceberg_compaction_task,
                                     compactor_runner_config,
                                     compactor_context.compactor_metrics.clone(),
                                 ).await {
-                                    Ok(runner) => runner,
+                                    Ok(runners) => runners,
                                     Err(e) => {
-                                        tracing::warn!(error = %e.as_report(), "Failed to create iceberg compactor runner {}", task_id);
+                                        tracing::warn!(error = %e.as_report(), task_id, "Failed to create plan runners");
                                         continue 'consume_stream;
                                     }
                                 };
 
-                                // Push task to queue instead of directly spawning
-                                let meta = iceberg_runner.to_meta();
-                                let push_result = task_queue.push(meta.clone(), Some(iceberg_runner));
+                                if plan_runners.is_empty() {
+                                    tracing::info!(task_id, "No plans to execute");
+                                    continue 'consume_stream;
+                                }
 
-                                match push_result {
-                                    PushResult::Added => {
-                                        tracing::info!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            "Iceberg compaction task added to queue"
-                                        );
-                                    },
-                                    PushResult::Replaced { old_task_id } => {
-                                        tracing::info!(
-                                            task_id = task_id,
-                                            old_task_id = old_task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            "Iceberg compaction task replaced in queue"
-                                        );
-                                    },
-                                    PushResult::RejectedRunningDuplicate => {
-                                        tracing::warn!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            "Iceberg compaction task rejected - duplicate already running"
-                                        );
-                                    },
-                                    PushResult::RejectedCapacity => {
-                                        tracing::warn!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            pending_budget = pending_parallelism_budget,
-                                            "Iceberg compaction task rejected - queue capacity exceeded"
-                                        );
-                                    },
-                                    PushResult::RejectedTooLarge => {
-                                        tracing::error!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            max_parallelism = max_task_parallelism,
-                                            "Iceberg compaction task rejected - parallelism requirement exceeds max"
-                                        );
-                                    },
-                                    PushResult::RejectedInvalidParallelism => {
-                                        tracing::error!(
-                                            task_id = task_id,
-                                            unique_ident = %meta.unique_ident,
-                                            required_parallelism = meta.required_parallelism,
-                                            "Iceberg compaction task rejected - invalid parallelism (must be > 0)"
-                                        );
+                                // Enqueue each plan runner independently
+                                let total_plans = plan_runners.len();
+                                let mut enqueued_count = 0;
+
+                                for runner in plan_runners {
+                                    let meta = runner.to_meta();
+                                    let required_parallelism = runner.required_parallelism();
+                                    let push_result = task_queue.push(meta.clone(), Some(runner));
+
+                                    match push_result {
+                                        PushResult::Added => {
+                                            enqueued_count += 1;
+                                            tracing::debug!(
+                                                task_id = task_id,
+                                                plan_index = enqueued_count - 1,
+                                                required_parallelism = required_parallelism,
+                                                "Iceberg plan runner added to queue"
+                                            );
+                                        },
+                                        PushResult::RejectedCapacity => {
+                                            tracing::warn!(
+                                                task_id = task_id,
+                                                required_parallelism = required_parallelism,
+                                                pending_budget = pending_parallelism_budget,
+                                                enqueued_count = enqueued_count,
+                                                total_plans = total_plans,
+                                                "Iceberg plan runner rejected - queue capacity exceeded"
+                                            );
+                                            // Stop enqueuing remaining plans
+                                            break;
+                                        },
+                                        PushResult::RejectedTooLarge => {
+                                            tracing::error!(
+                                                task_id = task_id,
+                                                required_parallelism = required_parallelism,
+                                                max_parallelism = max_task_parallelism,
+                                                "Iceberg plan runner rejected - parallelism exceeds max"
+                                            );
+                                        },
+                                        PushResult::RejectedInvalidParallelism => {
+                                            tracing::error!(
+                                                task_id = task_id,
+                                                required_parallelism = required_parallelism,
+                                                "Iceberg plan runner rejected - invalid parallelism"
+                                            );
+                                        }
                                     }
                                 }
+
+                                tracing::info!(
+                                    task_id = task_id,
+                                    total_plans = total_plans,
+                                    enqueued_count = enqueued_count,
+                                    "Enqueued {} of {} Iceberg plan runners",
+                                    enqueued_count,
+                                    total_plans
+                                );
                             },
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::PullTaskAck(_) => {
                                 // set flag
                                 pull_task_ack = true;
                             },
-                    }
+                        }
                     }
                     Some(Err(e)) => {
                         tracing::warn!("Failed to consume stream. {}", e.message());
@@ -599,6 +667,10 @@ pub fn start_compactor(
         let shutdown_map = CompactionShutdownMap::default();
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
+
+        // Track last logged state to avoid duplicate logs
+        let mut log_throttler =
+            LogThrottler::<CompactionLogState>::new(COMPACTION_HEARTBEAT_LOG_INTERVAL);
 
         // This outer loop is to recreate stream.
         'start_stream: loop {
@@ -698,11 +770,22 @@ pub fn start_compactor(
                             }
                         }
 
-                        tracing::info!(
-                            running_parallelism_count = %running_task_parallelism.load(Ordering::SeqCst),
-                            pull_task_ack = %pull_task_ack,
-                            pending_pull_task_count = %pending_pull_task_count
-                        );
+                        let running_count = running_task_parallelism.load(Ordering::SeqCst);
+                        let current_state = CompactionLogState {
+                            running_parallelism: running_count,
+                            pull_task_ack,
+                            pending_pull_task_count,
+                        };
+
+                        // Log only when state changes or periodically as heartbeat
+                        if log_throttler.should_log(&current_state) {
+                            tracing::info!(
+                                running_parallelism_count = %current_state.running_parallelism,
+                                pull_task_ack = %current_state.pull_task_ack,
+                                pending_pull_task_count = %current_state.pending_pull_task_count
+                            );
+                            log_throttler.update(current_state);
+                        }
 
                         continue;
                     }
@@ -837,7 +920,7 @@ pub fn start_compactor(
 
                                     if enable_check_compaction_result && need_check_task {
                                         let compact_table_ids = compact_task.build_compact_table_ids();
-                                        match compaction_catalog_manager_ref.acquire(compact_table_ids).await {
+                                        match compaction_catalog_manager_ref.acquire(compact_table_ids.into_iter().collect()).await {
                                             Ok(compaction_catalog_agent_ref) =>  {
                                                 match check_compaction_result(&compact_task, context.clone(), compaction_catalog_agent_ref).await
                                                 {
@@ -973,7 +1056,7 @@ pub fn start_shared_compactor(
                             task: dispatch_task,
                         } = request.into_inner();
                         let table_id_to_catalog = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
-                            acc.insert(table.id, table);
+                            acc.insert(table.id.into(), table);
                             acc
                         });
 
@@ -1093,6 +1176,10 @@ fn schedule_queued_tasks(
 ) {
     while let Some(popped_task) = task_queue.pop() {
         let task_id = popped_task.meta.task_id;
+
+        // Get unique_ident before moving runner
+        let unique_ident = popped_task.runner.as_ref().map(|r| r.unique_ident());
+
         let Some(runner) = popped_task.runner else {
             tracing::error!(
                 task_id = task_id,
@@ -1108,7 +1195,7 @@ fn schedule_queued_tasks(
 
         tracing::info!(
             task_id = task_id,
-            unique_ident = %popped_task.meta.unique_ident,
+            unique_ident = ?unique_ident,
             required_parallelism = popped_task.meta.required_parallelism,
             "Starting iceberg compaction task from queue"
         );
@@ -1150,6 +1237,7 @@ fn handle_meta_task_pulling(
     max_task_parallelism: u32,
     max_pull_task_count: u32,
     request_sender: &mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+    log_throttler: &mut LogThrottler<IcebergCompactionLogState>,
 ) -> bool {
     let mut pending_pull_task_count = 0;
     if *pull_task_ack {
@@ -1178,13 +1266,124 @@ fn handle_meta_task_pulling(
         }
     }
 
-    tracing::info!(
-        running_parallelism_count = %task_queue.running_parallelism_sum(),
-        waiting_parallelism_count = %task_queue.waiting_parallelism_sum(),
-        available_parallelism = %(max_task_parallelism.saturating_sub(task_queue.running_parallelism_sum())),
-        pull_task_ack = %*pull_task_ack,
-        pending_pull_task_count = %pending_pull_task_count
-    );
+    let running_count = task_queue.running_parallelism_sum();
+    let waiting_count = task_queue.waiting_parallelism_sum();
+    let available_count = max_task_parallelism.saturating_sub(running_count);
+    let current_state = IcebergCompactionLogState {
+        running_parallelism: running_count,
+        waiting_parallelism: waiting_count,
+        available_parallelism: available_count,
+        pull_task_ack: *pull_task_ack,
+        pending_pull_task_count,
+    };
+
+    // Log only when state changes or periodically as heartbeat
+    if log_throttler.should_log(&current_state) {
+        tracing::info!(
+            running_parallelism_count = %current_state.running_parallelism,
+            waiting_parallelism_count = %current_state.waiting_parallelism,
+            available_parallelism = %current_state.available_parallelism,
+            pull_task_ack = %current_state.pull_task_ack,
+            pending_pull_task_count = %current_state.pending_pull_task_count
+        );
+        log_throttler.update(current_state);
+    }
 
     false // No need to restart stream
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_log_state_equality() {
+        // Test CompactionLogState
+        let state1 = CompactionLogState {
+            running_parallelism: 10,
+            pull_task_ack: true,
+            pending_pull_task_count: 2,
+        };
+        let state2 = CompactionLogState {
+            running_parallelism: 10,
+            pull_task_ack: true,
+            pending_pull_task_count: 2,
+        };
+        let state3 = CompactionLogState {
+            running_parallelism: 11,
+            pull_task_ack: true,
+            pending_pull_task_count: 2,
+        };
+        assert_eq!(state1, state2);
+        assert_ne!(state1, state3);
+
+        // Test IcebergCompactionLogState
+        let ice_state1 = IcebergCompactionLogState {
+            running_parallelism: 10,
+            waiting_parallelism: 5,
+            available_parallelism: 15,
+            pull_task_ack: true,
+            pending_pull_task_count: 2,
+        };
+        let ice_state2 = IcebergCompactionLogState {
+            running_parallelism: 10,
+            waiting_parallelism: 6,
+            available_parallelism: 15,
+            pull_task_ack: true,
+            pending_pull_task_count: 2,
+        };
+        assert_ne!(ice_state1, ice_state2);
+    }
+
+    #[test]
+    fn test_log_throttler_state_change_detection() {
+        let mut throttler = LogThrottler::<CompactionLogState>::new(Duration::from_secs(60));
+        let state1 = CompactionLogState {
+            running_parallelism: 10,
+            pull_task_ack: true,
+            pending_pull_task_count: 2,
+        };
+        let state2 = CompactionLogState {
+            running_parallelism: 11,
+            pull_task_ack: true,
+            pending_pull_task_count: 2,
+        };
+
+        // First call should always log
+        assert!(throttler.should_log(&state1));
+        throttler.update(state1.clone());
+
+        // Same state should not log
+        assert!(!throttler.should_log(&state1));
+
+        // Changed state should log
+        assert!(throttler.should_log(&state2));
+        throttler.update(state2.clone());
+
+        // Same state again should not log
+        assert!(!throttler.should_log(&state2));
+    }
+
+    #[test]
+    fn test_log_throttler_heartbeat() {
+        let mut throttler = LogThrottler::<CompactionLogState>::new(Duration::from_millis(10));
+        let state = CompactionLogState {
+            running_parallelism: 10,
+            pull_task_ack: true,
+            pending_pull_task_count: 2,
+        };
+
+        // First call should log
+        assert!(throttler.should_log(&state));
+        throttler.update(state.clone());
+
+        // Same state immediately should not log
+        assert!(!throttler.should_log(&state));
+
+        // Wait for heartbeat interval to pass
+        std::thread::sleep(Duration::from_millis(15));
+
+        // Same state after interval should log (heartbeat)
+        assert!(throttler.should_log(&state));
+    }
 }

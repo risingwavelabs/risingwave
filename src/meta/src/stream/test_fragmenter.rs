@@ -132,8 +132,8 @@ fn make_source_internal_table(id: u32) -> PbTable {
     ];
     PbTable {
         id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        schema_id: SchemaId::placeholder().as_raw_id(),
+        database_id: DatabaseId::placeholder().as_raw_id(),
         name: String::new(),
         columns,
         pk: vec![PbColumnOrder {
@@ -154,8 +154,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
     }
     PbTable {
         id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        schema_id: SchemaId::placeholder().as_raw_id(),
+        database_id: DatabaseId::placeholder().as_raw_id(),
         name: String::new(),
         columns,
         pk: vec![PbColumnOrder {
@@ -173,8 +173,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
 fn make_empty_table(id: u32) -> PbTable {
     PbTable {
         id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        schema_id: SchemaId::placeholder().as_raw_id(),
+        database_id: DatabaseId::placeholder().as_raw_id(),
         name: String::new(),
         columns: vec![],
         pk: vec![],
@@ -360,7 +360,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
             // `table_id` and `table` are left empty when generated from frontend.
-            table_id: TableId::placeholder().table_id(),
+            table_id: TableId::placeholder().as_raw_id(),
             table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
             staging_table: None,
@@ -485,7 +485,7 @@ async fn test_graph_builder() -> MetaResult<()> {
             })
     };
 
-    let stream_job_fragments = StreamJobFragments::for_test(TableId::default(), graph);
+    let stream_job_fragments = StreamJobFragments::for_test(0.into(), graph);
     let actors = stream_job_fragments.actors();
     let mview_fragment_ids = stream_job_fragments.mview_fragment_ids();
 

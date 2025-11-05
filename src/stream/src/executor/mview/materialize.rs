@@ -41,6 +41,7 @@ use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
 
 use crate::cache::ManagedLruCache;
+use crate::common::change_buffer::output_kind as cb_kind;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
     StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
@@ -87,7 +88,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     may_have_downstream: bool,
 
-    depended_subscription_ids: HashSet<u32>,
+    subscriber_ids: HashSet<u32>,
 
     metrics: MaterializeMetrics,
 
@@ -177,9 +178,9 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
 fn get_op_consistency_level(
     conflict_behavior: ConflictBehavior,
     may_have_downstream: bool,
-    depended_subscriptions: &HashSet<u32>,
+    subscriber_ids: &HashSet<u32>,
 ) -> StateTableOpConsistencyLevel {
-    if !depended_subscriptions.is_empty() {
+    if !subscriber_ids.is_empty() {
         StateTableOpConsistencyLevel::LogStoreEnabled
     } else if !may_have_downstream && matches!(conflict_behavior, ConflictBehavior::Overwrite) {
         // Table with overwrite conflict behavior could disable conflict check
@@ -256,16 +257,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
         let may_have_downstream = actor_context.initial_dispatch_num != 0;
-        let depended_subscription_ids = actor_context
-            .related_subscriptions
-            .get(&TableId::new(table_catalog.id))
-            .cloned()
-            .unwrap_or_default();
-        let op_consistency_level = get_op_consistency_level(
-            conflict_behavior,
-            may_have_downstream,
-            &depended_subscription_ids,
-        );
+        let subscriber_ids = actor_context.initial_subscriber_ids.clone();
+        let op_consistency_level =
+            get_op_consistency_level(conflict_behavior, may_have_downstream, &subscriber_ids);
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)
@@ -279,8 +273,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             actor_context.fragment_id,
         );
 
-        let metrics_info =
-            MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
+        let metrics_info = MetricsInfo::new(
+            metrics,
+            table_catalog.id.into(),
+            actor_context.id,
+            "Materialize",
+        );
 
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
@@ -301,7 +299,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             version_column_indices,
             is_dummy_table,
             may_have_downstream,
-            depended_subscription_ids,
+            subscriber_ids,
             metrics: mv_metrics,
             toastable_column_indices,
             refresh_args,
@@ -311,8 +309,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        let mv_table_id = TableId::new(self.state_table.table_id());
-        let _staging_table_id = TableId::new(self.state_table.table_id());
+        let mv_table_id = self.state_table.table_id();
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
@@ -414,15 +411,23 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 self.metrics
                                     .materialize_input_row_count
                                     .inc_by(chunk.cardinality() as u64);
+
                                 // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
                                 // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false,
-                                // and the conflict behavior is overwrite.
-                                let do_not_handle_conflict = !self.state_table.is_consistent_op()
+                                // and the conflict behavior is overwrite. We can rely on the state table to overwrite the conflicting rows in the storage,
+                                // while outputting inconsistent changes to downstream which no one will subscribe to.
+                                let optimized_conflict_behavior = if let ConflictBehavior::Overwrite =
+                                    self.conflict_behavior
+                                    && !self.state_table.is_consistent_op()
                                     && self.version_column_indices.is_empty()
-                                    && self.conflict_behavior == ConflictBehavior::Overwrite;
+                                {
+                                    ConflictBehavior::NoCheck
+                                } else {
+                                    self.conflict_behavior
+                                };
 
-                                match self.conflict_behavior {
-                                    checked_conflict_behaviors!() if !do_not_handle_conflict => {
+                                match optimized_conflict_behavior {
+                                    checked_conflict_behaviors!() => {
                                         if chunk.cardinality() == 0 {
                                             // empty chunk
                                             continue;
@@ -505,7 +510,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             )
                                             .await?;
 
-                                        match change_buffer.into_chunk(data_types.clone()) {
+                                        match change_buffer
+                                            .into_chunk::<{ cb_kind::RETRACT }>(data_types.clone())
+                                        {
                                             Some(output_chunk) => {
                                                 self.state_table.write_chunk(output_chunk.clone());
                                                 self.state_table.try_flush().await?;
@@ -514,10 +521,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             None => continue,
                                         }
                                     }
-                                    ConflictBehavior::IgnoreConflict => unreachable!(),
-                                    ConflictBehavior::NoCheck
-                                    | ConflictBehavior::Overwrite
-                                    | ConflictBehavior::DoUpdateIfNotNull => {
+                                    ConflictBehavior::NoCheck => {
                                         self.state_table.write_chunk(chunk.clone());
                                         self.state_table.try_flush().await?;
 
@@ -702,7 +706,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 self.local_barrier_manager.report_refresh_finished(
                                     epoch,
                                     self.actor_context.id,
-                                    refresh_args.table_id.into(),
+                                    refresh_args.table_id,
                                     staging_table_id,
                                 );
                                 tracing::debug!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
@@ -734,7 +738,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .try_wait_epoch(
                             HummockReadEpoch::Committed(on_complete_epoch.prev),
                             TryWaitEpochOptions {
-                                table_id: staging_table_id.into(),
+                                table_id: staging_table_id,
                             },
                         )
                         .await?;
@@ -783,7 +787,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                     None => unreachable!("associated_source_id is not set"),
                                 };
 
-                                if load_finish_source_id.table_id() == associated_source_id {
+                                if load_finish_source_id.as_raw_id() == associated_source_id {
                                     tracing::info!(
                                         %load_finish_source_id,
                                         "LoadFinish received, starting data replacement"
@@ -805,14 +809,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         self.may_have_downstream = true;
                     }
                     Self::may_update_depended_subscriptions(
-                        &mut self.depended_subscription_ids,
+                        &mut self.subscriber_ids,
                         &barrier,
                         mv_table_id,
                     );
                     let op_consistency_level = get_op_consistency_level(
                         self.conflict_behavior,
                         self.may_have_downstream,
-                        &self.depended_subscription_ids,
+                        &self.subscriber_ids,
                     );
                     let post_commit = self
                         .state_table
@@ -1118,7 +1122,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             is_dummy_table: false,
             toastable_column_indices: None,
             may_have_downstream: true,
-            depended_subscription_ids: HashSet::new(),
+            subscriber_ids: HashSet::new(),
             metrics,
             refresh_args: None, // Test constructor doesn't support refresh functionality
             local_barrier_manager: LocalBarrierManager::for_test(),
@@ -1396,22 +1400,34 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                     };
                 }
 
+                Op::UpdateDelete
+                    if matches!(
+                        conflict_behavior,
+                        ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull
+                    ) =>
+                {
+                    // For `UpdateDelete`s, we skip processing them but directly handle the following `UpdateInsert`
+                    // instead. This is because...
+                    //
+                    // - For `Overwrite`, we only care about the new row.
+                    // - For `DoUpdateIfNotNull`, we don't want the whole row to be deleted, but instead perform
+                    //   column-wise replacement when handling the `UpdateInsert`.
+                    //
+                    // However, for `IgnoreConflict`, we still need to delete the old row first, otherwise the row
+                    // cannot be updated at all.
+                }
+
                 Op::Delete | Op::UpdateDelete => {
-                    match conflict_behavior {
-                        checked_conflict_behaviors!() => {
-                            if let Some(old_row) = self.get_expected(&key) {
-                                let old_row_deserialized =
-                                    row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                change_buffer.delete(key.clone(), old_row_deserialized);
-                                // put a None into the cache to represent deletion
-                                self.lru_cache.put(key, None);
-                            } else {
-                                // delete a non-existent value
-                                // this is allowed in the case of mview conflict, so ignore
-                            };
-                        }
-                        _ => unreachable!(),
-                    };
+                    if let Some(old_row) = self.get_expected(&key) {
+                        let old_row_deserialized =
+                            row_serde.deserializer.deserialize(old_row.row.clone())?;
+                        change_buffer.delete(key.clone(), old_row_deserialized);
+                        // put a None into the cache to represent deletion
+                        self.lru_cache.put(key, None);
+                    } else {
+                        // delete a non-existent value
+                        // this is allowed in the case of mview conflict, so ignore
+                    }
                 }
             }
         }
@@ -1572,7 +1588,7 @@ mod tests {
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1675,7 +1691,7 @@ mod tests {
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1767,7 +1783,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1895,7 +1911,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2073,7 +2089,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2176,7 +2192,7 @@ mod tests {
             Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2294,7 +2310,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2483,7 +2499,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2683,7 +2699,7 @@ mod tests {
             .collect();
         // Prepare stream executors.
         let source =
-            MockSource::with_messages(messages).into_executor(schema.clone(), PkIndices::new());
+            MockSource::with_messages(messages).into_executor(schema.clone(), StreamKey::new());
 
         let mut materialize_executor = MaterializeExecutor::for_test(
             source,

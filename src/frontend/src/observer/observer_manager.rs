@@ -251,13 +251,15 @@ impl FrontendObserverNode {
         match info {
             Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database),
-                Operation::Delete => catalog_guard.drop_database(database.id),
+                Operation::Delete => catalog_guard.drop_database(database.id.into()),
                 Operation::Update => catalog_guard.update_database(database),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
                 Operation::Add => catalog_guard.create_schema(schema),
-                Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
+                Operation::Delete => {
+                    catalog_guard.drop_schema(schema.database_id.into(), schema.id.into())
+                }
                 Operation::Update => catalog_guard.update_schema(schema),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -269,23 +271,22 @@ impl FrontendObserverNode {
                     match obj {
                         ObjectInfo::Database(db) => match resp.operation() {
                             Operation::Add => catalog_guard.create_database(db),
-                            Operation::Delete => catalog_guard.drop_database(db.id),
+                            Operation::Delete => catalog_guard.drop_database(db.id.into()),
                             Operation::Update => catalog_guard.update_database(db),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
                         ObjectInfo::Schema(schema) => match resp.operation() {
                             Operation::Add => catalog_guard.create_schema(schema),
-                            Operation::Delete => {
-                                catalog_guard.drop_schema(schema.database_id, schema.id)
-                            }
+                            Operation::Delete => catalog_guard
+                                .drop_schema(schema.database_id.into(), schema.id.into()),
                             Operation::Update => catalog_guard.update_schema(schema),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
                         PbObjectInfo::Table(table) => match resp.operation() {
                             Operation::Add => catalog_guard.create_table(table),
                             Operation::Delete => catalog_guard.drop_table(
-                                table.database_id,
-                                table.schema_id,
+                                table.database_id.into(),
+                                table.schema_id.into(),
                                 table.id.into(),
                             ),
                             Operation::Update => {
@@ -306,8 +307,8 @@ impl FrontendObserverNode {
                         PbObjectInfo::Source(source) => match resp.operation() {
                             Operation::Add => catalog_guard.create_source(source),
                             Operation::Delete => catalog_guard.drop_source(
-                                source.database_id,
-                                source.schema_id,
+                                source.database_id.into(),
+                                source.schema_id.into(),
                                 source.id,
                             ),
                             Operation::Update => catalog_guard.update_source(source),
@@ -315,17 +316,19 @@ impl FrontendObserverNode {
                         },
                         PbObjectInfo::Sink(sink) => match resp.operation() {
                             Operation::Add => catalog_guard.create_sink(sink),
-                            Operation::Delete => {
-                                catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
-                            }
+                            Operation::Delete => catalog_guard.drop_sink(
+                                sink.database_id.into(),
+                                sink.schema_id.into(),
+                                sink.id,
+                            ),
                             Operation::Update => catalog_guard.update_sink(sink),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
                         PbObjectInfo::Subscription(subscription) => match resp.operation() {
                             Operation::Add => catalog_guard.create_subscription(subscription),
                             Operation::Delete => catalog_guard.drop_subscription(
-                                subscription.database_id,
-                                subscription.schema_id,
+                                subscription.database_id.into(),
+                                subscription.schema_id.into(),
                                 subscription.id,
                             ),
                             Operation::Update => catalog_guard.update_subscription(subscription),
@@ -334,8 +337,8 @@ impl FrontendObserverNode {
                         PbObjectInfo::Index(index) => match resp.operation() {
                             Operation::Add => catalog_guard.create_index(index),
                             Operation::Delete => catalog_guard.drop_index(
-                                index.database_id,
-                                index.schema_id,
+                                index.database_id.into(),
+                                index.schema_id.into(),
                                 index.id.into(),
                             ),
                             Operation::Update => catalog_guard.update_index(index),
@@ -343,17 +346,19 @@ impl FrontendObserverNode {
                         },
                         PbObjectInfo::View(view) => match resp.operation() {
                             Operation::Add => catalog_guard.create_view(view),
-                            Operation::Delete => {
-                                catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
-                            }
+                            Operation::Delete => catalog_guard.drop_view(
+                                view.database_id.into(),
+                                view.schema_id.into(),
+                                view.id,
+                            ),
                             Operation::Update => catalog_guard.update_view(view),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
                         ObjectInfo::Function(function) => match resp.operation() {
                             Operation::Add => catalog_guard.create_function(function),
                             Operation::Delete => catalog_guard.drop_function(
-                                function.database_id,
-                                function.schema_id,
+                                function.database_id.into(),
+                                function.schema_id.into(),
                                 function.id.into(),
                             ),
                             Operation::Update => catalog_guard.update_function(function),
@@ -362,8 +367,8 @@ impl FrontendObserverNode {
                         ObjectInfo::Connection(connection) => match resp.operation() {
                             Operation::Add => catalog_guard.create_connection(connection),
                             Operation::Delete => catalog_guard.drop_connection(
-                                connection.database_id,
-                                connection.schema_id,
+                                connection.database_id.into(),
+                                connection.schema_id.into(),
                                 connection.id,
                             ),
                             Operation::Update => catalog_guard.update_connection(connection),
@@ -377,8 +382,8 @@ impl FrontendObserverNode {
                             match resp.operation() {
                                 Operation::Add => catalog_guard.create_secret(&secret),
                                 Operation::Delete => catalog_guard.drop_secret(
-                                    secret.database_id,
-                                    secret.schema_id,
+                                    secret.database_id.into(),
+                                    secret.schema_id.into(),
                                     SecretId::new(secret.id),
                                 ),
                                 Operation::Update => catalog_guard.update_secret(&secret),
@@ -391,8 +396,8 @@ impl FrontendObserverNode {
             Info::Function(function) => match resp.operation() {
                 Operation::Add => catalog_guard.create_function(function),
                 Operation::Delete => catalog_guard.drop_function(
-                    function.database_id,
-                    function.schema_id,
+                    function.database_id.into(),
+                    function.schema_id.into(),
                     function.id.into(),
                 ),
                 Operation::Update => catalog_guard.update_function(function),
@@ -401,8 +406,8 @@ impl FrontendObserverNode {
             Info::Connection(connection) => match resp.operation() {
                 Operation::Add => catalog_guard.create_connection(connection),
                 Operation::Delete => catalog_guard.drop_connection(
-                    connection.database_id,
-                    connection.schema_id,
+                    connection.database_id.into(),
+                    connection.schema_id.into(),
                     connection.id,
                 ),
                 Operation::Update => catalog_guard.update_connection(connection),
@@ -415,8 +420,8 @@ impl FrontendObserverNode {
                 match resp.operation() {
                     Operation::Add => catalog_guard.create_secret(&secret),
                     Operation::Delete => catalog_guard.drop_secret(
-                        secret.database_id,
-                        secret.schema_id,
+                        secret.database_id.into(),
+                        secret.schema_id.into(),
                         SecretId::new(secret.id),
                     ),
                     Operation::Update => catalog_guard.update_secret(&secret),

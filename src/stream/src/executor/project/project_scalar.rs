@@ -254,9 +254,9 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, pk_indices);
+        let source = source.into_executor(schema, stream_key);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
@@ -336,7 +336,7 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, PkIndices::new());
+        let source = source.into_executor(schema, StreamKey::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");

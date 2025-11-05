@@ -97,8 +97,8 @@ pub async fn handle_create_view(
 
     let view = PbView {
         id: 0,
-        schema_id,
-        database_id,
+        schema_id: schema_id.into(),
+        database_id: database_id.into(),
         name: view_name,
         properties,
         owner: session.user_id(),
@@ -112,7 +112,7 @@ pub async fn handle_create_view(
             view,
             dependent_relations
                 .into_iter()
-                .map(|t| t.table_id)
+                .map(|t| t.as_raw_id())
                 .collect(),
         )
         .await?;

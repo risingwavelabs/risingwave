@@ -22,6 +22,7 @@ use std::ops::Bound::{Excluded, Unbounded};
 
 use barrier_control::CreatingStreamingJobBarrierControl;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
@@ -53,7 +54,7 @@ use crate::stream::build_actor_connector_splits;
 #[derive(Debug)]
 pub(crate) struct CreatingStreamingJobControl {
     database_id: DatabaseId,
-    pub(super) job_id: TableId,
+    pub(super) job_id: JobId,
     definition: String,
     create_type: CreateType,
     pub(super) snapshot_backfill_upstream_tables: HashSet<TableId>,
@@ -77,7 +78,7 @@ impl CreatingStreamingJobControl {
         edges: &mut FragmentEdgeBuildResult,
     ) -> MetaResult<Self> {
         let job_id = info.stream_job_fragments.stream_job_id();
-        let database_id = DatabaseId::new(info.streaming_job.database_id());
+        let database_id = info.streaming_job.database_id();
         debug!(
             %job_id,
             definition = info.definition,
@@ -89,6 +90,7 @@ impl CreatingStreamingJobControl {
                 .stream_job_fragments
                 .new_fragment_info(&info.init_split_assignment)
                 .collect(),
+            subscribers: Default::default(), // no subscriber for newly create job
         };
         let snapshot_backfill_actors = job_info.snapshot_backfill_actor_ids().collect();
         let backfill_nodes_to_pause =
@@ -109,7 +111,16 @@ impl CreatingStreamingJobControl {
         );
 
         let actors_to_create =
-            edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create());
+            edges.collect_actors_to_create(info.stream_job_fragments.actors_to_create().map(
+                |(fragment_id, node, actors)| {
+                    (
+                        fragment_id,
+                        node,
+                        actors,
+                        [], // no subscribers for newly creating job
+                    )
+                },
+            ));
 
         let mut barrier_control =
             CreatingStreamingJobBarrierControl::new(job_id, backfill_epoch, false);
@@ -235,7 +246,7 @@ impl CreatingStreamingJobControl {
     }
 
     fn recover_consuming_snapshot(
-        job_id: TableId,
+        job_id: JobId,
         definition: &String,
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -309,7 +320,7 @@ impl CreatingStreamingJobControl {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn recover(
         database_id: DatabaseId,
-        job_id: TableId,
+        job_id: JobId,
         definition: String,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -400,7 +411,7 @@ impl CreatingStreamingJobControl {
                 } else {
                     let progress = create_mview_tracker
                         .gen_ddl_progress()
-                        .remove(&self.job_id.table_id)
+                        .remove(&self.job_id)
                         .expect("should exist");
                     format!("Snapshot [{}]", progress.progress)
                 }
@@ -422,7 +433,7 @@ impl CreatingStreamingJobControl {
             }
         };
         DdlProgress {
-            id: self.job_id.table_id as u64,
+            id: self.job_id.as_raw_id() as u64,
             statement: self.definition.clone(),
             create_type: self.create_type.as_str().to_owned(),
             progress,
@@ -443,7 +454,7 @@ impl CreatingStreamingJobControl {
 
     fn inject_barrier(
         database_id: DatabaseId,
-        table_id: TableId,
+        job_id: JobId,
         control_stream_manager: &mut ControlStreamManager,
         barrier_control: &mut CreatingStreamingJobBarrierControl,
         pre_applied_graph_info: &InflightStreamingJobInfo,
@@ -454,7 +465,7 @@ impl CreatingStreamingJobControl {
     ) -> MetaResult<()> {
         let node_to_collect = control_stream_manager.inject_barrier(
             database_id,
-            Some(table_id),
+            Some(job_id),
             mutation,
             &barrier_info,
             pre_applied_graph_info.fragment_infos(),
@@ -463,8 +474,6 @@ impl CreatingStreamingJobControl {
                 .into_iter()
                 .flatten(),
             new_actors,
-            vec![],
-            vec![],
         )?;
         barrier_control.enqueue_epoch(
             barrier_info.prev_epoch(),
@@ -489,7 +498,7 @@ impl CreatingStreamingJobControl {
             };
         if start_consume_upstream {
             info!(
-                table_id = self.job_id.table_id,
+                job_id = %self.job_id,
                 prev_epoch = barrier_info.prev_epoch(),
                 "start consuming upstream"
             );

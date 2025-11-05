@@ -77,7 +77,7 @@ impl MetaSnapshotMetadata {
                 .state_table_info
                 .info()
                 .iter()
-                .map(|(id, info)| (id.table_id, info.into()))
+                .map(|(id, info)| (id.as_raw_id(), info.into()))
                 .collect(),
             rw_version: Some(RW_VERSION.to_owned()),
         }

@@ -402,11 +402,11 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
         ];
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let dml_manager = Arc::new(DmlManager::for_test());
 
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, pk_indices);
+        let source = source.into_executor(schema, stream_key);
 
         let dml_executor = DmlExecutor::new(
             ActorContext::for_test(0),
