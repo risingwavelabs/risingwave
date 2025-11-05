@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_meta_model::ActorId;
@@ -136,7 +136,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         for ((table_id, associated_source_id), actors) in list_finished_info {
             let allow_yield = {
                 let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-                let single_task_tracker = lock_handle.inner.get_mut(&table_id).unwrap();
+                let single_task_tracker =
+                    lock_handle.inner.get_mut(&table_id).ok_or_else(|| {
+                        MetaError::from(anyhow!("Table tracker not found for table {}", table_id))
+                    })?;
                 single_task_tracker
                     .report_list_finished(actors.iter().map(|x| *x as ActorId).collect());
                 let allow_yield = single_task_tracker.is_list_finished()?;
@@ -197,7 +200,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         for ((table_id, associated_source_id), actors) in load_finished_info {
             let allow_yield = {
                 let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-                let single_task_tracker = lock_handle.inner.get_mut(&table_id).unwrap();
+                let single_task_tracker =
+                    lock_handle.inner.get_mut(&table_id).ok_or_else(|| {
+                        MetaError::from(anyhow!("Table tracker not found for table {}", table_id))
+                    })?;
                 single_task_tracker
                     .report_load_finished(actors.iter().map(|x| *x as ActorId).collect());
                 let allow_yield = single_task_tracker.is_load_finished()?;

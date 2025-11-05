@@ -192,11 +192,6 @@ impl RefreshManager {
             }
 
             {
-                tracing::info!(
-                    table_id = %table_id,
-                    tracker = ?tracker,
-                    "insert tracker to global tracker"
-                );
                 // Store tracker in global tracker before guard is dropped
                 let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
                 lock_handle.inner.insert(table_id, tracker);
