@@ -35,7 +35,8 @@ use risingwave_connector::sink::log_store::{
     LogWriter, LogWriterExt, LogWriterMetrics,
 };
 use risingwave_connector::sink::{
-    GLOBAL_SINK_METRICS, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
+    GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_BUFFERING, Sink, SinkImpl, SinkParam,
+    SinkWriterParam,
 };
 use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
@@ -98,6 +99,8 @@ struct NonAppendOnlyBehavior {
     ///
     /// By matching, we mean that stream key is a subset of the downstream pk.
     pk_specified_and_matched: bool,
+    /// Whether the user forces buffering all chunks between two barriers.
+    force_buffering: bool,
 }
 
 impl NonAppendOnlyBehavior {
@@ -115,11 +118,14 @@ impl NonAppendOnlyBehavior {
     /// we will buffer the chunks between two barriers, so the compaction is not needed,
     /// since the barriers will preserve chunk boundaries.
     ///
+    /// When `force_buffering` is true, we also skip compaction here, since the buffering
+    /// will also make compaction.
+    ///
     /// When the sink is an append-only sink, it is either `force_append_only` or
     /// `append_only`, we should only append to downstream, so there should not be any
     /// overlapping keys.
     fn should_compact_in_log_reader(self) -> bool {
-        self.pk_specified_and_matched
+        self.pk_specified_and_matched && !self.force_buffering
     }
 
     /// When stream key is different from the user defined primary key columns for sinks.
@@ -185,8 +191,8 @@ impl NonAppendOnlyBehavior {
     /// Since we've compacted the chunk with the stream key, the `DELETE` records survived must be to
     /// delete an existing row, so we can safely move them to the front. After the deletion is done,
     /// we can then safely sink the insert events with uniqueness guarantee.
-    fn should_reorder_records(self) -> bool {
-        !self.pk_specified_and_matched
+    fn should_buffer_and_reorder_records(self) -> bool {
+        !self.pk_specified_and_matched || self.force_buffering
     }
 }
 
@@ -253,8 +259,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             let stream_key = &info.stream_key;
             let pk_specified_and_matched = (sink_param.downstream_pk.as_ref())
                 .is_some_and(|downstream_pk| stream_key.iter().all(|i| downstream_pk.contains(i)));
+            let force_buffering = sink_param
+                .properties
+                .get(SINK_USER_FORCE_BUFFERING)
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
             Some(NonAppendOnlyBehavior {
                 pk_specified_and_matched,
+                force_buffering,
             })
         } else {
             None
@@ -522,7 +534,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     ) {
         // To reorder records, we need to buffer chunks of the entire epoch.
         if let Some(b) = non_append_only_behavior
-            && b.should_reorder_records()
+            && b.should_buffer_and_reorder_records()
         {
             assert_matches!(sink_type, SinkType::Upsert | SinkType::Retract);
 
@@ -1183,5 +1195,133 @@ mod test {
             executor.next().await.unwrap().unwrap(),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3)))
         );
+    }
+
+    #[tokio::test]
+    async fn test_force_buffering() {
+        use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_common::array::stream_chunk::StreamChunk;
+        use risingwave_common::types::DataType;
+
+        use crate::executor::Barrier;
+
+        let properties = maplit::btreemap! {
+            "connector".into() => "blackhole".into(),
+            "force_buffering".into() => "true".into()
+        };
+
+        // We have two visible columns and one hidden column. The hidden column will be pruned out
+        // within the sink executor.
+        let columns = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
+                is_hidden: true,
+            },
+        ];
+        let schema: Schema = columns
+            .iter()
+            .map(|column| Field::from(column.column_desc.clone()))
+            .collect();
+
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I I I
+                    + 1 1 10",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I I I
+                    + 1 3 30",
+            )),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I I I
+                    + 1 2 20
+                    - 1 2 20",
+            )),
+            Message::Chunk(StreamChunk::from_pretty(
+                " I I I
+                    - 1 1 10
+                    + 1 1 40",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ])
+        .into_executor(schema.clone(), vec![0, 1]);
+
+        let sink_param = SinkParam {
+            sink_id: 0.into(),
+            sink_name: "test".into(),
+            properties,
+
+            columns: columns
+                .iter()
+                .filter(|col| !col.is_hidden)
+                .map(|col| col.column_desc.clone())
+                .collect(),
+            downstream_pk: Some(vec![0, 1]),
+            sink_type: SinkType::Upsert,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let info = ExecutorInfo::for_test(schema, vec![0, 1], "SinkExecutor".to_owned(), 0);
+
+        let sink = build_sink(sink_param.clone()).unwrap();
+
+        let sink_executor = SinkExecutor::new(
+            ActorContext::for_test(0),
+            info,
+            source,
+            SinkWriterParam::for_test(),
+            sink,
+            sink_param,
+            columns.clone(),
+            BoundedInMemLogStoreFactory::for_test(1),
+            1024,
+            vec![DataType::Int64, DataType::Int64, DataType::Int64],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let mut executor = sink_executor.boxed().execute();
+
+        // Barrier message.
+        executor.next().await.unwrap().unwrap();
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact_vis(),
+            StreamChunk::from_pretty(
+                " I I I
+                + 1 1 10",
+            )
+        );
+
+        // Barrier message.
+        executor.next().await.unwrap().unwrap();
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact_vis(),
+            StreamChunk::from_pretty(
+                "  I I I
+                U- 1 1 10
+                U+ 1 1 40
+                 + 1 3 30",
+            ),
+        );
+
+        // The last barrier message.
+        executor.next().await.unwrap().unwrap();
     }
 }
