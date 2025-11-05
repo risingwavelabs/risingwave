@@ -128,7 +128,7 @@ macro_rules! for_all_sinks {
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
                 { Mqtt, $crate::sink::mqtt::MqttSink, $crate::sink::mqtt::MqttConfig },
-                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink, $crate::sink::google_pubsub::GooglePubSubConfig },
+                { GooglePubSub, $crate::sink::google_pubsub::GooglePubsubSink, $crate::sink::google_pubsub::GooglePubsubConfig },
                 { Nats, $crate::sink::nats::NatsSink, $crate::sink::nats::NatsConfig },
                 { Jdbc, $crate::sink::remote::JdbcSink, () },
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchConfig },

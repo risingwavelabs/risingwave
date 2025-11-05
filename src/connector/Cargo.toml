@@ -19,7 +19,7 @@ sink-bigquery = [
 ]
 sink-deltalake = ["dep:deltalake"]
 sink-google_pubsub = [
-    "dep:google-cloud-pubsub",
+    # "dep:google-cloud-pubsub",
     "dep:google-cloud-gax",
     "dep:google-cloud-googleapis",
 ]
@@ -74,7 +74,7 @@ google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", featur
     "pubsub",
     "bigquery",
 ], optional = true }
-google-cloud-pubsub = { package = "gcloud-pubsub", version = "1", optional = true }
+google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
