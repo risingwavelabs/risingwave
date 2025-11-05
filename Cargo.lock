@@ -7885,7 +7885,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.32"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7907,7 +7907,7 @@ dependencies = [
  "spin 0.9.8",
  "tokio",
  "tokio-util",
- "toml",
+ "toml 0.8.12",
  "tracing",
  "tracing-subscriber",
 ]
@@ -7915,7 +7915,7 @@ dependencies = [
 [[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.5.0+1"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http 0.60.12",
@@ -7932,7 +7932,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7943,7 +7943,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -7966,7 +7966,7 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -7976,7 +7976,7 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.5.1+0.12.0"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "async-stream",
  "chrono",
@@ -7991,7 +7991,7 @@ dependencies = [
 [[package]]
 name = "madsim-tonic-build"
 version = "0.5.1+0.12.3"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -10268,7 +10268,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.107",
@@ -11515,7 +11515,7 @@ dependencies = [
  "tinyvec",
  "tokio-retry",
  "tokio-util",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -12852,7 +12852,7 @@ dependencies = [
  "serde_with",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tracing",
  "workspace-hack",
 ]
@@ -14062,6 +14062,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e24345aa0fe688594e73770a5f6d1b216508b4f93484c0026d521acd30134392"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "serde_tokenstream"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14412,7 +14421,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.107",
@@ -15646,9 +15655,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9dd1545e8208b4a5af1aa9bbd0b4cf7e9ea08fabc5d0a5c67fcaafa17433aa3"
 dependencies = [
  "serde",
- "serde_spanned",
- "toml_datetime",
+ "serde_spanned 0.6.5",
+ "toml_datetime 0.6.5",
  "toml_edit 0.22.9",
+]
+
+[[package]]
+name = "toml"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0dc8b1fb61449e27716ec0e1bdf0f6b8f3e8f6b05391e8497b8b6d7804ea6d8"
+dependencies = [
+ "indexmap 2.12.0",
+ "serde_core",
+ "serde_spanned 1.0.3",
+ "toml_datetime 0.7.3",
+ "toml_parser",
+ "toml_writer",
+ "winnow 0.7.13",
 ]
 
 [[package]]
@@ -15661,13 +15685,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_datetime"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2cdb639ebbc97961c51720f858597f7f24c4fc295327923af55b74c3c724533"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "toml_edit"
 version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap 2.12.0",
- "toml_datetime",
+ "toml_datetime 0.6.5",
  "winnow 0.5.15",
 ]
 
@@ -15678,7 +15711,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
 dependencies = [
  "indexmap 2.12.0",
- "toml_datetime",
+ "toml_datetime 0.6.5",
  "winnow 0.5.15",
 ]
 
@@ -15690,10 +15723,25 @@ checksum = "8e40bb779c5187258fd7aad0eb68cb8706a0a81fa712fbea808ab43c4b8374c4"
 dependencies = [
  "indexmap 2.12.0",
  "serde",
- "serde_spanned",
- "toml_datetime",
+ "serde_spanned 0.6.5",
+ "toml_datetime 0.6.5",
  "winnow 0.6.26",
 ]
+
+[[package]]
+name = "toml_parser"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0cbe268d35bdb4bb5a56a2de88d0ad0eb70af5384a99d648cd4b3d04039800e"
+dependencies = [
+ "winnow 0.7.13",
+]
+
+[[package]]
+name = "toml_writer"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df8b2b54733674ad286d16267dcfc7a71ed5c776e4ac7aa3c3e2561f7c637bf2"
 
 [[package]]
 name = "tonic"
@@ -16635,7 +16683,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "sha2",
- "toml",
+ "toml 0.8.12",
  "windows-sys 0.59.0",
  "zstd 0.13.2",
 ]
