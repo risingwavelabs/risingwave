@@ -63,13 +63,11 @@ use std::sync::{Arc, LazyLock};
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use clickhouse::CLICKHOUSE_SINK;
 use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
 use futures::future::BoxFuture;
-use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
 use prometheus::Registry;
 use risingwave_common::array::ArrayError;
@@ -93,15 +91,17 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
 use sea_orm::DatabaseConnection;
-use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use self::clickhouse::CLICKHOUSE_SINK;
 use self::deltalake::DELTALAKE_SINK;
+use self::iceberg::ICEBERG_SINK;
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
+use self::starrocks::STARROCKS_SINK;
 use crate::WithPropertiesExt;
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};

@@ -631,7 +631,7 @@ mod test {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
-    use super::{DeltaLakeSinkCommitter, DeltaLakeConfig, DeltaLakeSinkWriter};
+    use super::{DeltaLakeConfig, DeltaLakeSinkCommitter, DeltaLakeSinkWriter};
     use crate::sink::SinkCommitCoordinator;
     use crate::sink::writer::SinkWriter;
 
