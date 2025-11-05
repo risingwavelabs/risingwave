@@ -63,7 +63,8 @@ impl EnforceSecret for PulsarConsumerOptions {}
 #[serde_as]
 pub struct PulsarConsumerOptions {
     #[serde(
-        rename = "pulsar.read_compacted", default,
+        rename = "pulsar.read_compacted",
+        default,
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub read_compacted: Option<bool>,

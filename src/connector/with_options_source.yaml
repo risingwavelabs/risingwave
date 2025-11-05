@@ -1233,6 +1233,7 @@ PulsarProperties:
   - name: pulsar.read_compacted
     field_type: bool
     required: false
+    default: Default::default
 TestSourceProperties:
   fields:
   - name: properties
