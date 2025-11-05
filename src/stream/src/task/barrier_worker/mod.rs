@@ -26,7 +26,8 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbLocalSstableInfo,
+    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
+    PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -85,10 +86,10 @@ pub struct BarrierCompleteResult {
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
 
     /// The source IDs that have finished listing data for refreshable batch sources.
-    pub list_finished_source_ids: Vec<u32>,
+    pub list_finished_source_ids: Vec<PbListFinishedSource>,
 
     /// The source IDs that have finished loading data for refreshable batch sources.
-    pub load_finished_source_ids: Vec<u32>,
+    pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
 
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
 
@@ -620,7 +621,8 @@ mod await_epoch_completed_future {
     use risingwave_common::id::TableId;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::{
-        PbCdcTableBackfillProgress, PbCreateMviewProgress,
+        PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource,
+        PbLoadFinishedSource,
     };
 
     use crate::error::StreamResult;
@@ -638,8 +640,8 @@ mod await_epoch_completed_future {
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
         create_mview_progress: Vec<PbCreateMviewProgress>,
-        list_finished_source_ids: Vec<u32>,
-        load_finished_source_ids: Vec<u32>,
+        list_finished_source_ids: Vec<PbListFinishedSource>,
+        load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
@@ -847,8 +849,8 @@ impl LocalBarrierWorker {
                             .map(|sst| sst.sst_info.into())
                             .collect(),
                         database_id: database_id.database_id,
-                        list_finished_source_ids,
-                        load_finished_source_ids,
+                        list_finished_sources: list_finished_source_ids,
+                        load_finished_sources: load_finished_source_ids,
                         vector_index_adds: vector_index_adds
                             .into_iter()
                             .map(|(table_id, adds)| {

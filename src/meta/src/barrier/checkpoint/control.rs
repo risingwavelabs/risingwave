@@ -28,6 +28,9 @@ use risingwave_meta_model::{SourceId, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    PbListFinishedSource, PbLoadFinishedSource,
+};
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use thiserror_ext::AsReport;
 use tracing::{debug, warn};
@@ -848,36 +851,70 @@ impl DatabaseCheckpointControl {
                 assert!(node.state.node_to_collect.is_empty());
 
                 // Process list_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
-                let list_finished_source_ids: Vec<_> = node
+                let mut list_finished_sources_by_actor: HashMap<u32, HashSet<u32>> = HashMap::new();
+                for entry in node
                     .state
                     .resps
                     .iter()
-                    .flat_map(|resp| &resp.list_finished_source_ids)
-                    .cloned()
-                    .collect::<HashSet<_>>() // deduplicate
-                    .into_iter()
-                    .collect();
-                if !list_finished_source_ids.is_empty() {
-                    // Add list_finished_source_ids to the task for processing
-                    let task = task.get_or_insert_default();
-                    task.list_finished_source_ids
-                        .extend(list_finished_source_ids);
+                    .flat_map(|resp| resp.list_finished_sources.iter())
+                {
+                    list_finished_sources_by_actor
+                        .entry(entry.associated_source_id)
+                        .or_default()
+                        .insert(entry.reporter_actor_id);
+                }
+                if !list_finished_sources_by_actor.is_empty() {
+                    let list_finished_source_ids: Vec<PbListFinishedSource> =
+                        list_finished_sources_by_actor
+                            .into_iter()
+                            .flat_map(|(associated_source_id, actor_ids)| {
+                                actor_ids.into_iter().map(move |reporter_actor_id| {
+                                    PbListFinishedSource {
+                                        associated_source_id,
+                                        reporter_actor_id,
+                                    }
+                                })
+                            })
+                            .collect();
+                    if !list_finished_source_ids.is_empty() {
+                        // Add list_finished_source_ids to the task for processing
+                        let task = task.get_or_insert_default();
+                        task.list_finished_source_ids
+                            .extend(list_finished_source_ids);
+                    }
                 }
                 // Process load_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
-                let load_finished_source_ids: Vec<_> = node
+                let mut load_finished_sources_by_actor: HashMap<u32, HashSet<u32>> = HashMap::new();
+                for entry in node
                     .state
                     .resps
                     .iter()
-                    .flat_map(|resp| &resp.load_finished_source_ids)
-                    .cloned()
-                    .collect::<HashSet<_>>() // deduplicate
-                    .into_iter()
-                    .collect();
-                if !load_finished_source_ids.is_empty() {
-                    // Add load_finished_source_ids to the task for processing
-                    let task = task.get_or_insert_default();
-                    task.load_finished_source_ids
-                        .extend(load_finished_source_ids);
+                    .flat_map(|resp| resp.load_finished_sources.iter())
+                {
+                    load_finished_sources_by_actor
+                        .entry(entry.associated_source_id)
+                        .or_default()
+                        .insert(entry.reporter_actor_id);
+                }
+                if !load_finished_sources_by_actor.is_empty() {
+                    let load_finished_source_ids: Vec<PbLoadFinishedSource> =
+                        load_finished_sources_by_actor
+                            .into_iter()
+                            .flat_map(|(associated_source_id, actor_ids)| {
+                                actor_ids.into_iter().map(move |reporter_actor_id| {
+                                    PbLoadFinishedSource {
+                                        associated_source_id,
+                                        reporter_actor_id,
+                                    }
+                                })
+                            })
+                            .collect();
+                    if !load_finished_source_ids.is_empty() {
+                        // Add load_finished_source_ids to the task for processing
+                        let task = task.get_or_insert_default();
+                        task.load_finished_source_ids
+                            .extend(load_finished_source_ids);
+                    }
                 }
                 // Process refresh_finished_table_ids for all barrier types (checkpoint and non-checkpoint)
                 let refresh_finished_table_ids: Vec<_> = node

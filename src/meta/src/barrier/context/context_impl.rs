@@ -20,6 +20,9 @@ use risingwave_common::id::JobId;
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    PbListFinishedSource, PbLoadFinishedSource,
+};
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -116,22 +119,28 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     async fn handle_list_finished_source_ids(
         &self,
-        list_finished_source_ids: Vec<u32>,
+        list_finished_source_ids: Vec<PbListFinishedSource>,
     ) -> MetaResult<()> {
         use risingwave_common::catalog::TableId;
 
         tracing::info!(
-            "Handling list finished source IDs: {:?}",
-            list_finished_source_ids
+            count = list_finished_source_ids.len(),
+            "Handling list finished source events"
         );
 
         use crate::barrier::Command;
-        for associated_source_id in list_finished_source_ids {
+        for list_finished in list_finished_source_ids {
             let res: MetaResult<()> = try {
-                tracing::info!(%associated_source_id, "Scheduling ListFinish command for refreshable batch source");
+                let associated_source_id_raw = list_finished.associated_source_id;
+                let reporter_actor_id = list_finished.reporter_actor_id;
+                tracing::info!(
+                    associated_source_id = %associated_source_id_raw,
+                    %reporter_actor_id,
+                    "Scheduling ListFinish command for refreshable batch source"
+                );
 
                 // For refreshable batch sources, associated_source_id is the table_id
-                let associated_source_id = TableId::new(associated_source_id);
+                let associated_source_id = TableId::new(associated_source_id_raw);
                 // Use a proper lookup to get the table_id associated with the source_id
                 let table_id = self
                     .metadata_manager
@@ -164,10 +173,20 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     )
                     .context("Failed to schedule ListFinish command")?;
 
-                tracing::info!(%associated_source_id, %table_id, "ListFinish command scheduled successfully");
+                tracing::info!(
+                    associated_source_id = %associated_source_id_raw,
+                    %reporter_actor_id,
+                    %table_id,
+                    "ListFinish command scheduled successfully"
+                );
             };
             if let Err(e) = res {
-                tracing::error!(error = %e.as_report(), %associated_source_id, "Failed to handle source list finished");
+                tracing::error!(
+                    error = %e.as_report(),
+                    associated_source_id = %list_finished.associated_source_id,
+                    %list_finished.reporter_actor_id,
+                    "Failed to handle source list finished"
+                );
             }
         }
         Ok(())
@@ -175,22 +194,28 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     async fn handle_load_finished_source_ids(
         &self,
-        load_finished_source_ids: Vec<u32>,
+        load_finished_source_ids: Vec<PbLoadFinishedSource>,
     ) -> MetaResult<()> {
         use risingwave_common::catalog::TableId;
 
         tracing::info!(
-            "Handling load finished source IDs: {:?}",
-            load_finished_source_ids
+            count = load_finished_source_ids.len(),
+            "Handling load finished source events"
         );
 
         use crate::barrier::Command;
-        for associated_source_id in load_finished_source_ids {
+        for load_finished in load_finished_source_ids {
+            let associated_source_id_raw = load_finished.associated_source_id;
+            let reporter_actor_id = load_finished.reporter_actor_id;
             let res: MetaResult<()> = try {
-                tracing::info!(%associated_source_id, "Scheduling LoadFinish command for refreshable batch source");
+                tracing::info!(
+                    associated_source_id = %associated_source_id_raw,
+                    %reporter_actor_id,
+                    "Scheduling LoadFinish command for refreshable batch source"
+                );
 
                 // For refreshable batch sources, associated_source_id is the table_id
-                let associated_source_id = TableId::new(associated_source_id);
+                let associated_source_id = TableId::new(associated_source_id_raw);
                 // Use a proper lookup to get the table_id associated with the source_id
                 let table_id = self
                     .metadata_manager
@@ -223,10 +248,19 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     )
                     .context("Failed to schedule LoadFinish command")?;
 
-                tracing::info!(%associated_source_id, %associated_source_id, "LoadFinish command scheduled successfully");
+                tracing::info!(
+                    associated_source_id = %associated_source_id_raw,
+                    %reporter_actor_id,
+                    "LoadFinish command scheduled successfully"
+                );
             };
             if let Err(e) = res {
-                tracing::error!(error = %e.as_report(), %associated_source_id, "Failed to handle source load finished");
+                tracing::error!(
+                    error = %e.as_report(),
+                    %reporter_actor_id,
+                    associated_source_id = %associated_source_id_raw,
+                    "Failed to handle source load finished"
+                );
             }
         }
 

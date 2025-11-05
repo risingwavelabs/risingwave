@@ -12,16 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
+
 use anyhow::anyhow;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use parking_lot::Mutex;
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
+use risingwave_meta_model::ActorId;
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
 
-use crate::barrier::{BarrierScheduler, Command};
+use crate::barrier::{BarrierScheduler, Command, SharedActorInfos};
 use crate::manager::MetadataManager;
 use crate::{MetaError, MetaResult};
+
+pub static REFRESH_PROGRESS_TRACKER: LazyLock<
+    Mutex<HashMap<TableId, SingleTableRefreshProgressTracker>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// # High level design for refresh table
 ///
@@ -90,7 +99,11 @@ impl RefreshManager {
     /// 3. Atomically sets the table state to REFRESHING
     /// 4. Sends a refresh command through the barrier system
     /// 5. Returns the result of the refresh operation
-    pub async fn refresh_table(&self, request: RefreshRequest) -> MetaResult<RefreshResponse> {
+    pub async fn refresh_table(
+        &self,
+        request: RefreshRequest,
+        shared_actor_infos: &SharedActorInfos,
+    ) -> MetaResult<RefreshResponse> {
         let table_id = TableId::new(request.table_id);
         let associated_source_id = TableId::new(request.associated_source_id);
 
@@ -107,6 +120,52 @@ impl RefreshManager {
                 .get_object_database_id(table_id.as_raw_id() as _)
                 .await? as _,
         );
+
+        // load actor info for refresh
+        let job_fragments = self
+            .metadata_manager
+            .get_job_fragments_by_id(table_id.as_job_id())
+            .await?;
+
+        // Collect actor information synchronously - guard must be dropped before any await
+        // Use a separate scope to ensure guard is dropped before the next await
+        {
+            let fragment_to_actor_mapping = shared_actor_infos.read_guard();
+            let mut tracker = SingleTableRefreshProgressTracker::default();
+            for (fragment_id, fragment) in &job_fragments.fragments {
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::Source)
+                {
+                    let fragment_info = fragment_to_actor_mapping
+                        .get_fragment(*fragment_id)
+                        .ok_or_else(|| MetaError::fragment_not_found(*fragment_id))?;
+                    tracker.expected_list_actors.extend(
+                        fragment_info
+                            .actors
+                            .keys()
+                            .map(|actor_id| *actor_id as ActorId),
+                    );
+                }
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::FsFetch)
+                    && let Some(fragment_info) =
+                        fragment_to_actor_mapping.get_fragment(*fragment_id)
+                {
+                    tracker.expected_fetch_actors.extend(
+                        fragment_info
+                            .actors
+                            .keys()
+                            .map(|actor_id| *actor_id as ActorId),
+                    );
+                }
+            }
+            // Store tracker in global tracker before guard is dropped
+            REFRESH_PROGRESS_TRACKER.lock().insert(table_id, tracker);
+
+            Ok::<_, MetaError>(())
+        }?;
 
         // Create refresh command
         let refresh_command = Command::Refresh {
@@ -204,5 +263,31 @@ impl RefreshManager {
         );
 
         Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct SingleTableRefreshProgressTracker {
+    pub expected_list_actors: HashSet<ActorId>,
+    pub expected_fetch_actors: HashSet<ActorId>,
+    pub list_finished_actors: HashSet<ActorId>,
+    pub fetch_finished_actors: HashSet<ActorId>,
+}
+
+impl SingleTableRefreshProgressTracker {
+    pub fn report_list_finished(&mut self, actor_ids: Vec<ActorId>) {
+        self.list_finished_actors.extend(actor_ids);
+    }
+
+    pub fn is_list_finished(&self) -> bool {
+        self.expected_list_actors == self.list_finished_actors
+    }
+
+    pub fn report_fetch_finished(&mut self, actor_ids: Vec<ActorId>) {
+        self.fetch_finished_actors.extend(actor_ids);
+    }
+
+    pub fn is_fetch_finished(&self) -> bool {
+        self.expected_fetch_actors == self.fetch_finished_actors
     }
 }
