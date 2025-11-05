@@ -316,7 +316,6 @@ impl Sink for RedisSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        self.config.common.build_conn_and_pipe().await?;
         let all_map: HashMap<String, DataType> = self
             .schema
             .fields()
@@ -331,10 +330,6 @@ impl Sink for RedisSink {
             .filter(|(k, _)| self.pk_indices.contains(k))
             .map(|(_, v)| (v.name.clone(), v.data_type.clone()))
             .collect();
-        tracing::error!(
-            "test:for bug: {:?}",
-            self.format_desc.options.get(REDIS_VALUE_TYPE)
-        );
         if matches!(
             self.format_desc.encode,
             super::catalog::SinkEncode::Template
@@ -485,6 +480,7 @@ impl Sink for RedisSink {
                 }
             }
         }
+        self.config.common.build_conn_and_pipe().await?;
         Ok(())
     }
 }
