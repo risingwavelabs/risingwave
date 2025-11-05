@@ -176,7 +176,7 @@ impl ControlStreamHandle {
         reset_request_id: u32,
     ) {
         self.send_response(Response::ResetDatabase(ResetDatabaseResponse {
-            database_id: database_id.as_raw_id(),
+            database_id,
             root_err: root_err.map(|err| PbScoredError {
                 err_msg: err.error.to_report_string(),
                 score: err.score.0,
@@ -454,7 +454,7 @@ impl LocalBarrierWorker {
     ) -> Result<(), (DatabaseId, StreamError)> {
         match request {
             Request::InjectBarrier(req) => {
-                let database_id = DatabaseId::new(req.database_id);
+                let database_id = req.database_id;
                 let result: StreamResult<()> = try {
                     let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
                     self.send_barrier(&barrier, req)?;
@@ -464,16 +464,13 @@ impl LocalBarrierWorker {
             }
             Request::RemovePartialGraph(req) => {
                 self.remove_partial_graphs(
-                    DatabaseId::new(req.database_id),
+                    req.database_id,
                     req.partial_graph_ids.into_iter().map(PartialGraphId::new),
                 );
                 Ok(())
             }
             Request::CreatePartialGraph(req) => {
-                self.add_partial_graph(
-                    DatabaseId::new(req.database_id),
-                    PartialGraphId::new(req.partial_graph_id),
-                );
+                self.add_partial_graph(req.database_id, PartialGraphId::new(req.partial_graph_id));
                 Ok(())
             }
             Request::ResetDatabase(req) => {
@@ -840,20 +837,20 @@ impl LocalBarrierWorker {
                         worker_id: self.actor_manager.env.worker_id(),
                         table_watermarks: table_watermarks
                             .into_iter()
-                            .map(|(key, value)| (key.as_raw_id(), value.into()))
+                            .map(|(key, value)| (key, value.into()))
                             .collect(),
                         old_value_sstables: old_value_ssts
                             .into_iter()
                             .map(|sst| sst.sst_info.into())
                             .collect(),
-                        database_id: database_id.as_raw_id(),
+                        database_id,
                         list_finished_source_ids,
                         load_finished_source_ids,
                         vector_index_adds: vector_index_adds
                             .into_iter()
                             .map(|(table_id, adds)| {
                                 (
-                                    table_id.as_raw_id(),
+                                    table_id,
                                     PbVectorIndexAdds {
                                         adds: adds.into_iter().map(|add| add.into()).collect(),
                                     },
@@ -862,10 +859,7 @@ impl LocalBarrierWorker {
                             .collect(),
                         cdc_table_backfill_progress,
                         truncate_tables: truncate_tables.into_iter().map_into().collect(),
-                        refresh_finished_tables: refresh_finished_tables
-                            .into_iter()
-                            .map_into()
-                            .collect(),
+                        refresh_finished_tables,
                     },
                 )
             }
@@ -895,7 +889,7 @@ impl LocalBarrierWorker {
         let database_status = self
             .state
             .databases
-            .get_mut(&DatabaseId::new(request.database_id))
+            .get_mut(&request.database_id)
             .expect("should exist");
         if let Some(state) = database_status.state_for_request() {
             state.transform_to_issued(barrier, request)?;
@@ -983,7 +977,7 @@ impl LocalBarrierWorker {
     }
 
     fn reset_database(&mut self, req: ResetDatabaseRequest) {
-        let database_id = DatabaseId::new(req.database_id);
+        let database_id = req.database_id;
         if let Some(database_status) = self.state.databases.get_mut(&database_id) {
             database_status.start_reset(
                 database_id,
@@ -1041,9 +1035,7 @@ impl LocalBarrierWorker {
             .suspend(failed_actor, err, completing_futures);
         self.control_stream_handle
             .send_response(Response::ReportDatabaseFailure(
-                ReportDatabaseFailureResponse {
-                    database_id: database_id.as_raw_id(),
-                },
+                ReportDatabaseFailureResponse { database_id },
             ));
     }
 
@@ -1176,7 +1168,7 @@ pub(crate) mod barrier_test_utils {
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             PbCreatePartialGraphRequest {
                                 partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
-                                database_id: TEST_DATABASE_ID.as_raw_id(),
+                                database_id: TEST_DATABASE_ID,
                             },
                         ),
                     ),
@@ -1222,7 +1214,7 @@ pub(crate) mod barrier_test_utils {
                         InjectBarrierRequest {
                             request_id: "".to_owned(),
                             barrier: Some(barrier.to_protobuf()),
-                            database_id: TEST_DATABASE_ID.as_raw_id(),
+                            database_id: TEST_DATABASE_ID,
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),

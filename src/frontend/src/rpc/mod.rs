@@ -50,8 +50,8 @@ impl FrontendService for FrontendServiceImpl {
         let req = request.into_inner();
 
         let replace_plan = get_new_table_plan(
-            req.table_id.into(),
-            req.database_id.into(),
+            req.table_id,
+            req.database_id,
             req.owner,
             req.cdc_table_change,
         )

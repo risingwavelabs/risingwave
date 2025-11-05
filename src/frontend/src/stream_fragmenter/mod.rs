@@ -188,11 +188,7 @@ pub fn build_graph_with_strategy(
     let mut fragment_graph = state.fragment_graph.to_protobuf();
 
     // Set table ids.
-    fragment_graph.dependent_table_ids = state
-        .dependent_table_ids
-        .into_iter()
-        .map(|id| id.as_raw_id())
-        .collect();
+    fragment_graph.dependent_table_ids = state.dependent_table_ids.into_iter().collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
 
     // Set parallelism and vnode count.
@@ -380,14 +376,14 @@ fn build_fragment(
 
             NodeBody::EowcGapFill(node) => {
                 let table = node.buffer_table.as_ref().unwrap().clone();
-                state.tables.insert(TableId::new(table.id), table);
+                state.tables.insert(table.id, table);
                 let table = node.prev_row_table.as_ref().unwrap().clone();
-                state.tables.insert(TableId::new(table.id), table);
+                state.tables.insert(table.id, table);
             }
 
             NodeBody::GapFill(node) => {
                 let table = node.state_table.as_ref().unwrap().clone();
-                state.tables.insert(TableId::new(table.id), table);
+                state.tables.insert(table.id, table);
             }
 
             NodeBody::StreamScan(node) => {
@@ -416,14 +412,12 @@ fn build_fragment(
                 }
                 // memorize table id for later use
                 // The table id could be a upstream CDC source
-                state
-                    .dependent_table_ids
-                    .insert(TableId::new(node.table_id));
+                state.dependent_table_ids.insert(node.table_id);
 
                 // Add state table if present
                 if let Some(state_table) = &node.state_table {
                     let table = state_table.clone();
-                    state.tables.insert(TableId::new(table.id), table);
+                    state.tables.insert(table.id, table);
                 }
             }
 

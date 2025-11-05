@@ -57,12 +57,12 @@ async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmen
         .into_iter()
         .map(|distribution| RwFragment {
             fragment_id: distribution.fragment_id as i32,
-            table_id: distribution.table_id as i32,
+            table_id: distribution.table_id.as_raw_id() as i32,
             distribution_type: distribution.distribution_type().as_str_name().into(),
             state_table_ids: distribution
                 .state_table_ids
                 .into_iter()
-                .map(|id| id as i32)
+                .map(|id| id.as_raw_id() as i32)
                 .collect(),
             upstream_fragment_ids: distribution
                 .upstream_fragment_ids

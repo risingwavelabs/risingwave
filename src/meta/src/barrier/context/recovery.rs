@@ -315,7 +315,7 @@ impl GlobalBarrierWorkerContextImpl {
             .await?;
         for table in tables {
             assert_eq!(table.table_type(), PbTableType::Table);
-            let fragment_infos = jobs.get_mut(&table.id.into()).unwrap();
+            let fragment_infos = jobs.get_mut(&table.id.as_job_id()).unwrap();
             let mut target_fragment_id = None;
             for fragment in fragment_infos.values() {
                 let mut is_target_fragment = false;

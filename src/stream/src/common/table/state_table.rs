@@ -473,11 +473,11 @@ impl<
         let preload_all_rows = if developer.default_enable_mem_preload_state_table {
             !developer
                 .mem_preload_state_table_ids_blacklist
-                .contains(&self.table_catalog.id)
+                .contains(&self.table_catalog.id.as_raw_id())
         } else {
             developer
                 .mem_preload_state_table_ids_whitelist
-                .contains(&self.table_catalog.id)
+                .contains(&self.table_catalog.id.as_raw_id())
         };
         self.with_preload_all_rows(preload_all_rows)
     }
@@ -526,7 +526,7 @@ impl<
             && let Err(e) =
                 risingwave_common::license::Feature::StateTableMemoryPreload.check_available()
         {
-            warn!(table_id=self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
+            warn!(table_id=%self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
             preload_all_rows = false;
         }
         StateTableInner::from_table_catalog_inner(
@@ -589,7 +589,7 @@ where
         output_column_ids: Vec<ColumnId>,
         preload_all_rows: bool,
     ) -> Self {
-        let table_id = TableId::new(table_catalog.id);
+        let table_id = table_catalog.id;
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()

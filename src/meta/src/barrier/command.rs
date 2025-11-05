@@ -830,7 +830,7 @@ impl CommandContext {
                             assert_eq!(index_table.table_type, PbTableType::VectorIndex as i32);
                             info.vector_index_delta
                                 .try_insert(
-                                    index_table.id.into(),
+                                    index_table.id,
                                     VectorIndexDelta::Init(PbVectorIndexInit {
                                         info: Some(index_table.vector_index_info.unwrap()),
                                     }),
@@ -949,7 +949,7 @@ impl Command {
                             .keys()
                             .map(|table_id| SubscriptionUpstreamInfo {
                                 subscriber_id: table_fragments.stream_job_id().as_raw_id(),
-                                upstream_mv_table_id: table_id.as_raw_id(),
+                                upstream_mv_table_id: *table_id,
                             })
                             .collect()
                     } else {
@@ -1030,7 +1030,7 @@ impl Command {
                                 .iter()
                                 .map(move |upstream_table_id| SubscriptionUpstreamInfo {
                                     subscriber_id: table_id.as_raw_id(),
-                                    upstream_mv_table_id: upstream_table_id.as_raw_id(),
+                                    upstream_mv_table_id: *upstream_table_id,
                                 })
                         })
                         .collect(),
@@ -1287,7 +1287,7 @@ impl Command {
                 actor_splits: Default::default(),
                 pause: false,
                 subscriptions_to_add: vec![SubscriptionUpstreamInfo {
-                    upstream_mv_table_id: upstream_mv_table_id.as_raw_id(),
+                    upstream_mv_table_id: *upstream_mv_table_id,
                     subscriber_id: *subscription_id,
                 }],
                 backfill_nodes_to_pause: vec![],
@@ -1300,7 +1300,7 @@ impl Command {
             } => Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
                 info: vec![SubscriptionUpstreamInfo {
                     subscriber_id: *subscription_id,
-                    upstream_mv_table_id: upstream_mv_table_id.as_raw_id(),
+                    upstream_mv_table_id: *upstream_mv_table_id,
                 }],
             })),
             Command::ConnectorPropsChange(config) => {
@@ -1329,7 +1329,7 @@ impl Command {
                 associated_source_id,
             } => Some(Mutation::RefreshStart(
                 risingwave_pb::stream_plan::RefreshStartMutation {
-                    table_id: table_id.as_raw_id(),
+                    table_id: *table_id,
                     associated_source_id: associated_source_id.as_raw_id(),
                 },
             )),

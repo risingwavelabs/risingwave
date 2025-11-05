@@ -137,7 +137,7 @@ impl FragmentActorBuilder {
                 // Index the upstreams by the an external edge ID.
                 let (upstream_fragment_id, upstream_no_shuffle_actor) = &self.upstreams
                     [&EdgeId::UpstreamExternal {
-                        upstream_table_id: stream_scan.table_id.into(),
+                        upstream_table_id: stream_scan.table_id,
                         downstream_fragment_id: self.fragment_id,
                     }];
 

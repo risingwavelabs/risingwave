@@ -10206,8 +10206,7 @@ dependencies = [
 [[package]]
 name = "prost"
 version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c0fef6c4230e4ccf618a35c59d7ede15dea37de8427500f50aff708806e42ec"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "bytes",
  "prost-derive 0.13.4",
@@ -10248,8 +10247,7 @@ dependencies = [
 [[package]]
 name = "prost-build"
 version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0f3e5beed80eb580c68e2c600937ac2c4eedabdfd5ef1e5b7ea4f3fba84497b"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "heck 0.5.0",
  "itertools 0.13.0",
@@ -10281,8 +10279,7 @@ dependencies = [
 [[package]]
 name = "prost-derive"
 version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "157c5a9d7ea5c2ed2d9fb8f495b64759f7816c7eaea54ba3978f0d63000162e3"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "anyhow",
  "itertools 0.13.0",
@@ -10340,8 +10337,7 @@ dependencies = [
 [[package]]
 name = "prost-types"
 version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc2f1e56baa61e93533aebc21af4d2134b70f66275e0fcdf3cbe43d77ff7e8fc"
+source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "prost 0.13.4",
 ]
@@ -11523,7 +11519,6 @@ dependencies = [
  "rw_iter_util",
  "rw_resource_util",
  "ryu",
- "sea-orm",
  "serde",
  "serde_bytes",
  "serde_default",
@@ -12645,10 +12640,13 @@ dependencies = [
  "prost-build 0.13.4",
  "prost-helpers",
  "risingwave_error",
+ "sea-orm",
  "serde",
  "static_assertions",
  "strum 0.27.1",
  "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
+ "thiserror-ext",
+ "tracing",
  "walkdir",
  "workspace-hack",
 ]

@@ -74,7 +74,7 @@ pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const MAX_SYS_CATALOG_NUM: i32 = 5000;
 pub const SYS_CATALOG_START_ID: i32 = i32::MAX - MAX_SYS_CATALOG_NUM;
 
-pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
+pub use risingwave_pb::id::OBJECT_ID_PLACEHOLDER;
 
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,

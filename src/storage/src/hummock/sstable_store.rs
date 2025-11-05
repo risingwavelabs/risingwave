@@ -107,7 +107,7 @@ impl<T> Deref for VectorMetaFileHolder<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        // #safety: VectorFileHolder is exposed only as immutable, and `VectorFileMeta` is pinned via box
+        // SAFETY: VectorFileHolder is exposed only as immutable, and `VectorFileMeta` is pinned via box
         unsafe { &*self.ptr }
     }
 }

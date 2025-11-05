@@ -1056,7 +1056,7 @@ pub fn start_shared_compactor(
                             task: dispatch_task,
                         } = request.into_inner();
                         let table_id_to_catalog = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
-                            acc.insert(table.id.into(), table);
+                            acc.insert(table.id, table);
                             acc
                         });
 

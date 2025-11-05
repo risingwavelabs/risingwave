@@ -278,7 +278,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .create_database(PbDatabase {
                 name: db_name.to_owned(),
-                id: 0,
+                id: 0.into(),
                 owner,
                 resource_group: resource_group.to_owned(),
                 barrier_interval_ms,
@@ -297,9 +297,9 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .create_schema(PbSchema {
-                id: 0,
+                id: 0.into(),
                 name: schema_name.to_owned(),
-                database_id: db_id.as_raw_id(),
+                database_id: db_id,
                 owner,
             })
             .await?;

@@ -137,7 +137,7 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         periodic_barriers: &mut PeriodicBarriers,
     ) -> MetaResult<()> {
-        let database_id = DatabaseId::new(resp.database_id);
+        let database_id = resp.database_id;
         let database_status = self.databases.get_mut(&database_id).expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
@@ -397,7 +397,7 @@ impl CheckpointControl {
         worker_id: WorkerId,
         resp: ResetDatabaseResponse,
     ) {
-        let database_id = DatabaseId::new(resp.database_id);
+        let database_id = resp.database_id;
         match self.databases.get_mut(&database_id).expect("should exist") {
             DatabaseCheckpointControlStatus::Running(_) => {
                 unreachable!("should not receive reset database resp when running")
@@ -880,7 +880,7 @@ impl DatabaseCheckpointControl {
                         .extend(load_finished_source_ids);
                 }
                 // Process refresh_finished_table_ids for all barrier types (checkpoint and non-checkpoint)
-                let refresh_finished_table_ids: Vec<_> = node
+                let refresh_finished_table_job_ids: Vec<_> = node
                     .state
                     .resps
                     .iter()
@@ -888,13 +888,13 @@ impl DatabaseCheckpointControl {
                     .cloned()
                     .collect::<HashSet<_>>() // deduplicate
                     .into_iter()
-                    .map(JobId::new)
+                    .map(|table_id| table_id.as_job_id())
                     .collect();
-                if !refresh_finished_table_ids.is_empty() {
+                if !refresh_finished_table_job_ids.is_empty() {
                     // Add refresh_finished_table_ids to the task for processing
                     let task = task.get_or_insert_default();
                     task.refresh_finished_table_job_ids
-                        .extend(refresh_finished_table_ids);
+                        .extend(refresh_finished_table_job_ids);
                 }
 
                 let staging_commit_info = self.create_mview_tracker.apply_collected_command(
