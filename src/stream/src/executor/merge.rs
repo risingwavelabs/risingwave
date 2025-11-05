@@ -19,7 +19,6 @@ use std::task::{Context, Poll};
 use risingwave_common::array::StreamChunkBuilder;
 use risingwave_common::config::MetricLevel;
 use tokio::sync::mpsc;
-use tokio::time::Instant;
 
 use super::exchange::input::BoxedActorInput;
 use super::*;
@@ -235,7 +234,6 @@ impl MergeExecutor {
         );
 
         // Channels that're blocked by the barrier to align.
-        let mut start_time = Instant::now();
         pin_mut!(select_all);
 
         let mut barrier_buffer = DispatchBarrierBuffer::new(
@@ -248,11 +246,9 @@ impl MergeExecutor {
         );
 
         loop {
-            let msg = barrier_buffer.await_next_message(&mut select_all).await?;
-            metrics
-                .actor_input_buffer_blocking_duration_ns
-                .inc_by(start_time.elapsed().as_nanos() as u64);
-
+            let msg = barrier_buffer
+                .await_next_message(&mut select_all, &metrics)
+                .await?;
             let msg = match msg {
                 DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
                 DispatcherMessage::Chunk(chunk) => {
@@ -326,7 +322,6 @@ impl MergeExecutor {
             };
 
             yield msg;
-            start_time = Instant::now();
         }
     }
 }
