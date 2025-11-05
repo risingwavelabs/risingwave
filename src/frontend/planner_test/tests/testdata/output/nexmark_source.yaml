@@ -2218,8 +2218,8 @@
     └─StreamProject { exprs: [id, item_name, count(auction)] }
       └─StreamTopN { order: [count(auction) DESC], limit: 1000, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count(auction) DESC], limit: 1000, offset: 0, group_key: [$expr1] }
-            └─StreamProject { exprs: [id, item_name, count(auction), Vnode(id) as $expr1] }
+          └─StreamGroupTopN { order: [count(auction) DESC], limit: 1000, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [id, item_name, count(auction), Vnode(id) as _vnode] }
               └─StreamHashAgg [append_only] { group_key: [id, item_name], aggs: [count(auction), count] }
                 └─StreamHashJoin [append_only] { type: Inner, predicate: id = auction, output: [id, item_name, auction, _row_id, _row_id] }
                   ├─StreamExchange { dist: HashShard(id) }
@@ -2236,8 +2236,8 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count(auction) DESC], limit: 1000, offset: 0, group_key: [$expr1] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [id, item_name, count(auction), Vnode(id) as $expr1] }
+    StreamGroupTopN { order: [count(auction) DESC], limit: 1000, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [id, item_name, count(auction), Vnode(id) as _vnode] }
         └── StreamHashAgg [append_only] { group_key: [id, item_name], aggs: [count(auction), count] } { tables: [ HashAggState: 2 ] }
             └── StreamHashJoin [append_only] { type: Inner, predicate: id = auction, output: [id, item_name, auction, _row_id, _row_id] }
                 ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
@@ -2253,14 +2253,14 @@
     └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { tables: [ Source: 8 ] }
 
     Table 0
-    ├── columns: [ id, item_name, count(auction), $expr1, _rw_timestamp ]
+    ├── columns: [ id, item_name, count(auction), _vnode, _rw_timestamp ]
     ├── primary key: [ $2 DESC, $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ id, item_name, count(auction), $expr1, _rw_timestamp ]
+    ├── columns: [ id, item_name, count(auction), _vnode, _rw_timestamp ]
     ├── primary key: [ $3 ASC, $2 DESC, $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -2336,8 +2336,8 @@
     └─StreamProject { exprs: [min(min(max(price)))] }
       └─StreamSimpleAgg { aggs: [min(min(max(price))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr1], aggs: [min(max(price)), count] }
-            └─StreamProject { exprs: [id, max(price), Vnode(id) as $expr1] }
+          └─StreamHashAgg { group_key: [_vnode], aggs: [min(max(price)), count] }
+            └─StreamProject { exprs: [id, max(price), Vnode(id) as _vnode] }
               └─StreamHashAgg [append_only] { group_key: [id], aggs: [max(price), count] }
                 └─StreamProject { exprs: [id, price, _row_id, _row_id] }
                   └─StreamFilter { predicate: (date_time >= date_time) AND (date_time <= expires) }
@@ -2357,9 +2357,9 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamHashAgg { group_key: [$expr1], aggs: [min(max(price)), count] }
+    StreamHashAgg { group_key: [_vnode], aggs: [min(max(price)), count] }
     ├── tables: [ HashAggState: 3, HashAggCall0: 2 ]
-    └── StreamProject { exprs: [id, max(price), Vnode(id) as $expr1] }
+    └── StreamProject { exprs: [id, max(price), Vnode(id) as _vnode] }
         └── StreamHashAgg [append_only] { group_key: [id], aggs: [max(price), count] }
             ├── tables: [ HashAggState: 4 ]
             └── StreamProject { exprs: [id, price, _row_id, _row_id] }
@@ -2383,7 +2383,7 @@
     └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { tables: [ Source: 10 ] }
 
     Table 0
-    ├── columns: [ min(max(price)), $expr1, _rw_timestamp ]
+    ├── columns: [ min(max(price)), _vnode, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
@@ -2397,7 +2397,7 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ $expr1, max(price), id, _rw_timestamp ]
+    ├── columns: [ _vnode, max(price), id, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
@@ -2405,7 +2405,7 @@
     └── vnode column idx: 0
 
     Table 3
-    ├── columns: [ $expr1, min(max(price)), count, _rw_timestamp ]
+    ├── columns: [ _vnode, min(max(price)), count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: []

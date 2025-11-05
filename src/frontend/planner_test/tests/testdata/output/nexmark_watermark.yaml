@@ -2407,8 +2407,8 @@
     └─StreamProject { exprs: [$expr2, $expr3, count($expr4)] }
       └─StreamTopN { order: [count($expr4) DESC], limit: 1000, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [$expr5] }
-            └─StreamProject { exprs: [$expr2, $expr3, count($expr4), Vnode($expr2) as $expr5] }
+          └─StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [$expr2, $expr3, count($expr4), Vnode($expr2) as _vnode] }
               └─StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count($expr4), count] }
                 └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4, output: [$expr2, $expr3, $expr4, _row_id, _row_id] }
                   ├─StreamExchange { dist: HashShard($expr2) }
@@ -2439,8 +2439,8 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [$expr5] } { tables: [ GroupTopN: 1 ] }
-    └── StreamProject { exprs: [$expr2, $expr3, count($expr4), Vnode($expr2) as $expr5] }
+    StreamGroupTopN { order: [count($expr4) DESC], limit: 1000, offset: 0, group_key: [_vnode] } { tables: [ GroupTopN: 1 ] }
+    └── StreamProject { exprs: [$expr2, $expr3, count($expr4), Vnode($expr2) as _vnode] }
         └── StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count($expr4), count] } { tables: [ HashAggState: 2 ] }
             └── StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4, output: [$expr2, $expr3, $expr4, _row_id, _row_id] }
                 ├── tables: [ HashJoinLeft: 3, HashJoinDegreeLeft: 4, HashJoinRight: 5, HashJoinDegreeRight: 6 ]
@@ -2465,10 +2465,10 @@
     └── StreamFilter { predicate: (event_type = 2:Int32) }
         └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ $expr2, $expr3, count($expr4), $expr5, _rw_timestamp ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ $expr2, $expr3, count($expr4), _vnode, _rw_timestamp ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
-    ├── columns: [ $expr2, $expr3, count($expr4), $expr5, _rw_timestamp ]
+    ├── columns: [ $expr2, $expr3, count($expr4), _vnode, _rw_timestamp ]
     ├── primary key: [ $3 ASC, $2 DESC, $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -2538,8 +2538,8 @@
     └─StreamProject { exprs: [min(min(max($expr5)))] }
       └─StreamSimpleAgg { aggs: [min(min(max($expr5))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr6], aggs: [min(max($expr5)), count] }
-            └─StreamProject { exprs: [$expr2, max($expr5), Vnode($expr2) as $expr6] }
+          └─StreamHashAgg { group_key: [_vnode], aggs: [min(max($expr5)), count] }
+            └─StreamProject { exprs: [$expr2, max($expr5), Vnode($expr2) as _vnode] }
               └─StreamHashAgg [append_only] { group_key: [$expr2], aggs: [max($expr5), count] }
                 └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4 AND ($expr1 >= $expr1) AND ($expr1 <= $expr3), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output: [$expr2, $expr5, _row_id, _row_id] }
                   ├─StreamExchange { dist: HashShard($expr2) }
@@ -2571,8 +2571,8 @@
             └── StreamExchange Single from 1
 
     Fragment 1
-    StreamHashAgg { group_key: [$expr6], aggs: [min(max($expr5)), count] } { tables: [ HashAggState: 3, HashAggCall0: 2 ] }
-    └── StreamProject { exprs: [$expr2, max($expr5), Vnode($expr2) as $expr6] }
+    StreamHashAgg { group_key: [_vnode], aggs: [min(max($expr5)), count] } { tables: [ HashAggState: 3, HashAggCall0: 2 ] }
+    └── StreamProject { exprs: [$expr2, max($expr5), Vnode($expr2) as _vnode] }
         └── StreamHashAgg [append_only] { group_key: [$expr2], aggs: [max($expr5), count] } { tables: [ HashAggState: 4 ] }
             └── StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr4 AND ($expr1 >= $expr1) AND ($expr1 <= $expr3), conditions_to_clean_right_state_table: ($expr1 >= $expr1), output: [$expr2, $expr5, _row_id, _row_id] }
                 ├── tables: [ HashJoinLeft: 5, HashJoinDegreeLeft: 6, HashJoinRight: 7, HashJoinDegreeRight: 8 ]
@@ -2597,13 +2597,13 @@
     └── StreamFilter { predicate: (event_type = 2:Int32) }
         └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ min(max($expr5)), $expr6, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ min(max($expr5)), _vnode, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ min(min(max($expr5))), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 2 { columns: [ $expr6, max($expr5), $expr2, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 2 { columns: [ _vnode, max($expr5), $expr2, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 1, 2 ], distribution key: [ 2 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 3 { columns: [ $expr6, min(max($expr5)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ _vnode, min(max($expr5)), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4 { columns: [ $expr2, max($expr5), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
