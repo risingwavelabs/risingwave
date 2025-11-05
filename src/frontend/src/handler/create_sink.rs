@@ -811,7 +811,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::file_sink::opendal_sink::FileSink;
         use risingwave_connector::sink::file_sink::s3::S3Sink;
         use risingwave_connector::sink::file_sink::webhdfs::WebhdfsSink;
-        use risingwave_connector::sink::google_pubsub::GooglePubsubSink;
+        use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;
         use risingwave_connector::sink::kinesis::KinesisSink;
         use risingwave_connector::sink::mqtt::MqttSink;
@@ -819,7 +819,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::redis::RedisSink;
 
         convert_args!(hashmap!(
-                GooglePubsubSink::SINK_NAME => hashmap!(
+                GooglePubSubSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],
                 ),
                 KafkaSink::SINK_NAME => hashmap!(

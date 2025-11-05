@@ -15,10 +15,10 @@
 feature_gated_sink_mod!(big_query, "bigquery");
 pub mod boxed;
 pub mod catalog;
-feature_gated_sink_mod!(clickhouse, "clickhouse");
+feature_gated_sink_mod!(clickhouse, ClickHouse, "clickhouse");
 pub mod coordinate;
 pub mod decouple_checkpoint_log_sink;
-feature_gated_sink_mod!(deltalake, "deltalake");
+feature_gated_sink_mod!(deltalake, DeltaLake, "deltalake");
 feature_gated_sink_mod!(doris, "doris");
 #[cfg(any(feature = "sink-doris", feature = "sink-starrocks"))]
 pub mod doris_starrocks_connector;
@@ -27,7 +27,7 @@ pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
-feature_gated_sink_mod!(google_pubsub, "google_pubsub");
+feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -112,7 +112,6 @@ use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
 use crate::sink::utils::feature_gated_sink_mod;
-use crate::sink::writer::SinkWriter;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
@@ -125,10 +124,10 @@ macro_rules! for_all_sinks {
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
-                { ClickHouse, $crate::sink::clickhouse::ClickhouseSink, $crate::sink::clickhouse::ClickhouseConfig },
+                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
                 { Mqtt, $crate::sink::mqtt::MqttSink, $crate::sink::mqtt::MqttConfig },
-                { GooglePubSub, $crate::sink::google_pubsub::GooglePubsubSink, $crate::sink::google_pubsub::GooglePubsubConfig },
+                { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink, $crate::sink::google_pubsub::GooglePubSubConfig },
                 { Nats, $crate::sink::nats::NatsSink, $crate::sink::nats::NatsConfig },
                 { Jdbc, $crate::sink::remote::JdbcSink, () },
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchConfig },
@@ -146,7 +145,7 @@ macro_rules! for_all_sinks {
                 { SnowflakeV2, $crate::sink::snowflake_redshift::snowflake::SnowflakeV2Sink, $crate::sink::snowflake_redshift::snowflake::SnowflakeV2Config },
                 { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::SnowflakeConfig },
                 { RedShift, $crate::sink::snowflake_redshift::redshift::RedshiftSink, $crate::sink::snowflake_redshift::redshift::RedShiftConfig },
-                { DeltaLake, $crate::sink::deltalake::DeltalakeSink, $crate::sink::deltalake::DeltalakeConfig },
+                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
                 { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
                 { Mongodb, $crate::sink::mongodb::MongodbSink, $crate::sink::mongodb::MongodbConfig },

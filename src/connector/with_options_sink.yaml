@@ -113,7 +113,7 @@ BigQueryConfig:
   - name: r#type
     field_type: String
     required: true
-ClickhouseConfig:
+ClickHouseConfig:
   fields:
   - name: clickhouse.url
     field_type: String
@@ -406,7 +406,7 @@ GcsConfig:
   - name: r#type
     field_type: String
     required: true
-GooglePubsubConfig:
+GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
     field_type: String

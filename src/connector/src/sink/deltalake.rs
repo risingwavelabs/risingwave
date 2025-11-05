@@ -60,7 +60,7 @@ pub const DELTALAKE_SINK: &str = "deltalake";
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
-pub struct DeltalakeCommon {
+pub struct DeltaLakeCommon {
     #[serde(rename = "location")]
     pub location: String,
     #[serde(flatten)]
@@ -75,7 +75,7 @@ pub struct DeltalakeCommon {
     pub commit_checkpoint_interval: u64,
 }
 
-impl EnforceSecret for DeltalakeCommon {
+impl EnforceSecret for DeltaLakeCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
         "gcs.service.account",
     };
@@ -93,7 +93,7 @@ impl EnforceSecret for DeltalakeCommon {
     }
 }
 
-impl DeltalakeCommon {
+impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
         let table = match Self::get_table_url(&self.location)? {
             DeltaTableUrl::S3(s3_path) => {
@@ -186,22 +186,22 @@ enum DeltaTableUrl {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
-pub struct DeltalakeConfig {
+pub struct DeltaLakeConfig {
     #[serde(flatten)]
-    pub common: DeltalakeCommon,
+    pub common: DeltaLakeCommon,
 
     pub r#type: String,
 }
 
-impl EnforceSecret for DeltalakeConfig {
+impl EnforceSecret for DeltaLakeConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
-        DeltalakeCommon::enforce_one(prop)
+        DeltaLakeCommon::enforce_one(prop)
     }
 }
 
-impl DeltalakeConfig {
+impl DeltaLakeConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
-        let config = serde_json::from_value::<DeltalakeConfig>(
+        let config = serde_json::from_value::<DeltaLakeConfig>(
             serde_json::to_value(properties).map_err(|e| SinkError::DeltaLake(e.into()))?,
         )
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -210,24 +210,24 @@ impl DeltalakeConfig {
 }
 
 #[derive(Debug)]
-pub struct DeltalakeSink {
-    pub config: DeltalakeConfig,
+pub struct DeltaLakeSink {
+    pub config: DeltaLakeConfig,
     param: SinkParam,
 }
 
-impl EnforceSecret for DeltalakeSink {
+impl EnforceSecret for DeltaLakeSink {
     fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
-            DeltalakeCommon::enforce_one(prop)?;
+            DeltaLakeCommon::enforce_one(prop)?;
         }
         Ok(())
     }
 }
 
-impl DeltalakeSink {
-    pub fn new(config: DeltalakeConfig, param: SinkParam) -> Result<Self> {
+impl DeltaLakeSink {
+    pub fn new(config: DeltaLakeConfig, param: SinkParam) -> Result<Self> {
         Ok(Self { config, param })
     }
 }
@@ -326,14 +326,14 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
     Ok(result)
 }
 
-impl Sink for DeltalakeSink {
+impl Sink for DeltaLakeSink {
     type Coordinator = DeltaLakeSinkCommitter;
-    type LogSinker = CoordinatedLogSinker<DeltalakeSinkWriter>;
+    type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let inner = DeltalakeSinkWriter::new(
+        let inner = DeltaLakeSinkWriter::new(
             self.config.clone(),
             self.param.schema().clone(),
             self.param.downstream_pk_or_empty(),
@@ -357,7 +357,7 @@ impl Sink for DeltalakeSink {
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        DeltalakeConfig::from_btreemap(config.clone())?;
+        DeltaLakeConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 
@@ -424,17 +424,17 @@ impl Sink for DeltalakeSink {
     }
 }
 
-impl TryFrom<SinkParam> for DeltalakeSink {
+impl TryFrom<SinkParam> for DeltaLakeSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let config = DeltalakeConfig::from_btreemap(param.properties.clone())?;
-        DeltalakeSink::new(config, param)
+        let config = DeltaLakeConfig::from_btreemap(param.properties.clone())?;
+        DeltaLakeSink::new(config, param)
     }
 }
 
-pub struct DeltalakeSinkWriter {
-    pub config: DeltalakeConfig,
+pub struct DeltaLakeSinkWriter {
+    pub config: DeltaLakeConfig,
     #[expect(dead_code)]
     schema: Schema,
     #[expect(dead_code)]
@@ -445,9 +445,9 @@ pub struct DeltalakeSinkWriter {
     dl_table: DeltaTable,
 }
 
-impl DeltalakeSinkWriter {
+impl DeltaLakeSinkWriter {
     pub async fn new(
-        config: DeltalakeConfig,
+        config: DeltaLakeConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
     ) -> Result<Self> {
@@ -499,7 +499,7 @@ fn convert_schema(schema: &StructType) -> Result<deltalake::arrow::datatypes::Sc
 }
 
 #[async_trait]
-impl SinkWriter for DeltalakeSinkWriter {
+impl SinkWriter for DeltaLakeSinkWriter {
     type CommitMetadata = Option<SinkMetadata>;
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -631,7 +631,7 @@ mod test {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
-    use super::{DeltaLakeSinkCommitter, DeltalakeConfig, DeltalakeSinkWriter};
+    use super::{DeltaLakeSinkCommitter, DeltaLakeConfig, DeltaLakeSinkWriter};
     use crate::sink::SinkCommitCoordinator;
     use crate::sink::writer::SinkWriter;
 
@@ -674,14 +674,14 @@ mod test {
             },
         ]);
 
-        let deltalake_config = DeltalakeConfig::from_btreemap(properties).unwrap();
+        let deltalake_config = DeltaLakeConfig::from_btreemap(properties).unwrap();
         let deltalake_table = deltalake_config
             .common
             .create_deltalake_client()
             .await
             .unwrap();
 
-        let mut deltalake_writer = DeltalakeSinkWriter::new(deltalake_config, schema, vec![0])
+        let mut deltalake_writer = DeltaLakeSinkWriter::new(deltalake_config, schema, vec![0])
             .await
             .unwrap();
         let chunk = StreamChunk::new(

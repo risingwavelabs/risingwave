@@ -145,16 +145,16 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
 pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use sink_properties::*;
     let mut map = HashMap::new();
-    // ClickhouseConfig
+    // ClickHouseConfig
     map.try_insert(
-        std::any::type_name::<ClickhouseConfig>().to_owned(),
+        std::any::type_name::<ClickHouseConfig>().to_owned(),
         [
             "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // DeltaLakeConfig
     map.try_insert(
-        std::any::type_name::<SnowflakeConfig>().to_owned(),
+        std::any::type_name::<DeltaLakeConfig>().to_owned(),
         [
             "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),

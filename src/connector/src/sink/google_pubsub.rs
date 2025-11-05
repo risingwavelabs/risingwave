@@ -73,7 +73,7 @@ use delivery_future::*;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
-pub struct GooglePubsubConfig {
+pub struct GooglePubSubConfig {
     /// The Google Pub/Sub Project ID
     #[serde(rename = "pubsub.project_id")]
     pub project_id: String,
@@ -99,22 +99,22 @@ pub struct GooglePubsubConfig {
     pub credentials: Option<String>,
 }
 
-impl EnforceSecret for GooglePubsubConfig {
+impl EnforceSecret for GooglePubSubConfig {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
         "pubsub.credentials",
     };
 }
 
-impl GooglePubsubConfig {
+impl GooglePubSubConfig {
     fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
-        serde_json::from_value::<GooglePubsubConfig>(serde_json::to_value(values).unwrap())
+        serde_json::from_value::<GooglePubSubConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct GooglePubsubSink {
-    pub config: GooglePubsubConfig,
+pub struct GooglePubSubSink {
+    pub config: GooglePubSubConfig,
     is_append_only: bool,
 
     schema: Schema,
@@ -124,17 +124,17 @@ pub struct GooglePubsubSink {
     sink_from_name: String,
 }
 
-impl EnforceSecret for GooglePubsubSink {
+impl EnforceSecret for GooglePubSubSink {
     fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
-            GooglePubsubConfig::enforce_one(prop)?;
+            GooglePubSubConfig::enforce_one(prop)?;
         }
         Ok(())
     }
 }
-impl Sink for GooglePubsubSink {
+impl Sink for GooglePubSubSink {
     type LogSinker = AsyncTruncateLogSinkerOf<GooglePubSubSinkWriter>;
 
     const SINK_NAME: &'static str = PUBSUB_SINK;
@@ -170,13 +170,13 @@ impl Sink for GooglePubsubSink {
     }
 }
 
-impl TryFrom<SinkParam> for GooglePubsubSink {
+impl TryFrom<SinkParam> for GooglePubSubSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let pk_indices = param.downstream_pk_or_empty();
-        let config = GooglePubsubConfig::from_btreemap(param.properties)?;
+        let config = GooglePubSubConfig::from_btreemap(param.properties)?;
         let format_desc = param
             .format_desc
             .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?;
@@ -200,7 +200,7 @@ struct GooglePubSubPayloadWriter<'w> {
 
 impl GooglePubSubSinkWriter {
     pub async fn new(
-        config: GooglePubsubConfig,
+        config: GooglePubSubConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         format_desc: &SinkFormatDesc,
