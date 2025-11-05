@@ -65,6 +65,7 @@ pub(crate) mod dummy {
         const SINK_NAME: &'static str;
     }
 
+    /// A dummy coordinator that always returns an error.
     #[allow(dead_code)]
     pub struct FeatureNotEnabledCoordinator<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
@@ -83,6 +84,7 @@ pub(crate) mod dummy {
         }
     }
 
+    /// A dummy log sinker that always returns an error.
     #[allow(dead_code)]
     pub struct FeatureNotEnabledLogSinker<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
@@ -92,6 +94,7 @@ pub(crate) mod dummy {
         }
     }
 
+    /// A dummy sink that always returns an error.
     #[allow(dead_code)]
     pub struct FeatureNotEnabledSink<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
 
@@ -155,7 +158,11 @@ pub(crate) mod dummy {
     }
 }
 
-macro_rules! feature_gated_mod {
+/// Define a sink module that is gated by a feature.
+///
+/// This is to allow some heavy or unpopular sink implementations (and their dependencies) to be disabled
+/// at compile time, in order to decrease compilation time and binary size.
+macro_rules! feature_gated_sink_mod {
     ($mod_name:ident, $sink_name:literal) => {
         paste::paste! {
         #[cfg(feature = "sink-" $sink_name)]
@@ -164,14 +171,16 @@ macro_rules! feature_gated_mod {
         pub mod $mod_name {
             use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
             pub struct [<$mod_name:camel NotEnabled>];
-            pub const [<$mod_name:upper _SINK>]: &'static str = $sink_name;
+            pub const [<$sink_name:upper _SINK>]: &'static str = $sink_name;
             impl FeatureNotEnabledSinkMarker for [<$mod_name:camel NotEnabled>] {
-                const SINK_NAME: &'static str = [<$mod_name:upper _SINK>];
+                const SINK_NAME: &'static str = [<$sink_name:upper _SINK>];
             }
+            #[doc = "A dummy sink that always returns an error, as the feature `sink-" $sink_name "` is currently not enabled."]
             pub type [<$mod_name:camel Sink>] = FeatureNotEnabledSink<[<$mod_name:camel NotEnabled>]>;
+            #[doc = "A dummy sink config that is empty, as the feature `sink-" $sink_name "` is currently not enabled."]
             pub struct [<$mod_name:camel Config>];
         }
         }
     };
 }
-pub(super) use feature_gated_mod;
+pub(super) use feature_gated_sink_mod;

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-feature_gated_mod!(big_query, "bigquery");
+feature_gated_sink_mod!(big_query, "bigquery");
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod decouple_checkpoint_log_sink;
-feature_gated_mod!(deltalake, "deltalake");
+feature_gated_sink_mod!(deltalake, "deltalake");
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
@@ -26,7 +26,7 @@ pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
-feature_gated_mod!(google_pubsub, "google_pubsub");
+feature_gated_sink_mod!(google_pubsub, "google_pubsub");
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -111,7 +111,7 @@ use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT
 use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
-use crate::sink::utils::feature_gated_mod;
+use crate::sink::utils::feature_gated_sink_mod;
 use crate::sink::writer::SinkWriter;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
