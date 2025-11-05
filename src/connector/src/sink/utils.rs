@@ -164,8 +164,9 @@ macro_rules! feature_gated_mod {
         pub mod $mod_name {
             use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
             pub struct [<$mod_name:camel NotEnabled>];
+            pub const [<$mod_name:upper _SINK>]: &'static str = $sink_name;
             impl FeatureNotEnabledSinkMarker for [<$mod_name:camel NotEnabled>] {
-                const SINK_NAME: &'static str = $sink_name;
+                const SINK_NAME: &'static str = [<$mod_name:upper _SINK>];
             }
             pub type [<$mod_name:camel Sink>] = FeatureNotEnabledSink<[<$mod_name:camel NotEnabled>]>;
             pub struct [<$mod_name:camel Config>];

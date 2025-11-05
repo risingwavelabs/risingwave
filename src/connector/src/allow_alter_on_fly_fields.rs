@@ -154,7 +154,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
     ).unwrap();
     // DeltaLakeConfig
     map.try_insert(
-        std::any::type_name::<DeltaLakeConfig>().to_owned(),
+        std::any::type_name::<SnowflakeConfig>().to_owned(),
         [
             "commit_checkpoint_interval".to_owned(),
         ].into_iter().collect(),

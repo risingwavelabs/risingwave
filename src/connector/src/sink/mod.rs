@@ -18,7 +18,7 @@ pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod decouple_checkpoint_log_sink;
-pub mod deltalake;
+feature_gated_mod!(deltalake, "deltalake");
 pub mod doris;
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
@@ -68,7 +68,6 @@ use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
-use deltalake::DELTALAKE_SINK;
 use futures::future::BoxFuture;
 use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
@@ -101,6 +100,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use self::deltalake::DELTALAKE_SINK;
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::WithPropertiesExt;
 use crate::connector_common::IcebergSinkCompactionUpdate;
@@ -146,7 +146,7 @@ macro_rules! for_all_sinks {
                 { SnowflakeV2, $crate::sink::snowflake_redshift::snowflake::SnowflakeV2Sink, $crate::sink::snowflake_redshift::snowflake::SnowflakeV2Config },
                 { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::SnowflakeConfig },
                 { RedShift, $crate::sink::snowflake_redshift::redshift::RedshiftSink, $crate::sink::snowflake_redshift::redshift::RedShiftConfig },
-                { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
+                { DeltaLake, $crate::sink::deltalake::DeltalakeSink, $crate::sink::deltalake::DeltalakeConfig },
                 { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
                 { Mongodb, $crate::sink::mongodb::MongodbSink, $crate::sink::mongodb::MongodbConfig },
