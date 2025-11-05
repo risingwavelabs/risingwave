@@ -9,8 +9,9 @@ repository = { workspace = true }
 
 [features]
 default = []
-all-sinks = ["sink-deltalake"]
+all-sinks = ["sink-bigquery", "sink-deltalake"]
 all-sources = []
+sink-bigquery = ["dep:gcp-bigquery-client", "dep:google-cloud-bigquery"]
 sink-deltalake = ["dep:deltalake"]
 
 [dependencies]
@@ -56,9 +57,9 @@ elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcp-bigquery-client = "0.18.0"
+gcp-bigquery-client = { version = "0.18.0", optional = true }
 glob = "0.3"
-google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", features = [
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", optional = true, features = [
     "auth",
 ] }
 google-cloud-gax = { package = "gcloud-gax", version = "1" }

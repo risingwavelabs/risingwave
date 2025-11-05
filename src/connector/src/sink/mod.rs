@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-pub mod big_query;
+
+feature_gated_mod!(big_query, "bigquery");
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
@@ -110,6 +111,7 @@ use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT
 use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
+use crate::sink::utils::feature_gated_mod;
 use crate::sink::writer::SinkWriter;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;

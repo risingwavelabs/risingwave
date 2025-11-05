@@ -154,3 +154,23 @@ pub(crate) mod dummy {
         }
     }
 }
+
+macro_rules! feature_gated_mod {
+    ($mod_name:ident, $sink_name:literal) => {
+        paste::paste! {
+        #[cfg(feature = "sink-" $sink_name)]
+        pub mod $mod_name;
+        #[cfg(not(feature = "sink-" $sink_name))]
+        pub mod $mod_name {
+            use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
+            pub struct [<$mod_name:camel NotEnabled>];
+            impl FeatureNotEnabledSinkMarker for [<$mod_name:camel NotEnabled>] {
+                const SINK_NAME: &'static str = $sink_name;
+            }
+            pub type [<$mod_name:camel Sink>] = FeatureNotEnabledSink<[<$mod_name:camel NotEnabled>]>;
+            pub struct [<$mod_name:camel Config>];
+        }
+        }
+    };
+}
+pub(super) use feature_gated_mod;
