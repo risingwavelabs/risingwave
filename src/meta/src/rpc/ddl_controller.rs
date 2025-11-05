@@ -1142,7 +1142,10 @@ impl DdlController {
                     );
                     let pb_cdc_table_type =
                         PbCdcTableType::try_from(*cdc_table_type).map_err(|e| {
-                            MetaError::invalid_parameter(format!("Invalid CDC table type: {}", e))
+                            MetaError::invalid_parameter(format!(
+                                "Invalid CDC table type: {}",
+                                e.as_report()
+                            ))
                         })?;
                     let cdc_table_type = CdcTableType::from(pb_cdc_table_type);
                     tracing::info!(
@@ -1246,7 +1249,10 @@ impl DdlController {
                 if let Some(cdc_table_type) = table.cdc_table_type.as_ref() {
                     let pb_cdc_table_type =
                         PbCdcTableType::try_from(*cdc_table_type).map_err(|e| {
-                            MetaError::invalid_parameter(format!("Invalid CDC table type: {}", e))
+                            MetaError::invalid_parameter(format!(
+                                "Invalid CDC table type: {}",
+                                e.as_report()
+                            ))
                         })?;
                     let cdc_table_type = CdcTableType::from(pb_cdc_table_type);
                     if cdc_table_type != CdcTableType::Unspecified {

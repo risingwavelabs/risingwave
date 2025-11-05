@@ -27,6 +27,7 @@ use risingwave_pb::plan_common::{
     PbColumnCatalog, PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
+use thiserror_ext::AsReport;
 
 use super::*;
 use crate::executor::TroublemakerExecutor;
@@ -248,7 +249,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                                         actor_id = params.actor_context.id,
                                         source_id = source.source_id,
                                         policies_json = policies_json,
-                                        error = %e,
+                                        error = %e.as_report(),
                                         "Failed to parse cdc_table_schema_change_policies from source catalog"
                                     );
                                     None

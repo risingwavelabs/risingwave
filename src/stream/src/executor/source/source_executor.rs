@@ -186,7 +186,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         actor_id = self.actor_ctx.id,
                         source_id = self.stream_source_core.source_id.table_id,
                         policies_json = table_policies_json,
-                        error = %e,
+                        error = %e.as_report(),
                         "Failed to parse CDC table schema change policies JSON"
                     );
                 }

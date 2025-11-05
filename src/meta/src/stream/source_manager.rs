@@ -146,7 +146,7 @@ impl SourceManagerCore {
 
         // Serialize the policies mapping to JSON
         let policies_json = serde_json::to_string(&self.cdc_table_schema_change_policies)
-            .map_err(|e| format!("Failed to serialize policies: {}", e))?;
+            .map_err(|e| format!("Failed to serialize policies: {}", e.as_report()))?;
 
         tracing::info!(
             "Serialized CDC table schema change policies for source_id={}: {}",
@@ -184,7 +184,7 @@ impl SourceManagerCore {
 
         // Serialize the updated policies mapping to JSON
         let policies_json = serde_json::to_string(&self.cdc_table_schema_change_policies)
-            .map_err(|e| format!("Failed to serialize policies: {}", e))?;
+            .map_err(|e| format!("Failed to serialize policies: {}", e.as_report()))?;
 
         tracing::info!(
             "Serialized CDC table schema change policies for source_id={}: {}",
@@ -708,7 +708,10 @@ impl SourceManager {
             let policies_json = {
                 let core = self.core.lock().await;
                 serde_json::to_string(core.get_cdc_table_schema_change_policies()).map_err(|e| {
-                    MetaError::invalid_parameter(format!("Failed to serialize policies: {}", e))
+                    MetaError::invalid_parameter(format!(
+                        "Failed to serialize policies: {}",
+                        e.as_report()
+                    ))
                 })?
             };
             // Get existing source properties
@@ -773,7 +776,7 @@ impl SourceManager {
                     tracing::error!(
                         source_id = source_id,
                         database_id = database_id,
-                        error = %e,
+                        error = %e.as_report(),
                         "META: Failed to send ConnectorPropsChange command"
                     );
                 }
@@ -829,7 +832,10 @@ impl SourceManager {
             let policies_json = {
                 let core = self.core.lock().await;
                 serde_json::to_string(core.get_cdc_table_schema_change_policies()).map_err(|e| {
-                    MetaError::invalid_parameter(format!("Failed to serialize policies: {}", e))
+                    MetaError::invalid_parameter(format!(
+                        "Failed to serialize policies: {}",
+                        e.as_report()
+                    ))
                 })?
             };
 
@@ -895,7 +901,7 @@ impl SourceManager {
                     tracing::error!(
                         source_id = source_id,
                         database_id = database_id,
-                        error = %e,
+                        error = %e.as_report(),
                         "META: Failed to send ConnectorPropsChange command"
                     );
                 }
