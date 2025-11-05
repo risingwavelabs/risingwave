@@ -9,10 +9,20 @@ repository = { workspace = true }
 
 [features]
 default = []
-all-sinks = ["sink-bigquery", "sink-deltalake"]
+all-sinks = ["sink-bigquery", "sink-deltalake", "sink-google_pubsub"]
 all-sources = []
-sink-bigquery = ["dep:gcp-bigquery-client", "dep:google-cloud-bigquery"]
+sink-bigquery = [
+    "dep:gcp-bigquery-client",
+    "dep:google-cloud-bigquery",
+    "dep:google-cloud-gax",
+    "dep:google-cloud-googleapis",
+]
 sink-deltalake = ["dep:deltalake"]
+sink-google_pubsub = [
+    "dep:google-cloud-pubsub",
+    "dep:google-cloud-gax",
+    "dep:google-cloud-googleapis",
+]
 
 [dependencies]
 anyhow = "1"
@@ -40,10 +50,7 @@ byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 cfg-if = "1"
 cfg-or-panic = "0.2"
-chrono = { workspace = true, features = [
-    "clock",
-    "std",
-] }
+chrono = { workspace = true, features = ["clock", "std"] }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
     "time",
     "rustls-tls",
@@ -59,15 +66,15 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = { version = "0.18.0", optional = true }
 glob = "0.3"
-google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", optional = true, features = [
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", features = [
     "auth",
-] }
-google-cloud-gax = { package = "gcloud-gax", version = "1" }
+], optional = true }
+google-cloud-gax = { package = "gcloud-gax", version = "1", optional = true }
 google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", features = [
     "pubsub",
     "bigquery",
-] }
-google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
+], optional = true }
+google-cloud-pubsub = { package = "gcloud-pubsub", version = "1", optional = true }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }

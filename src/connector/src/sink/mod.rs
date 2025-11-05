@@ -26,7 +26,7 @@ pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
-pub mod google_pubsub;
+feature_gated_mod!(google_pubsub, "google_pubsub");
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
