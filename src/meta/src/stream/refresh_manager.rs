@@ -43,7 +43,7 @@ use crate::{MetaError, MetaResult};
 pub static REFRESH_TABLE_PROGRESS_TRACKER: LazyLock<Mutex<GlobalRefreshTableProgressTracker>> =
     LazyLock::new(|| Mutex::new(GlobalRefreshTableProgressTracker::default()));
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct GlobalRefreshTableProgressTracker {
     pub inner: HashMap<TableId, SingleTableRefreshProgressTracker>,
     pub table_id_by_database_id: HashMap<DatabaseId, HashSet<TableId>>,
@@ -156,8 +156,6 @@ impl RefreshManager {
             .get_job_fragments_by_id(table_id.as_job_id())
             .await?;
 
-        // Collect actor information synchronously - guard must be dropped before any await
-        // Use a separate scope to ensure guard is dropped before the next await
         {
             let fragment_to_actor_mapping = shared_actor_infos.read_guard();
             let mut tracker = SingleTableRefreshProgressTracker::default();
@@ -165,6 +163,8 @@ impl RefreshManager {
                 if fragment
                     .fragment_type_mask
                     .contains(FragmentTypeFlag::Source)
+                    // should exclude dml fragments to avoid selecting the DML sql
+                    && !fragment.fragment_type_mask.contains(FragmentTypeFlag::Dml)
                 {
                     let fragment_info = fragment_to_actor_mapping
                         .get_fragment(*fragment_id)
@@ -192,6 +192,11 @@ impl RefreshManager {
             }
 
             {
+                tracing::info!(
+                    table_id = %table_id,
+                    tracker = ?tracker,
+                    "insert tracker to global tracker"
+                );
                 // Store tracker in global tracker before guard is dropped
                 let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
                 lock_handle.inner.insert(table_id, tracker);
@@ -304,7 +309,7 @@ impl RefreshManager {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SingleTableRefreshProgressTracker {
     pub expected_list_actors: HashSet<ActorId>,
     pub expected_fetch_actors: HashSet<ActorId>,

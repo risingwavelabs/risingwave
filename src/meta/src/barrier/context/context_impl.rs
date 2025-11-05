@@ -135,6 +135,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
         for ((table_id, associated_source_id), actors) in list_finished_info {
             let allow_yield = {
+                tracing::info!(
+                    %table_id,
+                    %associated_source_id,
+                    "get single task tracker"
+                );
                 let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
                 let single_task_tracker = lock_handle.inner.get_mut(&table_id).unwrap();
                 single_task_tracker
