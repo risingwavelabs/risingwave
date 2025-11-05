@@ -1982,6 +1982,80 @@ pub async fn create_iceberg_engine_table(
         );
     }
 
+    if let Some(small_files_threshold_mb) =
+        handler_args.with_options.get("small_files_threshold_mb")
+    {
+        let small_files_threshold_mb = small_files_threshold_mb.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "small_files_threshold_mb must be a positive integer: {}",
+                small_files_threshold_mb
+            ))
+        })?;
+        if small_files_threshold_mb == 0 {
+            bail!("small_files_threshold_mb must be a positive integer: 0");
+        }
+        sink_with.insert(
+            "small_files_threshold_mb".to_owned(),
+            small_files_threshold_mb.to_string(),
+        );
+    }
+
+    if let Some(delete_files_count_threshold) = handler_args
+        .with_options
+        .get("delete_files_count_threshold")
+    {
+        let delete_files_count_threshold =
+            delete_files_count_threshold.parse::<usize>().map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "delete_files_count_threshold must be a positive integer: {}",
+                    delete_files_count_threshold
+                ))
+            })?;
+        if delete_files_count_threshold == 0 {
+            bail!("delete_files_count_threshold must be a positive integer: 0");
+        }
+        sink_with.insert(
+            "delete_files_count_threshold".to_owned(),
+            delete_files_count_threshold.to_string(),
+        );
+    }
+
+    if let Some(trigger_snapshot_count) = handler_args.with_options.get("trigger_snapshot_count") {
+        let trigger_snapshot_count = trigger_snapshot_count.parse::<usize>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "trigger_snapshot_count must be a positive integer: {}",
+                trigger_snapshot_count
+            ))
+        })?;
+        if trigger_snapshot_count == 0 {
+            bail!("trigger_snapshot_count must be a positive integer: 0");
+        }
+        sink_with.insert(
+            "trigger_snapshot_count".to_owned(),
+            trigger_snapshot_count.to_string(),
+        );
+    }
+
+    if let Some(target_file_size_mb) = handler_args.with_options.get("target_file_size_mb") {
+        let target_file_size_mb = target_file_size_mb.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "target_file_size_mb must be a positive integer: {}",
+                target_file_size_mb
+            ))
+        })?;
+        if target_file_size_mb == 0 {
+            bail!("target_file_size_mb must be a positive integer: 0");
+        }
+        sink_with.insert(
+            "target_file_size_mb".to_owned(),
+            target_file_size_mb.to_string(),
+        );
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("target_file_size_mb"));
+    }
+
     let partition_by = handler_args
         .with_options
         .get("partition_by")

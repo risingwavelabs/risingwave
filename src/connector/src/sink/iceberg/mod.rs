@@ -240,12 +240,24 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly)]
     pub max_snapshots_num_before_compaction: Option<usize>,
 
+    #[serde(rename = "small_files_threshold_mb", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub small_files_threshold_mb: Option<u64>,
 
+    #[serde(rename = "delete_files_count_threshold", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub delete_files_count_threshold: Option<usize>,
 
+    #[serde(rename = "trigger_snapshot_count", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub trigger_snapshot_count: Option<usize>,
 
+    #[serde(rename = "target_file_size_mb", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub target_file_size_mb: Option<u64>,
 }
 
