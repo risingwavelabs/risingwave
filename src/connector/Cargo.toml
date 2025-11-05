@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [features]
 default = []
-all-sinks = ["sink-bigquery", "sink-deltalake", "sink-google_pubsub"]
+all-sinks = ["sink-bigquery", "sink-deltalake", "sink-google_pubsub", "sink-clickhouse"]
 all-sources = []
 sink-bigquery = [
     "dep:gcp-bigquery-client",
@@ -23,6 +23,7 @@ sink-google_pubsub = [
     "dep:google-cloud-gax",
     "dep:google-cloud-googleapis",
 ]
+sink-clickhouse = ["dep:clickhouse"]
 
 [dependencies]
 anyhow = "1"
@@ -54,7 +55,7 @@ chrono = { workspace = true, features = ["clock", "std"] }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
     "time",
     "rustls-tls",
-] }
+], optional = true }
 csv = "1.4"
 deltalake = { workspace = true, optional = true }
 duration-str = "0.17.0"

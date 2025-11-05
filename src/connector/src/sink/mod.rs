@@ -15,7 +15,7 @@
 feature_gated_sink_mod!(big_query, "bigquery");
 pub mod boxed;
 pub mod catalog;
-pub mod clickhouse;
+feature_gated_sink_mod!(clickhouse, "clickhouse");
 pub mod coordinate;
 pub mod decouple_checkpoint_log_sink;
 feature_gated_sink_mod!(deltalake, "deltalake");
@@ -59,7 +59,6 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
-use ::clickhouse::error::Error as ClickHouseError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -125,7 +124,7 @@ macro_rules! for_all_sinks {
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
-                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
+                { ClickHouse, $crate::sink::clickhouse::ClickhouseSink, $crate::sink::clickhouse::ClickhouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
                 { Mqtt, $crate::sink::mqtt::MqttSink, $crate::sink::mqtt::MqttConfig },
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubsubSink, $crate::sink::google_pubsub::GooglePubsubConfig },
@@ -1103,8 +1102,9 @@ impl From<RpcError> for SinkError {
     }
 }
 
-impl From<ClickHouseError> for SinkError {
-    fn from(value: ClickHouseError) -> Self {
+#[cfg(feature = "sink-clickhouse")]
+impl From<::clickhouse::error::Error> for SinkError {
+    fn from(value: ::clickhouse::error::Error) -> Self {
         SinkError::ClickHouse(value.to_report_string())
     }
 }

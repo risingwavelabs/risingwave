@@ -174,7 +174,7 @@ impl ClickHouseEngine {
 
     pub fn from_query_engine(
         engine_name: &ClickhouseQueryEngine,
-        config: &ClickHouseConfig,
+        config: &ClickhouseConfig,
     ) -> Result<Self> {
         match engine_name.engine.as_str() {
             "MergeTree" => Ok(ClickHouseEngine::MergeTree),
@@ -326,14 +326,14 @@ impl ClickHouseCommon {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
-pub struct ClickHouseConfig {
+pub struct ClickhouseConfig {
     #[serde(flatten)]
     pub common: ClickHouseCommon,
 
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
-impl EnforceSecret for ClickHouseConfig {
+impl EnforceSecret for ClickhouseConfig {
     fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
         ClickHouseCommon::enforce_one(prop)
     }
@@ -349,28 +349,28 @@ impl EnforceSecret for ClickHouseConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct ClickHouseSink {
-    pub config: ClickHouseConfig,
+pub struct ClickhouseSink {
+    pub config: ClickhouseConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
 }
 
-impl EnforceSecret for ClickHouseSink {
+impl EnforceSecret for ClickhouseSink {
     fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
     ) -> crate::error::ConnectorResult<()> {
         for prop in prop_iter {
-            ClickHouseConfig::enforce_one(prop)?;
+            ClickhouseConfig::enforce_one(prop)?;
         }
         Ok(())
     }
 }
 
-impl ClickHouseConfig {
+impl ClickhouseConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
-            serde_json::from_value::<ClickHouseConfig>(serde_json::to_value(properties).unwrap())
+            serde_json::from_value::<ClickhouseConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -384,13 +384,13 @@ impl ClickHouseConfig {
     }
 }
 
-impl TryFrom<SinkParam> for ClickHouseSink {
+impl TryFrom<SinkParam> for ClickhouseSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let pk_indices = param.downstream_pk_or_empty();
-        let config = ClickHouseConfig::from_btreemap(param.properties)?;
+        let config = ClickhouseConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -400,7 +400,7 @@ impl TryFrom<SinkParam> for ClickHouseSink {
     }
 }
 
-impl ClickHouseSink {
+impl ClickhouseSink {
     /// Check that the column names and types of risingwave and clickhouse are identical
     fn check_column_name_and_type(&self, clickhouse_columns_desc: &[SystemColumn]) -> Result<()> {
         let rw_fields_name = build_fields_name_type_from_schema(&self.schema)?;
@@ -527,7 +527,7 @@ impl ClickHouseSink {
     }
 }
 
-impl Sink for ClickHouseSink {
+impl Sink for ClickhouseSink {
     type LogSinker = DecoupleCheckpointLogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
@@ -577,7 +577,7 @@ impl Sink for ClickHouseSink {
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
-        ClickHouseConfig::from_btreemap(config.clone())?;
+        ClickhouseConfig::from_btreemap(config.clone())?;
         Ok(())
     }
 
@@ -602,7 +602,7 @@ impl Sink for ClickHouseSink {
     }
 }
 pub struct ClickHouseSinkWriter {
-    pub config: ClickHouseConfig,
+    pub config: ClickhouseConfig,
     #[expect(dead_code)]
     schema: Schema,
     #[expect(dead_code)]
@@ -627,7 +627,7 @@ struct ClickHouseSchemaFeature {
 
 impl ClickHouseSinkWriter {
     pub async fn new(
-        config: ClickHouseConfig,
+        config: ClickhouseConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
@@ -827,7 +827,7 @@ struct ClickhouseQueryEngine {
 
 async fn query_column_engine_from_ck(
     client: ClickHouseClient,
-    config: &ClickHouseConfig,
+    config: &ClickhouseConfig,
 ) -> Result<(Vec<SystemColumn>, ClickHouseEngine)> {
     let query_engine = QUERY_ENGINE;
     let query_column = QUERY_COLUMN;
