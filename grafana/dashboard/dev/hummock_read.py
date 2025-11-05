@@ -114,7 +114,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_latency(
+                panels.timeseries_percentage(
                     "Read Duration - Get",
                     "Histogram of the latency of Get operations that have been issued to the state store.",
                     [
@@ -134,7 +134,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_latency(
+                panels.timeseries_percentage(
                     "Read Duration - Iter",
                     "Histogram of the time spent on iterator initialization."
                     "Histogram of the time spent on iterator scanning.",
