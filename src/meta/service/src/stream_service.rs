@@ -40,6 +40,7 @@ use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -610,7 +611,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 .map_err(|e| {
                                     Status::internal(format!(
                                         "Failed to update table catalog: {}",
-                                        e
+                                        e.as_report()
                                     ))
                                 })?;
 
@@ -626,7 +627,7 @@ impl StreamManagerService for StreamServiceImpl {
                                 .map_err(|e| {
                                     Status::internal(format!(
                                         "Failed to update CDC table policy mapping: {}",
-                                        e
+                                        e.as_report()
                                     ))
                                 })?;
 
