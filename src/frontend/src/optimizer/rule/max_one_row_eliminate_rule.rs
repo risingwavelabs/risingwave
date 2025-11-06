@@ -36,7 +36,7 @@ impl Rule<Logical> for MaxOneRowEliminateRule {
         }
 
         if !right.max_one_row() {
-            right = if SoleSysTableVisitor::has_sys_table(right.clone()) {
+            right = if SoleSysTableVisitor::sys_table_only(right.clone()) {
                 // If the right side is just a `SysScan` (with `Values`), we add a `Limit 1` to enforce the max one row restriction.
                 // This is a workaround for the case where `SysScan` cannot be guaranteed to return at most one row in compile time,
                 // but to make the system queries work compatible with PostgreSQL, we need to enforce the max one row restriction at runtime.

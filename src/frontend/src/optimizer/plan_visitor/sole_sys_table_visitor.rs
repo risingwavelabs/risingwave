@@ -23,7 +23,7 @@ pub struct SoleSysTableVisitor {
 }
 
 impl SoleSysTableVisitor {
-    pub fn has_sys_table(plan: LogicalPlanRef) -> bool {
+    pub fn sys_table_only(plan: LogicalPlanRef) -> bool {
         let mut visitor = SoleSysTableVisitor {
             has_sys_table: false,
         };
