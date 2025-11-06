@@ -59,7 +59,7 @@ pub use relation::{
     ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 // Re-export common types
-pub use risingwave_common::gap_fill_types::FillStrategy;
+pub use risingwave_common::gap_fill::FillStrategy;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;

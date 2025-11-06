@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
-use risingwave_common::gap_fill_types::FillStrategy;
+use risingwave_common::gap_fill::FillStrategy;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr as AstExpr, FunctionArg, FunctionArgExpr, TableAlias};
 

@@ -1013,7 +1013,7 @@ impl DdlController {
                 let (aborted, _) = self
                     .metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id as _, false)
+                    .try_abort_creating_streaming_job(job_id, false)
                     .await?;
                 if aborted {
                     tracing::warn!(id = %job_id, "aborted streaming job");

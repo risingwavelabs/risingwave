@@ -18,7 +18,7 @@ anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = { version = "0.44", features = ["websockets"] }
+async-nats = { version = "0.45", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -123,6 +123,7 @@ redis = { workspace = true, features = [
     "tokio-rustls-comp",
     "cluster-async",
     "geospatial",
+    "streams",
 ] }
 regex = { workspace = true }
 reqwest = { workspace = true }

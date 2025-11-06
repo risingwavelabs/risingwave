@@ -62,7 +62,7 @@ impl GlobalBarrierManager {
             .list_background_creating_jobs(true, None)
             .await?;
         for (job_id, definition, _init_at) in job_info {
-            if let Entry::Vacant(e) = ddl_progress.entry(job_id as _) {
+            if let Entry::Vacant(e) = ddl_progress.entry(job_id) {
                 warn!(%job_id, "background job has no ddl progress");
                 e.insert(DdlProgress {
                     id: job_id.as_raw_id() as u64,
