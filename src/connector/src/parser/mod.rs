@@ -288,10 +288,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
         for msg in batch {
             if msg.is_cdc_heartbeat() {
                 if !is_heartbeat_emitted {
-                    tracing::debug!(
-                        offset = msg.offset,
-                        "handling a heartbeat message"
-                    );
+                    tracing::debug!(offset = msg.offset, "handling a heartbeat message");
                     chunk_builder.heartbeat(MessageMeta {
                         source_meta: &msg.meta,
                         split_id: &msg.split_id,
