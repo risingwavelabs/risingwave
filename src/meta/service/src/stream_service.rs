@@ -735,6 +735,27 @@ impl StreamManagerService for StreamServiceImpl {
             .collect();
         Ok(Response::new(ListCdcProgressResponse { cdc_progress }))
     }
+
+    async fn list_unmigrated_tables(
+        &self,
+        _request: Request<ListUnmigratedTablesRequest>,
+    ) -> Result<Response<ListUnmigratedTablesResponse>, Status> {
+        let unmigrated_tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_unmigrated_tables()
+            .await?
+            .into_iter()
+            .map(|table| list_unmigrated_tables_response::UnmigratedTable {
+                table_id: table.id,
+                table_name: table.name,
+            })
+            .collect();
+
+        Ok(Response::new(ListUnmigratedTablesResponse {
+            tables: unmigrated_tables,
+        }))
+    }
 }
 
 fn fragment_desc_to_distribution(

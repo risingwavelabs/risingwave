@@ -1866,6 +1866,16 @@ impl MetaClient {
     pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.inner.refresh(request).await
     }
+
+    pub async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>> {
+        let request = ListUnmigratedTablesRequest {};
+        let resp = self.inner.list_unmigrated_tables(request).await?;
+        Ok(resp
+            .tables
+            .into_iter()
+            .map(|table| (table.table_id, table.table_name))
+            .collect())
+    }
 }
 
 #[async_trait]
@@ -2466,6 +2476,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, get_actor_vnodes, GetActorVnodesRequest, GetActorVnodesResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
             ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
+            ,{ stream_client, list_unmigrated_tables, ListUnmigratedTablesRequest, ListUnmigratedTablesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
