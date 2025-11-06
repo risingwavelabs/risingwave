@@ -1314,11 +1314,10 @@ mod test {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact_vis(),
             StreamChunk::from_pretty(
-                "  I I I
-                U- 1 1 10
-                U+ 1 1 40
-                 + 1 3 30",
-            ),
+                " I I I
+                + 1 3 30
+                + 1 1 40",
+            )
         );
 
         // The last barrier message.
