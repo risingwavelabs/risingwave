@@ -115,9 +115,7 @@ impl LocalBarrierManager {
 
     pub fn for_test() -> Self {
         Self::new(
-            DatabaseId {
-                database_id: 114514,
-            },
+            114514.into(),
             "114514".to_owned(),
             StreamEnvironment::for_test(),
         )

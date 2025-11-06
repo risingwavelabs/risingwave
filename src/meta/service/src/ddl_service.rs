@@ -242,7 +242,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropDatabase(database_id as _))
+            .run_command(DdlCommand::DropDatabase(database_id.into()))
             .await?;
 
         Ok(Response::new(DropDatabaseResponse {
@@ -333,7 +333,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id as _, drop_mode))
+            .run_command(DdlCommand::DropSchema(schema_id.into(), drop_mode))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
@@ -844,7 +844,7 @@ impl DdlService for DdlServiceImpl {
             .ddl_controller
             .run_command(DdlCommand::AlterSetSchema(
                 object.unwrap(),
-                new_schema_id as _,
+                new_schema_id.into(),
             ))
             .await?;
         Ok(Response::new(AlterSetSchemaResponse {
@@ -1379,7 +1379,7 @@ impl DdlService for DdlServiceImpl {
         };
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
+            .run_command(DdlCommand::AlterDatabaseParam(database_id.into(), param))
             .await?;
 
         return Ok(Response::new(AlterDatabaseParamResponse {
@@ -1470,7 +1470,7 @@ impl DdlService for DdlServiceImpl {
         let table_catalog = self
             .metadata_manager
             .catalog_controller
-            .get_table_catalog_by_name(database_id as _, schema_id as _, &table_name)
+            .get_table_catalog_by_name(database_id.into(), schema_id.into(), &table_name)
             .await?
             .ok_or(Status::not_found("Internal error: table not found"))?;
 

@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
@@ -162,7 +162,6 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_object_database_id(request_id as ObjectId)
             .await?;
-        let database_id = DatabaseId::new(database_id as _);
         // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
             .iter()
@@ -306,8 +305,8 @@ impl StreamManagerService for StreamServiceImpl {
                         parallelism: Some(parallelism.into()),
                         max_parallelism: max_parallelism as _,
                         resource_group,
-                        database_id: database_id as _,
-                        schema_id: schema_id as _,
+                        database_id: database_id.as_raw_id(),
+                        schema_id: schema_id.as_raw_id(),
                     }
                 },
             )
@@ -614,7 +613,6 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_object_database_id(object_id as ObjectId)
             .await?;
-        let database_id = DatabaseId::new(database_id as _);
 
         let mut mutation = HashMap::default();
         mutation.insert(object_id, new_props_plaintext);
@@ -689,10 +687,11 @@ fn fragment_desc_to_distribution(
         table_id: fragment_desc.job_id.as_raw_id(),
         distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
         state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
-        upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
+        upstream_fragment_ids: upstreams.into_iter().map(|id| id as _).collect(),
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,
         vnode_count: fragment_desc.vnode_count as _,
         node: Some(fragment_desc.stream_node.to_protobuf()),
+        parallelism_policy: fragment_desc.parallelism_policy,
     }
 }

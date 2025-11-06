@@ -20,7 +20,8 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::DataType;
 
 pub use super::change_buffer::InconsistencyBehavior;
-use crate::common::change_buffer::ChangeBuffer;
+use crate::common::change_buffer::output_kind::{RETRACT, UPSERT};
+use crate::common::change_buffer::{ChangeBuffer, OutputKind};
 
 /// A helper to remove unnecessary changes in the stream chunks based on the key.
 pub struct StreamChunkCompactor {
@@ -38,10 +39,10 @@ impl StreamChunkCompactor {
     }
 
     /// Remove unnecessary changes in the given chunks, by modifying the visibility and ops in place.
-    pub fn into_compacted_chunks_inline(
+    pub fn into_compacted_chunks_inline<const KIND: OutputKind>(
         self,
         ib: InconsistencyBehavior,
-    ) -> impl Iterator<Item = StreamChunk> {
+    ) -> Vec<StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 
         let estimate_size = chunks.iter().map(|c| c.cardinality()).sum();
@@ -68,23 +69,32 @@ impl StreamChunkCompactor {
                     mut old_row,
                     mut new_row,
                 } => {
-                    old_row.set_vis(true);
-                    new_row.set_vis(true);
-                    // Ops of adjacent updates can be set to `U-` and `U+`.
-                    if old_row.same_chunk(&new_row) && old_row.index() + 1 == new_row.index() {
-                        old_row.set_op(Op::UpdateDelete);
-                        new_row.set_op(Op::UpdateInsert);
+                    match KIND {
+                        // For upsert output, we only keep the new row with normalized op (`Insert`).
+                        UPSERT => new_row.set_vis(true),
+                        // For retract output, we keep both the old and new row, and rewrite the ops
+                        // to `U-` and `U+` if they are adjacent.
+                        RETRACT => {
+                            old_row.set_vis(true);
+                            new_row.set_vis(true);
+                            if old_row.same_chunk(&new_row)
+                                && old_row.index() + 1 == new_row.index()
+                            {
+                                old_row.set_op(Op::UpdateDelete);
+                                new_row.set_op(Op::UpdateInsert);
+                            }
+                        }
                     }
                 }
             }
         }
 
-        chunks.into_iter().map(|c| c.into())
+        chunks.into_iter().map(|c| c.into()).collect()
     }
 
     /// Remove unnecessary changes in the given chunks, by filtering them out and constructing new
     /// chunks, with the given chunk size.
-    pub fn into_compacted_chunks_reconstructed(
+    pub fn into_compacted_chunks_reconstructed<const KIND: OutputKind>(
         self,
         chunk_size: usize,
         data_types: Vec<DataType>,
@@ -101,19 +111,23 @@ impl StreamChunkCompactor {
             }
         }
 
-        cb.into_chunks(data_types, chunk_size)
+        cb.into_chunks::<KIND>(data_types, chunk_size)
     }
 }
 
 /// Remove unnecessary changes in the given chunk, by modifying the visibility and ops in place.
+///
 /// This is the same as [`StreamChunkCompactor::into_compacted_chunks_inline`] with only one chunk.
-pub fn compact_chunk_inline(
+pub fn compact_chunk_inline<const KIND: OutputKind>(
     stream_chunk: StreamChunk,
-    pk_indices: &[usize],
+    key_indices: &[usize],
     ib: InconsistencyBehavior,
 ) -> StreamChunk {
-    let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), vec![stream_chunk]);
-    compactor.into_compacted_chunks_inline(ib).next().unwrap()
+    StreamChunkCompactor::new(key_indices.to_vec(), vec![stream_chunk])
+        .into_compacted_chunks_inline::<KIND>(ib)
+        .into_iter()
+        .exactly_one()
+        .unwrap_or_else(|_| unreachable!("should have exactly one chunk in the output"))
 }
 
 #[cfg(test)]
@@ -123,8 +137,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compact_chunk_inline() {
-        let pk_indices = [0, 1];
+    fn test_compact_chunk_inline_upsert() {
+        test_compact_chunk_inline::<UPSERT>();
+    }
+
+    #[test]
+    fn test_compact_chunk_inline_retract() {
+        test_compact_chunk_inline::<RETRACT>();
+    }
+
+    fn test_compact_chunk_inline<const KIND: OutputKind>() {
+        let key = [0, 1];
         let chunks = vec![
             StreamChunk::from_pretty(
                 " I I I
@@ -147,13 +170,14 @@ mod tests {
                 + 9 9 1",
             ),
         ];
-        let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
-        let mut iter = compactor.into_compacted_chunks_inline(InconsistencyBehavior::Panic);
+        let compactor = StreamChunkCompactor::new(key.to_vec(), chunks);
+        let mut iter = compactor
+            .into_compacted_chunks_inline::<KIND>(InconsistencyBehavior::Panic)
+            .into_iter();
 
         let chunk = iter.next().unwrap().compact_vis();
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
+        let expected = match KIND {
+            RETRACT => StreamChunk::from_pretty(
                 " I I I
                 U- 1 1 1
                 U+ 1 1 2
@@ -161,9 +185,15 @@ mod tests {
                 + 2 5 5
                 - 6 6 9",
             ),
-            "{}",
-            chunk.to_pretty()
-        );
+            UPSERT => StreamChunk::from_pretty(
+                " I I I
+                + 1 1 2
+                + 4 9 2
+                + 2 5 5
+                - 6 6 9",
+            ),
+        };
+        assert_eq!(chunk, expected, "{}", chunk.to_pretty());
 
         let chunk = iter.next().unwrap().compact_vis();
         assert_eq!(
@@ -180,8 +210,17 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_chunk_reconstructed() {
-        let pk_indices = [0, 1];
+    fn test_compact_chunk_reconstructed_upsert() {
+        test_compact_chunk_reconstructed::<UPSERT>();
+    }
+
+    #[test]
+    fn test_compact_chunk_reconstructed_retract() {
+        test_compact_chunk_reconstructed::<RETRACT>();
+    }
+
+    fn test_compact_chunk_reconstructed<const KIND: OutputKind>() {
+        let key = [0, 1];
         let chunks = vec![
             StreamChunk::from_pretty(
                 " I I I
@@ -204,27 +243,33 @@ mod tests {
             + 9 9 1",
             ),
         ];
-        let compactor = StreamChunkCompactor::new(pk_indices.to_vec(), chunks);
+        let compactor = StreamChunkCompactor::new(key.to_vec(), chunks);
 
-        let chunks = compactor.into_compacted_chunks_reconstructed(
+        let chunks = compactor.into_compacted_chunks_reconstructed::<KIND>(
             100,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             InconsistencyBehavior::Panic,
         );
         let chunk = chunks.into_iter().next().unwrap();
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
+        let expected = match KIND {
+            RETRACT => StreamChunk::from_pretty(
                 "  I I I
-                U- 1 1 1
-                U+ 1 1 2
+                 U- 1 1 1
+                 U+ 1 1 2
                  + 4 9 2
                  + 2 5 5
                  - 6 6 9
                  + 2 2 2",
             ),
-            "{}",
-            chunk.to_pretty()
-        );
+            UPSERT => StreamChunk::from_pretty(
+                "  I I I
+                 + 1 1 2
+                 + 4 9 2
+                 + 2 5 5
+                 - 6 6 9
+                 + 2 2 2",
+            ),
+        };
+        assert_eq!(chunk, expected, "{}", chunk.to_pretty());
     }
 }

@@ -55,7 +55,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
                 .map(|function| RwFunction {
                     id: function.id.function_id() as i32,
                     name: function.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: function.owner as i32,
                     r#type: function.kind.to_string(),
                     arg_type_ids: function.arg_types.iter().map(|t| t.to_oid()).collect(),
@@ -63,7 +63,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
                     language: function.language.clone(),
                     link: function.link.clone(),
                     acl: get_acl_items(
-                        &Object::FunctionId(function.id.function_id()),
+                        Object::FunctionId(function.id.function_id()),
                         false,
                         &users,
                         username_map,

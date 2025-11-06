@@ -45,7 +45,6 @@ use crate::stream::{SourceChange, StreamFragmentGraph};
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
-        let database_id = database_id.map(|database_id| database_id.database_id as _);
         self.metadata_manager
             .catalog_controller
             .clean_dirty_subscription(database_id)
@@ -85,10 +84,7 @@ impl GlobalBarrierWorkerContextImpl {
         let mgr = &self.metadata_manager;
         let job_info = mgr
             .catalog_controller
-            .list_background_creating_jobs(
-                false,
-                database_id.map(|database_id| database_id.database_id as _),
-            )
+            .list_background_creating_jobs(false, database_id)
             .await?;
 
         Ok(job_info
@@ -106,8 +102,6 @@ impl GlobalBarrierWorkerContextImpl {
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
-        let database_id = database_id.map(|database_id| database_id.database_id as _);
-
         let all_actor_infos = self
             .metadata_manager
             .catalog_controller
@@ -121,7 +115,7 @@ impl GlobalBarrierWorkerContextImpl {
                     assert_eq!(database_id, loaded_database_id);
                 }
                 (
-                    DatabaseId::new(loaded_database_id as _),
+                    loaded_database_id,
                     job_fragment_infos
                         .into_iter()
                         .map(|(job_id, fragment_infos)| {

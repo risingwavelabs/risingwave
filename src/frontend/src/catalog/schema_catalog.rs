@@ -1098,10 +1098,10 @@ impl OwnedByUserCatalog for SchemaCatalog {
 impl From<&PbSchema> for SchemaCatalog {
     fn from(schema: &PbSchema) -> Self {
         Self {
-            id: schema.id,
+            id: schema.id.into(),
             owner: schema.owner,
             name: schema.name.clone(),
-            database_id: schema.database_id,
+            database_id: schema.database_id.into(),
             table_by_name: HashMap::new(),
             table_by_id: HashMap::new(),
             source_by_name: HashMap::new(),

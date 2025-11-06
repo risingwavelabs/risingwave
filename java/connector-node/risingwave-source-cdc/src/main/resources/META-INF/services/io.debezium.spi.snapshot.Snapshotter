@@ -1,0 +1,1 @@
+com.risingwave.connector.cdc.debezium.internal.NoDataRecoverySnapshotter

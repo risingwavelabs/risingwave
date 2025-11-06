@@ -83,7 +83,7 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                             ind as i16
                         })
                         .collect(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: index.index_table().owner as i32,
                     definition: index_table.create_sql(),
                     acl: vec![],

@@ -60,7 +60,7 @@ impl PgConstraint {
         PgConstraint {
             oid: table.id.as_raw_id() as i32, // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
-            connamespace: schema.id() as i32,
+            connamespace: schema.id().as_raw_id() as i32,
             contype: "p".to_owned(), // p = primary key constraint
             condeferrable: false,
             convalidated: true,
@@ -97,7 +97,7 @@ impl PgConstraint {
         PgConstraint {
             oid: table.id.as_raw_id() as i32, // Use table_id as a mock oid of constraint here.
             conname: format!("{}_pkey", &table.name),
-            connamespace: schema.id() as i32,
+            connamespace: schema.id().as_raw_id() as i32,
             contype: "p".to_owned(), // p = primary key constraint
             condeferrable: false,
             convalidated: true,
