@@ -1543,13 +1543,9 @@ impl DdlController {
                 );
             }
             JobStatus::Creating => {
-                let canceled_jobs = self
-                    .stream_manager
+                self.stream_manager
                     .cancel_streaming_jobs(vec![job_id.id()])
                     .await?;
-                if canceled_jobs.is_empty() {
-                    tracing::warn!(job_id = %job_id.id(), "failed to cancel streaming job");
-                }
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Created => {

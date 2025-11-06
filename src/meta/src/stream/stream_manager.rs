@@ -161,11 +161,10 @@ impl CreatingStreamingJobInfo {
                         Ok(()) => {
                             receivers.insert(job_id, rx);
                         }
-                        Err(e) => {
+                        Err(_) => {
                             return Err(anyhow::anyhow!(
-                                "failed to send shutdown signal for streaming job {}: {:?}",
-                                job_id,
-                                e
+                                "failed to send shutdown signal for streaming job {}: receiver dropped",
+                                job_id
                             )
                             .into());
                         }
@@ -702,13 +701,7 @@ impl GlobalStreamManager {
         let cancelled_recovered_ids = join_all(futures)
             .await
             .into_iter()
-            .collect::<MetaResult<Vec<_>>>()
-            .map_err(|e| {
-                MetaError::from(anyhow::anyhow!(
-                    "failed to cancel recovered streaming jobs: {}",
-                    e
-                ))
-            })?;
+            .collect::<MetaResult<Vec<_>>>()?;
 
         cancelled_ids.extend(cancelled_recovered_ids);
         Ok(cancelled_ids)
