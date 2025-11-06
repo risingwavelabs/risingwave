@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 
 use anyhow::Context;
+use risingwave_connector_codec::common::kconnect::ConnectSchema;
 use simd_json::BorrowedValue;
 use simd_json::prelude::MutableObject;
 
@@ -29,6 +30,7 @@ use crate::parser::{AccessBuilder, MongoProperties};
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
     value: Option<Vec<u8>>,
+    kafka_connect_schema_cache: Option<(BorrowedValue<'static>, ConnectSchema)>,
     json_parse_options: JsonParseOptions,
 }
 
@@ -41,6 +43,7 @@ impl DebeziumJsonAccessBuilder {
     ) -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
+            kafka_connect_schema_cache: None,
             json_parse_options: JsonParseOptions::new_for_debezium(
                 timestamptz_handling,
                 timestamp_handling,
@@ -53,6 +56,7 @@ impl DebeziumJsonAccessBuilder {
     pub fn new_for_schema_event() -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
+            kafka_connect_schema_cache: None,
             json_parse_options: JsonParseOptions::default(),
         })
     }

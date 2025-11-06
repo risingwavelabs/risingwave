@@ -14,12 +14,16 @@
 
 use std::sync::Arc;
 
+#[derive(Debug)]
 struct SchemaInner {
     name: Option<Box<str>>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Schema(Arc<SchemaInner>);
+
+pub use Schema as ConnectSchema;
+
 pub struct SchemaBuilder;
 
 impl SchemaBuilder {
