@@ -263,6 +263,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             },
             source_desc.source.config.clone(),
             None,
+            None,
         ));
 
         while let Some(msg) = stream.next().await {

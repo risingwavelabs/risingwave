@@ -20,29 +20,28 @@ use either::Either;
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState, WaitCheckpointTask,
+    ConnectorState, ReleaseHandle, SplitId, SplitImpl, SplitMetaData, StreamChunkWithState,
+    WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde_json;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{mpsc, oneshot};
+use tokio::task;
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
-use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
@@ -98,6 +97,8 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Local barrier manager for reporting source load finished events
     _barrier_manager: LocalBarrierManager,
+
+    last_release_handles: Arc<tokio::sync::Mutex<Option<Vec<ReleaseHandle>>>>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -121,6 +122,7 @@ impl<S: StateStore> SourceExecutor<S> {
             rate_limit_rps,
             is_shared_non_cdc,
             _barrier_manager: barrier_manager,
+            last_release_handles: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -133,7 +135,22 @@ impl<S: StateStore> SourceExecutor<S> {
             is_auto_schema_change_enable: self.is_auto_schema_change_enable(),
             actor_ctx: self.actor_ctx.clone(),
             reader_stream: None,
+            last_release_handles: self.last_release_handles.clone(),
         }
+    }
+
+    fn spawn_release_last_handles(&self) {
+        let handles_arc = self.last_release_handles.clone();
+        task::spawn(async move {
+            if let Some(handles) = {
+                let mut guard = handles_arc.lock().await;
+                guard.take()
+            } {
+                for handle in handles {
+                    handle.release().await;
+                }
+            }
+        });
     }
 
     async fn spawn_wait_checkpoint_worker(
@@ -157,72 +174,6 @@ impl<S: StateStore> SourceExecutor<S> {
             source_reader,
             building_task: initial_task,
         }))
-    }
-
-    /// build the source column ids and the source context which will be used to build the source stream
-    pub fn prepare_source_stream_build(
-        &self,
-        source_desc: &SourceDesc,
-    ) -> (Vec<ColumnId>, SourceContext) {
-        let column_ids = source_desc
-            .columns
-            .iter()
-            .map(|column_desc| column_desc.column_id)
-            .collect_vec();
-
-        let (schema_change_tx, mut schema_change_rx) =
-            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
-        let schema_change_tx = if self.is_auto_schema_change_enable() {
-            let meta_client = self.actor_ctx.meta_client.clone();
-            // spawn a task to handle schema change event from source parser
-            let _join_handle = tokio::task::spawn(async move {
-                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
-                    let table_ids = schema_change.table_ids();
-                    tracing::info!(
-                        target: "auto_schema_change",
-                        "recv a schema change event for tables: {:?}", table_ids);
-                    // TODO: retry on rpc error
-                    if let Some(ref meta_client) = meta_client {
-                        match meta_client
-                            .auto_schema_change(schema_change.to_protobuf())
-                            .await
-                        {
-                            Ok(_) => {
-                                tracing::info!(
-                                    target: "auto_schema_change",
-                                    "schema change success for tables: {:?}", table_ids);
-                                finish_tx.send(()).unwrap();
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    target: "auto_schema_change",
-                                    error = ?e.as_report(), "schema change error");
-                                finish_tx.send(()).unwrap();
-                            }
-                        }
-                    }
-                }
-            });
-            Some(schema_change_tx)
-        } else {
-            info!("auto schema change is disabled in config");
-            None
-        };
-        let source_ctx = SourceContext::new(
-            self.actor_ctx.id,
-            self.stream_source_core.source_id,
-            self.actor_ctx.fragment_id,
-            self.stream_source_core.source_name.clone(),
-            source_desc.metrics.clone(),
-            SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
-            },
-            source_desc.source.config.clone(),
-            schema_change_tx,
-        );
-
-        (column_ids, source_ctx)
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
@@ -411,6 +362,14 @@ impl<S: StateStore> SourceExecutor<S> {
             target_state
         );
 
+        // if let Some(last_release_handle) = self.last_release_handle.take()
+        //     && source_desc.source.config.enable_mux_reader()
+        // {
+        //     // If the source reader is a MuxReader, we need to release the last handle
+        //     // before rebuilding the stream reader.
+        //     //last_release_handle.release().await?;
+        // }
+
         // Replace the source reader with a new one of the new state.
         let reader_stream_builder = self.stream_reader_builder(source_desc.clone());
         let reader_stream = reader_stream_builder.into_retry_stream(Some(target_state), false);
@@ -499,7 +458,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         yield Message::Barrier(first_barrier);
 
-        let mut core = self.stream_source_core;
+        let core = &mut self.stream_source_core;
         let source_id = core.source_id;
 
         // Build source description from the builder.
@@ -509,7 +468,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)?;
 
         let mut wait_checkpoint_task_builder = Self::spawn_wait_checkpoint_worker(
-            &core,
+            core,
             source_desc.source.clone(),
             self.metrics.clone(),
         )
@@ -544,9 +503,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
-
-        // Return the ownership of `stream_source_core` to the source executor.
-        self.stream_source_core = core;
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
@@ -953,6 +909,12 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                 }
             }
         }
+    }
+}
+
+impl<S: StateStore> Drop for SourceExecutor<S> {
+    fn drop(&mut self) {
+        self.spawn_release_last_handles();
     }
 }
 
