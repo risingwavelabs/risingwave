@@ -95,7 +95,7 @@ pub(crate) mod tests {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
         hummock_manager_ref: &HummockManagerRef,
-        table_ids: &[u32],
+        table_ids: &[TableId],
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_owned();
         let options = Arc::new(StorageOpts {
@@ -223,7 +223,7 @@ pub(crate) mod tests {
             worker_id as _,
         ));
 
-        let table_id = 0;
+        let table_id = 0.into();
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(
@@ -358,10 +358,10 @@ pub(crate) mod tests {
     async fn prepare_data(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         storage: &HummockStorage,
-        existing_table_id: u32,
+        existing_table_id: TableId,
         keys_per_epoch: usize,
     ) {
-        let table_id = existing_table_id.into();
+        let table_id = existing_table_id;
         let kv_count: u16 = 128;
         let mut epoch = test_epoch(1);
         let mut local = storage.new_local(NewLocalOptions::for_test(table_id)).await;
@@ -378,8 +378,8 @@ pub(crate) mod tests {
 
             for _ in 0..keys_per_epoch {
                 let mut key = idx.to_be_bytes().to_vec();
-                let ramdom_key = rand::rng().random::<[u8; 32]>();
-                key.extend_from_slice(&ramdom_key);
+                let random_key = rand::rng().random::<[u8; 32]>();
+                key.extend_from_slice(&random_key);
                 local
                     .insert(TableKey(Bytes::from(key)), val.clone(), None)
                     .unwrap();
@@ -410,7 +410,7 @@ pub(crate) mod tests {
         )
         .await;
 
-        let existing_table_id: u32 = 1;
+        let existing_table_id = 1.into();
         let storage_existing_table_id = get_hummock_storage(
             hummock_meta_client.clone(),
             notification_client,
@@ -490,12 +490,12 @@ pub(crate) mod tests {
 
         update_filter_key_extractor_for_table_ids(
             global_storage.compaction_catalog_manager_ref(),
-            &[table_id_1.table_id(), table_id_2.table_id()],
+            &[table_id_1, table_id_2],
         );
 
         let compaction_catalog_agent_ref = global_storage
             .compaction_catalog_manager_ref()
-            .acquire(vec![table_id_1.table_id(), table_id_2.table_id()])
+            .acquire(vec![table_id_1, table_id_2])
             .await
             .unwrap();
 
@@ -513,8 +513,8 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
 
-        let drop_table_id = table_id_1.table_id();
-        let existing_table_id = table_id_2.table_id();
+        let drop_table_id = table_id_1;
+        let existing_table_id = table_id_2;
         let kv_count: usize = 128;
         let mut epoch = test_epoch(1);
         register_table_ids_to_compaction_group(
@@ -655,7 +655,7 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    table_id: TableId::from(existing_table_id),
+                    table_id: existing_table_id,
                     prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
@@ -665,7 +665,7 @@ pub(crate) mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = k.user_key.table_id.table_id();
+            let table_id = k.user_key.table_id;
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
@@ -680,7 +680,7 @@ pub(crate) mod tests {
             worker_id as _,
         ));
 
-        let existing_table_id = 2;
+        let existing_table_id = 2.into();
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(
@@ -716,7 +716,7 @@ pub(crate) mod tests {
         let prev_epoch: u64 = hummock_manager_ref
             .get_current_version()
             .await
-            .table_committed_epoch(existing_table_id.into())
+            .table_committed_epoch(existing_table_id)
             .unwrap();
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
@@ -724,11 +724,11 @@ pub(crate) mod tests {
         let vnode = VirtualNode::from_index(1);
         let mut epoch_set = BTreeSet::new();
 
-        let table_id_set = HashSet::from_iter([existing_table_id.into()]);
+        let table_id_set = HashSet::from_iter([existing_table_id]);
         storage.start_epoch(epoch, table_id_set.clone());
 
         let mut local = storage
-            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+            .new_local(NewLocalOptions::for_test(existing_table_id))
             .await;
         for i in 0..kv_count {
             let next_epoch = epoch + millisec_interval_epoch;
@@ -858,7 +858,7 @@ pub(crate) mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    table_id: TableId::from(existing_table_id),
+                    table_id: existing_table_id,
                     prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
@@ -868,7 +868,7 @@ pub(crate) mod tests {
             .unwrap();
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = k.user_key.table_id.table_id();
+            let table_id = k.user_key.table_id;
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
@@ -883,7 +883,7 @@ pub(crate) mod tests {
             worker_id as _,
         ));
 
-        let existing_table_id = 2;
+        let existing_table_id = 2.into();
         let mut key = BytesMut::default();
         key.put_u16(1);
         key.put_slice(b"key_prefix");
@@ -912,7 +912,7 @@ pub(crate) mod tests {
 
         let table_id_to_vnode =
             HashMap::from_iter([(existing_table_id, VirtualNode::COUNT_FOR_TEST)]);
-        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0.into(), None)]);
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
@@ -933,7 +933,7 @@ pub(crate) mod tests {
         let prev_epoch: u64 = hummock_manager_ref
             .get_current_version()
             .await
-            .table_committed_epoch(existing_table_id.into())
+            .table_committed_epoch(existing_table_id)
             .unwrap();
         // let base_epoch = Epoch(0);
         let base_epoch = Epoch::now();
@@ -942,9 +942,9 @@ pub(crate) mod tests {
         let mut epoch_set = BTreeSet::new();
 
         let mut local = storage
-            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+            .new_local(NewLocalOptions::for_test(existing_table_id))
             .await;
-        let table_id_set = HashSet::from_iter([existing_table_id.into()]);
+        let table_id_set = HashSet::from_iter([existing_table_id]);
         storage.start_epoch(epoch, table_id_set.clone());
         for i in 0..kv_count {
             if i == 0 {
@@ -957,9 +957,9 @@ pub(crate) mod tests {
             storage.start_epoch(next_epoch, table_id_set.clone());
             epoch_set.insert(epoch);
 
-            let ramdom_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
+            let random_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
             local
-                .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
+                .insert(TableKey(Bytes::from(random_key)), val.clone(), None)
                 .unwrap();
             local.flush().await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
@@ -1055,7 +1055,7 @@ pub(crate) mod tests {
 
         // 6. scan kv to check key table_id
         let bloom_filter_key = [
-            existing_table_id.to_be_bytes().to_vec(),
+            existing_table_id.as_raw_id().to_be_bytes().to_vec(),
             key_prefix.to_vec(),
         ]
         .concat();
@@ -1071,7 +1071,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
-                    table_id: TableId::from(existing_table_id),
+                    table_id: existing_table_id,
                     prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
@@ -1082,7 +1082,7 @@ pub(crate) mod tests {
 
         let mut scan_count = 0;
         for (k, _) in scan_result {
-            let table_id = k.user_key.table_id.table_id();
+            let table_id = k.user_key.table_id;
             assert_eq!(table_id, existing_table_id);
             scan_count += 1;
         }
@@ -1099,7 +1099,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             worker_id as _,
         ));
-        let existing_table_id: u32 = 1;
+        let existing_table_id = 1.into();
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(
@@ -1123,7 +1123,7 @@ pub(crate) mod tests {
         ));
         prepare_data(hummock_meta_client.clone(), &storage, existing_table_id, 2).await;
         let mut local = storage
-            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+            .new_local(NewLocalOptions::for_test(existing_table_id))
             .await;
         let epoch = test_epoch(130);
         local.init_for_test(epoch).await.unwrap();
@@ -1143,13 +1143,7 @@ pub(crate) mod tests {
         //     .unwrap();
         local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
-        flush_and_commit(
-            &hummock_meta_client,
-            &storage,
-            epoch,
-            existing_table_id.into(),
-        )
-        .await;
+        flush_and_commit(&hummock_meta_client, &storage, epoch, existing_table_id).await;
 
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
@@ -1270,7 +1264,7 @@ pub(crate) mod tests {
             );
             let hash = Sstable::hash_for_bloom_filter(
                 fast_iter.key().user_key.encode().as_slice(),
-                fast_iter.key().user_key.table_id.table_id,
+                fast_iter.key().user_key.table_id.as_raw_id(),
             );
             assert_eq!(normal_iter.value(), fast_iter.value());
             let key = fast_iter.key();
@@ -1332,7 +1326,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             worker_id as _,
         ));
-        let existing_table_id: u32 = 1;
+        let existing_table_id: TableId = 1.into();
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(
@@ -1388,7 +1382,7 @@ pub(crate) mod tests {
                     table_infos: ssts,
                 },
             ],
-            existing_table_ids: vec![1],
+            existing_table_ids: vec![1.into()],
             task_id: 1,
             splits: vec![KeyRange::inf()],
             target_level: 6,
@@ -1515,7 +1509,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             worker_id as _,
         ));
-        let existing_table_id: u32 = 1;
+        let existing_table_id = 1.into();
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(
@@ -1617,7 +1611,7 @@ pub(crate) mod tests {
                     table_infos: sst_infos,
                 },
             ],
-            existing_table_ids: vec![1],
+            existing_table_ids: vec![1.into()],
             task_id: 1,
             splits: vec![KeyRange::inf()],
             target_level: 6,
@@ -1643,7 +1637,7 @@ pub(crate) mod tests {
             hummock_manager_ref.clone(),
             worker_id as _,
         ));
-        let existing_table_id: u32 = 1;
+        let existing_table_id = 1.into();
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(
@@ -1750,7 +1744,7 @@ pub(crate) mod tests {
         let watermark_idx = key_count * 20;
         let watermark_key = Bytes::from(watermark_idx.to_be_bytes().to_vec());
         table_watermarks.insert(
-            1,
+            1.into(),
             TableWatermarks {
                 watermarks: vec![(
                     test_epoch(500),
@@ -1885,7 +1879,7 @@ pub(crate) mod tests {
             )
             .await,
             &hummock_manager_ref,
-            &[table_id_1.table_id(), table_id_2.table_id()],
+            &[table_id_1, table_id_2],
         )
         .await;
 
@@ -1896,7 +1890,7 @@ pub(crate) mod tests {
         let key_prefix = key.freeze();
 
         let compaction_catalog_agent_ref =
-            CompactionCatalogAgent::for_test(vec![table_id_1.table_id(), table_id_2.table_id()]);
+            CompactionCatalogAgent::for_test(vec![table_id_1, table_id_2]);
 
         let compact_ctx = get_compactor_context(&storage);
         let object_id_manager = Arc::new(ObjectIdManager::new(
@@ -1958,12 +1952,12 @@ pub(crate) mod tests {
                 let next_epoch = *epoch + millisec_interval_epoch;
                 storage.start_epoch(next_epoch, table_id_set.clone());
 
-                let ramdom_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
+                let random_key = [key_prefix.as_ref(), &rand::rng().random::<[u8; 32]>()].concat();
 
                 if local_1.1 {
                     local_1
                         .0
-                        .insert(TableKey(Bytes::from(ramdom_key.clone())), val.clone(), None)
+                        .insert(TableKey(Bytes::from(random_key.clone())), val.clone(), None)
                         .unwrap();
                 }
                 local_1.0.flush().await.unwrap();
@@ -1974,7 +1968,7 @@ pub(crate) mod tests {
                 if local_2.1 {
                     local_2
                         .0
-                        .insert(TableKey(Bytes::from(ramdom_key.clone())), val.clone(), None)
+                        .insert(TableKey(Bytes::from(random_key.clone())), val.clone(), None)
                         .unwrap();
                 }
                 local_2.0.flush().await.unwrap();
@@ -2008,7 +2002,7 @@ pub(crate) mod tests {
         epoch += millisec_interval_epoch;
 
         let parent_group_id = 2;
-        let split_table_ids = vec![table_id_2.table_id()];
+        let split_table_ids = vec![table_id_2];
 
         async fn compact_once(
             group_id: CompactionGroupId,
@@ -2108,7 +2102,7 @@ pub(crate) mod tests {
         )
         .await;
 
-        let created_tables = HashSet::from_iter(vec![table_id_1.table_id(), table_id_2.table_id()]);
+        let created_tables = HashSet::from_iter(vec![table_id_1, table_id_2]);
 
         // try merge
         hummock_manager_ref
@@ -2365,8 +2359,8 @@ pub(crate) mod tests {
         ));
 
         // Set up two table IDs, but only one will be in existing_table_ids
-        let existing_table_id: u32 = 1;
-        let filtered_table_id: u32 = 2;
+        let existing_table_id = 1.into();
+        let filtered_table_id = 2.into();
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
@@ -2405,7 +2399,7 @@ pub(crate) mod tests {
         // Add keys for existing_table_id (should be kept)
         for i in 0..50 {
             let key = FullKey::new(
-                TableId::new(existing_table_id),
+                existing_table_id,
                 TableKey(format!("existing_key_{:03}", i).into_bytes()),
                 epoch,
             );
@@ -2416,7 +2410,7 @@ pub(crate) mod tests {
         // Add keys for filtered_table_id (should be filtered out)
         for i in 0..50 {
             let key = FullKey::new(
-                TableId::new(filtered_table_id),
+                filtered_table_id,
                 TableKey(format!("filtered_key_{:03}", i).into_bytes()),
                 epoch,
             );
@@ -2505,7 +2499,7 @@ pub(crate) mod tests {
 
         while iter.is_valid() {
             let key = iter.key();
-            let table_id = key.user_key.table_id.table_id();
+            let table_id = key.user_key.table_id;
 
             // Verify that only existing_table_id keys are present
             assert_eq!(

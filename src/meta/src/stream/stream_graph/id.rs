@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use crate::controller::id::{
     IdCategory, IdCategoryType, IdGeneratorManager as SqlIdGeneratorManager,
 };
@@ -41,42 +44,94 @@ impl<const TYPE: IdCategoryType> From<u32> for GlobalId<TYPE> {
 ///
 /// This requires the local IDs exactly a permutation of the range `[0, len)`.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct GlobalIdGen<const TYPE: IdCategoryType> {
+pub(super) struct GlobalIdGen<ID: From<u32>> {
     offset: u32,
     len: u32,
+    _phantom: PhantomData<ID>,
 }
 
-impl<const TYPE: IdCategoryType> GlobalIdGen<TYPE> {
+pub(super) type GlobalFragmentId = GlobalId<{ IdCategory::Fragment }>;
+pub(super) type GlobalFragmentIdGen = GlobalIdGen<GlobalFragmentId>;
+
+pub(super) type GlobalTableIdGen = GlobalIdGen<GlobalId<{ IdCategory::Table }>>;
+
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub(super) struct GlobalActorId(u32);
+
+impl GlobalActorId {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub fn as_global_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for GlobalActorId {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+impl<const TYPE: IdCategoryType> GlobalIdGen<GlobalId<TYPE>> {
     /// Pre-allocate a range of IDs with the given `len` and return the generator.
     pub fn new(id_gen: &SqlIdGeneratorManager, len: u64) -> Self {
         let offset = id_gen.generate_interval::<TYPE>(len);
         Self {
             offset: offset as u32,
             len: len as u32,
+            _phantom: PhantomData,
         }
     }
+}
 
+pub(super) type GlobalActorIdGen = GlobalIdGen<GlobalActorId>;
+
+impl GlobalIdGen<GlobalActorId> {
+    pub fn new(counter: &AtomicU32, len: u64) -> Self {
+        let len_u32 = u32::try_from(len).expect("actor count exceeds u32::MAX");
+        let offset = counter.fetch_add(len_u32, Ordering::Relaxed);
+        Self {
+            offset,
+            len: len_u32,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<ID: From<u32>> GlobalIdGen<ID> {
     /// Convert local id to global id. Panics if `id >= len`.
-    pub fn to_global_id(self, local_id: u32) -> GlobalId<TYPE> {
+    pub fn to_global_id(&self, local_id: u32) -> ID {
         assert!(
             local_id < self.len,
             "id {} is out of range (len: {})",
             local_id,
             self.len
         );
-        GlobalId(local_id + self.offset)
+        ID::from(local_id + self.offset)
     }
 
-    /// Returns the length of this ID generator.
     pub fn len(&self) -> u32 {
         self.len
     }
 }
 
-pub(super) type GlobalFragmentId = GlobalId<{ IdCategory::Fragment }>;
-pub(super) type GlobalFragmentIdGen = GlobalIdGen<{ IdCategory::Fragment }>;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub(super) type GlobalTableIdGen = GlobalIdGen<{ IdCategory::Table }>;
+    #[test]
+    fn global_actor_id_gen_reserves_unique_ranges() {
+        let counter = AtomicU32::new(10);
+        let first = GlobalActorIdGen::new(&counter, 3);
+        assert_eq!(first.len(), 3);
+        let second = GlobalActorIdGen::new(&counter, 2);
+        assert_eq!(second.len(), 2);
 
-pub(super) type GlobalActorId = GlobalId<{ IdCategory::Actor }>;
-pub(super) type GlobalActorIdGen = GlobalIdGen<{ IdCategory::Actor }>;
+        assert_eq!(first.to_global_id(0).as_global_id(), 10);
+        assert_eq!(first.to_global_id(2).as_global_id(), 12);
+        assert_eq!(second.to_global_id(1).as_global_id(), 14);
+        assert_eq!(counter.load(Ordering::Relaxed), 15);
+    }
+}

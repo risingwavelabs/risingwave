@@ -37,7 +37,7 @@ pub struct DatabaseCatalog {
 impl DatabaseCatalog {
     pub fn create_schema(&mut self, proto: &PbSchema) {
         let name = proto.name.clone();
-        let id = proto.id;
+        let id = proto.id.into();
         let schema = proto.into();
         self.schema_by_name
             .try_insert(name.clone(), schema)
@@ -72,9 +72,9 @@ impl DatabaseCatalog {
         self.schema_by_name.get(name)
     }
 
-    pub fn get_schema_by_id(&self, schema_id: &SchemaId) -> Option<&SchemaCatalog> {
+    pub fn get_schema_by_id(&self, schema_id: SchemaId) -> Option<&SchemaCatalog> {
         self.schema_by_name
-            .get(self.schema_name_by_id.get(schema_id)?)
+            .get(self.schema_name_by_id.get(&schema_id)?)
     }
 
     pub fn get_schema_mut(&mut self, schema_id: SchemaId) -> Option<&mut SchemaCatalog> {
@@ -93,21 +93,21 @@ impl DatabaseCatalog {
     }
 
     pub fn update_schema(&mut self, prost: &PbSchema) {
-        let id = prost.id;
+        let id = prost.id.into();
         let name = prost.name.clone();
 
         let old_schema_name = self.schema_name_by_id.get(&id).unwrap().to_owned();
         if old_schema_name != name {
             let mut schema = self.schema_by_name.remove(&old_schema_name).unwrap();
             schema.name.clone_from(&name);
-            schema.database_id = prost.database_id;
+            schema.database_id = prost.database_id.into();
             schema.owner = prost.owner;
             self.schema_by_name.insert(name.clone(), schema);
             self.schema_name_by_id.insert(id, name);
         } else {
             let schema = self.get_schema_mut(id).unwrap();
             schema.name.clone_from(&name);
-            schema.database_id = prost.database_id;
+            schema.database_id = prost.database_id.into();
             schema.owner = prost.owner;
         };
     }
@@ -122,7 +122,7 @@ impl DatabaseCatalog {
 
     pub fn to_prost(&self) -> PbDatabase {
         PbDatabase {
-            id: self.id,
+            id: self.id.into(),
             name: self.name.clone(),
             owner: self.owner,
             resource_group: self.resource_group.clone(),
@@ -141,7 +141,7 @@ impl OwnedByUserCatalog for DatabaseCatalog {
 impl From<&PbDatabase> for DatabaseCatalog {
     fn from(db: &PbDatabase) -> Self {
         Self {
-            id: db.id,
+            id: db.id.into(),
             name: db.name.clone(),
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),

@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
-use std::fmt::Write;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
@@ -29,7 +28,6 @@ use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::stream_plan::StreamNode;
 
@@ -129,92 +127,6 @@ impl Fragment {
     /// The fragment id.
     pub fn id(&self) -> u32 {
         self.inner.fragment_id
-    }
-
-    /// Generate a reschedule plan for the fragment.
-    pub fn reschedule(
-        &self,
-        remove: impl AsRef<[WorkerSlotId]>,
-        add: impl AsRef<[WorkerSlotId]>,
-    ) -> String {
-        let remove = remove.as_ref();
-        let add = add.as_ref();
-
-        let mut worker_decreased = HashMap::new();
-        for worker_slot in remove {
-            let worker_id = worker_slot.worker_id();
-            *worker_decreased.entry(worker_id).or_insert(0) += 1;
-        }
-
-        let mut worker_increased = HashMap::new();
-        for worker_slot in add {
-            let worker_id = worker_slot.worker_id();
-            *worker_increased.entry(worker_id).or_insert(0) += 1;
-        }
-
-        let worker_ids: HashSet<_> = worker_increased
-            .keys()
-            .chain(worker_decreased.keys())
-            .cloned()
-            .collect();
-
-        let mut worker_actor_diff = HashMap::new();
-
-        for worker_id in worker_ids {
-            let increased = worker_increased.remove(&worker_id).unwrap_or(0);
-            let decreased = worker_decreased.remove(&worker_id).unwrap_or(0);
-            let diff = increased - decreased;
-            if diff != 0 {
-                worker_actor_diff.insert(worker_id, diff);
-            }
-        }
-
-        let mut f = String::new();
-
-        if !worker_actor_diff.is_empty() {
-            let worker_diff_str = worker_actor_diff
-                .into_iter()
-                .map(|(k, v)| format!("{}:{}", k, v))
-                .join(", ");
-
-            write!(f, "{}", self.id()).unwrap();
-            write!(f, ":[{}]", worker_diff_str).unwrap();
-        }
-
-        f
-    }
-
-    /// Generate a random reschedule plan for the fragment.
-    ///
-    /// Consumes `self` as the actor info will be stale after rescheduling.
-    pub fn random_reschedule(self) -> String {
-        let all_worker_slots = self.all_worker_slots();
-        let used_worker_slots = self.used_worker_slots();
-
-        let rng = &mut thread_rng();
-        let target_worker_slot_count = match self.inner.distribution_type() {
-            FragmentDistributionType::Unspecified => unreachable!(),
-            FragmentDistributionType::Single => 1,
-            FragmentDistributionType::Hash => rng.random_range(1..=all_worker_slots.len()),
-        };
-
-        let target_worker_slots: HashSet<_> = all_worker_slots
-            .into_iter()
-            .choose_multiple(rng, target_worker_slot_count)
-            .into_iter()
-            .collect();
-
-        let remove = used_worker_slots
-            .difference(&target_worker_slots)
-            .copied()
-            .collect_vec();
-
-        let add = target_worker_slots
-            .difference(&used_worker_slots)
-            .copied()
-            .collect_vec();
-
-        self.reschedule(remove, add)
     }
 
     pub fn all_worker_count(&self) -> HashMap<u32, usize> {
@@ -410,60 +322,6 @@ impl Cluster {
             .await
     }
 
-    /// Reschedule with the given `plan`. Check the document of
-    /// [`risingwave_ctl::cmd_impl::meta::reschedule`] for more details.
-    pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
-        self.reschedule_helper(plan, false).await
-    }
-
-    /// Same as reschedule, but resolve the no-shuffle upstream
-    pub async fn reschedule_resolve_no_shuffle(&mut self, plan: impl Into<String>) -> Result<()> {
-        self.reschedule_helper(plan, true).await
-    }
-
-    #[cfg_or_panic(madsim)]
-    async fn reschedule_helper(
-        &mut self,
-        plan: impl Into<String>,
-        resolve_no_shuffle_upstream: bool,
-    ) -> Result<()> {
-        let plan = plan.into();
-
-        let revision = self
-            .ctl
-            .spawn(async move {
-                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
-                    &risingwave_ctl::common::CtlContext::default(),
-                )
-                .await?;
-
-                Ok::<_, anyhow::Error>(r.revision)
-            })
-            .await??;
-
-        self.ctl
-            .spawn(async move {
-                let revision = format!("{}", revision);
-                let mut v = vec![
-                    "meta",
-                    "reschedule",
-                    "--plan",
-                    plan.as_ref(),
-                    "--revision",
-                    &revision,
-                ];
-
-                if resolve_no_shuffle_upstream {
-                    v.push("--resolve-no-shuffle");
-                }
-
-                start_ctl(v).await
-            })
-            .await??;
-
-        Ok(())
-    }
-
     /// Pause all data sources in the cluster.
     #[cfg_or_panic(madsim)]
     pub async fn pause(&mut self) -> Result<()> {
@@ -483,11 +341,8 @@ impl Cluster {
     pub async fn throttle_mv(&mut self, table_id: TableId, rate_limit: Option<u32>) -> Result<()> {
         self.ctl
             .spawn(async move {
-                let mut command: Vec<String> = vec![
-                    "throttle".into(),
-                    "mv".into(),
-                    table_id.table_id.to_string(),
-                ];
+                let mut command: Vec<String> =
+                    vec!["throttle".into(), "mv".into(), table_id.to_string()];
                 if let Some(rate_limit) = rate_limit {
                     command.push(rate_limit.to_string());
                 }

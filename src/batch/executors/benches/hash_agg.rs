@@ -73,7 +73,7 @@ fn create_hash_agg_executor(
     );
     let input_schema = input.schema();
 
-    let agg_calls = vec![create_agg_call(
+    let agg_calls = [create_agg_call(
         input_schema,
         agg_type,
         arg_columns,

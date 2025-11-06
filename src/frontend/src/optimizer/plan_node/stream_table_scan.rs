@@ -392,7 +392,7 @@ impl StreamTableScan {
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
-                    fields: upstream_schema.clone(),
+                    fields: upstream_schema,
                     stream_key: vec![], // not used
                     ..Default::default()
                 },
@@ -410,7 +410,7 @@ impl StreamTableScan {
         };
 
         let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
-            table_id: self.core.table_catalog.id.table_id,
+            table_id: self.core.table_catalog.id.as_raw_id(),
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,

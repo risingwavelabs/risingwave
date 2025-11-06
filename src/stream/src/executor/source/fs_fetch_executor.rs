@@ -21,6 +21,7 @@ use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -265,7 +266,19 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::error!(error = %e.as_report(), "Fetch Error");
+                    tracing::error!(
+                        source_id = %core.source_id,
+                        source_name = %core.source_name,
+                        fragment_id = %self.actor_ctx.fragment_id,
+                        error = %e.as_report(),
+                        "Fetch Error"
+                    );
+                    GLOBAL_ERROR_METRICS.user_source_error.report([
+                        "File source fetch error".to_owned(),
+                        core.source_id.to_string(),
+                        core.source_name.clone(),
+                        self.actor_ctx.fragment_id.to_string(),
+                    ]);
                     splits_on_fetch = 0;
                 }
                 Ok(msg) => {
@@ -385,14 +398,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 )
                                 .unwrap();
                                 debug_assert_eq!(mapping.len(), 1);
-                                if let Some((split_id, _offset)) = mapping.into_iter().next() {
+                                if let Some((split_id, offset)) = mapping.into_iter().next() {
                                     reading_file = Some(split_id.clone());
                                     let row = state_store_handler.get(&split_id).await?
                                         .unwrap_or_else(|| {
                                             panic!("The fs_split (file_name) {:?} should be in the state table.",
                                         split_id)
                                         });
-                                    let fs_split = match row.datum_at(1) {
+                                    let mut fs_split = match row.datum_at(1) {
                                         Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
                                             OpendalFsSplit::<Src>::restore_from_json(
                                                 jsonb_ref.to_owned_scalar(),
@@ -400,6 +413,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         }
                                         _ => unreachable!(),
                                     };
+                                    fs_split.update_offset(offset)?;
 
                                     state_store_handler
                                         .set(&split_id, fs_split.encode_to_json())
@@ -413,6 +427,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 yield Message::Chunk(chunk);
                             }
                             None => {
+                                tracing::debug!("Deleting file: {:?}", reading_file);
                                 if let Some(ref delete_file_name) = reading_file {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(delete_file_name).await?;

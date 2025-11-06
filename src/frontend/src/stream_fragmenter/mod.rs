@@ -16,6 +16,7 @@ mod graph;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod parallelism;
 mod rewrite;
@@ -71,6 +72,7 @@ pub struct BuildFragmentGraphState {
     has_source_backfill: bool,
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
+    tables: HashMap<TableId, Table>,
 }
 
 impl BuildFragmentGraphState {
@@ -189,7 +191,7 @@ pub fn build_graph_with_strategy(
     fragment_graph.dependent_table_ids = state
         .dependent_table_ids
         .into_iter()
-        .map(|id| id.table_id)
+        .map(|id| id.as_raw_id())
         .collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
 
@@ -376,6 +378,18 @@ fn build_fragment(
 
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
+            NodeBody::EowcGapFill(node) => {
+                let table = node.buffer_table.as_ref().unwrap().clone();
+                state.tables.insert(TableId::new(table.id), table);
+                let table = node.prev_row_table.as_ref().unwrap().clone();
+                state.tables.insert(TableId::new(table.id), table);
+            }
+
+            NodeBody::GapFill(node) => {
+                let table = node.state_table.as_ref().unwrap().clone();
+                state.tables.insert(TableId::new(table.id), table);
+            }
+
             NodeBody::StreamScan(node) => {
                 current_fragment
                     .fragment_type_mask
@@ -405,7 +419,12 @@ fn build_fragment(
                 state
                     .dependent_table_ids
                     .insert(TableId::new(node.table_id));
-                current_fragment.upstream_table_ids.push(node.table_id);
+
+                // Add state table if present
+                if let Some(state_table) = &node.state_table {
+                    let table = state_table.clone();
+                    state.tables.insert(TableId::new(table.id), table);
+                }
             }
 
             NodeBody::StreamCdcScan(node) => {
@@ -434,9 +453,6 @@ fn build_fragment(
                 state
                     .dependent_table_ids
                     .insert(node.upstream_source_id.into());
-                current_fragment
-                    .upstream_table_ids
-                    .push(node.upstream_source_id);
             }
             NodeBody::SourceBackfill(node) => {
                 current_fragment
@@ -445,7 +461,6 @@ fn build_fragment(
                 // memorize upstream source id for later use
                 let source_id = node.upstream_source_id;
                 state.dependent_table_ids.insert(source_id.into());
-                current_fragment.upstream_table_ids.push(source_id);
                 state.has_source_backfill = true;
             }
 
@@ -480,6 +495,12 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::UpstreamSinkUnion);
+            }
+
+            NodeBody::LocalityProvider(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::LocalityProvider);
             }
 
             _ => {}

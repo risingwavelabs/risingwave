@@ -31,8 +31,8 @@ use risingwave_pb::stream_plan::SourceNode;
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    DummySourceExecutor, FsListExecutor, IcebergListExecutor, SourceExecutor,
-    SourceStateTableHandler, StreamSourceCore,
+    BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
+    SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
 
 pub struct SourceExecutorBuilder;
@@ -122,9 +122,9 @@ pub fn create_source_desc_builder(
         // passed via `StreamSource` so null pk may be emitted to downstream.
         //
         // TODO: use the correct information to fill in pk_dicies.
-        // We should consdier add back the "pk_column_ids" field removed by #8841 in
+        // We should consider add back the "pk_column_ids" field removed by #8841 in
         // StreamSource
-        params.info.pk_indices.clone(),
+        params.info.stream_key.clone(),
     )
 }
 
@@ -214,6 +214,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     IcebergListExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
+                        source
+                            .downstream_columns
+                            .as_ref()
+                            .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
@@ -221,6 +225,30 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.env.config().clone(),
                     )
                     .boxed()
+                } else if source.with_properties.is_batch_connector() {
+                    if source
+                        .with_properties
+                        .get_connector()
+                        .map(|c| {
+                            c.eq_ignore_ascii_case(
+                                risingwave_connector::source::BATCH_POSIX_FS_CONNECTOR,
+                            )
+                        })
+                        .unwrap_or(false)
+                    {
+                        BatchPosixFsListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            system_params,
+                            source.rate_limit,
+                            params.local_barrier_manager.clone(),
+                        )
+                        .boxed()
+                    } else {
+                        unreachable!("unknown batch connector");
+                    }
                 } else {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
                     SourceExecutor::new(

@@ -24,7 +24,6 @@ use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
 use foyer::Hint;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     MetaConfig, NoOverride, extract_storage_memory_config, load_config,
 };
@@ -404,7 +403,8 @@ async fn start_replay(
 
         // We can custom more conditions for compaction triggering
         // For now I just use a static way here
-        if replay_count % opts.num_trigger_frequency == 0 && !modified_compaction_groups.is_empty()
+        if replay_count.is_multiple_of(opts.num_trigger_frequency)
+            && !modified_compaction_groups.is_empty()
         {
             // join previously spawned check result task
             if let Some(handle) = check_result_task {
@@ -633,7 +633,7 @@ async fn open_hummock_iters(
             .new_read_snapshot(
                 HummockReadEpoch::NoWait(epoch),
                 NewReadSnapshotOptions {
-                    table_id: TableId { table_id },
+                    table_id: table_id.into(),
                 },
             )
             .await?;

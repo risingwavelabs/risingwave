@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::JobId;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
 use serde::{Deserialize, Serialize};
-
-use crate::TableId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default, Serialize, Deserialize)]
 #[sea_orm(table_name = "cdc_table_snapshot_splits")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub table_id: TableId,
+    pub table_id: JobId,
     #[sea_orm(primary_key, auto_increment = false)]
     pub split_id: i64,
     pub left: Vec<u8>,

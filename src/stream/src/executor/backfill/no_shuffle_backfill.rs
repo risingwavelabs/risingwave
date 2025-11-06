@@ -134,7 +134,7 @@ where
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
-        let upstream_table_id = self.upstream_table.table_id().table_id;
+        let upstream_table_id = self.upstream_table.table_id();
 
         let mut upstream = self.upstream.execute();
 
@@ -270,7 +270,7 @@ where
                                     }
                                     Message::Chunk(chunk) => {
                                         // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(chunk.compact());
+                                        upstream_chunk_buffer.push(chunk.compact_vis());
                                     }
                                     Message::Watermark(_) => {
                                         // Ignore watermark during backfill.
@@ -474,7 +474,7 @@ where
                                     tracing::info!(
                                         old_rate_limit = ?old_rate_limit,
                                         new_rate_limit = ?new_rate_limit,
-                                        upstream_table_id = upstream_table_id,
+                                        %upstream_table_id,
                                         actor_id = self.actor_id,
                                         "backfill rate limit changed",
                                     );

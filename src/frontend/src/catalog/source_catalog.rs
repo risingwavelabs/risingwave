@@ -72,8 +72,8 @@ impl SourceCatalog {
         let (with_properties, secret_refs) = self.with_properties.clone().into_parts();
         PbSource {
             id: self.id,
-            schema_id: self.schema_id,
-            database_id: self.database_id,
+            schema_id: self.schema_id.into(),
+            database_id: self.database_id.into(),
             name: self.name.clone(),
             row_id_index: self.row_id_index.map(|idx| idx as _),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect(),
@@ -88,7 +88,7 @@ impl SourceCatalog {
             created_at_epoch: self.created_at_epoch.map(|x| x.0),
             optional_associated_table_id: self
                 .associated_table_id
-                .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.table_id)),
+                .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.as_raw_id())),
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
@@ -192,8 +192,8 @@ impl From<&PbSource> for SourceCatalog {
         Self {
             id,
             name,
-            schema_id,
-            database_id,
+            schema_id: schema_id.into(),
+            database_id: database_id.into(),
             columns,
             pk_col_ids,
             append_only,

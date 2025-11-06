@@ -1247,12 +1247,12 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
@@ -1342,12 +1342,12 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
@@ -1434,12 +1434,12 @@ mod tests {
         let column_descs = test_payload_schema(pk_info);
         let fields = column_descs
             .into_iter()
-            .map(|desc| Field::new(desc.name.clone(), desc.data_type.clone()))
+            .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 

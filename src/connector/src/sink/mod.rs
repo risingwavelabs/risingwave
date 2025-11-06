@@ -106,6 +106,7 @@ use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
@@ -231,6 +232,7 @@ pub const SINK_SNAPSHOT_OPTION: &str = "snapshot";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
+pub const SINK_TYPE_RETRACT: &str = "retract";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,7 +241,8 @@ pub struct SinkParam {
     pub sink_name: String,
     pub properties: BTreeMap<String, String>,
     pub columns: Vec<ColumnDesc>,
-    pub downstream_pk: Vec<usize>,
+    /// User-defined primary key indices for upsert sink, if any.
+    pub downstream_pk: Option<Vec<usize>>,
     pub sink_type: SinkType,
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
@@ -271,11 +274,15 @@ impl SinkParam {
             sink_name: pb_param.sink_name,
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
-            downstream_pk: table_schema
-                .pk_indices
-                .iter()
-                .map(|i| *i as usize)
-                .collect(),
+            downstream_pk: if table_schema.pk_indices.is_empty() {
+                None
+            } else {
+                Some(
+                    (table_schema.pk_indices.iter())
+                        .map(|i| *i as usize)
+                        .collect(),
+                )
+            },
             sink_type: SinkType::from_proto(
                 PbSinkType::try_from(pb_param.sink_type).expect("should be able to convert"),
             ),
@@ -292,7 +299,8 @@ impl SinkParam {
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
-                pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
+                pk_indices: (self.downstream_pk.as_ref())
+                    .map_or_else(Vec::new, |pk| pk.iter().map(|i| *i as u32).collect()),
             }),
             sink_type: self.sink_type.to_proto().into(),
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
@@ -305,6 +313,15 @@ impl SinkParam {
         Schema {
             fields: self.columns.iter().map(Field::from).collect(),
         }
+    }
+
+    /// Get the downstream primary key indices specified by the user. If not specified, return
+    /// an empty vector.
+    ///
+    /// Prefer directly accessing the `downstream_pk` field, as it uses `None` to represent
+    /// unspecified values, making it clearer.
+    pub fn downstream_pk_or_empty(&self) -> Vec<usize> {
+        self.downstream_pk.clone().unwrap_or_default()
     }
 
     // `SinkParams` should only be used when there is a secret context.
@@ -632,7 +649,7 @@ impl SinkMetaClient {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Fialed to add sink fail event to event log.");
+                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Failed to add sink fail event to event log.");
                     }
                 }
             }
@@ -691,10 +708,17 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
                 }
                 None => match user_specified {
                     SinkDecouple::Default | SinkDecouple::Enable => {
-                        desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
-                            DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
-                        );
+                        if matches!(Self::SINK_NAME, ICEBERG_SINK) {
+                            desc.properties.insert(
+                                COMMIT_CHECKPOINT_INTERVAL.to_owned(),
+                                ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            );
+                        } else {
+                            desc.properties.insert(
+                                COMMIT_CHECKPOINT_INTERVAL.to_owned(),
+                                DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
+                            );
+                        }
                     }
                     SinkDecouple::Disable => {
                         desc.properties.insert(

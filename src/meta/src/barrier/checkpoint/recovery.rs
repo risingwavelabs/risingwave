@@ -18,7 +18,8 @@ use std::task::{Context, Poll};
 
 use futures::FutureExt;
 use prometheus::{HistogramTimer, IntCounter};
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -98,7 +99,7 @@ struct DatabaseRecoveryMetrics {
 
 impl DatabaseRecoveryMetrics {
     fn new(database_id: DatabaseId) -> Self {
-        let database_id_str = format!("database {}", database_id.database_id);
+        let database_id_str = format!("database {}", database_id);
         Self {
             recovery_failure_cnt: GLOBAL_META_METRICS
                 .recovery_failure_cnt
@@ -262,7 +263,7 @@ impl DatabaseRecoveringState {
         &self,
     ) -> Option<(
         &BarrierWorkerState,
-        &HashMap<TableId, CreatingStreamingJobControl>,
+        &HashMap<JobId, CreatingStreamingJobControl>,
     )> {
         match &self.stage {
             DatabaseRecoveringStage::Resetting { .. } => None,
@@ -324,7 +325,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                     control_stream_manager.reset_database(self.database_id, reset_request_id);
                 let metrics = DatabaseRecoveryMetrics::new(self.database_id);
                 event_log_manager_ref.add_event_logs(vec![Event::Recovery(
-                    EventRecovery::database_recovery_start(self.database_id.database_id),
+                    EventRecovery::database_recovery_start(self.database_id.as_raw_id()),
                 )]);
                 *database_status =
                     DatabaseCheckpointControlStatus::Recovering(DatabaseRecoveringState {
@@ -345,7 +346,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                 }
                 DatabaseRecoveringStage::Initializing { .. } => {
                     event_log_manager_ref.add_event_logs(vec![Event::Recovery(
-                        EventRecovery::database_recovery_failure(self.database_id.database_id),
+                        EventRecovery::database_recovery_failure(self.database_id.as_raw_id()),
                     )]);
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let remaining_workers =
@@ -380,7 +381,7 @@ impl CheckpointControl {
                     None
                 }
                 DatabaseRecoveringStage::Initializing { .. } => {
-                    warn!(database_id = database_id.database_id, "");
+                    warn!(database_id = %database_id, "");
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let remaining_workers =
                         control_stream_manager.reset_database(database_id, reset_request_id);
@@ -401,10 +402,6 @@ impl CheckpointControl {
 pub(crate) struct EnterInitializing(pub(crate) HashMap<WorkerId, ResetDatabaseResponse>);
 
 impl DatabaseStatusAction<'_, EnterInitializing> {
-    pub(crate) fn control(&self) -> &CheckpointControl {
-        &*self.control
-    }
-
     pub(crate) fn enter(
         self,
         runtime_info: DatabaseRuntimeInfoSnapshot,
@@ -430,7 +427,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             job_infos,
             mut state_table_committed_epochs,
             mut state_table_log_epochs,
-            subscription_info,
+            mut mv_depended_subscriptions,
             stream_actors,
             fragment_relations,
             mut source_splits,
@@ -438,8 +435,12 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut cdc_table_snapshot_split_assignment,
         } = runtime_info;
         let result: MetaResult<_> = try {
-            let mut builder =
-                FragmentEdgeBuilder::new(job_infos.values().flatten(), control_stream_manager);
+            let mut builder = FragmentEdgeBuilder::new(
+                job_infos
+                    .values()
+                    .flat_map(|fragment_infos| fragment_infos.values()),
+                control_stream_manager,
+            );
             builder.add_relations(&fragment_relations);
             let mut edges = builder.build();
             control_stream_manager.inject_database_initial_barrier(
@@ -451,7 +452,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &stream_actors,
                 &mut source_splits,
                 &mut background_jobs,
-                subscription_info,
+                &mut mv_depended_subscriptions,
                 false,
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_split_assignment,
@@ -466,7 +467,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             }
             Err(e) => {
                 warn!(
-                    database_id = self.database_id.database_id,
+                    database_id = %self.database_id,
                     e = %e.as_report(),
                     "failed to inject initial barrier"
                 );
@@ -503,7 +504,7 @@ impl DatabaseStatusAction<'_, EnterRunning> {
         info!(database_id = ?self.database_id, "database enter running");
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         event_log_manager_ref.add_event_logs(vec![Event::Recovery(
-            EventRecovery::database_recovery_success(self.database_id.database_id),
+            EventRecovery::database_recovery_success(self.database_id.as_raw_id()),
         )]);
         let database_status = self
             .control

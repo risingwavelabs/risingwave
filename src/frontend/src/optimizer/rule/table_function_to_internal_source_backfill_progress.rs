@@ -65,7 +65,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
                 Field::new("backfill_state_table_id", DataType::Int32),
                 Field::new("backfill_progress", DataType::Jsonb),
             ];
-            let plan = LogicalValues::new(vec![], Schema::new(fields), ctx.clone());
+            let plan = LogicalValues::new(vec![], Schema::new(fields), ctx);
             return Ok(plan.into());
         }
 
@@ -82,7 +82,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
     }
 
     fn build_scan(ctx: Rc<OptimizerContext>, table: Arc<TableCatalog>) -> LogicalScan {
-        LogicalScan::create(table, ctx.clone(), None)
+        LogicalScan::create(table, ctx, None)
     }
 
     fn build_project(
@@ -140,7 +140,7 @@ struct SourceBackfillInfo {
 
 impl SourceBackfillInfo {
     fn new(table: &TableCatalog) -> anyhow::Result<Self> {
-        let Some(job_id) = table.job_id.map(|id| id.table_id) else {
+        let Some(job_id) = table.job_id.map(|id| id.as_raw_id()) else {
             bail!("`job_id` column not found in source backfill table catalog");
         };
         let Some(backfill_progress_column_index) = table
@@ -154,7 +154,7 @@ impl SourceBackfillInfo {
             );
         };
         let fragment_id = table.fragment_id;
-        let table_id = table.id.table_id;
+        let table_id = table.id.as_raw_id();
 
         Ok(Self {
             job_id,

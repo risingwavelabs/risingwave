@@ -118,7 +118,9 @@ pub mod vacuum;
 pub mod variable;
 mod wait;
 
-pub use alter_table_column::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
+pub use alter_table_column::{
+    fetch_table_catalog_for_alter, get_new_table_definition_for_cdc_table, get_replace_table_plan,
+};
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
@@ -686,7 +688,7 @@ pub async fn handle(
                 name,
                 table_name,
                 method,
-                columns.to_vec(),
+                columns.clone(),
                 include,
                 distributed_by,
             )
@@ -1252,18 +1254,35 @@ pub async fn handle(
             operation,
         } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
         Statement::AlterFragment {
-            fragment_id,
-            operation: AlterFragmentOperation::AlterBackfillRateLimit { rate_limit },
-        } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
-                &handler_args.session,
-                PbThrottleTarget::Fragment,
-                fragment_id,
-                rate_limit,
-                StatementType::SET_VARIABLE,
-            )
-            .await
-        }
+            fragment_ids,
+            operation,
+        } => match operation {
+            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
+                let [fragment_id] = fragment_ids.as_slice() else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "ALTER FRAGMENT ... SET RATE_LIMIT supports exactly one fragment id"
+                            .to_owned(),
+                    )
+                    .into());
+                };
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                    &handler_args.session,
+                    PbThrottleTarget::Fragment,
+                    *fragment_id,
+                    rate_limit,
+                    StatementType::SET_VARIABLE,
+                )
+                .await
+            }
+            AlterFragmentOperation::SetParallelism { parallelism } => {
+                alter_parallelism::handle_alter_fragment_parallelism(
+                    handler_args,
+                    fragment_ids,
+                    parallelism,
+                )
+                .await
+            }
+        },
         Statement::AlterDefaultPrivileges { .. } => {
             handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
         }

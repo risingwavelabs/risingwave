@@ -282,6 +282,7 @@ pub enum AlterSecretOperation {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterFragmentOperation {
     AlterBackfillRateLimit { rate_limit: i32 },
+    SetParallelism { parallelism: SetVariableValue },
 }
 
 impl fmt::Display for AlterDatabaseOperation {
@@ -678,6 +679,9 @@ impl fmt::Display for AlterFragmentOperation {
         match self {
             AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
                 write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterFragmentOperation::SetParallelism { parallelism } => {
+                write!(f, "SET PARALLELISM TO {}", parallelism)
             }
         }
     }

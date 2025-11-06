@@ -13,31 +13,41 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::pin::pin;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
+use futures::future::select;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
+use risingwave_common::id::TableId;
 use risingwave_common::types::DataType;
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
-use risingwave_meta::model::TableParallelism;
+use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
-use risingwave_meta_model::ObjectId;
+use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
+use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
+use risingwave_meta_model::{ObjectId, StreamingParallelism};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
+use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use thiserror_ext::AsReport;
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
 use tonic::{Request, Response, Status};
 
 use crate::MetaError;
@@ -119,6 +129,89 @@ impl DdlServiceImpl {
             fragment_graph: fragment_graph.unwrap(),
         }
     }
+
+    pub fn start_migrate_table_fragments(&self) -> (JoinHandle<()>, Sender<()>) {
+        tracing::info!("start migrate legacy table fragments task");
+        let env = self.env.clone();
+        let metadata_manager = self.metadata_manager.clone();
+        let ddl_controller = self.ddl_controller.clone();
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            async fn migrate_inner(
+                env: &MetaSrvEnv,
+                metadata_manager: &MetadataManager,
+                ddl_controller: &DdlController,
+            ) -> MetaResult<()> {
+                let tables = metadata_manager
+                    .catalog_controller
+                    .list_unmigrated_tables()
+                    .await?;
+
+                if tables.is_empty() {
+                    tracing::info!("no legacy table fragments need migration");
+                    return Ok(());
+                }
+
+                let client = {
+                    let workers = metadata_manager
+                        .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
+                        .await?;
+                    if workers.is_empty() {
+                        return Err(anyhow::anyhow!("no active frontend nodes found").into());
+                    }
+                    let worker = workers.choose(&mut thread_rng()).unwrap();
+                    env.frontend_client_pool().get(worker).await?
+                };
+
+                for table in tables {
+                    let start = tokio::time::Instant::now();
+                    let req = GetTableReplacePlanRequest {
+                        database_id: table.database_id,
+                        owner: table.owner,
+                        table_name: table.name.clone(),
+                        cdc_table_change: None,
+                    };
+                    let resp = client
+                        .get_table_replace_plan(req)
+                        .await
+                        .context("failed to get table replace plan from frontend")?;
+
+                    let plan = resp.into_inner().replace_plan.unwrap();
+                    let replace_info = DdlServiceImpl::extract_replace_table_info(plan);
+                    ddl_controller
+                        .run_command(DdlCommand::ReplaceStreamJob(replace_info))
+                        .await?;
+                    tracing::info!(elapsed=?start.elapsed(), table_id=table.id, "migrated table fragments");
+                }
+                tracing::info!("successfully migrated all legacy table fragments");
+
+                Ok(())
+            }
+
+            let migrate_future = async move {
+                let mut attempt = 0;
+                loop {
+                    match migrate_inner(&env, &metadata_manager, &ddl_controller).await {
+                        Ok(_) => break,
+                        Err(e) => {
+                            attempt += 1;
+                            tracing::error!(
+                                "failed to migrate legacy table fragments: {}, attempt {}, retrying in 5 secs",
+                                e.as_report(),
+                                attempt
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
+                    }
+                }
+            };
+
+            select(pin!(migrate_future), shutdown_rx).await;
+        });
+
+        (join_handle, shutdown_tx)
+    }
 }
 
 #[async_trait::async_trait]
@@ -149,7 +242,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropDatabase(database_id as _))
+            .run_command(DdlCommand::DropDatabase(database_id.into()))
             .await?;
 
         Ok(Response::new(DropDatabaseResponse {
@@ -240,7 +333,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id as _, drop_mode))
+            .run_command(DdlCommand::DropSchema(schema_id.into(), drop_mode))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
@@ -448,7 +541,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
-                job_id: StreamingJobId::MaterializedView(table_id as _),
+                job_id: StreamingJobId::MaterializedView(TableId::new(table_id as _)),
                 drop_mode,
             })
             .await?;
@@ -596,7 +689,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Table(
                     source_id.map(|PbSourceId::Id(id)| id as _),
-                    table_id as _,
+                    TableId::new(table_id as _),
                 ),
                 drop_mode,
             })
@@ -751,7 +844,7 @@ impl DdlService for DdlServiceImpl {
             .ddl_controller
             .run_command(DdlCommand::AlterSetSchema(
                 object.unwrap(),
-                new_schema_id as _,
+                new_schema_id.into(),
             ))
             .await?;
         Ok(Response::new(AlterSetSchemaResponse {
@@ -872,7 +965,10 @@ impl DdlService for DdlServiceImpl {
             .metadata_manager
             .catalog_controller
             .get_table_by_ids(
-                table_ids.into_iter().map(|id| id as _).collect(),
+                table_ids
+                    .into_iter()
+                    .map(|id| TableId::new(id as _))
+                    .collect(),
                 include_dropped_tables,
             )
             .await?;
@@ -896,13 +992,21 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
+
+        let table_parallelism = ModelTableParallelism::from(parallelism);
+        let streaming_parallelism = match table_parallelism {
+            ModelTableParallelism::Fixed(n) => StreamingParallelism::Fixed(n),
+            _ => bail_invalid_parameter!(
+                "CDC table backfill parallelism must be set to a fixed value"
+            ),
+        };
+
         self.ddl_controller
             .reschedule_cdc_table_backfill(
                 job_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
-                    resource_group: JobResourceGroupTarget::Keep,
-                },
+                ReschedulePolicy::Parallelism(ParallelismPolicy {
+                    parallelism: streaming_parallelism,
+                }),
             )
             .await?;
         Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
@@ -917,18 +1021,70 @@ impl DdlService for DdlServiceImpl {
         let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
+
+        let parallelism = match parallelism.get_parallelism()? {
+            Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                StreamingParallelism::Fixed(*parallelism as _)
+            }
+            Parallelism::Auto(_) | Parallelism::Adaptive(_) => StreamingParallelism::Adaptive,
+            _ => bail_unavailable!(),
+        };
+
         self.ddl_controller
             .reschedule_streaming_job(
-                job_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
-                    resource_group: JobResourceGroupTarget::Keep,
-                },
+                job_id.into(),
+                ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
                 deferred,
             )
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
+    }
+
+    async fn alter_fragment_parallelism(
+        &self,
+        request: Request<AlterFragmentParallelismRequest>,
+    ) -> Result<Response<AlterFragmentParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let fragment_ids = req.fragment_ids;
+        if fragment_ids.is_empty() {
+            return Err(Status::invalid_argument(
+                "at least one fragment id must be provided",
+            ));
+        }
+
+        let parallelism = match req.parallelism {
+            Some(parallelism) => {
+                let streaming_parallelism = match parallelism.get_parallelism()? {
+                    Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                        StreamingParallelism::Fixed(*parallelism as _)
+                    }
+                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => {
+                        StreamingParallelism::Adaptive
+                    }
+                    _ => bail_unavailable!(),
+                };
+                Some(streaming_parallelism)
+            }
+            None => None,
+        };
+
+        let fragment_targets = fragment_ids
+            .into_iter()
+            .map(|fragment_id| {
+                (
+                    fragment_id as risingwave_meta_model::FragmentId,
+                    parallelism.clone(),
+                )
+            })
+            .collect();
+
+        self.ddl_controller
+            .reschedule_fragments(fragment_targets)
+            .await?;
+
+        Ok(Response::new(AlterFragmentParallelismResponse {}))
     }
 
     /// Auto schema change for cdc sources,
@@ -1077,7 +1233,7 @@ impl DdlService for DdlServiceImpl {
                         database_id: table.database_id,
                         owner: table.owner,
                         table_name: table.name.clone(),
-                        table_change: Some(table_change.clone()),
+                        cdc_table_change: Some(table_change.clone()),
                     })
                     .await;
 
@@ -1197,11 +1353,8 @@ impl DdlService for DdlServiceImpl {
 
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Refresh,
-                    resource_group: JobResourceGroupTarget::Update(resource_group),
-                },
+                table_id.into(),
+                ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
             .await?;
@@ -1226,7 +1379,7 @@ impl DdlService for DdlServiceImpl {
         };
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
+            .run_command(DdlCommand::AlterDatabaseParam(database_id.into(), param))
             .await?;
 
         return Ok(Response::new(AlterDatabaseParamResponse {
@@ -1274,6 +1427,155 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(ExpireIcebergTableSnapshotsResponse {
             status: None,
+        }))
+    }
+
+    async fn create_iceberg_table(
+        &self,
+        request: Request<CreateIcebergTableRequest>,
+    ) -> Result<Response<CreateIcebergTableResponse>, Status> {
+        let req = request.into_inner();
+        let CreateIcebergTableRequest {
+            table_info,
+            sink_info,
+            iceberg_source,
+            if_not_exists,
+        } = req;
+
+        // 1. create table job
+        let PbTableJobInfo {
+            source,
+            table,
+            fragment_graph,
+            job_type,
+        } = table_info.unwrap();
+        let table = table.unwrap();
+        let database_id = table.get_database_id();
+        let schema_id = table.get_schema_id();
+        let table_name = table.get_name().to_owned();
+
+        let stream_job =
+            StreamingJob::Table(source, table, PbTableJobType::try_from(job_type).unwrap());
+        let _ = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob {
+                stream_job,
+                fragment_graph: fragment_graph.unwrap(),
+                dependencies: HashSet::new(),
+                specific_resource_group: None,
+                if_not_exists,
+            })
+            .await?;
+
+        let table_catalog = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_catalog_by_name(database_id.into(), schema_id.into(), &table_name)
+            .await?
+            .ok_or(Status::not_found("Internal error: table not found"))?;
+
+        // 2. create iceberg sink job
+        let PbSinkJobInfo {
+            sink,
+            fragment_graph,
+        } = sink_info.unwrap();
+        let sink = sink.unwrap();
+        let mut fragment_graph = fragment_graph.unwrap();
+
+        assert_eq!(fragment_graph.dependent_table_ids.len(), 1);
+        assert!(
+            risingwave_common::catalog::TableId::from(fragment_graph.dependent_table_ids[0])
+                .is_placeholder()
+        );
+        fragment_graph.dependent_table_ids[0] = table_catalog.id;
+        for fragment in fragment_graph.fragments.values_mut() {
+            stream_graph_visitor::visit_fragment_mut(fragment, |node| match node {
+                NodeBody::StreamScan(scan) => {
+                    scan.table_id = table_catalog.id;
+                    if let Some(table_desc) = &mut scan.table_desc {
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table_desc.table_id)
+                                .is_placeholder()
+                        );
+                        table_desc.table_id = table_catalog.id;
+                        table_desc.maybe_vnode_count = table_catalog.maybe_vnode_count;
+                    }
+                    if let Some(table) = &mut scan.arrangement_table {
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table.id).is_placeholder()
+                        );
+                        *table = table_catalog.clone();
+                    }
+                }
+                NodeBody::BatchPlan(plan) => {
+                    if let Some(table_desc) = &mut plan.table_desc {
+                        assert!(
+                            risingwave_common::catalog::TableId::from(table_desc.table_id)
+                                .is_placeholder()
+                        );
+                        table_desc.table_id = table_catalog.id;
+                        table_desc.maybe_vnode_count = table_catalog.maybe_vnode_count;
+                    }
+                }
+                _ => {}
+            });
+        }
+
+        let table_id = table_catalog.id as ObjectId;
+        let dependencies = HashSet::from_iter([table_id]);
+        let stream_job = StreamingJob::Sink(sink);
+        let res = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateStreamingJob {
+                stream_job,
+                fragment_graph,
+                dependencies,
+                specific_resource_group: None,
+                if_not_exists,
+            })
+            .await;
+
+        if res.is_err() {
+            let _ = self
+                .ddl_controller
+                .run_command(DdlCommand::DropStreamingJob {
+                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
+                    drop_mode: DropMode::Cascade,
+                })
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(error = %err.as_report(),
+                        "Failed to clean up table after iceberg sink creation failure",
+                    );
+                });
+            res?;
+        }
+
+        // 3. create iceberg source
+        let iceberg_source = iceberg_source.unwrap();
+        let res = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateNonSharedSource(iceberg_source))
+            .await;
+        if res.is_err() {
+            let _ = self
+                .ddl_controller
+                .run_command(DdlCommand::DropStreamingJob {
+                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
+                    drop_mode: DropMode::Cascade,
+                })
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "Failed to clean up table after iceberg source creation failure",
+                    );
+                });
+        }
+
+        Ok(Response::new(CreateIcebergTableResponse {
+            status: None,
+            version: res?,
         }))
     }
 }

@@ -18,6 +18,7 @@ use std::pin::Pin;
 use futures::FutureExt;
 use futures::future::Shared;
 use moka::sync::Cache;
+use risingwave_common::id::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::HummockResult;
@@ -27,7 +28,7 @@ type InflightResult = Shared<Pin<Box<dyn Future<Output = HummockResult<PinnedVer
 
 /// A naive cache to reduce number of RPC sent to meta node.
 pub struct SimpleTimeTravelVersionCache {
-    cache: Cache<(u32, HummockEpoch), InflightResult>,
+    cache: Cache<(TableId, HummockEpoch), InflightResult>,
 }
 
 impl SimpleTimeTravelVersionCache {
@@ -38,7 +39,7 @@ impl SimpleTimeTravelVersionCache {
 
     pub async fn get_or_insert(
         &self,
-        table_id: u32,
+        table_id: TableId,
         epoch: HummockEpoch,
         fetch: impl Future<Output = HummockResult<PinnedVersion>> + Send + 'static,
     ) -> HummockResult<PinnedVersion> {

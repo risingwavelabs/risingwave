@@ -81,12 +81,12 @@ use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
 
-use super::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
+use super::decouple_checkpoint_log_sink::iceberg_default_commit_checkpoint_interval;
 use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
     SinkCommittedEpochSubscriber, SinkError, SinkWriterParam,
 };
-use crate::connector_common::{IcebergCommon, IcebergSinkCompactionUpdate};
+use crate::connector_common::{IcebergCommon, IcebergSinkCompactionUpdate, IcebergTableIdentifier};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::catalog::SinkId;
 use crate::sink::coordinate::CoordinatedLogSinker;
@@ -124,6 +124,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_some_true() -> Option<bool> {
+    Some(true)
+}
+
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 pub struct IcebergConfig {
@@ -134,6 +138,9 @@ pub struct IcebergConfig {
 
     #[serde(flatten)]
     common: IcebergCommon,
+
+    #[serde(flatten)]
+    table: IcebergTableIdentifier,
 
     #[serde(
         rename = "primary_key",
@@ -149,8 +156,8 @@ pub struct IcebergConfig {
     #[serde(default)]
     pub partition_by: Option<String>,
 
-    /// Commit every n(>0) checkpoints, default is 10.
-    #[serde(default = "default_commit_checkpoint_interval")]
+    /// Commit every n(>0) checkpoints, default is 60.
+    #[serde(default = "iceberg_default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
@@ -158,8 +165,8 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
-    /// Whether it is `exactly_once`, the default is not.
-    #[serde(default)]
+    /// Whether it is `exactly_once`, the default is true.
+    #[serde(default = "default_some_true")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
     // Retry commit num when iceberg commit fail. default is 8.
@@ -308,7 +315,7 @@ impl IcebergConfig {
 
     pub async fn load_table(&self) -> Result<Table> {
         self.common
-            .load_table(&self.java_catalog_props)
+            .load_table(&self.table, &self.java_catalog_props)
             .await
             .map_err(Into::into)
     }
@@ -321,7 +328,7 @@ impl IcebergConfig {
     }
 
     pub fn full_table_name(&self) -> Result<TableIdent> {
-        self.common.full_table_name().map_err(Into::into)
+        self.table.to_table_ident().map_err(Into::into)
     }
 
     pub fn catalog_name(&self) -> String {
@@ -342,7 +349,7 @@ impl IcebergConfig {
 }
 
 pub struct IcebergSink {
-    config: IcebergConfig,
+    pub config: IcebergConfig,
     param: SinkParam,
     // In upsert mode, it never be None and empty.
     unique_column_ids: Option<Vec<usize>>,
@@ -377,7 +384,7 @@ impl Debug for IcebergSink {
 }
 
 impl IcebergSink {
-    async fn create_and_validate_table(&self) -> Result<Table> {
+    pub async fn create_and_validate_table(&self) -> Result<Table> {
         if self.config.create_table_if_not_exists {
             self.create_table_if_not_exists().await?;
         }
@@ -398,10 +405,10 @@ impl IcebergSink {
         Ok(table)
     }
 
-    async fn create_table_if_not_exists(&self) -> Result<()> {
+    pub async fn create_table_if_not_exists(&self) -> Result<()> {
         let catalog = self.config.create_catalog().await?;
-        let namespace = if let Some(database_name) = &self.config.common.database_name {
-            let namespace = NamespaceIdent::new(database_name.clone());
+        let namespace = if let Some(database_name) = self.config.table.database_name() {
+            let namespace = NamespaceIdent::new(database_name.to_owned());
             if !catalog
                 .namespace_exists(&namespace)
                 .await
@@ -450,7 +457,7 @@ impl IcebergSink {
 
             let location = {
                 let mut names = namespace.clone().inner();
-                names.push(self.config.common.table_name.clone());
+                names.push(self.config.table.table_name().to_owned());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
                         let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
@@ -510,7 +517,7 @@ impl IcebergSink {
             };
 
             let table_creation_builder = TableCreation::builder()
-                .name(self.config.common.table_name.clone())
+                .name(self.config.table.table_name().to_owned())
                 .schema(iceberg_schema);
 
             let table_creation = match (location, partition_spec) {
@@ -977,11 +984,7 @@ impl IcebergSinkWriter {
                     iceberg::spec::DataFileFormat::Parquet,
                 ),
             );
-            DataFileWriterBuilder::new(
-                parquet_writer_builder.clone(),
-                None,
-                partition_spec.spec_id(),
-            )
+            DataFileWriterBuilder::new(parquet_writer_builder, None, partition_spec.spec_id())
         };
         let position_delete_builder = {
             let parquet_writer_builder = ParquetWriterBuilder::new(
@@ -998,7 +1001,7 @@ impl IcebergSinkWriter {
             );
             MonitoredPositionDeleteWriterBuilder::new(
                 SortPositionDeleteWriterBuilder::new(
-                    parquet_writer_builder.clone(),
+                    parquet_writer_builder,
                     writer_param
                         .streaming_config
                         .developer
@@ -1033,7 +1036,7 @@ impl IcebergSinkWriter {
                 ),
             );
 
-            EqualityDeleteFileWriterBuilder::new(parquet_writer_builder.clone(), config)
+            EqualityDeleteFileWriterBuilder::new(parquet_writer_builder, config)
         };
         let delta_builder = EqualityDeltaWriterBuilder::new(
             data_file_builder,
@@ -1219,7 +1222,7 @@ impl SinkWriter for IcebergSinkWriter {
         };
 
         // Process the chunk.
-        let (mut chunk, ops) = chunk.compact().into_parts();
+        let (mut chunk, ops) = chunk.compact_vis().into_parts();
         match &self.project_idx_vec {
             ProjectIdxVec::None => {}
             ProjectIdxVec::Prepare(idx) => {
@@ -1251,7 +1254,7 @@ impl SinkWriter for IcebergSinkWriter {
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
                 chunk.set_visibility(filters);
                 IcebergArrowConvert
-                    .to_record_batch(self.arrow_schema.clone(), &chunk.compact())
+                    .to_record_batch(self.arrow_schema.clone(), &chunk.compact_vis())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
             }
             IcebergWriterDispatch::PartitionUpsert {
@@ -1999,10 +2002,7 @@ impl IcebergSinkCommitter {
         iceberg_config: &IcebergConfig,
         snapshot_id: i64,
     ) -> Result<bool> {
-        let iceberg_common = iceberg_config.common.clone();
-        let table = iceberg_common
-            .load_table(&iceberg_config.java_catalog_props)
-            .await?;
+        let table = iceberg_config.load_table().await?;
         if table.metadata().snapshot_by_id(snapshot_id).is_some() {
             Ok(true)
         } else {
@@ -2274,8 +2274,8 @@ mod test {
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
     use risingwave_common::types::{DataType, MapType, StructType};
 
-    use crate::connector_common::IcebergCommon;
-    use crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
+    use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
+    use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
         COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
         ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, MAX_SNAPSHOTS_NUM,
@@ -2494,8 +2494,6 @@ mod test {
                 catalog_type: Some("jdbc".to_owned()),
                 glue_id: None,
                 catalog_name: Some("demo".to_owned()),
-                database_name: Some("demo_db".to_owned()),
-                table_name: "demo_table".to_owned(),
                 path_style_access: Some(true),
                 credential: None,
                 oauth2_server_uri: None,
@@ -2510,6 +2508,14 @@ mod test {
                 azblob_account_key: None,
                 azblob_endpoint_url: None,
                 header: None,
+                adlsgen2_account_name: None,
+                adlsgen2_account_key: None,
+                adlsgen2_endpoint: None,
+                vended_credentials: None,
+            },
+            table: IcebergTableIdentifier {
+                database_name: Some("demo_db".to_owned()),
+                table_name: "demo_table".to_owned(),
             },
             r#type: "upsert".to_owned(),
             force_append_only: false,
@@ -2519,9 +2525,9 @@ mod test {
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
                 .collect(),
-            commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
+            commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
             create_table_if_not_exists: false,
-            is_exactly_once: None,
+            is_exactly_once: Some(true),
             commit_retry_num: 8,
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
@@ -2537,7 +2543,7 @@ mod test {
         assert_eq!(iceberg_config, expected_iceberg_config);
 
         assert_eq!(
-            &iceberg_config.common.full_table_name().unwrap().to_string(),
+            &iceberg_config.full_table_name().unwrap().to_string(),
             "demo_db.demo_table"
         );
     }

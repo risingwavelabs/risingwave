@@ -422,6 +422,16 @@ test_cross_db_snapshot_backfill() {
   kill_cluster
 }
 
+test_locality_backfill() {
+  echo "--- e2e, locality backfill test, $RUNTIME_CLUSTER_PROFILE"
+
+  risedev ci-start $RUNTIME_CLUSTER_PROFILE
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/locality_backfill/basic.slt'
+
+  kill_cluster
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
@@ -433,6 +443,7 @@ main() {
   test_scale_in
 
   test_cross_db_snapshot_backfill
+  test_locality_backfill
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then

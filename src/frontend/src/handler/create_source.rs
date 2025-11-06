@@ -428,7 +428,7 @@ pub(crate) fn bind_all_columns(
                 )?;
                 match key_data_type {
                     DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64 => {
-                        columns[0].column_desc.data_type = key_data_type.clone();
+                        columns[0].column_desc.data_type = key_data_type;
                     }
                     _ => {
                         return Err(RwError::from(ProtocolError(
@@ -1023,7 +1023,7 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
         Some(TableId::placeholder())
     };
     let source = SourceCatalog {
-        id: TableId::placeholder().table_id,
+        id: TableId::placeholder().as_raw_id(),
         name: source_name,
         schema_id,
         database_id,

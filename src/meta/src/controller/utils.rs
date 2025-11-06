@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::id::JobId;
 use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
-use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
@@ -34,9 +32,9 @@ use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, I32Array,
     JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
-    TableId, UserId, VnodeBitmap, WorkerId, actor, connection, database, fragment,
-    fragment_relation, function, index, object, object_dependency, schema, secret, sink, source,
-    streaming_job, subscription, table, user, user_default_privilege, user_privilege, view,
+    TableId, UserId, WorkerId, connection, database, fragment, fragment_relation, function, index,
+    object, object_dependency, schema, secret, sink, source, streaming_job, subscription, table,
+    user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -47,9 +45,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::expr::{PbExprNode, expr_node};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
-use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
-};
+use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
@@ -68,10 +64,11 @@ use sea_orm::{
 };
 use thiserror_ext::AsReport;
 
-use crate::barrier::SharedFragmentInfo;
+use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::fragment::FragmentTypeMaskExt;
-use crate::model::{FragmentActorDispatchers, FragmentDownstreamRelation};
+use crate::controller::scale::resolve_streaming_job_definition;
+use crate::model::FragmentDownstreamRelation;
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -128,7 +125,8 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
         )
         .to_owned();
 
-    let common_table_expr = CommonTableExpression::new()
+    let mut common_table_expr = CommonTableExpression::new();
+    common_table_expr
         .query(
             base_query
                 .union(UnionType::All, belonged_obj_query)
@@ -136,8 +134,7 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
                 .to_owned(),
         )
         .column(cte_return_alias.clone())
-        .table_name(cte_alias.clone())
-        .to_owned();
+        .table_name(cte_alias.clone());
 
     SelectStatement::new()
         .distinct()
@@ -150,7 +147,7 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
         .from(cte_alias.clone())
         .inner_join(
             Object,
-            Expr::col((cte_alias, cte_return_alias.clone())).equals(object::Column::Oid),
+            Expr::col((cte_alias, cte_return_alias)).equals(object::Column::Oid),
         )
         .order_by(object::Column::Oid, Order::Desc)
         .to_owned()
@@ -160,7 +157,6 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
                 .cte(common_table_expr)
                 .to_owned(),
         )
-        .to_owned()
 }
 
 /// This function will construct a query using recursive cte to find if dependent objects are already relying on the target table.
@@ -225,10 +221,8 @@ pub fn construct_sink_cycle_check_query(
         )
         .inner_join(
             cte_alias.clone(),
-            Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).eq(Expr::col((
-                depend_alias.clone(),
-                object_dependency::Column::Oid,
-            ))),
+            Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy))
+                .eq(Expr::col((depend_alias, object_dependency::Column::Oid))),
         )
         .and_where(
             Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).ne(Expr::col((
@@ -238,21 +232,20 @@ pub fn construct_sink_cycle_check_query(
         )
         .to_owned();
 
-    let common_table_expr = CommonTableExpression::new()
+    let mut common_table_expr = CommonTableExpression::new();
+    common_table_expr
         .query(base_query.union(UnionType::All, cte_referencing).to_owned())
         .columns([
             object_dependency::Column::Oid,
             object_dependency::Column::UsedBy,
         ])
-        .table_name(cte_alias.clone())
-        .to_owned();
+        .table_name(cte_alias.clone());
 
     SelectStatement::new()
         .expr(Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy)).count())
         .from(cte_alias.clone())
         .and_where(
-            Expr::col((cte_alias.clone(), object_dependency::Column::UsedBy))
-                .is_in(dependent_objects),
+            Expr::col((cte_alias, object_dependency::Column::UsedBy)).is_in(dependent_objects),
         )
         .to_owned()
         .with(
@@ -261,7 +254,6 @@ pub fn construct_sink_cycle_check_query(
                 .cte(common_table_expr)
                 .to_owned(),
         )
-        .to_owned()
 }
 
 #[derive(Clone, DerivePartialModel, FromQueryResult, Debug)]
@@ -281,25 +273,24 @@ pub struct PartialFragmentStateTables {
     pub state_table_ids: I32Array,
 }
 
-#[derive(Clone, DerivePartialModel, FromQueryResult)]
-#[sea_orm(entity = "Actor")]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct PartialActorLocation {
     pub actor_id: ActorId,
     pub fragment_id: FragmentId,
     pub worker_id: WorkerId,
-    pub status: ActorStatus,
 }
 
-#[derive(FromQueryResult)]
+#[derive(FromQueryResult, Debug, Eq, PartialEq, Clone)]
 pub struct FragmentDesc {
     pub fragment_id: FragmentId,
-    pub job_id: ObjectId,
+    pub job_id: JobId,
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     pub state_table_ids: I32Array,
     pub parallelism: i64,
     pub vnode_count: i32,
     pub stream_node: StreamNode,
+    pub parallelism_policy: String,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
@@ -376,11 +367,13 @@ where
     Ok(())
 }
 
-pub async fn ensure_job_not_canceled<C>(job_id: ObjectId, db: &C) -> MetaResult<()>
+pub async fn ensure_job_not_canceled<C>(job_id: JobId, db: &C) -> MetaResult<()>
 where
     C: ConnectionTrait,
 {
-    let count = Object::find_by_id(job_id).count(db).await?;
+    let count = Object::find_by_id(job_id.as_raw_id() as ObjectId)
+        .count(db)
+        .await?;
     if count == 0 {
         return Err(MetaError::cancelled(format!(
             "job {} might be cancelled manually or by recovery",
@@ -430,8 +423,8 @@ where
         .inner_join(Object)
         .filter(
             object::Column::DatabaseId
-                .eq(pb_function.database_id as DatabaseId)
-                .and(object::Column::SchemaId.eq(pb_function.schema_id as SchemaId))
+                .eq(DatabaseId::new(pb_function.database_id))
+                .and(object::Column::SchemaId.eq(SchemaId::new(pb_function.schema_id)))
                 .and(function::Column::Name.eq(&pb_function.name))
                 .and(
                     function::Column::ArgTypes
@@ -459,8 +452,8 @@ where
         .inner_join(Object)
         .filter(
             object::Column::DatabaseId
-                .eq(pb_connection.database_id as DatabaseId)
-                .and(object::Column::SchemaId.eq(pb_connection.schema_id as SchemaId))
+                .eq(DatabaseId::new(pb_connection.database_id))
+                .and(object::Column::SchemaId.eq(SchemaId::new(pb_connection.schema_id)))
                 .and(connection::Column::Name.eq(&pb_connection.name)),
         )
         .count(db)
@@ -483,8 +476,8 @@ where
         .inner_join(Object)
         .filter(
             object::Column::DatabaseId
-                .eq(pb_secret.database_id as DatabaseId)
-                .and(object::Column::SchemaId.eq(pb_secret.schema_id as SchemaId))
+                .eq(pb_secret.database_id)
+                .and(object::Column::SchemaId.eq(pb_secret.schema_id))
                 .and(secret::Column::Name.eq(&pb_secret.name)),
         )
         .count(db)
@@ -507,8 +500,8 @@ where
         .inner_join(Object)
         .filter(
             object::Column::DatabaseId
-                .eq(pb_subscription.database_id as DatabaseId)
-                .and(object::Column::SchemaId.eq(pb_subscription.schema_id as SchemaId))
+                .eq(pb_subscription.database_id)
+                .and(object::Column::SchemaId.eq(pb_subscription.schema_id))
                 .and(subscription::Column::Name.eq(&pb_subscription.name)),
         )
         .count(db)
@@ -579,9 +572,10 @@ where
                 } else {
                     true
                 };
+                let job_id = JobId::new(oid as u32);
                 return if check_creation
                     && !matches!(
-                        StreamingJob::find_by_id(oid)
+                        StreamingJob::find_by_id(job_id)
                             .select_only()
                             .column(streaming_job::Column::JobStatus)
                             .into_tuple::<JobStatus>()
@@ -592,7 +586,7 @@ where
                     Err(MetaError::catalog_under_creation(
                         $obj_type.as_str(),
                         name,
-                        oid,
+                        job_id,
                     ))
                 } else {
                     Err(MetaError::catalog_duplicated($obj_type.as_str(), name))
@@ -919,18 +913,18 @@ pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery 
         )
         .to_owned();
 
-    let common_table_expr = CommonTableExpression::new()
+    let mut common_table_expr = CommonTableExpression::new();
+    common_table_expr
         .query(base_query.union(UnionType::All, cte_referencing).to_owned())
         .columns([
             cte_return_privilege_alias.clone(),
             cte_return_user_alias.clone(),
         ])
-        .table_name(cte_alias.clone())
-        .to_owned();
+        .table_name(cte_alias.clone());
 
     SelectStatement::new()
         .columns([cte_return_privilege_alias, cte_return_user_alias])
-        .from(cte_alias.clone())
+        .from(cte_alias)
         .to_owned()
         .with(
             WithClause::new()
@@ -938,10 +932,9 @@ pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery 
                 .cte(common_table_expr)
                 .to_owned(),
         )
-        .to_owned()
 }
 
-pub async fn get_internal_tables_by_id<C>(job_id: ObjectId, db: &C) -> MetaResult<Vec<TableId>>
+pub async fn get_internal_tables_by_id<C>(job_id: JobId, db: &C) -> MetaResult<Vec<TableId>>
 where
     C: ConnectionTrait,
 {
@@ -1107,7 +1100,7 @@ where
     assert_ne!(object.obj_type, ObjectType::Database);
 
     let for_mview_filter = if object.obj_type == ObjectType::Table {
-        let table_type = Table::find_by_id(object_id)
+        let table_type = Table::find_by_id(TableId::new(object_id as _))
             .select_only()
             .column(table::Column::TableType)
             .into_tuple::<TableType>()
@@ -1153,7 +1146,7 @@ where
         .map(|(grantee, _, _, _)| *grantee)
         .collect::<HashSet<_>>();
 
-    let internal_table_ids = get_internal_tables_by_id(object_id, db).await?;
+    let internal_table_ids = get_internal_tables_by_id(JobId::new(object_id as _), db).await?;
 
     for (grantee, granted_by, action, with_grant_option) in default_privileges {
         UserPrivilege::insert(user_privilege::ActiveModel {
@@ -1171,7 +1164,7 @@ where
             for internal_table_id in &internal_table_ids {
                 UserPrivilege::insert(user_privilege::ActiveModel {
                     user_id: Set(grantee),
-                    oid: Set(*internal_table_id as _),
+                    oid: Set(internal_table_id.as_raw_id() as _),
                     granted_by: Set(granted_by),
                     action: Set(Action::Select),
                     with_grant_option: Set(with_grant_option),
@@ -1236,118 +1229,6 @@ pub async fn insert_fragment_relations(
     Ok(())
 }
 
-pub async fn get_fragment_actor_dispatchers<C>(
-    db: &C,
-    fragment_ids: Vec<FragmentId>,
-) -> MetaResult<FragmentActorDispatchers>
-where
-    C: ConnectionTrait,
-{
-    type FragmentActorInfo = (
-        DistributionType,
-        Arc<HashMap<crate::model::ActorId, Option<Bitmap>>>,
-    );
-    let mut fragment_actor_cache: HashMap<FragmentId, FragmentActorInfo> = HashMap::new();
-    let get_fragment_actors = |fragment_id: FragmentId| async move {
-        let result: MetaResult<FragmentActorInfo> = try {
-            let mut fragment_actors = Fragment::find_by_id(fragment_id)
-                .find_with_related(Actor)
-                .filter(actor::Column::Status.eq(ActorStatus::Running))
-                .all(db)
-                .await?;
-            if fragment_actors.is_empty() {
-                return Err(anyhow!("failed to find fragment: {}", fragment_id).into());
-            }
-            assert_eq!(
-                fragment_actors.len(),
-                1,
-                "find multiple fragment {:?}",
-                fragment_actors
-            );
-            let (fragment, actors) = fragment_actors.pop().unwrap();
-            (
-                fragment.distribution_type,
-                Arc::new(
-                    actors
-                        .into_iter()
-                        .map(|actor| {
-                            (
-                                actor.actor_id as _,
-                                actor
-                                    .vnode_bitmap
-                                    .map(|bitmap| Bitmap::from(bitmap.to_protobuf())),
-                            )
-                        })
-                        .collect(),
-                ),
-            )
-        };
-        result
-    };
-    let fragment_relations = FragmentRelation::find()
-        .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids))
-        .all(db)
-        .await?;
-
-    let mut actor_dispatchers_map: HashMap<_, HashMap<_, Vec<_>>> = HashMap::new();
-    for fragment_relation::Model {
-        source_fragment_id,
-        target_fragment_id,
-        dispatcher_type,
-        dist_key_indices,
-        output_indices,
-        output_type_mapping,
-    } in fragment_relations
-    {
-        let (source_fragment_distribution, source_fragment_actors) = {
-            let (distribution, actors) = {
-                match fragment_actor_cache.entry(source_fragment_id) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => {
-                        entry.insert(get_fragment_actors(source_fragment_id).await?)
-                    }
-                }
-            };
-            (*distribution, actors.clone())
-        };
-        let (target_fragment_distribution, target_fragment_actors) = {
-            let (distribution, actors) = {
-                match fragment_actor_cache.entry(target_fragment_id) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => {
-                        entry.insert(get_fragment_actors(target_fragment_id).await?)
-                    }
-                }
-            };
-            (*distribution, actors.clone())
-        };
-        let output_mapping = PbDispatchOutputMapping {
-            indices: output_indices.into_u32_array(),
-            types: output_type_mapping.unwrap_or_default().to_protobuf(),
-        };
-        let dispatchers = compose_dispatchers(
-            source_fragment_distribution,
-            &source_fragment_actors,
-            target_fragment_id as _,
-            target_fragment_distribution,
-            &target_fragment_actors,
-            dispatcher_type,
-            dist_key_indices.into_u32_array(),
-            output_mapping,
-        );
-        let actor_dispatchers_map = actor_dispatchers_map
-            .entry(source_fragment_id as _)
-            .or_default();
-        for (actor_id, dispatchers) in dispatchers {
-            actor_dispatchers_map
-                .entry(actor_id as _)
-                .or_default()
-                .push(dispatchers);
-        }
-    }
-    Ok(actor_dispatchers_map)
-}
-
 pub fn compose_dispatchers(
     source_fragment_distribution: DistributionType,
     source_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
@@ -1362,7 +1243,7 @@ pub fn compose_dispatchers(
         DispatcherType::Hash => {
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
-                dist_key_indices: dist_key_indices.clone(),
+                dist_key_indices,
                 output_mapping: output_mapping.into(),
                 hash_mapping: Some(
                     ActorMapping::from_bitmaps(
@@ -1394,7 +1275,7 @@ pub fn compose_dispatchers(
         DispatcherType::Broadcast | DispatcherType::Simple => {
             let dispatcher = PbDispatcher {
                 r#type: PbDispatcherType::from(dispatcher_type) as _,
-                dist_key_indices: dist_key_indices.clone(),
+                dist_key_indices,
                 output_mapping: output_mapping.into(),
                 hash_mapping: None,
                 dispatcher_id: target_fragment_id as _,
@@ -1517,42 +1398,6 @@ pub fn resolve_no_shuffle_actor_dispatcher(
     }
 }
 
-/// `get_fragment_mappings` returns the fragment vnode mappings of the given job.
-pub async fn get_fragment_mappings<C>(
-    db: &C,
-    job_id: ObjectId,
-) -> MetaResult<Vec<PbFragmentWorkerSlotMapping>>
-where
-    C: ConnectionTrait,
-{
-    let job_actors: Vec<(
-        FragmentId,
-        DistributionType,
-        ActorId,
-        Option<VnodeBitmap>,
-        WorkerId,
-        ActorStatus,
-    )> = Actor::find()
-        .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::DistributionType,
-        ])
-        .columns([
-            actor::Column::ActorId,
-            actor::Column::VnodeBitmap,
-            actor::Column::WorkerId,
-            actor::Column::Status,
-        ])
-        .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
-        .filter(fragment::Column::JobId.eq(job_id))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(rebuild_fragment_mapping_from_actors(job_actors))
-}
-
 pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {
     let fragment_worker_slot_mapping = match fragment.distribution_type {
         DistributionType::Single => {
@@ -1594,102 +1439,6 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
     }
 }
 
-pub fn rebuild_fragment_mapping_from_actors(
-    job_actors: Vec<(
-        FragmentId,
-        DistributionType,
-        ActorId,
-        Option<VnodeBitmap>,
-        WorkerId,
-        ActorStatus,
-    )>,
-) -> Vec<FragmentWorkerSlotMapping> {
-    let mut all_actor_locations = HashMap::new();
-    let mut actor_bitmaps = HashMap::new();
-    let mut fragment_actors = HashMap::new();
-    let mut fragment_dist = HashMap::new();
-
-    for (fragment_id, dist, actor_id, bitmap, worker_id, actor_status) in job_actors {
-        if actor_status == ActorStatus::Inactive {
-            continue;
-        }
-
-        all_actor_locations
-            .entry(fragment_id)
-            .or_insert(HashMap::new())
-            .insert(actor_id as hash::ActorId, worker_id as u32);
-        actor_bitmaps.insert(actor_id, bitmap);
-        fragment_actors
-            .entry(fragment_id)
-            .or_insert_with(Vec::new)
-            .push(actor_id);
-        fragment_dist.insert(fragment_id, dist);
-    }
-
-    let mut result = vec![];
-    for (fragment_id, dist) in fragment_dist {
-        let mut actor_locations = all_actor_locations.remove(&fragment_id).unwrap();
-        let fragment_worker_slot_mapping = match dist {
-            DistributionType::Single => {
-                let actor = fragment_actors
-                    .remove(&fragment_id)
-                    .unwrap()
-                    .into_iter()
-                    .exactly_one()
-                    .unwrap() as hash::ActorId;
-                let actor_location = actor_locations.remove(&actor).unwrap();
-
-                WorkerSlotMapping::new_single(WorkerSlotId::new(actor_location, 0))
-            }
-            DistributionType::Hash => {
-                let actors = fragment_actors.remove(&fragment_id).unwrap();
-
-                let all_actor_bitmaps: HashMap<_, _> = actors
-                    .iter()
-                    .map(|actor_id| {
-                        let vnode_bitmap = actor_bitmaps
-                            .remove(actor_id)
-                            .flatten()
-                            .expect("actor bitmap shouldn't be none in hash fragment");
-
-                        let bitmap = Bitmap::from(&vnode_bitmap.to_protobuf());
-                        (*actor_id as hash::ActorId, bitmap)
-                    })
-                    .collect();
-
-                let actor_mapping = ActorMapping::from_bitmaps(&all_actor_bitmaps);
-
-                actor_mapping.to_worker_slot(&actor_locations)
-            }
-        };
-
-        result.push(PbFragmentWorkerSlotMapping {
-            fragment_id: fragment_id as u32,
-            mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
-        })
-    }
-    result
-}
-
-/// `get_fragment_actor_ids` returns the fragment actor ids of the given fragments.
-pub async fn get_fragment_actor_ids<C>(
-    db: &C,
-    fragment_ids: Vec<FragmentId>,
-) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
-where
-    C: ConnectionTrait,
-{
-    let fragment_actors: Vec<(FragmentId, ActorId)> = Actor::find()
-        .select_only()
-        .columns([actor::Column::FragmentId, actor::Column::ActorId])
-        .filter(actor::Column::FragmentId.is_in(fragment_ids))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(fragment_actors.into_iter().into_group_map())
-}
-
 /// For the given streaming jobs, returns
 /// - All source fragments
 /// - All sink fragments
@@ -1697,7 +1446,8 @@ where
 /// - All fragments
 pub async fn get_fragments_for_jobs<C>(
     db: &C,
-    streaming_jobs: Vec<ObjectId>,
+    actor_info: &SharedActorInfos,
+    streaming_jobs: Vec<JobId>,
 ) -> MetaResult<(
     HashMap<SourceId, BTreeSet<FragmentId>>,
     HashSet<FragmentId>,
@@ -1727,20 +1477,20 @@ where
         .into_tuple()
         .all(db)
         .await?;
-    let actors: Vec<ActorId> = Actor::find()
-        .select_only()
-        .column(actor::Column::ActorId)
-        .filter(
-            actor::Column::FragmentId.is_in(fragments.iter().map(|(id, _, _)| *id).collect_vec()),
-        )
-        .into_tuple()
-        .all(db)
-        .await?;
 
-    let fragment_ids = fragments
+    let fragment_ids: HashSet<_> = fragments
         .iter()
         .map(|(fragment_id, _, _)| *fragment_id)
         .collect();
+
+    let actors = {
+        let guard = actor_info.read_guard();
+        fragment_ids
+            .iter()
+            .flat_map(|id| guard.get_fragment(*id as _))
+            .flat_map(|f| f.actors.keys().cloned().map(|id| id as _))
+            .collect::<HashSet<_>>()
+    };
 
     let mut source_fragment_ids: HashMap<SourceId, BTreeSet<FragmentId>> = HashMap::new();
     let mut sink_fragment_ids: HashSet<FragmentId> = HashSet::new();
@@ -1785,47 +1535,47 @@ pub(crate) fn build_object_group_for_delete(
             ObjectType::Schema => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Schema(PbSchema {
                     id: obj.oid as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Table => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Table(PbTable {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Source => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Source(PbSource {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Sink => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Sink(PbSink {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Subscription => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Subscription(PbSubscription {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::View => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::View(PbView {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
@@ -1833,16 +1583,16 @@ pub(crate) fn build_object_group_for_delete(
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Index(PbIndex {
                         id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
+                        schema_id: obj.schema_id.unwrap().into(),
+                        database_id: obj.database_id.unwrap().into(),
                         ..Default::default()
                     })),
                 });
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Table(PbTable {
                         id: obj.oid as _,
-                        schema_id: obj.schema_id.unwrap() as _,
-                        database_id: obj.database_id.unwrap() as _,
+                        schema_id: obj.schema_id.unwrap().into(),
+                        database_id: obj.database_id.unwrap().into(),
                         ..Default::default()
                     })),
                 });
@@ -1850,24 +1600,24 @@ pub(crate) fn build_object_group_for_delete(
             ObjectType::Function => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Function(PbFunction {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Connection => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Connection(PbConnection {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Secret => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Secret(PbSecret {
                     id: obj.oid as _,
-                    schema_id: obj.schema_id.unwrap() as _,
-                    database_id: obj.database_id.unwrap() as _,
+                    schema_id: obj.schema_id.unwrap().into(),
+                    database_id: obj.database_id.unwrap().into(),
                     ..Default::default()
                 })),
             }),
@@ -1950,7 +1700,7 @@ pub async fn rename_relation(
             if let Some(source_id) = associated_source_id {
                 rename_relation!(Source, source, source_id, source_id);
             }
-            rename_relation!(Table, table, table_id, object_id)
+            rename_relation!(Table, table, table_id, TableId::new(object_id as _))
         }
         ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
         ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
@@ -1986,7 +1736,7 @@ pub async fn rename_relation(
     Ok((to_update_relations, old_name))
 }
 
-pub async fn get_database_resource_group<C>(txn: &C, database_id: ObjectId) -> MetaResult<String>
+pub async fn get_database_resource_group<C>(txn: &C, database_id: DatabaseId) -> MetaResult<String>
 where
     C: ConnectionTrait,
 {
@@ -2003,7 +1753,7 @@ where
 
 pub async fn get_existing_job_resource_group<C>(
     txn: &C,
-    streaming_job_id: ObjectId,
+    streaming_job_id: JobId,
 ) -> MetaResult<String>
 where
     C: ConnectionTrait,
@@ -2037,7 +1787,7 @@ pub fn filter_workers_by_resource_group(
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })
-        .map(|(id, _)| (*id as WorkerId))
+        .map(|(id, _)| *id as WorkerId)
         .collect()
 }
 
@@ -2097,7 +1847,9 @@ pub async fn rename_relation_refer(
 
     for obj in objs {
         match obj.obj_type {
-            ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
+            ObjectType::Table => {
+                rename_relation_ref!(Table, table, table_id, TableId::new(obj.oid as _))
+            }
             ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
             ObjectType::Subscription => {
                 rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
@@ -2326,6 +2078,51 @@ pub fn build_select_node_list(
     }
 
     Ok(exprs)
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct StreamingJobExtraInfo {
+    pub timezone: Option<String>,
+    pub job_definition: String,
+}
+
+pub async fn get_streaming_job_extra_info<C>(
+    txn: &C,
+    job_ids: Vec<JobId>,
+) -> MetaResult<HashMap<JobId, StreamingJobExtraInfo>>
+where
+    C: ConnectionTrait,
+{
+    let timezone_pairs: Vec<(JobId, Option<String>)> = StreamingJob::find()
+        .select_only()
+        .columns([
+            streaming_job::Column::JobId,
+            streaming_job::Column::Timezone,
+        ])
+        .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let job_ids = job_ids.into_iter().collect();
+
+    let mut definitions = resolve_streaming_job_definition(txn, &job_ids).await?;
+
+    let result = timezone_pairs
+        .into_iter()
+        .map(|(job_id, timezone)| {
+            let job_definition = definitions.remove(&job_id).unwrap_or_default();
+            (
+                job_id,
+                StreamingJobExtraInfo {
+                    timezone,
+                    job_definition,
+                },
+            )
+        })
+        .collect();
+
+    Ok(result)
 }
 
 #[cfg(test)]

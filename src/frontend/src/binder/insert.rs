@@ -21,7 +21,6 @@ use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type as ExprType;
-use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
 use super::BoundQuery;
@@ -118,7 +117,7 @@ impl Binder {
                 table_catalog.owner,
                 AclMode::Insert,
                 table_name.clone(),
-                PbObject::TableId(table_catalog.id.table_id),
+                table_catalog.id,
             ),
             table_catalog.database_id,
         )?;
@@ -312,15 +311,28 @@ impl Binder {
         let default_columns = default_column_indices
             .into_iter()
             .map(|i| {
-                (
-                    i,
-                    default_columns_from_catalog
-                        .get(&i)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone())
-                        }),
-                )
+                let column = &cols_to_insert_in_table[i];
+                let expr = default_columns_from_catalog
+                    .get(&i)
+                    .cloned()
+                    .unwrap_or_else(|| ExprImpl::literal_null(column.data_type().clone()));
+
+                let expr = if column.nullable() {
+                    expr
+                } else {
+                    FunctionCall::new_unchecked(
+                        ExprType::CheckNotNull,
+                        vec![
+                            expr,
+                            ExprImpl::literal_varchar(column.name().to_owned()),
+                            ExprImpl::literal_varchar(table_name.clone()),
+                        ],
+                        column.data_type().clone(),
+                    )
+                    .into()
+                };
+
+                (i, expr)
             })
             .collect_vec();
 

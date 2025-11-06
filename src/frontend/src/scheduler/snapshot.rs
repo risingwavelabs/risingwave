@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
 };
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{BatchQueryCommittedEpoch, BatchQueryEpoch, batch_query_epoch};
 use risingwave_pb::hummock::{HummockVersionDeltas, StateTableInfoDelta};
 use tokio::sync::watch;
@@ -29,7 +30,8 @@ use tokio::sync::watch;
 use crate::error::{ErrorCode, RwError};
 use crate::expr::InlineNowProcTime;
 use crate::meta_client::FrontendMetaClient;
-use crate::scheduler::SchedulerError;
+use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query};
+use crate::scheduler::{SchedulerError, SchedulerResult};
 
 /// The storage snapshot to read from in a query, which can be freely cloned.
 #[derive(Clone)]
@@ -49,7 +51,7 @@ pub enum ReadSnapshot {
 
 impl ReadSnapshot {
     /// Get the [`BatchQueryEpoch`] for this snapshot.
-    pub fn batch_query_epoch(
+    fn batch_query_epoch(
         &self,
         read_storage_tables: &HashSet<TableId>,
     ) -> Result<BatchQueryEpoch, SchedulerError> {
@@ -69,6 +71,62 @@ impl ReadSnapshot {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
             },
         })
+    }
+
+    pub fn fill_batch_query_epoch(&self, query: &mut Query) -> SchedulerResult<()> {
+        fn on_node(
+            execution_plan_node: &mut ExecutionPlanNode,
+            f: &mut impl FnMut(&mut Option<BatchQueryEpoch>, u32),
+        ) {
+            for node in &mut execution_plan_node.children {
+                on_node(node, f);
+            }
+            let (query_epoch, table_id) = match &mut execution_plan_node.node {
+                NodeBody::RowSeqScan(scan) => (
+                    &mut scan.query_epoch,
+                    scan.table_desc.as_ref().unwrap().table_id,
+                ),
+                NodeBody::DistributedLookupJoin(join) => (
+                    &mut join.query_epoch,
+                    join.inner_side_table_desc.as_ref().unwrap().table_id,
+                ),
+                NodeBody::LocalLookupJoin(join) => (
+                    &mut join.query_epoch,
+                    join.inner_side_table_desc.as_ref().unwrap().table_id,
+                ),
+                NodeBody::VectorIndexNearest(vector_index_read) => (
+                    &mut vector_index_read.query_epoch,
+                    vector_index_read.reader_desc.as_ref().unwrap().table_id,
+                ),
+                _ => {
+                    return;
+                }
+            };
+            f(query_epoch, table_id);
+        }
+
+        fn on_query(query: &mut Query, mut f: impl FnMut(&mut Option<BatchQueryEpoch>, u32)) {
+            for stage in query.stage_graph.stages.values_mut() {
+                on_node(&mut stage.root, &mut f);
+            }
+        }
+
+        let mut unspecified_epoch_table_ids = HashSet::new();
+        on_query(query, |query_epoch, table_id| {
+            if query_epoch.is_none() {
+                unspecified_epoch_table_ids.insert(table_id.into());
+            }
+        });
+
+        let query_epoch = self.batch_query_epoch(&unspecified_epoch_table_ids)?;
+
+        on_query(query, |node_query_epoch, _| {
+            if node_query_epoch.is_none() {
+                *node_query_epoch = Some(query_epoch);
+            }
+        });
+
+        Ok(())
     }
 
     pub fn inline_now_proc_time(&self) -> InlineNowProcTime {
@@ -143,11 +201,11 @@ impl PinnedSnapshot {
 
     pub fn list_change_log_epochs(
         &self,
-        table_id: u32,
+        table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Vec<u64> {
-        if let Some(table_change_log) = self.value.table_change_log.get(&TableId::new(table_id)) {
+        if let Some(table_change_log) = self.value.table_change_log.get(&table_id) {
             let table_change_log = table_change_log.clone();
             table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
         } else {
@@ -183,8 +241,8 @@ pub struct HummockSnapshotManager {
 
 #[derive(Default)]
 struct TableChangeLogNotificationMsg {
-    updated_change_log_table_ids: HashSet<u32>,
-    deleted_table_ids: HashSet<u32>,
+    updated_change_log_table_ids: HashSet<TableId>,
+    deleted_table_ids: HashSet<TableId>,
 }
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
@@ -219,7 +277,7 @@ impl HummockSnapshotManager {
                 if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {
                     None
                 } else {
-                    Some(table_id.table_id())
+                    Some(*table_id)
                 }
             })
             .collect();
@@ -246,7 +304,7 @@ impl HummockSnapshotManager {
                     let new_value_empty = new_log.new_value.is_empty();
                     let old_value_empty = new_log.old_value.is_empty();
                     if !new_value_empty || !old_value_empty {
-                        Some(*table_id)
+                        Some(TableId::new(*table_id))
                     } else {
                         None
                     }
@@ -257,7 +315,12 @@ impl HummockSnapshotManager {
         let deleted_table_ids: HashSet<_> = deltas
             .version_deltas
             .iter()
-            .flat_map(|version_deltas| version_deltas.removed_table_ids.clone())
+            .flat_map(|version_deltas| {
+                version_deltas
+                    .removed_table_ids
+                    .iter()
+                    .map(|table_id| table_id.into())
+            })
             .collect();
         self.table_change_log_notification_sender
             .send(TableChangeLogNotificationMsg {
@@ -326,7 +389,10 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn wait_table_change_log_notification(&self, table_id: u32) -> Result<(), RwError> {
+    pub async fn wait_table_change_log_notification(
+        &self,
+        table_id: TableId,
+    ) -> Result<(), RwError> {
         let mut rx = self.table_change_log_notification_sender.subscribe();
         loop {
             rx.changed()

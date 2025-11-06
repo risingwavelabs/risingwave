@@ -13,44 +13,24 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pgwire::pg_server::{BoxedError, Session, SessionManager};
+use pgwire::pg_server::{Session, SessionManager};
+use risingwave_common::id::DatabaseId;
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{
     CancelRunningSqlRequest, CancelRunningSqlResponse, GetRunningSqlsRequest,
     GetRunningSqlsResponse, GetTableReplacePlanRequest, GetTableReplacePlanResponse, RunningSql,
 };
-use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_sqlparser::ast::ObjectName;
 use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
 
 use crate::error::RwError;
 use crate::handler::create_source::SqlColumnStrategy;
 use crate::handler::kill_process::handle_kill_local;
-use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
+use crate::handler::{
+    fetch_table_catalog_for_alter, get_new_table_definition_for_cdc_table, get_replace_table_plan,
+};
 use crate::session::{SESSION_MANAGER, SessionMapRef};
-
-#[derive(thiserror::Error, Debug)]
-pub enum AutoSchemaChangeError {
-    #[error("frontend error")]
-    FrontendError(
-        #[from]
-        #[backtrace]
-        RwError,
-    ),
-}
-
-impl From<BoxedError> for AutoSchemaChangeError {
-    fn from(err: BoxedError) -> Self {
-        AutoSchemaChangeError::FrontendError(RwError::from(err))
-    }
-}
-
-impl From<AutoSchemaChangeError> for tonic::Status {
-    fn from(err: AutoSchemaChangeError) -> Self {
-        err.to_status(tonic::Code::Internal, "frontend")
-    }
-}
 
 #[derive(Default)]
 pub struct FrontendServiceImpl {
@@ -70,11 +50,14 @@ impl FrontendService for FrontendServiceImpl {
         request: RpcRequest<GetTableReplacePlanRequest>,
     ) -> Result<RpcResponse<GetTableReplacePlanResponse>, Status> {
         let req = request.into_inner();
-        tracing::info!("get_table_replace_plan for table {}", req.table_name);
 
-        let table_change = req.table_change.expect("schema change message is required");
-        let replace_plan =
-            get_new_table_plan(table_change, req.table_name, req.database_id, req.owner).await?;
+        let replace_plan = get_new_table_plan(
+            req.table_name,
+            req.database_id.into(),
+            req.owner,
+            req.cdc_table_change,
+        )
+        .await?;
 
         Ok(RpcResponse::new(GetTableReplacePlanResponse {
             replace_plan: Some(replace_plan),
@@ -111,13 +94,13 @@ impl FrontendService for FrontendServiceImpl {
     }
 }
 
-/// Get the new table plan for the given table schema change
+/// Rebuild the table's streaming plan, possibly with cdc column changes.
 async fn get_new_table_plan(
-    table_change: TableSchemaChange,
     table_name: String,
-    database_id: u32,
+    database_id: DatabaseId,
     owner: u32,
-) -> Result<ReplaceJobPlan, AutoSchemaChangeError> {
+    cdc_table_change: Option<TableSchemaChange>,
+) -> Result<ReplaceJobPlan, RwError> {
     tracing::info!("get_new_table_plan for table {}", table_name);
 
     let session_mgr = SESSION_MANAGER
@@ -127,22 +110,27 @@ async fn get_new_table_plan(
     // get a session object for the corresponding user and database
     let session = session_mgr.create_dummy_session(database_id, owner)?;
 
-    let new_version_columns = table_change
-        .columns
-        .into_iter()
-        .map(|c| c.into())
-        .collect_vec();
     let table_name = ObjectName::from(vec![table_name.as_str().into()]);
+    let (original_catalog, _) = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
-    let (new_table_definition, original_catalog) =
-        get_new_table_definition_for_cdc_table(&session, table_name.clone(), &new_version_columns)
-            .await?;
-    let (_, table, graph, job_type) = get_replace_table_plan(
+    let definition = if let Some(cdc_table_change) = cdc_table_change {
+        let new_version_columns = cdc_table_change
+            .columns
+            .into_iter()
+            .map(|c| c.into())
+            .collect_vec();
+        get_new_table_definition_for_cdc_table(original_catalog.clone(), &new_version_columns)
+            .await?
+    } else {
+        original_catalog.create_sql_ast_purified()?
+    };
+
+    let (source, table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
-        new_table_definition,
+        definition,
         &original_catalog,
-        SqlColumnStrategy::FollowUnchecked, // not used
+        SqlColumnStrategy::FollowUnchecked,
     )
     .await?;
 
@@ -150,7 +138,7 @@ async fn get_new_table_plan(
         replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
             replace_job_plan::ReplaceTable {
                 table: Some(table.to_prost()),
-                source: None, // none for cdc table
+                source: source.map(|s| s.to_prost()),
                 job_type: job_type as _,
             },
         )),

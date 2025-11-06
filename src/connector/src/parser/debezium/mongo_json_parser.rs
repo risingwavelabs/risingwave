@@ -86,7 +86,7 @@ impl DebeziumMongoJsonParser {
         }
 
         // encodings are fixed to MongoJson
-        let encoding = EncodingProperties::MongoJson(props.clone());
+        let encoding = EncodingProperties::MongoJson(props);
         // for key, it doesn't matter if strong schema is enabled or not
         let key_builder = build_accessor_builder(encoding.clone())?;
 
@@ -372,7 +372,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
             // data without payload and schema field
             br#"{"before":null,"after":"{\"_id\": {\"$numberLong\": \"1004\"},\"first_name\": \"Anne\",\"last_name\": \"Kretchmar\",\"email\": \"annek@noanswer.org\"}","patch":null,"filter":null,"updateDescription":null,"source":{"version":"2.1.4.Final","connector":"mongodb","name":"dbserver1","ts_ms":1681879044000,"snapshot":"last","db":"inventory","sequence":null,"rs":"rs0","collection":"customers","ord":1,"lsid":null,"txnNumber":null},"op":"r","ts_ms":1681879054736,"transaction":null}"#.to_vec()];
 
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
             ColumnDesc::named("first_name", ColumnId::new(1), DataType::Varchar),
             ColumnDesc::named("last_name", ColumnId::new(2), DataType::Varchar),
@@ -424,7 +424,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
     #[tokio::test]
     async fn test_strong_schema_datetime() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
             ColumnDesc::named("rocket type", ColumnId::new(1), DataType::Varchar),
             ColumnDesc::named("freezed at", ColumnId::new(2), DataType::Date),
@@ -552,7 +552,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
     #[tokio::test]
     async fn test_bson_v2_debezium_basic_types() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
             ColumnDesc::named("name", ColumnId::new(1), DataType::Varchar),
             ColumnDesc::named("age", ColumnId::new(2), DataType::Int32),
@@ -638,7 +638,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
     #[tokio::test]
     async fn test_bson_v2_debezium_struct() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
             ColumnDesc::named(
                 "struct_data",
@@ -739,7 +739,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
     #[tokio::test]
     async fn test_bson_v2_debezium_list() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
             ColumnDesc::named("hobbies", ColumnId::new(1), DataType::Varchar.list()),
         ];
@@ -842,7 +842,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
     }
     #[tokio::test]
     async fn test_null_and_overflow() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("_id", ColumnId::new(0), DataType::Int64),
             ColumnDesc::named("name", ColumnId::new(1), DataType::Varchar),
             ColumnDesc::named("age", ColumnId::new(2), DataType::Int32),

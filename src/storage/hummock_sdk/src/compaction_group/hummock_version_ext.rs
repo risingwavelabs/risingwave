@@ -119,16 +119,16 @@ impl<L> HummockVersionCommon<SstableInfo, L> {
 
     pub fn safe_epoch_table_watermarks(
         &self,
-        existing_table_ids: &[u32],
-    ) -> BTreeMap<u32, TableWatermarks> {
+        existing_table_ids: &[TableId],
+    ) -> BTreeMap<TableId, TableWatermarks> {
         safe_epoch_table_watermarks_impl(&self.table_watermarks, existing_table_ids)
     }
 }
 
 pub fn safe_epoch_table_watermarks_impl(
     table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
-    existing_table_ids: &[u32],
-) -> BTreeMap<u32, TableWatermarks> {
+    existing_table_ids: &[TableId],
+) -> BTreeMap<TableId, TableWatermarks> {
     fn extract_single_table_watermark(
         table_watermarks: &TableWatermarks,
     ) -> Option<TableWatermarks> {
@@ -145,19 +145,18 @@ pub fn safe_epoch_table_watermarks_impl(
     table_watermarks
         .iter()
         .filter_map(|(table_id, table_watermarks)| {
-            let u32_table_id = table_id.table_id();
-            if !existing_table_ids.contains(&u32_table_id) {
+            if !existing_table_ids.contains(table_id) {
                 None
             } else {
                 extract_single_table_watermark(table_watermarks)
-                    .map(|table_watermarks| (table_id.table_id, table_watermarks))
+                    .map(|table_watermarks| (*table_id, table_watermarks))
             }
         })
         .collect()
 }
 
 pub fn safe_epoch_read_table_watermarks_impl(
-    safe_epoch_watermarks: BTreeMap<u32, TableWatermarks>,
+    safe_epoch_watermarks: BTreeMap<TableId, TableWatermarks>,
 ) -> BTreeMap<TableId, ReadTableWatermark> {
     safe_epoch_watermarks
         .into_iter()
@@ -178,7 +177,7 @@ pub fn safe_epoch_read_table_watermarks_impl(
                 }
             }
             (
-                TableId::from(table_id),
+                table_id,
                 ReadTableWatermark {
                     direction: watermarks.direction,
                     vnode_watermarks: vnode_watermark_map,
@@ -517,12 +516,12 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                             self.state_table_info
                                 .compaction_group_member_table_ids(*compaction_group_id)
                                 .iter()
-                                .map(|table_id| table_id.table_id)
+                                .copied()
                                 .collect()
                         } else {
                             #[expect(deprecated)]
                             // for backward-compatibility of previous hummock version delta
-                            BTreeSet::from_iter(group_construct.table_ids.clone())
+                            BTreeSet::from_iter(group_construct.table_ids.iter().map(Into::into))
                         };
 
                         if group_construct.version() >= CompatibilityVersion::SplitGroupByTableId {
@@ -819,13 +818,11 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         let left_group_id_table_ids = self
             .state_table_info
             .compaction_group_member_table_ids(left_group_id)
-            .iter()
-            .map(|table_id| table_id.table_id);
+            .iter();
         let right_group_id_table_ids = self
             .state_table_info
             .compaction_group_member_table_ids(right_group_id)
-            .iter()
-            .map(|table_id| table_id.table_id);
+            .iter();
 
         assert!(
             left_group_id_table_ids
@@ -1122,7 +1119,7 @@ impl Levels {
                     && insert_table_infos.iter().all(|sst| {
                         sst.table_ids.len() == 1
                             && sst.table_ids[0]
-                                == member_table_ids.iter().next().expect("non-empty").table_id
+                                == *member_table_ids.iter().next().expect("non-empty")
                     })
                 {
                     // Only change vnode_partition_count for group which has only one state-table.
@@ -1210,7 +1207,7 @@ pub fn build_initial_compaction_group_levels(
 }
 
 fn split_sst_info_for_level(
-    member_table_ids: &BTreeSet<u32>,
+    member_table_ids: &BTreeSet<TableId>,
     level: &mut Level,
     new_sst_id: &mut HummockSstableId,
 ) -> Vec<SstableInfo> {
@@ -1263,7 +1260,7 @@ pub fn get_table_compaction_group_id_mapping(
         .state_table_info
         .info()
         .iter()
-        .map(|(table_id, info)| (table_id.table_id, info.compaction_group_id))
+        .map(|(table_id, info)| (*table_id, info.compaction_group_id))
         .collect()
 }
 
@@ -1661,7 +1658,7 @@ mod tests {
                 right: full_key_r.into(),
                 right_exclusive: false,
             },
-            table_ids,
+            table_ids: table_ids.iter().map(Into::into).collect(),
             object_id: sst_id.into(),
             min_epoch: 20,
             max_epoch: 20,
@@ -1866,7 +1863,7 @@ mod tests {
                 right,
                 right_exclusive: false,
             },
-            table_ids,
+            table_ids: table_ids.iter().map(Into::into).collect(),
             file_size: 100,
             sst_size: 100,
             uncompressed_file_size: 100,
@@ -2265,7 +2262,7 @@ mod tests {
         let s3 = gen_sstable_info(3, vec![6, 7], epoch);
 
         let ssts = vec![s1, s2, s3];
-        let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
+        let split_key = group_split::build_split_key(4.into(), VirtualNode::ZERO);
 
         let pos = group_split::get_split_pos(&ssts, split_key.clone());
         assert_eq!(1, pos);
@@ -2280,7 +2277,7 @@ mod tests {
         let sst = gen_sstable_info(1, vec![1, 2, 3, 5], epoch);
 
         {
-            let split_key = group_split::build_split_key(3, VirtualNode::ZERO);
+            let split_key = group_split::build_split_key(3.into(), VirtualNode::ZERO);
             let origin_sst = sst.clone();
             let sst_size = origin_sst.sst_size;
             let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
@@ -2312,12 +2309,12 @@ mod tests {
             assert!(branched_sst.sst_size < origin_sst.file_size);
             assert_eq!(10, branched_sst.sst_id);
             assert_eq!(11, origin_sst.sst_id);
-            assert_eq!(&3, branched_sst.table_ids.first().unwrap()); // split table_id to right
+            assert_eq!(3, branched_sst.table_ids.first().unwrap().as_raw_id()); // split table_id to right
         }
 
         {
             // test un-exist table_id
-            let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
+            let split_key = group_split::build_split_key(4.into(), VirtualNode::ZERO);
             let origin_sst = sst.clone();
             let sst_size = origin_sst.sst_size;
             let split_type = group_split::need_to_split(&origin_sst, split_key.clone());
@@ -2343,24 +2340,23 @@ mod tests {
             assert!(branched_sst.sst_size < origin_sst.file_size);
             assert_eq!(10, branched_sst.sst_id);
             assert_eq!(11, origin_sst.sst_id);
-            assert_eq!(&5, branched_sst.table_ids.first().unwrap()); // split table_id to right
+            assert_eq!(5, branched_sst.table_ids.first().unwrap().as_raw_id()); // split table_id to right
         }
 
         {
-            let split_key = group_split::build_split_key(6, VirtualNode::ZERO);
-            let origin_sst = sst.clone();
-            let split_type = group_split::need_to_split(&origin_sst, split_key);
+            let split_key = group_split::build_split_key(6.into(), VirtualNode::ZERO);
+            let split_type = group_split::need_to_split(&sst, split_key);
             assert_eq!(SstSplitType::Left, split_type);
         }
 
         {
-            let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
+            let split_key = group_split::build_split_key(4.into(), VirtualNode::ZERO);
             let origin_sst = sst.clone();
             let split_type = group_split::need_to_split(&origin_sst, split_key);
             assert_eq!(SstSplitType::Both, split_type);
 
-            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
-            let origin_sst = sst.clone();
+            let split_key = group_split::build_split_key(1.into(), VirtualNode::ZERO);
+            let origin_sst = sst;
             let split_type = group_split::need_to_split(&origin_sst, split_key);
             assert_eq!(SstSplitType::Right, split_type);
         }
@@ -2370,8 +2366,8 @@ mod tests {
             let mut sst = gen_sstable_info_impl(1, vec![1], epoch);
             sst.key_range.right = sst.key_range.left.clone();
             let sst: SstableInfo = sst.into();
-            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
-            let origin_sst = sst.clone();
+            let split_key = group_split::build_split_key(1.into(), VirtualNode::ZERO);
+            let origin_sst = sst;
             let sst_size = origin_sst.sst_size;
 
             let mut new_sst_id = 10.into();
@@ -2572,7 +2568,7 @@ mod tests {
 
         {
             // split Overlapping level
-            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+            let split_key = group_split::build_split_key(1.into(), VirtualNode::ZERO);
 
             let mut new_sst_id = 100.into();
             let x = group_split::split_sst_info_for_level_v2(
@@ -2615,7 +2611,7 @@ mod tests {
         {
             // test split empty level
             let mut new_sst_id = 100.into();
-            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+            let split_key = group_split::build_split_key(1.into(), VirtualNode::ZERO);
             let x = group_split::split_sst_info_for_level_v2(
                 &mut cg1.levels[2],
                 &mut new_sst_id,
@@ -2628,7 +2624,7 @@ mod tests {
         {
             // test split to right Nonoverlapping level
             let mut cg1 = cg1.clone();
-            let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
+            let split_key = group_split::build_split_key(1.into(), VirtualNode::ZERO);
 
             let mut new_sst_id = 100.into();
             let x = group_split::split_sst_info_for_level_v2(
@@ -2651,7 +2647,7 @@ mod tests {
         {
             // test split to left Nonoverlapping level
             let mut cg1 = cg1.clone();
-            let split_key = group_split::build_split_key(5, VirtualNode::ZERO);
+            let split_key = group_split::build_split_key(5.into(), VirtualNode::ZERO);
 
             let mut new_sst_id = 100.into();
             let x = group_split::split_sst_info_for_level_v2(
@@ -2692,7 +2688,7 @@ mod tests {
         {
             // test split to both Nonoverlapping level
             let mut cg1 = cg1.clone();
-            let split_key = group_split::build_split_key(4, VirtualNode::ZERO);
+            let split_key = group_split::build_split_key(4.into(), VirtualNode::ZERO);
 
             let mut new_sst_id = 100.into();
             let x = group_split::split_sst_info_for_level_v2(
@@ -2706,12 +2702,15 @@ mod tests {
             assert_eq!(100 / 2, x[0].sst_size);
             assert_eq!(11, x[1].sst_id);
             assert_eq!(100, x[1].sst_size);
-            assert_eq!(vec![4], x[1].table_ids);
+            assert_eq!(vec![TableId::new(4)], x[1].table_ids);
 
             assert_eq!(2, cg1.levels[0].table_infos.len());
             assert_eq!(101, cg1.levels[0].table_infos[1].sst_id);
             assert_eq!(100 / 2, cg1.levels[0].table_infos[1].sst_size);
-            assert_eq!(vec![3], cg1.levels[0].table_infos[1].table_ids);
+            assert_eq!(
+                vec![TableId::new(3)],
+                cg1.levels[0].table_infos[1].table_ids
+            );
         }
     }
 }

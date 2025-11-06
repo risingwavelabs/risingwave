@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use user_catalog::UserCatalog;
 
 pub(crate) mod user_authentication;
@@ -25,14 +24,6 @@ pub type UserId = u32;
 pub type UserInfoVersion = u64;
 
 /// Check if the current user has access to the object.
-pub fn has_access_to_object(
-    current_user: &UserCatalog,
-    schema_name: &str,
-    obj_id: u32,
-    owner_id: UserId,
-) -> bool {
-    owner_id == current_user.id
-        || schema_name == DEFAULT_SCHEMA_NAME
-        || current_user.is_admin
-        || current_user.check_object_visibility(obj_id)
+pub fn has_access_to_object(current_user: &UserCatalog, obj_id: u32, owner_id: UserId) -> bool {
+    owner_id == current_user.id || current_user.check_object_visibility(obj_id)
 }

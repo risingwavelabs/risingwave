@@ -56,7 +56,7 @@ pub fn start_hummock_workers(
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
         start_vacuum_time_travel_metadata_loop(
-            hummock_manager.clone(),
+            hummock_manager,
             Duration::from_secs(meta_opts.time_travel_vacuum_interval_sec),
         ),
     ];

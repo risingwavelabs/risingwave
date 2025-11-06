@@ -55,7 +55,7 @@ pub(crate) struct Opts {
     /// Input directory containing sqls, expected outputs.
     #[clap(name = "INPUT_DIR", short = 'i', long = "input", value_parser, value_hint = ValueHint::DirPath)]
     input_dir: PathBuf,
-    /// Output directory containing output files, diff reuslts.
+    /// Output directory containing output files, diff results.
     #[clap(name = "OUTPUT_DIR", short = 'o', long = "output", value_parser, value_hint = ValueHint::DirPath)]
     output_dir: PathBuf,
     /// Schedule file containing each parallel schedule.

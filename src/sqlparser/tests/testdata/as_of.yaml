@@ -2,7 +2,7 @@
 - input: select * from t1 left join t2 FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2;
   formatted_sql: SELECT * FROM t1 LEFT JOIN t2 FOR SYSTEM_TIME AS OF PROCTIME() ON a1 = a2
 - input: select * from t1 left join t2 FOR SYSTEM_TIME AS OF NOW() on a1 = a2;
-  formatted_sql: SELECT * FROM t1 LEFT JOIN t2 FOR SYSTEM_TIME AS OF NOW() - 0 SECOND ON a1 = a2
+  formatted_sql: SELECT * FROM t1 LEFT JOIN t2 FOR SYSTEM_TIME AS OF NOW() - '0' SECOND ON a1 = a2
 - input: select * from t1 left join t2 FOR SYSTEM_TIME AS OF 1 on a1 = a2;
   formatted_sql: SELECT * FROM t1 LEFT JOIN t2 FOR SYSTEM_TIME AS OF 1 ON a1 = a2
 - input: select * from t1 left join t2 FOR SYSTEM_TIME AS OF 'string' on a1 = a2;

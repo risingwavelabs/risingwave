@@ -247,8 +247,7 @@ pub mod test_utils {
                 ))
             })
             .collect();
-        let options_with_secret =
-            crate::WithOptionsSecResolved::without_secrets(with_properties.clone());
+        let options_with_secret = crate::WithOptionsSecResolved::without_secrets(with_properties);
         SourceDescBuilder {
             columns,
             metrics: Default::default(),
