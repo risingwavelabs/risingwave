@@ -50,7 +50,7 @@ pub mod writer;
 pub mod prelude {
     pub use crate::sink::{
         Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-        SINK_USER_FORCE_BUFFERING, Sink, SinkError, SinkParam, SinkWriterParam,
+        SINK_USER_FORCE_COMPACTION, Sink, SinkError, SinkParam, SinkWriterParam,
     };
 }
 
@@ -234,7 +234,7 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_TYPE_RETRACT: &str = "retract";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
-pub const SINK_USER_FORCE_BUFFERING: &str = "force_buffering";
+pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
