@@ -380,7 +380,7 @@ impl StreamManagerService for StreamServiceImpl {
             .get_fragment(fragment_id)
             .ok_or_else(|| Status::not_found(format!("Fragment {} not found", fragment_id)))?;
 
-        let actors = fragment_info
+        let actor_vnodes = fragment_info
             .actors
             .iter()
             .map(|(actor_id, actor_info)| {
@@ -397,7 +397,7 @@ impl StreamManagerService for StreamServiceImpl {
             })
             .collect();
 
-        Ok(Response::new(GetFragmentVnodesResponse { actors }))
+        Ok(Response::new(GetFragmentVnodesResponse { actor_vnodes }))
     }
 
     async fn get_actor_vnodes(

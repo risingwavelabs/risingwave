@@ -245,7 +245,7 @@ message GetFragmentVnodesResponse {
     uint32 actor_id = 1;
     repeated uint32 vnode_indices = 2;
   }
-  repeated ActorVnodes actors = 1;
+  repeated ActorVnodes actor_vnodes = 1;
 }
 
 message GetActorVnodesRequest {

@@ -1176,7 +1176,7 @@ impl MetaClient {
             .get_fragment_vnodes(GetFragmentVnodesRequest { fragment_id })
             .await?;
         Ok(resp
-            .actors
+            .actor_vnodes
             .into_iter()
             .map(|actor| (actor.actor_id, actor.vnode_indices))
             .collect())
