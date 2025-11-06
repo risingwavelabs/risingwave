@@ -203,7 +203,7 @@ impl StreamManagerService for StreamServiceImpl {
         let canceled_jobs = self
             .stream_manager
             .cancel_streaming_jobs(table_ids.into_iter().map(JobId::from).collect_vec())
-            .await
+            .await?
             .into_iter()
             .map(|id| id.as_raw_id())
             .collect_vec();
