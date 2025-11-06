@@ -583,6 +583,10 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool>
         self.current_entry_idx < self.inner.entries.len()
     }
 
+    fn invalidate(&mut self) {
+        self.current_entry_idx = self.inner.entries.len();
+    }
+
     fn advance_to_next_entry(&mut self) {
         debug_assert!(self.is_valid_entry_idx());
         match D::direction() {
@@ -591,7 +595,7 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool>
             }
             DirectionEnum::Backward => {
                 if self.current_entry_idx == 0 {
-                    self.current_entry_idx = self.inner.entries.len();
+                    self.invalidate();
                 } else {
                     self.current_entry_idx -= 1;
                 }
@@ -752,7 +756,33 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
-        debug_assert_eq!(key.user_key.table_id, self.table_id);
+        match key.user_key.table_id.cmp(&self.table_id) {
+            Ordering::Less => {
+                match D::direction() {
+                    DirectionEnum::Forward => {
+                        // seek key table id < batch table id, so seek to beginning
+                        self.rewind().await?;
+                    }
+                    DirectionEnum::Backward => {
+                        self.invalidate();
+                        return Ok(());
+                    }
+                };
+            }
+            Ordering::Greater => {
+                match D::direction() {
+                    DirectionEnum::Forward => {
+                        self.invalidate();
+                        return Ok(());
+                    }
+                    DirectionEnum::Backward => {
+                        // seek key table id > batch table id, so seek to end
+                        self.rewind().await?;
+                    }
+                };
+            }
+            Ordering::Equal => (),
+        }
         // Perform binary search on table key because the items in SharedBufferBatch is ordered
         // by table key.
         let partition_point = self
@@ -787,7 +817,7 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
                 }
                 DirectionEnum::Backward => {
                     if i == 0 {
-                        self.current_entry_idx = self.inner.entries.len();
+                        self.invalidate();
                     } else {
                         self.current_entry_idx = i - 1;
                         self.reset_value_idx();
