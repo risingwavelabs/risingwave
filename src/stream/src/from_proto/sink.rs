@@ -219,6 +219,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             SinkType::Retract
         } else {
             let sink_type_from_proto = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+            // For backward compatibility: Iceberg sink with Upsert type should be treated as Retract type.
             if connector.eq_ignore_ascii_case(ICEBERG_SINK)
                 && matches!(sink_type_from_proto, SinkType::Upsert)
             {
