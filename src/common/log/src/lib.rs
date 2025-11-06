@@ -44,6 +44,20 @@ impl LogSuppresser {
         }
     }
 
+    /// Create a `LogSuppresser` that allows `per_second` logs per second.
+    pub fn per_second(per_second: u32) -> Self {
+        Self::new(RateLimiter::direct(Quota::per_second(
+            NonZeroU32::new(per_second).unwrap(),
+        )))
+    }
+
+    /// Create a `LogSuppresser` that allows `per_minute` logs per minute.
+    pub fn per_minute(per_minute: u32) -> Self {
+        Self::new(RateLimiter::direct(Quota::per_minute(
+            NonZeroU32::new(per_minute).unwrap(),
+        )))
+    }
+
     /// Check if the log should be suppressed.
     /// If the log should be suppressed, return `Err(LogSuppressed)`.
     /// Otherwise, return `Ok(Some(..))` with count of suppressed messages since last check,
@@ -64,9 +78,7 @@ impl LogSuppresser {
 impl Default for LogSuppresser {
     /// Default rate limiter allows 1 log per second.
     fn default() -> Self {
-        Self::new(RateLimiter::direct(Quota::per_second(
-            NonZeroU32::new(1).unwrap(),
-        )))
+        Self::per_second(1)
     }
 }
 
@@ -94,11 +106,8 @@ mod tests {
 
         for _ in 0..1000 {
             interval.tick().await;
-            static RATE_LIMITER: LazyLock<LogSuppresser> = LazyLock::new(|| {
-                LogSuppresser::new(RateLimiter::direct(Quota::per_second(
-                    NonZeroU32::new(5).unwrap(),
-                )))
-            });
+            static RATE_LIMITER: LazyLock<LogSuppresser> =
+                LazyLock::new(|| LogSuppresser::per_second(5));
 
             if let Ok(suppressed_count) = RATE_LIMITER.check() {
                 suppressed += suppressed_count.map(|v| v.get()).unwrap_or_default();

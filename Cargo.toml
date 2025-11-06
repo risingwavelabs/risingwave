@@ -13,6 +13,7 @@ members = [
     "src/common/fields-derive",
     "src/common/heap_profiling",
     "src/common/metrics",
+    "src/common/log",
     "src/common/telemetry_event",
     "src/compute",
     "src/connector",

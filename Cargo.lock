@@ -11511,6 +11511,7 @@ dependencies = [
  "reqwest 0.12.15",
  "risingwave-fields-derive",
  "risingwave_common_estimate_size",
+ "risingwave_common_log",
  "risingwave_common_metrics",
  "risingwave_common_proc_macro",
  "risingwave_common_secret",
@@ -11582,6 +11583,16 @@ dependencies = [
  "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tracing",
+]
+
+[[package]]
+name = "risingwave_common_log"
+version = "2.7.0-alpha"
+dependencies = [
+ "governor",
+ "madsim-tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -13022,6 +13033,7 @@ dependencies = [
  "madsim-tokio",
  "prost 0.13.4",
  "reqwest 0.12.15",
+ "risingwave_common_log",
  "risingwave_pb",
  "thiserror-ext",
  "tracing",
