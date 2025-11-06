@@ -1276,6 +1276,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     fn cluster_id(&self) -> &str {
         "test-cluster-uuid"
     }
+
+    async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<u32, String>> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]

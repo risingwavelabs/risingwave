@@ -406,6 +406,7 @@ service StreamManagerService {
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
+  rpc ListUnmigratedTables(ListUnmigratedTablesRequest) returns (ListUnmigratedTablesResponse);
 }
 
 // Below for cluster service.
@@ -1018,3 +1019,13 @@ message SetSyncLogStoreAlignedRequest {
 }
 
 message SetSyncLogStoreAlignedResponse {}
+
+message ListUnmigratedTablesRequest {}
+
+message ListUnmigratedTablesResponse {
+  message UnmigratedTable {
+    uint32 table_id = 1;
+    string table_name = 2;
+  }
+  repeated UnmigratedTable tables = 1;
+}

@@ -189,6 +189,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
 
     fn cluster_id(&self) -> &str;
+
+    async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -476,5 +478,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     fn cluster_id(&self) -> &str {
         self.0.cluster_id()
+    }
+
+    async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>> {
+        self.0.list_unmigrated_tables().await
     }
 }
