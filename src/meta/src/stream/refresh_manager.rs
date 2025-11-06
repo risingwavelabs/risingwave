@@ -237,6 +237,16 @@ impl RefreshManager {
                     .set_table_refresh_state(table_id, RefreshState::Idle)
                     .await?;
 
+                {
+                    let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
+                    lock_handle.inner.remove(&table_id);
+                    if let Some(table_ids) =
+                        lock_handle.table_id_by_database_id.get_mut(&database_id)
+                    {
+                        table_ids.remove(&table_id);
+                    }
+                }
+
                 Err(anyhow!(e)
                     .context(format!("Failed to refresh table {}", table_id))
                     .into())
