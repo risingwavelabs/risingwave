@@ -23,8 +23,8 @@ type RateLimiter = governor::RateLimiter<
     governor::clock::MonotonicClock,
 >;
 
-/// `LogSuppresser` is a helper to suppress log spamming.
-pub struct LogSuppresser {
+/// `LogSuppressor` is a helper to suppress log spamming.
+pub struct LogSuppressor {
     /// The number of times the log has been suppressed. Will be returned and cleared when the
     /// rate limiter allows next log to be printed.
     suppressed_count: AtomicUsize,
@@ -36,7 +36,7 @@ pub struct LogSuppresser {
 #[derive(Debug)]
 pub struct LogSuppressed;
 
-impl LogSuppresser {
+impl LogSuppressor {
     pub fn new(rate_limiter: RateLimiter) -> Self {
         Self {
             suppressed_count: AtomicUsize::new(0),
@@ -44,14 +44,14 @@ impl LogSuppresser {
         }
     }
 
-    /// Create a `LogSuppresser` that allows `per_second` logs per second.
+    /// Create a `LogSuppressor` that allows `per_second` logs per second.
     pub fn per_second(per_second: u32) -> Self {
         Self::new(RateLimiter::direct(Quota::per_second(
             NonZeroU32::new(per_second).unwrap(),
         )))
     }
 
-    /// Create a `LogSuppresser` that allows `per_minute` logs per minute.
+    /// Create a `LogSuppressor` that allows `per_minute` logs per minute.
     pub fn per_minute(per_minute: u32) -> Self {
         Self::new(RateLimiter::direct(Quota::per_minute(
             NonZeroU32::new(per_minute).unwrap(),
@@ -75,7 +75,7 @@ impl LogSuppresser {
     }
 }
 
-impl Default for LogSuppresser {
+impl Default for LogSuppressor {
     /// Default rate limiter allows 1 log per second.
     fn default() -> Self {
         Self::per_second(1)
@@ -106,8 +106,8 @@ mod tests {
 
         for _ in 0..1000 {
             interval.tick().await;
-            static RATE_LIMITER: LazyLock<LogSuppresser> =
-                LazyLock::new(|| LogSuppresser::per_second(5));
+            static RATE_LIMITER: LazyLock<LogSuppressor> =
+                LazyLock::new(|| LogSuppressor::per_second(5));
 
             if let Ok(suppressed_count) = RATE_LIMITER.check() {
                 suppressed += suppressed_count.map(|v| v.get()).unwrap_or_default();
