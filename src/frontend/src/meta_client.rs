@@ -178,6 +178,10 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
 
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>>;
+
+    async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>>;
+
     fn worker_id(&self) -> u32;
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
@@ -452,6 +456,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>> {
         self.0.get_fragment_by_id(fragment_id).await
+    }
+
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>> {
+        self.0.get_fragment_vnodes(fragment_id).await
+    }
+
+    async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>> {
+        self.0.get_actor_vnodes(actor_id).await
     }
 
     fn worker_id(&self) -> u32 {
