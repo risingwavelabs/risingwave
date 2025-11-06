@@ -123,6 +123,7 @@ redis = { workspace = true, features = [
     "tokio-rustls-comp",
     "cluster-async",
     "geospatial",
+    "streams",
 ] }
 regex = { workspace = true }
 reqwest = { workspace = true }
