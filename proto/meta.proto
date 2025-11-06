@@ -236,6 +236,26 @@ message GetFragmentByIdResponse {
   FragmentDistribution distribution = 1;
 }
 
+message GetFragmentVnodesRequest {
+  uint32 fragment_id = 1;
+}
+
+message GetFragmentVnodesResponse {
+  message ActorVnodes {
+    uint32 actor_id = 1;
+    repeated uint32 vnode_indices = 2;
+  }
+  repeated ActorVnodes actor_vnodes = 1;
+}
+
+message GetActorVnodesRequest {
+  uint32 actor_id = 1;
+}
+
+message GetActorVnodesResponse {
+  repeated uint32 vnode_indices = 1;
+}
+
 message ListStreamingJobStatesRequest {}
 
 message ListStreamingJobStatesResponse {
@@ -404,6 +424,8 @@ service StreamManagerService {
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
+  rpc GetFragmentVnodes(GetFragmentVnodesRequest) returns (GetFragmentVnodesResponse);
+  rpc GetActorVnodes(GetActorVnodesRequest) returns (GetActorVnodesResponse);
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
 }
