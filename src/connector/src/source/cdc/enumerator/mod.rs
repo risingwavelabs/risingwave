@@ -21,6 +21,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use itertools::Itertools;
+use mysql_async::prelude::*;
 use prost::Message;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::util::addr::HostAddr;
@@ -271,6 +272,140 @@ impl<T: CdcSourceTypeTrait> CdcMonitor for DebeziumSplitEnumerator<T> {
     }
 }
 
+impl DebeziumSplitEnumerator<Mysql> {
+    async fn monitor_mysql_binlog_files(&mut self) -> ConnectorResult<()> {
+        // Get hostname and port for metrics labels
+        let hostname = self
+            .properties
+            .get("hostname")
+            .map(|s| s.as_str())
+            .unwrap_or("unknown");
+        let port = self
+            .properties
+            .get("port")
+            .map(|s| s.as_str())
+            .unwrap_or("unknown");
+
+        // Query binlog files and update metrics
+        match self.query_binlog_files().await {
+            Ok(binlog_files) => {
+                if let Some((oldest_file, oldest_size)) = binlog_files.first() {
+                    // Extract sequence number from filename (e.g., "binlog.000001" -> 1)
+                    if let Some(seq) = Self::extract_binlog_seq(oldest_file) {
+                        self.metrics
+                            .mysql_cdc_binlog_file_seq_min
+                            .with_guarded_label_values(&[hostname, port])
+                            .set(seq as i64);
+                        tracing::debug!(
+                            "MySQL CDC source {} ({}:{}): oldest binlog = {}, seq = {}, size = {}",
+                            self.source_id,
+                            hostname,
+                            port,
+                            oldest_file,
+                            seq,
+                            oldest_size
+                        );
+                    }
+                }
+                if let Some((newest_file, newest_size)) = binlog_files.last() {
+                    // Extract sequence number from filename
+                    if let Some(seq) = Self::extract_binlog_seq(newest_file) {
+                        self.metrics
+                            .mysql_cdc_binlog_file_seq_max
+                            .with_guarded_label_values(&[hostname, port])
+                            .set(seq as i64);
+                        tracing::debug!(
+                            "MySQL CDC source {} ({}:{}): newest binlog = {}, seq = {}, size = {}",
+                            self.source_id,
+                            hostname,
+                            port,
+                            newest_file,
+                            seq,
+                            newest_size
+                        );
+                    }
+                }
+                tracing::debug!(
+                    "MySQL CDC source {} ({}:{}): total {} binlog files",
+                    self.source_id,
+                    hostname,
+                    port,
+                    binlog_files.len()
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to query binlog files for MySQL CDC source {} ({}:{}): {}",
+                    self.source_id,
+                    hostname,
+                    port,
+                    e.as_report()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Extract sequence number from binlog filename
+    /// e.g., "binlog.000001" -> Some(1), "mysql-bin.000123" -> Some(123)
+    fn extract_binlog_seq(filename: &str) -> Option<u64> {
+        filename.rsplit('.').next()?.parse::<u64>().ok()
+    }
+
+    /// Query binlog files from MySQL, returns Vec<(filename, size)>
+    async fn query_binlog_files(&self) -> ConnectorResult<Vec<(String, u64)>> {
+        // Extract connection parameters from CDC properties
+        let hostname = self
+            .properties
+            .get("hostname")
+            .ok_or_else(|| anyhow::anyhow!("hostname not found in CDC properties"))?;
+        let port = self
+            .properties
+            .get("port")
+            .ok_or_else(|| anyhow::anyhow!("port not found in CDC properties"))?;
+        let user = self
+            .properties
+            .get("username")
+            .ok_or_else(|| anyhow::anyhow!("username not found in CDC properties"))?;
+        let password = self
+            .properties
+            .get("password")
+            .ok_or_else(|| anyhow::anyhow!("password not found in CDC properties"))?;
+        let database = self
+            .properties
+            .get("database.name")
+            .ok_or_else(|| anyhow::anyhow!("database.name not found in CDC properties"))?;
+
+        // Build MySQL connection string
+        let mysql_url = format!(
+            "mysql://{}:{}@{}:{}/{}",
+            user, password, hostname, port, database
+        );
+
+        // Create MySQL connection
+        let pool = mysql_async::Pool::new(mysql_url.as_str());
+        let mut conn = pool
+            .get_conn()
+            .await
+            .context("Failed to connect to MySQL")?;
+
+        // Query binlog files using SHOW BINARY LOGS
+        // Note: MySQL 8.0+ returns 3 columns: Log_name, File_size, Encrypted
+        let query_result: Vec<(String, u64)> = conn
+            .query_map(
+                "SHOW BINARY LOGS",
+                |(log_name, file_size, _encrypted): (String, u64, String)| (log_name, file_size),
+            )
+            .await
+            .context("Failed to execute SHOW BINARY LOGS")?;
+
+        drop(conn);
+        pool.disconnect().await.ok();
+
+        Ok(query_result)
+    }
+}
+
 impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
     type CdcSourceType = Mysql;
 
@@ -281,6 +416,15 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
             None,
             None,
         )]
+    }
+}
+
+#[async_trait]
+impl CdcMonitor for DebeziumSplitEnumerator<Mysql> {
+    async fn monitor_cdc(&mut self) -> ConnectorResult<()> {
+        // For MySQL CDC, query the upstream MySQL binlog files and monitor them.
+        self.monitor_mysql_binlog_files().await?;
+        Ok(())
     }
 }
 

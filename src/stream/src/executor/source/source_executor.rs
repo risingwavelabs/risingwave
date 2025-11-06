@@ -88,9 +88,9 @@ fn extract_pg_cdc_lsn_from_offset(offset_str: &str) -> Option<u64> {
 ///   }
 /// }
 ///
-/// Returns Some((file_seq, position)) where:
-/// - file_seq: the numeric part of binlog filename (e.g., 123 from "binlog.000123")
-/// - position: the byte offset within the binlog file
+/// Returns `Some((file_seq, position))` where:
+/// - `file_seq`: the numeric part of binlog filename (e.g., 123 from "binlog.000123")
+/// - `position`: the byte offset within the binlog file
 fn extract_mysql_cdc_binlog_offset(offset_str: &str) -> Option<(u64, u64)> {
     let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
     let source_offset = offset.get("sourceOffset")?;
@@ -475,22 +475,19 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
 
                 // MySQL CDC: Extract and record binlog file sequence and position
-                if let SplitImpl::MysqlCdc(mysql_split) = split_impl {
-                    if let Some(offset_str) = mysql_split.start_offset().as_ref() {
-                        if let Some((file_seq, position)) =
-                            extract_mysql_cdc_binlog_offset(offset_str)
-                        {
-                            self.metrics
-                                .mysql_cdc_state_binlog_file_seq
-                                .with_guarded_label_values(&[&source_id])
-                                .set(file_seq as i64);
+                if let SplitImpl::MysqlCdc(mysql_split) = split_impl
+                    && let Some(offset_str) = mysql_split.start_offset().as_ref()
+                    && let Some((file_seq, position)) = extract_mysql_cdc_binlog_offset(offset_str)
+                {
+                    self.metrics
+                        .mysql_cdc_state_binlog_file_seq
+                        .with_guarded_label_values(&[&source_id])
+                        .set(file_seq as i64);
 
-                            self.metrics
-                                .mysql_cdc_state_binlog_position
-                                .with_guarded_label_values(&[&source_id])
-                                .set(position as i64);
-                        }
-                    }
+                    self.metrics
+                        .mysql_cdc_state_binlog_position
+                        .with_guarded_label_values(&[&source_id])
+                        .set(position as i64);
                 }
             }
 
