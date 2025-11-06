@@ -139,6 +139,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                             ?barrier.epoch,
                                             actor_id = self.actor_ctx.id,
                                             source_id = %self.stream_source_core.source_id,
+                                            table_id = %self.associated_table_id,
                                             "RefreshStart triggered file re-listing"
                                         );
                                         is_refreshing = true;

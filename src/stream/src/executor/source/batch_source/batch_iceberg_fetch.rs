@@ -135,7 +135,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                                     ?barrier.epoch,
                                                     actor_id = self.actor_ctx.id,
                                                     source_id = %core.source_id,
-
+                                                    table_id = %self.associated_table_id,
                                                     "RefreshStart:"
                                                 );
 
@@ -155,6 +155,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                                     ?barrier.epoch,
                                                     actor_id = self.actor_ctx.id,
                                                     source_id = %core.source_id,
+                                                    table_id = %self.associated_table_id,
                                                     "ListFinish:"
                                                 );
                                                 is_list_finished = true;
