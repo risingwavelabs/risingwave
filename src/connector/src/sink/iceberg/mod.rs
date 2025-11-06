@@ -2574,6 +2574,10 @@ mod test {
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true,
             max_snapshots_num_before_compaction: None,
+            small_files_threshold_mb: None,
+            delete_files_count_threshold: None,
+            trigger_snapshot_count: None,
+            target_file_size_mb: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

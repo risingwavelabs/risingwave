@@ -385,6 +385,11 @@ impl IcebergCompactionManager {
                 // Update interval if changed
                 track.update_interval(compaction_interval, Instant::now());
             }
+        } else {
+            tracing::error!(
+                "Failed to find compaction track for sink {} during update; configuration changes not applied.",
+                sink_id.sink_id
+            );
         }
     }
 
@@ -394,9 +399,6 @@ impl IcebergCompactionManager {
         _sink_id: SinkId,
         iceberg_config: &IcebergConfig,
     ) -> MetaResult<CompactionTrack> {
-        // TODO: Determine TaskType based on iceberg_config
-        // For now, use Full as default. If you know how to determine TaskType, please update this logic.
-
         let trigger_interval_sec = iceberg_config.compaction_interval_sec();
         let trigger_snapshot_count = iceberg_config.trigger_snapshot_count();
 
