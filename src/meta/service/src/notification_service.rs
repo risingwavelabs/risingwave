@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use anyhow::{Context, anyhow};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
@@ -31,6 +33,7 @@ use risingwave_pb::meta::{
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -49,6 +52,9 @@ pub struct NotificationServiceImpl {
 }
 
 impl NotificationServiceImpl {
+    const STREAMING_MAPPING_SNAPSHOT_WAIT_INTERVAL: Duration = Duration::from_millis(50);
+    const STREAMING_MAPPING_SNAPSHOT_WAIT_RETRY: usize = 12;
+
     pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
@@ -254,7 +260,7 @@ impl NotificationServiceImpl {
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
         let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
-            self.get_worker_slot_mapping_snapshot().await?;
+            self.wait_streaming_worker_slot_mapping_snapshot().await?;
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
@@ -348,6 +354,28 @@ impl NotificationServiceImpl {
             cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
+    }
+
+    async fn wait_streaming_worker_slot_mapping_snapshot(
+        &self,
+    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
+        let mut attempts = 0usize;
+        loop {
+            let (mappings, version) = self.get_worker_slot_mapping_snapshot().await?;
+            if !mappings.is_empty() {
+                return Ok((mappings, version));
+            }
+
+            if attempts >= Self::STREAMING_MAPPING_SNAPSHOT_WAIT_RETRY {
+                tracing::warn!(
+                    "streaming vnode mapping snapshot is still empty; returning the latest snapshot"
+                );
+                return Ok((mappings, version));
+            }
+
+            attempts += 1;
+            sleep(Self::STREAMING_MAPPING_SNAPSHOT_WAIT_INTERVAL).await;
+        }
     }
 }
 
