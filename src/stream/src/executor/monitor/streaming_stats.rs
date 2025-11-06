@@ -218,6 +218,10 @@ pub struct StreamingMetrics {
     pub pg_cdc_state_table_lsn: LabelGuardedIntGaugeVec,
     pub pg_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
 
+    // MySQL CDC binlog monitoring
+    pub mysql_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
+    pub mysql_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
+
     // Gap Fill
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
 }
@@ -313,6 +317,22 @@ impl StreamingMetrics {
         let pg_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
             "stream_pg_cdc_jni_commit_offset_lsn",
             "LSN value when JNI commit offset is called for PostgreSQL CDC",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let mysql_cdc_state_binlog_file_seq = register_guarded_int_gauge_vec_with_registry!(
+            "stream_mysql_cdc_state_binlog_file_seq",
+            "Current binlog file sequence number stored in MySQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let mysql_cdc_state_binlog_position = register_guarded_int_gauge_vec_with_registry!(
+            "stream_mysql_cdc_state_binlog_position",
+            "Current binlog position stored in MySQL CDC state table",
             &["source_id"],
             registry,
         )
@@ -1338,6 +1358,8 @@ impl StreamingMetrics {
             materialize_current_epoch,
             pg_cdc_state_table_lsn,
             pg_cdc_jni_commit_offset_lsn,
+            mysql_cdc_state_binlog_file_seq,
+            mysql_cdc_state_binlog_position,
             gap_fill_generated_rows_count,
         }
     }
