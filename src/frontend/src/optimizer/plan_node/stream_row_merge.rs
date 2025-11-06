@@ -60,8 +60,8 @@ impl StreamRowMerge {
         assert_eq!(lhs_input.stream_key(), rhs_input.stream_key());
         assert_eq!(lhs_input.stream_kind(), rhs_input.stream_kind());
 
-        // Currently, `RowMerge` only supports and is only used for merging simple agg and approx percentile agg.
-        // We restrict the input's distribution, key, and kind here for simplicity.
+        // Currently, `RowMerge` only supports and is only used for merging singleton inputs, typically
+        // simple agg and approx percentile agg. We check the input's properties here for sanity.
         assert_eq!(lhs_input.distribution(), &Distribution::Single);
         assert_eq!(lhs_input.stream_key(), Some(&[][..]));
         assert_eq!(lhs_input.stream_kind(), StreamKind::Retract);
