@@ -255,7 +255,9 @@ impl StreamReaderBuilder {
             'consume: for msg in stream {
                 match msg {
                     Ok(msg) => {
-                        for (_, row) in msg.rows() {
+                        // All rows (including those visible or invisible) will be used to update the source offset.
+                        for i in 0..msg.capacity() {
+                            let (_, row, _) = msg.row_at(i);
                             let split = row.datum_at(split_idx).unwrap().into_utf8();
                             let offset = row.datum_at(offset_idx).unwrap().into_utf8();
                             latest_splits_info
