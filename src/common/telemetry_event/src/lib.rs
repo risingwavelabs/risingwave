@@ -83,6 +83,7 @@ pub fn report_event_common(
         if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
             tracing::info!(
                 suppressed_count,
+                event_name,
                 "Telemetry tracking_id is not set, event reporting disabled"
             );
         }
