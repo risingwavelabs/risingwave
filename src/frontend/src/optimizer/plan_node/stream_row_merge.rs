@@ -28,7 +28,9 @@ use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
-use crate::optimizer::property::{FunctionalDependencySet, WatermarkColumns, reject_upsert_input};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, StreamKind, WatermarkColumns,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamRowMerge` is used for merging two streams with the same stream key and distribution.
@@ -56,8 +58,14 @@ impl StreamRowMerge {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
         assert_eq!(lhs_input.distribution(), rhs_input.distribution());
         assert_eq!(lhs_input.stream_key(), rhs_input.stream_key());
-        let functional_dependency =
-            FunctionalDependencySet::with_key(lhs_mapping.target_size(), &[]);
+        assert_eq!(lhs_input.stream_kind(), rhs_input.stream_kind());
+
+        // Currently, `RowMerge` only supports and is only used for merging simple agg and approx percentile agg.
+        // We restrict the input's distribution, key, and kind here for simplicity.
+        assert_eq!(lhs_input.distribution(), &Distribution::Single);
+        assert_eq!(lhs_input.stream_key(), Some(&[][..]));
+        assert_eq!(lhs_input.stream_kind(), StreamKind::Retract);
+
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
         let o2i_lhs = lhs_mapping
             .inverse()
@@ -79,18 +87,16 @@ impl StreamRowMerge {
         }
         let schema = Schema::new(schema_fields);
         assert!(!schema.is_empty());
-        let watermark_columns = WatermarkColumns::new();
-
         let base = PlanBase::new_stream(
             lhs_input.ctx(),
             schema,
-            lhs_input.stream_key().map(|k| k.to_vec()),
-            functional_dependency,
-            lhs_input.distribution().clone(),
-            reject_upsert_input!(lhs_input),
+            Some(vec![]),
+            FunctionalDependencySet::new(lhs_mapping.target_size()),
+            Distribution::Single,
+            StreamKind::Retract,
             lhs_input.emit_on_window_close(),
-            watermark_columns,
-            lhs_input.columns_monotonicity().clone(),
+            WatermarkColumns::new(),
+            MonotonicityMap::new(),
         );
         Ok(Self {
             base,
