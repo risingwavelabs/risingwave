@@ -655,6 +655,26 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+  - name: small_files_threshold_mb
+    field_type: u64
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: delete_files_count_threshold
+    field_type: usize
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: trigger_snapshot_count
+    field_type: usize
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: target_file_size_mb
+    field_type: u64
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic
