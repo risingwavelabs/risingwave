@@ -491,7 +491,6 @@ impl DispatchExecutor {
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        // TODO(config): use config from actor context, instead of the global one
         let chunk_size = local_barrier_manager
             .env
             .global_config()

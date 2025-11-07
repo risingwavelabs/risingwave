@@ -123,7 +123,6 @@ impl StreamActorManager {
         .await
     }
 
-    #[expect(clippy::too_many_arguments)]
     async fn create_snapshot_backfill_node(
         &self,
         stream_node: &StreamNode,
@@ -489,7 +488,6 @@ impl StreamActorManager {
         };
 
         let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
-            // TODO(config): use config from actor context, instead of the global one
             || self
                 .env
                 .global_config()

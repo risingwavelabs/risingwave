@@ -35,7 +35,7 @@ pub struct StreamEnvironment {
     /// Streaming related configurations.
     ///
     /// This is the global config for the whole compute node. Actor may have its config overridden.
-    /// In executor, prefer using `actor_context.streaming_config` instead.
+    /// In executor, use `actor_context.config` instead.
     global_config: Arc<StreamingConfig>,
 
     /// Current worker node id.
