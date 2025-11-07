@@ -407,7 +407,7 @@ impl FormatterBuild for DebeziumJsonFormatter {
             .format_desc
             .options
             .get(KEY_SCHEMA_ENABLE)
-            .map_or(true, |s| s.to_lowercase().parse::<bool>().unwrap_or(true));
+            .is_none_or(|s| s.to_lowercase().parse::<bool>().unwrap_or(true));
 
         Ok(DebeziumJsonFormatter::new(
             b.builder.schema,
