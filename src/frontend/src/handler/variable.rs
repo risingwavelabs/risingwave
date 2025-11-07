@@ -103,7 +103,7 @@ pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Re
     if name.eq_ignore_ascii_case("PARAMETERS") {
         handle_show_system_params(handler_args)
     } else if name.eq_ignore_ascii_case("ALL") {
-        handle_show_all(handler_args.clone())
+        handle_show_all(handler_args)
     } else {
         let config_reader = handler_args.session.config();
         Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)

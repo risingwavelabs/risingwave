@@ -17,7 +17,6 @@ use std::collections::HashSet;
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{ExprError, Result, capture_context, function};
 use risingwave_pb::user::Action;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
@@ -78,14 +77,22 @@ fn has_any_column_privilege_1(user_name: &str, table_oid: i32, privileges: &str)
 
 #[function("has_database_privilege(varchar, int4, varchar) -> boolean")]
 fn has_database_privilege(user_name: &str, database_oid: i32, privileges: &str) -> Result<bool> {
+    has_database_privilege_impl(user_name, DatabaseId::new(database_oid as _), privileges)
+}
+
+fn has_database_privilege_impl(
+    user_name: &str,
+    database_oid: DatabaseId,
+    privileges: &str,
+) -> Result<bool> {
     // does user have privilege for database
-    let database_owner = get_database_owner_by_id_captured(database_oid as DatabaseId)?;
+    let database_owner = get_database_owner_by_id_captured(database_oid)?;
     let allowed_actions = HashSet::from_iter([Action::Create, Action::Connect]);
     let actions = parse_privilege(privileges, &allowed_actions)?;
     has_privilege_impl_captured(
         user_name,
         &OwnedGrantObject {
-            object: Object::DatabaseId(database_oid as u32),
+            object: database_oid.into(),
             owner: database_owner as u32,
         },
         &actions,
@@ -96,7 +103,7 @@ fn has_database_privilege(user_name: &str, database_oid: i32, privileges: &str) 
 fn has_database_privilege_1(user_id: i32, database_name: &str, privileges: &str) -> Result<bool> {
     let user_name = get_user_name_by_id_captured(user_id)?;
     let database_oid = get_database_id_by_name_captured(database_name)?;
-    has_database_privilege(user_name.as_str(), database_oid, privileges)
+    has_database_privilege_impl(user_name.as_str(), database_oid, privileges)
 }
 
 #[function("has_database_privilege(int4, int4, varchar) -> boolean")]
@@ -112,19 +119,27 @@ fn has_database_privilege_3(
     privileges: &str,
 ) -> Result<bool> {
     let database_oid = get_database_id_by_name_captured(database_name)?;
-    has_database_privilege(user_name, database_oid, privileges)
+    has_database_privilege_impl(user_name, database_oid, privileges)
 }
 
 #[function("has_schema_privilege(varchar, int4, varchar) -> boolean")]
 fn has_schema_privilege(user_name: &str, schema_oid: i32, privileges: &str) -> Result<bool> {
+    has_schema_privilege_impl(user_name, SchemaId::new(schema_oid as _), privileges)
+}
+
+fn has_schema_privilege_impl(
+    user_name: &str,
+    schema_oid: SchemaId,
+    privileges: &str,
+) -> Result<bool> {
     // does user have privilege for schema
-    let schema_owner = get_schema_owner_by_id_captured(schema_oid as SchemaId)?;
+    let schema_owner = get_schema_owner_by_id_captured(schema_oid)?;
     let allowed_actions = HashSet::from_iter([Action::Create, Action::Usage]);
     let actions = parse_privilege(privileges, &allowed_actions)?;
     has_privilege_impl_captured(
         user_name,
         &OwnedGrantObject {
-            object: Object::SchemaId(schema_oid as u32),
+            object: schema_oid.into(),
             owner: schema_owner as u32,
         },
         &actions,
@@ -135,7 +150,7 @@ fn has_schema_privilege(user_name: &str, schema_oid: i32, privileges: &str) -> R
 fn has_schema_privilege_1(user_id: i32, schema_name: &str, privileges: &str) -> Result<bool> {
     let user_name = get_user_name_by_id_captured(user_id)?;
     let schema_oid = get_schema_id_by_name_captured(schema_name)?;
-    has_schema_privilege(user_name.as_str(), schema_oid, privileges)
+    has_schema_privilege_impl(user_name.as_str(), schema_oid, privileges)
 }
 
 #[function("has_schema_privilege(int4, int4, varchar) -> boolean")]
@@ -147,7 +162,7 @@ fn has_schema_privilege_2(user_id: i32, schema_oid: i32, privileges: &str) -> Re
 #[function("has_schema_privilege(varchar, varchar, varchar) -> boolean")]
 fn has_schema_privilege_3(user_name: &str, schema_name: &str, privileges: &str) -> Result<bool> {
     let schema_oid = get_schema_id_by_name_captured(schema_name)?;
-    has_schema_privilege(user_name, schema_oid, privileges)
+    has_schema_privilege_impl(user_name, schema_oid, privileges)
 }
 
 #[function("has_function_privilege(varchar, int4, varchar) -> boolean")]
@@ -233,7 +248,7 @@ fn get_grant_object_by_oid(
 }
 
 #[capture_context(CATALOG_READER)]
-fn get_database_id_by_name(catalog_reader: &CatalogReader, db_name: &str) -> Result<i32> {
+fn get_database_id_by_name(catalog_reader: &CatalogReader, db_name: &str) -> Result<DatabaseId> {
     let reader = &catalog_reader.read_guard();
     Ok(reader
         .get_database_by_name(db_name)
@@ -241,7 +256,7 @@ fn get_database_id_by_name(catalog_reader: &CatalogReader, db_name: &str) -> Res
             name: "database",
             reason: e.to_report_string().into(),
         })?
-        .id() as i32)
+        .id())
 }
 
 #[capture_context(CATALOG_READER)]
@@ -250,13 +265,12 @@ fn get_database_owner_by_id(
     database_id: DatabaseId,
 ) -> Result<i32> {
     let reader = &catalog_reader.read_guard();
-    let database =
-        reader
-            .get_database_by_id(&database_id)
-            .map_err(|e| ExprError::InvalidParam {
-                name: "database",
-                reason: e.to_report_string().into(),
-            })?;
+    let database = reader
+        .get_database_by_id(database_id)
+        .map_err(|e| ExprError::InvalidParam {
+            name: "database",
+            reason: e.to_report_string().into(),
+        })?;
     Ok(database.owner as i32)
 }
 
@@ -275,7 +289,7 @@ fn get_schema_owner_by_id(
         })?
         .id();
     Ok(reader
-        .get_schema_by_id(&db_id, &schema_id)
+        .get_schema_by_id(db_id, schema_id)
         .map_err(|e| ExprError::InvalidParam {
             name: "schema",
             reason: e.to_report_string().into(),
@@ -288,7 +302,7 @@ fn get_schema_id_by_name(
     catalog_reader: &CatalogReader,
     db_name: &str,
     schema_name: &str,
-) -> Result<i32> {
+) -> Result<SchemaId> {
     let reader = &catalog_reader.read_guard();
     Ok(reader
         .get_schema_by_name(db_name, schema_name)
@@ -296,7 +310,7 @@ fn get_schema_id_by_name(
             name: "schema",
             reason: e.to_report_string().into(),
         })?
-        .id() as i32)
+        .id())
 }
 
 #[capture_context(CATALOG_READER, DB_NAME, AUTH_CONTEXT, SEARCH_PATH)]

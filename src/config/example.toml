@@ -10,7 +10,7 @@ grpc_max_reset_stream = 200
 
 [server.heap_profiling]
 enable_auto = true
-threshold_auto = 0.8999999761581421
+threshold_auto = 0.9
 dir = "./"
 
 [meta]
@@ -22,6 +22,7 @@ max_inflight_time_travel_query = 1000
 periodic_compaction_interval_sec = 60
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
+iceberg_gc_interval_sec = 3600
 hummock_version_checkpoint_interval_sec = 30
 enable_hummock_data_archive = false
 hummock_time_travel_snapshot_interval = 100
@@ -158,6 +159,19 @@ max_total_query_size_bytes = 1073741824
 min_single_query_size_bytes = 1048576
 max_single_query_size_bytes = 1073741824
 
+[[frontend.hba_config.entries]]
+connection_type = "Local"
+databases = ["all"]
+users = ["all"]
+auth_method = "trust"
+
+[[frontend.hba_config.entries]]
+connection_type = "Host"
+databases = ["all"]
+users = ["all"]
+addresses = ["0.0.0.0/0"]
+auth_method = "password"
+
 [streaming]
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
@@ -210,7 +224,7 @@ connect_timeout_secs = 5
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
-shared_buffer_flush_ratio = 0.800000011920929
+shared_buffer_flush_ratio = 0.8
 shared_buffer_min_batch_flush_size_mb = 800
 imm_merge_threshold = 0
 write_conflict_detection_enabled = true
@@ -253,7 +267,8 @@ iceberg_compaction_max_concurrent_closes = 8
 iceberg_compaction_enable_dynamic_size_estimation = true
 iceberg_compaction_size_estimation_smoothing_factor = 0.3
 iceberg_compaction_small_file_threshold_mb = 32
-iceberg_compaction_max_task_total_size_mb = 51200
+iceberg_compaction_pending_parallelism_budget_multiplier = 4.0
+iceberg_compaction_target_binpack_group_size_mb = 102400
 
 [storage.cache]
 vector_block_cache_capacity_mb = 16

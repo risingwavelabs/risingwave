@@ -165,7 +165,7 @@ create source s (
 query T
 show sources
 ----
-s
+public.s
 
 query T
 show tables
@@ -188,12 +188,12 @@ create table s (
 query T
 show sources
 ----
-s
+public.s
 
 query T
 show tables
 ----
-s
+public.s
 
 statement ok
 drop table s

@@ -663,14 +663,14 @@ SELECT decode(encode('\x1234567890abcdef00', 'escape'), 'escape');
 --
 -- get_bit/set_bit etc
 --
---@ SELECT get_bit('\x1234567890abcdef00'::bytea, 43);
---@ SELECT get_bit('\x1234567890abcdef00'::bytea, 99);  -- error
---@ SELECT set_bit('\x1234567890abcdef00'::bytea, 43, 0);
---@ SELECT set_bit('\x1234567890abcdef00'::bytea, 99, 0);  -- error
---@ SELECT get_byte('\x1234567890abcdef00'::bytea, 3);
---@ SELECT get_byte('\x1234567890abcdef00'::bytea, 99);  -- error
---@ SELECT set_byte('\x1234567890abcdef00'::bytea, 7, 11);
---@ SELECT set_byte('\x1234567890abcdef00'::bytea, 99, 11);  -- error
+SELECT get_bit('\x1234567890abcdef00'::bytea, 43);
+SELECT get_bit('\x1234567890abcdef00'::bytea, 99);  -- error
+SELECT set_bit('\x1234567890abcdef00'::bytea, 43, 0);
+SELECT set_bit('\x1234567890abcdef00'::bytea, 99, 0);  -- error
+SELECT get_byte('\x1234567890abcdef00'::bytea, 3);
+SELECT get_byte('\x1234567890abcdef00'::bytea, 99);  -- error
+SELECT set_byte('\x1234567890abcdef00'::bytea, 7, 11);
+SELECT set_byte('\x1234567890abcdef00'::bytea, 99, 11);  -- error
 
 --
 -- test behavior of escape_string_warning and standard_conforming_strings options
@@ -754,7 +754,7 @@ SELECT repeat('Pg', -4);
 --@ SELECT encode(overlay(E'Th\\000omas'::bytea placing E'\\002\\003'::bytea from 8),'escape');
 --@ SELECT encode(overlay(E'Th\\000omas'::bytea placing E'\\002\\003'::bytea from 5 for 3),'escape');
 
---@ SELECT bit_count('\x1234567890'::bytea);
+SELECT bit_count('\x1234567890'::bytea);
 
 --@ SELECT unistr('\0064at\+0000610');
 --@ SELECT unistr('d\u0061t\U000000610');

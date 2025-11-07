@@ -50,7 +50,7 @@ const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
-const fn _default_stream_load_http_timeout_ms() -> u64 {
+pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
 
@@ -108,6 +108,7 @@ pub struct StarrocksConfig {
         default = "_default_stream_load_http_timeout_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub stream_load_http_timeout_ms: u64,
 
     /// Set this option to a positive integer n, RisingWave will try to commit data
@@ -180,7 +181,7 @@ impl EnforceSecret for StarrocksSink {
 
 impl StarrocksSink {
     pub fn new(param: SinkParam, config: StarrocksConfig, schema: Schema) -> Result<Self> {
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         let is_append_only = param.sink_type.is_append_only();
         Ok(Self {
             config,

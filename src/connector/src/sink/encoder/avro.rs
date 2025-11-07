@@ -210,7 +210,7 @@ enum OptIdx {
 /// * For `validate`, the inputs are (RisingWave type, ProtoBuf type).
 /// * For `encode`, the inputs are (RisingWave type, RisingWave data, ProtoBuf type).
 ///
-/// Thus we impl [`MaybeData`] for both [`()`] and [`DatumRef`].
+/// Thus we impl [`MaybeData`] for both `()` and [`DatumRef`].
 trait MaybeData: std::fmt::Debug {
     type Out;
 
@@ -447,6 +447,25 @@ fn on_field<D: MaybeData>(
         },
         DataType::Varchar => match inner {
             AvroSchema::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+
+            // Add enum support
+            AvroSchema::Enum(enum_schema) => maybe.on_base(|s| {
+                let str_value = s.into_utf8();
+
+                if let Some(position) = enum_schema
+                    .symbols
+                    .iter()
+                    .position(|symbol| symbol == str_value)
+                {
+                    Ok(Value::Enum(position as u32, str_value.to_owned()))
+                } else {
+                    Err(FieldEncodeError::new(format!(
+                        "Value '{}' is not a valid enum symbol. Valid symbols are: {:?}",
+                        str_value, enum_schema.symbols
+                    )))
+                }
+            })?,
+
             _ => return no_match_err(),
         },
         DataType::Bytea => match inner {
@@ -974,6 +993,28 @@ mod tests {
             ]),
         );
 
+        // NEW: Varchar to Enum tests
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("RED".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(0, "RED".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("BLUE".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(2, "BLUE".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("ACTIVE".into())),
+            r#"{"type": "enum", "name": "Status", "symbols": ["ACTIVE", "INACTIVE"]}"#,
+            Value::Enum(0, "ACTIVE".to_owned()),
+        );
+
         // Test complex JSON with nested structures - using serde_json::Value comparison
         let complex_json = r#"{
             "person": {
@@ -1003,7 +1044,7 @@ mod tests {
         let input_json = JsonbVal::from_str(complex_json).unwrap();
         let result = on_field(
             &DataType::Jsonb,
-            Some(ScalarImpl::Jsonb(input_json.clone())).to_datum_ref(),
+            Some(ScalarImpl::Jsonb(input_json)).to_datum_ref(),
             &AvroSchema::parse_str(r#""string""#).unwrap(),
             &NamesRef::new(&AvroSchema::parse_str(r#""string""#).unwrap()).unwrap(),
         )
@@ -1115,7 +1156,7 @@ mod tests {
             Field::with_name(DataType::Int32, "req"),
             Field::with_name(DataType::Varchar, "extra"),
         ]);
-        let Err(err) = AvroEncoder::new(schema, None, avro_schema.clone(), header) else {
+        let Err(err) = AvroEncoder::new(schema, None, avro_schema, header) else {
             panic!()
         };
         assert_eq!(
@@ -1252,7 +1293,7 @@ mod tests {
 
         test_ok(
             t,
-            datum.clone(),
+            datum,
             right,
             Value::Union(0, Value::TimestampMillis(1).into()),
         );

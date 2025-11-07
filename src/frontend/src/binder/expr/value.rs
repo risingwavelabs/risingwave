@@ -452,7 +452,7 @@ mod tests {
             "2 minutes",
             "1 month",
         ];
-        let data = vec![
+        let data = [
             Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,

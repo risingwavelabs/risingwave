@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::FragmentTypeMask;
+use risingwave_common::id::JobId;
 use sea_orm::prelude::DateTime;
 
 use super::*;
+use crate::controller::fragment::FragmentTypeMaskExt;
 
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
@@ -51,7 +54,7 @@ impl CatalogController {
                     None
                 };
                 MetaTelemetryJobDesc {
-                    table_id,
+                    table_id: table_id.as_raw_id() as _,
                     connector: connector_info,
                     optimization: vec![],
                 }
@@ -62,14 +65,15 @@ impl CatalogController {
     pub async fn list_background_creating_jobs(
         &self,
         include_initial: bool,
-    ) -> MetaResult<Vec<(ObjectId, String, DateTime)>> {
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<(JobId, String, DateTime)>> {
         let inner = self.inner.read().await;
         let status_cond = if include_initial {
             streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating])
         } else {
             streaming_job::Column::JobStatus.eq(JobStatus::Creating)
         };
-        let mut table_info: Vec<(ObjectId, String, DateTime)> = Table::find()
+        let mut table_info: Vec<(JobId, String, DateTime)> = Table::find()
             .select_only()
             .columns([table::Column::TableId, table::Column::Definition])
             .column(object::Column::InitializedAt)
@@ -78,12 +82,17 @@ impl CatalogController {
             .filter(
                 streaming_job::Column::CreateType
                     .eq(CreateType::Background)
-                    .and(status_cond.clone()),
+                    .and(status_cond.clone())
+                    .and(
+                        database_id
+                            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+                            .unwrap_or_else(|| SimpleExpr::from(true)),
+                    ),
             )
             .into_tuple()
             .all(&inner.db)
             .await?;
-        let sink_info: Vec<(ObjectId, String, DateTime)> = Sink::find()
+        let sink_info: Vec<(JobId, String, DateTime)> = Sink::find()
             .select_only()
             .columns([sink::Column::SinkId, sink::Column::Definition])
             .column(object::Column::InitializedAt)
@@ -92,7 +101,12 @@ impl CatalogController {
             .filter(
                 streaming_job::Column::CreateType
                     .eq(CreateType::Background)
-                    .and(status_cond),
+                    .and(status_cond)
+                    .and(
+                        database_id
+                            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+                            .unwrap_or_else(|| SimpleExpr::from(true)),
+                    ),
             )
             .into_tuple()
             .all(&inner.db)
@@ -268,5 +282,26 @@ impl CatalogController {
     pub async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {
         let inner = self.inner.read().await;
         inner.list_functions().await
+    }
+
+    /// `Unmigrated` refers to table-fragments that have not yet been migrated to the new plan (for now, this means
+    /// table-fragments that do not use `UpstreamSinkUnion` operator to receive multiple upstream sinks)
+    pub async fn list_unmigrated_tables(&self) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+
+        let table_objs = Table::find()
+            .filter(table::Column::TableType.eq(TableType::Table))
+            .find_also_related(Object)
+            .join(JoinType::InnerJoin, object::Relation::Fragment.def())
+            .filter(FragmentTypeMask::intersects(FragmentTypeFlag::Mview).and(
+                FragmentTypeMask::disjoint(FragmentTypeFlag::UpstreamSinkUnion),
+            ))
+            .all(&inner.db)
+            .await?;
+
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
     }
 }

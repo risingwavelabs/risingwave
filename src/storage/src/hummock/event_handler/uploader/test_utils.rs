@@ -61,7 +61,7 @@ use crate::opts::StorageOpts;
 use crate::store::SealCurrentEpochOptions;
 
 pub(crate) const INITIAL_EPOCH: HummockEpoch = test_epoch(5);
-pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+pub(crate) const TEST_TABLE_ID: TableId = TableId::new(233);
 
 pub trait UploadOutputFuture = Future<Output = HummockResult<UploadTaskOutput>> + Send + 'static;
 pub trait UploadFn<Fut: UploadOutputFuture> =
@@ -168,7 +168,7 @@ pub(super) fn gen_sstable_info(
                 right: end_full_key.encode().into(),
                 right_exclusive: true,
             },
-            table_ids: vec![TEST_TABLE_ID.table_id],
+            table_ids: vec![TEST_TABLE_ID],
             ..Default::default()
         }
         .into(),

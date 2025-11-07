@@ -53,18 +53,11 @@ message TableFragments {
   }
   // Runtime information of an actor
   message ActorStatus {
-    // Current state of actor
-    enum ActorState {
-      UNSPECIFIED = 0;
-      // Initial state after creation
-      INACTIVE = 1;
-      // Running normally
-      RUNNING = 2;
-    }
     // Current on which worker
     common.ActorLocation location = 1;
-    // Current state
-    ActorState state = 2;
+    // Field 2 for actor state has been reserved for backward compatibility.
+    reserved 2;
+    reserved "state";
   }
   message Fragment {
     enum FragmentDistributionType {
@@ -243,6 +236,26 @@ message GetFragmentByIdResponse {
   FragmentDistribution distribution = 1;
 }
 
+message GetFragmentVnodesRequest {
+  uint32 fragment_id = 1;
+}
+
+message GetFragmentVnodesResponse {
+  message ActorVnodes {
+    uint32 actor_id = 1;
+    repeated uint32 vnode_indices = 2;
+  }
+  repeated ActorVnodes actor_vnodes = 1;
+}
+
+message GetActorVnodesRequest {
+  uint32 actor_id = 1;
+}
+
+message GetActorVnodesResponse {
+  repeated uint32 vnode_indices = 1;
+}
+
 message ListStreamingJobStatesRequest {}
 
 message ListStreamingJobStatesResponse {
@@ -271,6 +284,7 @@ message FragmentDistribution {
   uint32 parallelism = 7;
   uint32 vnode_count = 8;
   stream_plan.StreamNode node = 9;
+  string parallelism_policy = 10;
 }
 
 message ListFragmentDistributionResponse {
@@ -295,7 +309,8 @@ message ListActorStatesResponse {
     uint32 fragment_id = 2;
     reserved 3;
     reserved "parallel_unit_id";
-    TableFragments.ActorStatus.ActorState state = 4;
+    reserved 4;
+    reserved "state";
     uint32 worker_id = 5;
   }
   repeated ActorState states = 1;
@@ -409,8 +424,11 @@ service StreamManagerService {
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
+  rpc GetFragmentVnodes(GetFragmentVnodesRequest) returns (GetFragmentVnodesResponse);
+  rpc GetActorVnodes(GetActorVnodesRequest) returns (GetActorVnodesResponse);
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
+  rpc ListUnmigratedTables(ListUnmigratedTablesRequest) returns (ListUnmigratedTablesResponse);
 }
 
 // Below for cluster service.
@@ -539,7 +557,9 @@ message MetaSnapshot {
   reserved "parallel_unit_mappings";
   GetSessionParamsResponse session_params = 20;
   repeated catalog.Secret secrets = 23;
-  uint64 compute_node_total_cpu_count = 24;
+  reserved 24;
+  reserved "compute_node_total_cpu_count";
+  common.ClusterResource cluster_resource = 25;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockVersion hummock_version = 12;
   backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
@@ -609,12 +629,14 @@ message SubscribeResponse {
     FragmentWorkerSlotMapping streaming_worker_slot_mapping = 27;
     FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
     catalog.Secret secret = 29;
-    uint64 compute_node_total_cpu_count = 30;
+    common.ClusterResource cluster_resource = 31;
   }
   reserved 12;
   reserved "parallel_unit_mapping";
   reserved 23;
   reserved "serving_parallel_unit_mappings";
+  reserved 30;
+  reserved "compute_node_total_cpu_count";
 }
 
 service NotificationService {
@@ -1019,3 +1041,13 @@ message SetSyncLogStoreAlignedRequest {
 }
 
 message SetSyncLogStoreAlignedResponse {}
+
+message ListUnmigratedTablesRequest {}
+
+message ListUnmigratedTablesResponse {
+  message UnmigratedTable {
+    uint32 table_id = 1;
+    string table_name = 2;
+  }
+  repeated UnmigratedTable tables = 1;
+}

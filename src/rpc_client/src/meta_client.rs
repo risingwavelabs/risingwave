@@ -34,16 +34,17 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::id::{DatabaseId, JobId, SchemaId};
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult,
@@ -60,6 +61,7 @@ use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -130,8 +132,6 @@ use crate::hummock_meta_client::{
 use crate::meta_rpc_client_method_impl;
 
 type ConnectionId = u32;
-type DatabaseId = u32;
-type SchemaId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
@@ -188,15 +188,15 @@ impl MetaClient {
     pub async fn create_connection(
         &self,
         connection_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         req: create_connection_request::Payload,
     ) -> Result<WaitVersion> {
         let request = CreateConnectionRequest {
             name: connection_name,
-            database_id,
-            schema_id,
+            database_id: database_id.into(),
+            schema_id: schema_id.into(),
             owner_id,
             payload: Some(req),
         };
@@ -209,15 +209,15 @@ impl MetaClient {
     pub async fn create_secret(
         &self,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = CreateSecretRequest {
             name: secret_name,
-            database_id,
-            schema_id,
+            database_id: database_id.into(),
+            schema_id: schema_id.into(),
             owner_id,
             value,
         };
@@ -313,6 +313,7 @@ impl MetaClient {
                             rw_version: RW_VERSION.to_owned(),
                             total_memory_bytes: system_memory_available_bytes() as _,
                             total_cpu_cores: total_cpu_available() as _,
+                            hostname: hostname(),
                         }),
                     })
                     .await
@@ -444,7 +445,7 @@ impl MetaClient {
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropMaterializedViewRequest {
-            table_id: table_id.table_id(),
+            table_id: table_id.as_raw_id(),
             cascade,
         };
 
@@ -584,7 +585,7 @@ impl MetaClient {
                     value: barrier_interval_ms,
                 };
                 AlterDatabaseParamRequest {
-                    database_id,
+                    database_id: database_id.into(),
                     param: Some(alter_database_param_request::Param::BarrierIntervalMs(
                         barrier_interval_ms,
                     )),
@@ -595,7 +596,7 @@ impl MetaClient {
                     value: checkpoint_frequency,
                 };
                 AlterDatabaseParamRequest {
-                    database_id,
+                    database_id: database_id.into(),
                     param: Some(alter_database_param_request::Param::CheckpointFrequency(
                         checkpoint_frequency,
                     )),
@@ -611,10 +612,10 @@ impl MetaClient {
     pub async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        new_schema_id: u32,
+        new_schema_id: SchemaId,
     ) -> Result<WaitVersion> {
         let request = AlterSetSchemaRequest {
-            new_schema_id,
+            new_schema_id: new_schema_id.into(),
             object: Some(object),
         };
         let resp = self.inner.alter_set_schema(request).await?;
@@ -635,17 +636,31 @@ impl MetaClient {
 
     pub async fn alter_parallelism(
         &self,
-        table_id: u32,
+        job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterParallelismRequest {
-            table_id,
+            table_id: job_id.into(),
             parallelism: Some(parallelism),
             deferred,
         };
 
         self.inner.alter_parallelism(request).await?;
+        Ok(())
+    }
+
+    pub async fn alter_fragment_parallelism(
+        &self,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
+    ) -> Result<()> {
+        let request = AlterFragmentParallelismRequest {
+            fragment_ids,
+            parallelism,
+        };
+
+        self.inner.alter_fragment_parallelism(request).await?;
         Ok(())
     }
 
@@ -666,12 +681,12 @@ impl MetaClient {
 
     pub async fn alter_resource_group(
         &self,
-        table_id: u32,
+        table_id: TableId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterResourceGroupRequest {
-            table_id,
+            table_id: table_id.into(),
             resource_group,
             deferred,
         };
@@ -697,16 +712,16 @@ impl MetaClient {
         &self,
         secret_id: u32,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
         let request = AlterSecretRequest {
             secret_id,
             name: secret_name,
-            database_id,
-            schema_id,
+            database_id: database_id.into(),
+            schema_id: schema_id.into(),
             owner_id,
             value,
         };
@@ -786,7 +801,7 @@ impl MetaClient {
     ) -> Result<WaitVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(SourceId::Id),
-            table_id: table_id.table_id(),
+            table_id: table_id.as_raw_id(),
             cascade,
         };
 
@@ -874,7 +889,9 @@ impl MetaClient {
     }
 
     pub async fn drop_database(&self, database_id: DatabaseId) -> Result<WaitVersion> {
-        let request = DropDatabaseRequest { database_id };
+        let request = DropDatabaseRequest {
+            database_id: database_id.into(),
+        };
         let resp = self.inner.drop_database(request).await?;
         Ok(resp
             .version
@@ -882,7 +899,10 @@ impl MetaClient {
     }
 
     pub async fn drop_schema(&self, schema_id: SchemaId, cascade: bool) -> Result<WaitVersion> {
-        let request = DropSchemaRequest { schema_id, cascade };
+        let request = DropSchemaRequest {
+            schema_id: schema_id.into(),
+            cascade,
+        };
         let resp = self.inner.drop_schema(request).await?;
         Ok(resp
             .version
@@ -966,8 +986,8 @@ impl MetaClient {
     ) -> Result<()> {
         let request = AlterDefaultPrivilegeRequest {
             user_ids,
-            database_id,
-            schema_ids,
+            database_id: database_id.into(),
+            schema_ids: schema_ids.into_iter().map(|s| s.into()).collect(),
             operation: Some(operation),
             granted_by,
         };
@@ -1079,7 +1099,9 @@ impl MetaClient {
     }
 
     pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
-        let request = FlushRequest { database_id };
+        let request = FlushRequest {
+            database_id: database_id.into(),
+        };
         let resp = self.inner.flush(request).await?;
         Ok(HummockVersionId::new(resp.hummock_version_id))
     }
@@ -1146,6 +1168,26 @@ impl MetaClient {
             .get_fragment_by_id(GetFragmentByIdRequest { fragment_id })
             .await?;
         Ok(resp.distribution)
+    }
+
+    pub async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>> {
+        let resp = self
+            .inner
+            .get_fragment_vnodes(GetFragmentVnodesRequest { fragment_id })
+            .await?;
+        Ok(resp
+            .actor_vnodes
+            .into_iter()
+            .map(|actor| (actor.actor_id, actor.vnode_indices))
+            .collect())
+    }
+
+    pub async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>> {
+        let resp = self
+            .inner
+            .get_actor_vnodes(GetActorVnodesRequest { actor_id })
+            .await?;
+        Ok(resp.vnode_indices)
     }
 
     pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
@@ -1497,7 +1539,7 @@ impl MetaClient {
     pub async fn split_compaction_group(
         &self,
         group_id: CompactionGroupId,
-        table_ids_to_new_group: &[StateTableId],
+        table_ids_to_new_group: &[u32],
         partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let req = SplitCompactionGroupRequest {
@@ -1777,6 +1819,26 @@ impl MetaClient {
         Ok(resp.cdc_progress)
     }
 
+    pub async fn create_iceberg_table(
+        &self,
+        table_job_info: PbTableJobInfo,
+        sink_job_info: PbSinkJobInfo,
+        iceberg_source: PbSource,
+        if_not_exists: bool,
+    ) -> Result<WaitVersion> {
+        let request = CreateIcebergTableRequest {
+            table_info: Some(table_job_info),
+            sink_info: Some(sink_job_info),
+            iceberg_source: Some(iceberg_source),
+            if_not_exists,
+        };
+
+        let resp = self.inner.create_iceberg_table(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         let request = ListIcebergTablesRequest {};
         let resp = self.inner.list_iceberg_tables(request).await?;
@@ -1803,6 +1865,16 @@ impl MetaClient {
 
     pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.inner.refresh(request).await
+    }
+
+    pub async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>> {
+        let request = ListUnmigratedTablesRequest {};
+        let resp = self.inner.list_unmigrated_tables(request).await?;
+        Ok(resp
+            .tables
+            .into_iter()
+            .map(|table| (table.table_id, table.table_name))
+            .collect())
     }
 }
 
@@ -2016,7 +2088,8 @@ impl GrpcMetaClientCore {
         let session_params_client = SessionParamServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel.clone());
-        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
+        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone())
+            .max_decoding_message_size(usize::MAX);
         let event_log_client = EventLogServiceClient::new(channel.clone());
         let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
         let hosted_iceberg_catalog_service_client =
@@ -2280,7 +2353,7 @@ impl GrpcMetaClient {
         let members = match strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
             MetaAddressStrategy::List(addrs) => {
-                let mut members = LruCache::new(20);
+                let mut members = LruCache::new(20.try_into().unwrap());
                 for addr in addrs {
                     members.put(addr.clone(), None);
                 }
@@ -2399,13 +2472,17 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
+            ,{ stream_client, get_fragment_vnodes, GetFragmentVnodesRequest, GetFragmentVnodesResponse }
+            ,{ stream_client, get_actor_vnodes, GetActorVnodesRequest, GetActorVnodesResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
             ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
+            ,{ stream_client, list_unmigrated_tables, ListUnmigratedTablesRequest, ListUnmigratedTablesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
@@ -2445,6 +2522,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
             ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
+            ,{ ddl_client, create_iceberg_table, CreateIcebergTableRequest, CreateIcebergTableResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

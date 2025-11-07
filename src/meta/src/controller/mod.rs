@@ -178,7 +178,7 @@ pub struct ObjectModel<M: ModelTrait>(M, object::Model);
 impl From<ObjectModel<database::Model>> for PbDatabase {
     fn from(value: ObjectModel<database::Model>) -> Self {
         Self {
-            id: value.0.database_id as _,
+            id: value.0.database_id.as_raw_id(),
             name: value.0.name,
             owner: value.1.owner_id as _,
             resource_group: value.0.resource_group.clone(),
@@ -193,10 +193,10 @@ impl From<ObjectModel<secret::Model>> for PbSecret {
         Self {
             id: value.0.secret_id as _,
             name: value.0.name,
-            database_id: value.1.database_id.unwrap() as _,
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             value: value.0.value,
             owner: value.1.owner_id as _,
-            schema_id: value.1.schema_id.unwrap() as _,
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
         }
     }
 }
@@ -204,9 +204,9 @@ impl From<ObjectModel<secret::Model>> for PbSecret {
 impl From<ObjectModel<schema::Model>> for PbSchema {
     fn from(value: ObjectModel<schema::Model>) -> Self {
         Self {
-            id: value.0.schema_id as _,
+            id: value.0.schema_id.as_raw_id(),
             name: value.0.name,
-            database_id: value.1.database_id.unwrap() as _,
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             owner: value.1.owner_id as _,
         }
     }
@@ -215,9 +215,9 @@ impl From<ObjectModel<schema::Model>> for PbSchema {
 impl From<ObjectModel<table::Model>> for PbTable {
     fn from(value: ObjectModel<table::Model>) -> Self {
         Self {
-            id: value.0.table_id as _,
-            schema_id: value.1.schema_id.unwrap() as _,
-            database_id: value.1.database_id.unwrap() as _,
+            id: value.0.table_id.as_raw_id(),
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             pk: value.0.pk.to_protobuf(),
@@ -273,7 +273,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             cdc_table_id: value.0.cdc_table_id,
             maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
             webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
-            job_id: value.0.belongs_to_job_id.map(|id| id as _),
+            job_id: value.0.belongs_to_job_id.map(|id| id.as_raw_id()),
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
             refreshable: value.0.refreshable,
@@ -300,8 +300,8 @@ impl From<ObjectModel<source::Model>> for PbSource {
         }
         Self {
             id: value.0.source_id as _,
-            schema_id: value.1.schema_id.unwrap() as _,
-            database_id: value.1.database_id.unwrap() as _,
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             name: value.0.name,
             row_id_index: value.0.row_id_index.map(|id| id as _),
             columns: value.0.columns.to_protobuf(),
@@ -323,7 +323,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             optional_associated_table_id: value
                 .0
                 .optional_associated_table_id
-                .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id as _)),
+                .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id.as_raw_id())),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
@@ -340,8 +340,8 @@ impl From<ObjectModel<sink::Model>> for PbSink {
         }
         Self {
             id: value.0.sink_id as _,
-            schema_id: value.1.schema_id.unwrap() as _,
-            database_id: value.1.database_id.unwrap() as _,
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             plan_pk: value.0.plan_pk.to_protobuf(),
@@ -362,7 +362,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             sink_from_name: value.0.sink_from_name,
             stream_job_status: PbStreamJobStatus::Created as _,
             format_desc: value.0.sink_format_desc.map(|desc| desc.to_protobuf()),
-            target_table: value.0.target_table.map(|id| id as _),
+            target_table: value.0.target_table.map(|id| id.as_raw_id()),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             create_type: PbCreateType::Foreground as _,
@@ -375,7 +375,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             auto_refresh_schema_from_table: value
                 .0
                 .auto_refresh_schema_from_table
-                .map(|id| id as _),
+                .map(|id| id.as_raw_id()),
         }
     }
 }
@@ -384,8 +384,8 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
     fn from(value: ObjectModel<subscription::Model>) -> Self {
         Self {
             id: value.0.subscription_id as _,
-            schema_id: value.1.schema_id.unwrap() as _,
-            database_id: value.1.database_id.unwrap() as _,
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             name: value.0.name,
             owner: value.1.owner_id as _,
             retention_seconds: value.0.retention_seconds as _,
@@ -408,12 +408,12 @@ impl From<ObjectModel<index::Model>> for PbIndex {
     fn from(value: ObjectModel<index::Model>) -> Self {
         Self {
             id: value.0.index_id as _,
-            schema_id: value.1.schema_id.unwrap() as _,
-            database_id: value.1.database_id.unwrap() as _,
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             name: value.0.name,
             owner: value.1.owner_id as _,
-            index_table_id: value.0.index_table_id as _,
-            primary_table_id: value.0.primary_table_id as _,
+            index_table_id: value.0.index_table_id.as_raw_id(),
+            primary_table_id: value.0.primary_table_id.as_raw_id(),
             index_item: value.0.index_items.to_protobuf(),
             index_column_properties: value
                 .0
@@ -439,8 +439,8 @@ impl From<ObjectModel<view::Model>> for PbView {
     fn from(value: ObjectModel<view::Model>) -> Self {
         Self {
             id: value.0.view_id as _,
-            schema_id: value.1.schema_id.unwrap() as _,
-            database_id: value.1.database_id.unwrap() as _,
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             name: value.0.name,
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
@@ -459,8 +459,8 @@ impl From<ObjectModel<connection::Model>> for PbConnection {
         };
         Self {
             id: value.1.oid as _,
-            schema_id: value.1.schema_id.unwrap() as _,
-            database_id: value.1.database_id.unwrap() as _,
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             name: value.0.name,
             owner: value.1.owner_id as _,
             info: Some(info),
@@ -472,8 +472,8 @@ impl From<ObjectModel<function::Model>> for PbFunction {
     fn from(value: ObjectModel<function::Model>) -> Self {
         Self {
             id: value.0.function_id as _,
-            schema_id: value.1.schema_id.unwrap() as _,
-            database_id: value.1.database_id.unwrap() as _,
+            schema_id: value.1.schema_id.unwrap().as_raw_id(),
+            database_id: value.1.database_id.unwrap().as_raw_id(),
             name: value.0.name,
             owner: value.1.owner_id as _,
             arg_names: value.0.arg_names.split(',').map(|s| s.to_owned()).collect(),

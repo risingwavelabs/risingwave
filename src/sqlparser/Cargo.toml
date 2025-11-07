@@ -35,7 +35,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 anyhow = "1"
-console = "0.15"
+console = "0.16"
 libtest-mimic = "0.8"
 matches = "0.1"
 serde = { workspace = true }

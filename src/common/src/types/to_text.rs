@@ -65,6 +65,11 @@ pub trait ToText {
         self.write(&mut s).unwrap();
         s
     }
+
+    /// Returns an displayable wrapper implemented with `ToText::write`.
+    fn text_display(&self) -> impl std::fmt::Display + '_ {
+        std::fmt::from_fn(|f| self.write(f))
+    }
 }
 
 macro_rules! implement_using_to_string {

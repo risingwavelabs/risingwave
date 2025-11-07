@@ -41,9 +41,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::table::collect_data_chunk_with_builder;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
-use crate::executor::{
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
-};
+use crate::executor::{Message, StreamExecutorError, StreamExecutorResult, Watermark};
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
 pub const METADATA_STATE_LEN: usize = 3;
@@ -302,10 +300,10 @@ impl BackfillProgressPerVnode {
 pub(crate) fn mark_chunk(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamChunk {
-    let chunk = chunk.compact();
+    let chunk = chunk.compact_vis();
     mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
 }
 
@@ -313,11 +311,11 @@ pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
     last_cdc_offset: Option<CdcOffset>,
 ) -> StreamExecutorResult<StreamChunk> {
-    let chunk = chunk.compact();
+    let chunk = chunk.compact_vis();
     mark_cdc_chunk_inner(
         offset_parse_func,
         chunk,
@@ -335,7 +333,7 @@ pub(crate) fn mark_cdc_chunk(
 pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
     chunk: &StreamChunk,
     backfill_state: &BackfillState,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     upstream_table: &ReplicatedStateTable<S, SD>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
@@ -393,7 +391,7 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
 fn mark_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamChunk {
     let (data, ops) = chunk.into_parts();
@@ -471,7 +469,7 @@ fn mark_cdc_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     last_cdc_offset: Option<CdcOffset>,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
     let (data, ops) = chunk.into_parts();

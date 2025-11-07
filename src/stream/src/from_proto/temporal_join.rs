@@ -119,7 +119,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect_vec();
 
-            let null_safe = node.get_null_safe().to_vec();
+            let null_safe = node.get_null_safe().clone();
 
             let join_key_data_types = left_join_keys
                 .iter()

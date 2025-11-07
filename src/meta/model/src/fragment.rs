@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::JobId;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{FragmentId, I32Array, ObjectId, StreamNode};
+use crate::{FragmentId, I32Array, StreamNode, StreamingParallelism};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "fragment")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub fragment_id: FragmentId,
-    pub job_id: ObjectId,
+    pub job_id: JobId,
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     /// Note: the `StreamNode` is different from the final plan node used by actors.
@@ -33,6 +34,8 @@ pub struct Model {
     #[deprecated]
     pub upstream_fragment_id: I32Array,
     pub vnode_count: i32,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub parallelism: Option<StreamingParallelism>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
@@ -65,8 +68,6 @@ impl From<PbFragmentDistributionType> for DistributionType {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::actor::Entity")]
-    Actor,
     #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::JobId",
@@ -75,12 +76,6 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Object,
-}
-
-impl Related<super::actor::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Actor.def()
-    }
 }
 
 impl Related<super::object::Entity> for Entity {

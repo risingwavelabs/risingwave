@@ -14,7 +14,6 @@
 
 pub use {Source as SourceModel, Table as TableModel};
 
-pub use super::actor::Entity as Actor;
 pub use super::catalog_version::Entity as CatalogVersion;
 pub use super::cluster::Entity as Cluster;
 pub use super::compaction_config::Entity as CompactionConfig;
@@ -24,6 +23,7 @@ pub use super::connection::Entity as Connection;
 pub use super::database::Entity as Database;
 pub use super::fragment::Entity as Fragment;
 pub use super::fragment_relation::Entity as FragmentRelation;
+pub use super::fragment_splits::Entity as FragmentSplits;
 pub use super::function::Entity as Function;
 pub use super::hummock_pinned_snapshot::Entity as HummockPinnedSnapshot;
 pub use super::hummock_pinned_version::Entity as HummockPinnedVersion;
@@ -38,7 +38,6 @@ pub use super::secret::Entity as Secret;
 pub use super::session_parameter::Entity as SessionParameter;
 pub use super::sink::Entity as Sink;
 pub use super::source::Entity as Source;
-pub use super::source_splits::Entity as SourceSplits;
 pub use super::streaming_job::Entity as StreamingJob;
 pub use super::subscription::Entity as Subscription;
 pub use super::system_parameter::Entity as SystemParameter;

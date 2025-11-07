@@ -69,10 +69,10 @@ where
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
 
-    last_table_id: u32,
+    last_table_id: TableId,
 
     vnode_count: usize,
-    table_vnode_partition: BTreeMap<u32, u32>,
+    table_vnode_partition: BTreeMap<TableId, u32>,
     split_weight_by_vnode: u32,
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
@@ -95,7 +95,7 @@ where
         builder_factory: F,
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        table_vnode_partition: BTreeMap<u32, u32>,
+        table_vnode_partition: BTreeMap<TableId, u32>,
         concurrent_uploading_sst_count: Option<usize>,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> Self {
@@ -108,7 +108,7 @@ where
             current_builder: None,
             compactor_metrics,
             task_progress,
-            last_table_id: 0,
+            last_table_id: 0.into(),
             table_vnode_partition,
             vnode_count,
             split_weight_by_vnode: 0,
@@ -129,7 +129,7 @@ where
             current_builder: None,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
-            last_table_id: 0,
+            last_table_id: 0.into(),
             table_vnode_partition: BTreeMap::default(),
             vnode_count: VirtualNode::COUNT_FOR_TEST,
             split_weight_by_vnode: 0,
@@ -229,13 +229,12 @@ where
 
     pub fn check_switch_builder(&mut self, user_key: &UserKey<&[u8]>) -> bool {
         let mut switch_builder = false;
-        if user_key.table_id.table_id != self.last_table_id {
-            let new_vnode_partition_count =
-                self.table_vnode_partition.get(&user_key.table_id.table_id);
+        if user_key.table_id != self.last_table_id {
+            let new_vnode_partition_count = self.table_vnode_partition.get(&user_key.table_id);
 
             self.vnode_count = self
                 .compaction_catalog_agent_ref
-                .vnode_count(user_key.table_id.table_id);
+                .vnode_count(user_key.table_id);
             self.largest_vnode_in_current_partition = self.vnode_count - 1;
 
             if new_vnode_partition_count.is_some()
@@ -258,7 +257,7 @@ where
                 }
 
                 // table_id change
-                self.last_table_id = user_key.table_id.table_id;
+                self.last_table_id = user_key.table_id;
                 switch_builder = true;
                 if self.split_weight_by_vnode > 1 {
                     self.largest_vnode_in_current_partition =
@@ -393,11 +392,11 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             .clone()
             .create_sst_writer(id, writer_options);
         let table_id_to_vnode = HashMap::from_iter(vec![(
-            TableId::default().table_id(),
+            TableId::default().as_raw_id(),
             VirtualNode::COUNT_FOR_TEST,
         )]);
         let table_id_to_watermark_serde =
-            HashMap::from_iter(vec![(TableId::default().table_id(), None)]);
+            HashMap::from_iter(vec![(TableId::default().as_raw_id(), None)]);
         let builder = SstableBuilder::for_test(
             id,
             writer,
@@ -548,8 +547,11 @@ mod tests {
         };
 
         {
-            let table_partition_vnode =
-                BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
+            let table_partition_vnode = BTreeMap::from([
+                (1_u32.into(), 4_u32),
+                (2_u32.into(), 4_u32),
+                (3_u32.into(), 4_u32),
+            ]);
 
             let compaction_catalog_agent_ref =
                 CompactionCatalogAgent::for_test(vec![0, 1, 2, 3, 4, 5]);
@@ -603,12 +605,16 @@ mod tests {
 
         {
             // Test different table vnode count
-            let table_partition_vnode =
-                BTreeMap::from([(1_u32, 4_u32), (2_u32, 4_u32), (3_u32, 4_u32)]);
+            let table_partition_vnode = BTreeMap::from([
+                (1_u32.into(), 4_u32),
+                (2_u32.into(), 4_u32),
+                (3_u32.into(), 4_u32),
+            ]);
 
-            let table_id_to_vnode = HashMap::from_iter(vec![(1, 64), (2, 128), (3, 256)]);
+            let table_id_to_vnode =
+                HashMap::from_iter(vec![(1.into(), 64), (2.into(), 128), (3.into(), 256)]);
             let table_id_to_watermark_serde =
-                HashMap::from_iter(vec![(1, None), (2, None), (3, None)]);
+                HashMap::from_iter(vec![(1.into(), None), (2.into(), None), (3.into(), None)]);
             let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
                 FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
                 table_id_to_vnode,

@@ -52,11 +52,11 @@ fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSub
                 .map(|subscription| RwSubscription {
                     id: subscription.id.subscription_id as i32,
                     name: subscription.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: subscription.owner.user_id as i32,
                     definition: subscription.definition.clone(),
                     acl: get_acl_items(
-                        &Object::SubscriptionId(subscription.id.subscription_id),
+                        Object::SubscriptionId(subscription.id.subscription_id),
                         false,
                         &users,
                         username_map,

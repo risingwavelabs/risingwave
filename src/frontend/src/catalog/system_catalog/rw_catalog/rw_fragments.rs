@@ -31,6 +31,7 @@ struct RwFragment {
     flags: Vec<String>,
     parallelism: i32,
     max_parallelism: i32,
+    parallelism_policy: String,
     node: JsonbVal,
 }
 
@@ -74,6 +75,7 @@ async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmen
                 .collect(),
             parallelism: distribution.parallelism as i32,
             max_parallelism: distribution.vnode_count as i32,
+            parallelism_policy: distribution.parallelism_policy,
             node: json!(distribution.node).into(),
         })
         .collect())

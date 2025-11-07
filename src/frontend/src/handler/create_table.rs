@@ -45,7 +45,6 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::{PbTableJobType, TableJobType};
-use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
@@ -60,9 +59,10 @@ use risingwave_sqlparser::ast::{
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
+use thiserror_ext::AsReport;
 
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use super::{RwPgResponse, alter_streaming_rate_limit, create_sink, create_source};
+use super::{RwPgResponse, alter_streaming_rate_limit};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -90,15 +90,18 @@ use crate::{Binder, Explain, TableCatalog, WithOptions};
 
 mod col_id_gen;
 pub use col_id_gen::*;
+use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, MAX_SNAPSHOTS_NUM,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
+    MAX_SNAPSHOTS_NUM, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
 };
+use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
+use risingwave_pb::meta::PbThrottleTarget;
 
-use crate::handler::drop_table::handle_drop_table;
+use crate::handler::create_sink::{SinkPlanContext, gen_sink_plan};
 
 fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
@@ -252,7 +255,7 @@ pub fn bind_sql_column_constraints(
     };
 
     let mut binder = Binder::new_for_ddl(session);
-    binder.bind_columns_to_context(table_name.clone(), column_catalogs)?;
+    binder.bind_columns_to_context(table_name, column_catalogs)?;
 
     for column in columns {
         let Some(idx) = column_catalogs
@@ -775,11 +778,27 @@ fn gen_table_plan_inner(
     }
 
     if !append_only && retention_seconds.is_some() {
-        return Err(ErrorCode::NotSupported(
-            "Defining retention seconds on table requires the table to be append only.".to_owned(),
-            "Use the key words `APPEND ONLY`".to_owned(),
-        )
-        .into());
+        if session
+            .config()
+            .unsafe_enable_storage_retention_for_non_append_only_tables()
+        {
+            tracing::warn!(
+                "Storage retention is enabled for non-append-only table {}. This may lead to stream inconsistency.",
+                table_name
+            );
+            const NOTICE: &str = "Storage retention is enabled for non-append-only table. \
+                                  This may lead to stream inconsistency and unrecoverable \
+                                  node failure if there is any row INSERT/UPDATE/DELETE operation \
+                                  corresponding to the TTLed primary keys";
+            session.notice_to_user(NOTICE);
+        } else {
+            return Err(ErrorCode::NotSupported(
+                "Defining retention seconds on table requires the table to be append only."
+                    .to_owned(),
+                "Use the key words `APPEND ONLY`".to_owned(),
+            )
+            .into());
+        }
     }
 
     let materialize =
@@ -863,7 +882,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let non_generated_column_descs = columns
         .iter()
-        .filter(|&c| (!c.is_generated()))
+        .filter(|&c| !c.is_generated())
         .map(|c| c.column_desc.clone())
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
@@ -1477,8 +1496,10 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            create_iceberg_engine_table(
-                session,
+            let hummock_table_name = hummock_table.name.clone();
+            session.create_staging_table(hummock_table.clone());
+            let res = create_iceberg_engine_table(
+                session.clone(),
                 handler_args,
                 source.map(|s| s.to_prost()),
                 hummock_table,
@@ -1487,7 +1508,9 @@ pub async fn handle_create_table(
                 job_type,
                 if_not_exists,
             )
-            .await?;
+            .await;
+            session.drop_staging_table(&hummock_table_name);
+            res?
         }
     }
 
@@ -1579,14 +1602,14 @@ pub async fn create_iceberg_engine_table(
         .env()
         .catalog_reader()
         .read_guard()
-        .get_database_by_id(&table.database_id)?
+        .get_database_by_id(table.database_id)?
         .name()
         .to_owned();
     let rw_schema_name = session
         .env()
         .catalog_reader()
         .read_guard()
-        .get_schema_by_id(&table.database_id, &table.schema_id)?
+        .get_schema_by_id(table.database_id, table.schema_id)?
         .name()
         .clone();
     let iceberg_catalog_name = rw_db_name.clone();
@@ -1624,20 +1647,20 @@ pub async fn create_iceberg_engine_table(
 
                 let mut with_common = BTreeMap::new();
                 with_common.insert("connector".to_owned(), "iceberg".to_owned());
-                with_common.insert("database.name".to_owned(), iceberg_database_name.to_owned());
-                with_common.insert("table.name".to_owned(), iceberg_table_name.to_owned());
+                with_common.insert("database.name".to_owned(), iceberg_database_name);
+                with_common.insert("table.name".to_owned(), iceberg_table_name);
 
                 if let Some(s) = params.properties.get("hosted_catalog")
                     && s.eq_ignore_ascii_case("true")
                 {
                     with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
-                    with_common.insert("catalog.uri".to_owned(), catalog_uri.to_owned());
-                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user.to_owned());
+                    with_common.insert("catalog.uri".to_owned(), catalog_uri);
+                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user);
                     with_common.insert(
                         "catalog.jdbc.password".to_owned(),
                         meta_store_password.clone(),
                     );
-                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name.to_owned());
+                    with_common.insert("catalog.name".to_owned(), iceberg_catalog_name);
                 }
 
                 with_common
@@ -1978,7 +2001,7 @@ pub async fn create_iceberg_engine_table(
                     ))
                 })?;
 
-            partition_columns.push(column.to_owned());
+            partition_columns.push(column);
         }
 
         ensure_partition_columns_are_prefix_of_primary_key(&partition_columns, &pks).map_err(
@@ -1999,6 +2022,12 @@ pub async fn create_iceberg_engine_table(
 
     sink_handler_args.with_options =
         WithOptions::new(sink_with, Default::default(), connection_ref.clone());
+    let SinkPlanContext {
+        sink_plan,
+        sink_catalog,
+        ..
+    } = gen_sink_plan(sink_handler_args, create_sink_stmt, None, true).await?;
+    let sink_graph = build_graph(sink_plan, Some(GraphJobType::Sink))?;
 
     let mut source_name = table_name.clone();
     *source_name.0.last_mut().unwrap() = Ident::from(
@@ -2022,36 +2051,89 @@ pub async fn create_iceberg_engine_table(
     source_handler_args.with_options =
         WithOptions::new(source_with, Default::default(), connection_ref);
 
+    let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
+    let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
+    let with_properties = bind_connector_props(&source_handler_args, &format_encode, true)?;
+
+    // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
+    // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
+    let (iceberg_catalog, table_identifier) = {
+        let sink_param = SinkParam::try_from_sink_catalog(sink_catalog.clone())?;
+        let iceberg_sink = IcebergSink::try_from(sink_param)?;
+        iceberg_sink.create_table_if_not_exists().await?;
+
+        let iceberg_catalog = iceberg_sink.config.create_catalog().await?;
+        let table_identifier = iceberg_sink.config.full_table_name()?;
+        (iceberg_catalog, table_identifier)
+    };
+
+    let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        &session,
+        &format_encode,
+        Either::Left(&with_properties),
+        create_source_type,
+    )
+    .await?;
+    let mut col_id_gen = ColumnIdGenerator::new_initial();
+
+    let iceberg_source_catalog = bind_create_source_or_table_with_connector(
+        source_handler_args,
+        create_source_stmt.source_name,
+        format_encode,
+        with_properties,
+        &create_source_stmt.columns,
+        create_source_stmt.constraints,
+        create_source_stmt.wildcard_idx,
+        create_source_stmt.source_watermarks,
+        columns_from_resolve_source,
+        source_info,
+        create_source_stmt.include_column_options,
+        &mut col_id_gen,
+        create_source_type,
+        overwrite_options.source_rate_limit,
+        SqlColumnStrategy::FollowChecked,
+    )
+    .await?;
+
+    let has_connector = source.is_some();
+
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
     let _ = Jvm::get_or_init()?;
 
     let catalog_writer = session.catalog_writer()?;
-    // TODO(iceberg): make iceberg engine table creation ddl atomic
-    let has_connector = source.is_some();
-    catalog_writer
-        .create_table(
-            source,
-            table.to_prost(),
-            graph,
-            job_type,
+    let res = catalog_writer
+        .create_iceberg_table(
+            PbTableJobInfo {
+                source,
+                table: Some(table.to_prost()),
+                fragment_graph: Some(graph),
+                job_type: job_type as _,
+            },
+            PbSinkJobInfo {
+                sink: Some(sink_catalog.to_proto()),
+                fragment_graph: Some(sink_graph),
+            },
+            iceberg_source_catalog.to_prost(),
             if_not_exists,
-            HashSet::default(),
         )
-        .await?;
-    let res = create_sink::handle_create_sink(sink_handler_args, create_sink_stmt, true).await;
+        .await;
     if res.is_err() {
-        // Since we don't support ddl atomicity, we need to drop the partial created table.
-        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
-        res?;
-    }
-    let res = create_source::handle_create_source(source_handler_args, create_source_stmt).await;
-    if res.is_err() {
-        // Since we don't support ddl atomicity, we need to drop the partial created table.
-        handle_drop_table(handler_args.clone(), table_name.clone(), true, true).await?;
-        res?;
+        let _ = iceberg_catalog
+            .drop_table(&table_identifier)
+            .await
+            .inspect_err(|err| {
+                tracing::error!(
+                    "failed to drop iceberg table {} after create iceberg engine table failed: {}",
+                    table_identifier,
+                    err.as_report()
+                );
+            });
+        res?
     }
 
+    // TODO: remove it together with rate limit rewrite after we support atomic DDL in meta side.
     if has_connector {
         alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
             handler_args,
@@ -2274,7 +2356,7 @@ pub async fn generate_stream_graph_for_replace_table(
         table.associated_source_id = Some(source_id);
 
         let source = source.as_mut().unwrap();
-        source.id = source_id.table_id;
+        source.id = source_id.as_raw_id();
         source.associated_table_id = Some(table.id());
     }
 
@@ -2289,8 +2371,7 @@ fn get_source_and_resolved_table_name(
     let db_name = &session.database();
     let (schema_name, resolved_table_name) =
         Binder::resolve_schema_qualified_name(db_name, &table_name)?;
-    let (database_id, schema_id) =
-        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let (format_encode, source_name) =
         Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;
@@ -2356,7 +2437,7 @@ fn bind_webhook_info(
         column_name: columns_defs[0].name.real_value(),
         secret_name,
     };
-    let mut binder = Binder::new_for_ddl_with_secure_compare(session, secure_compare_context);
+    let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
     let expr = binder.bind_expr(&signature_expr)?;
 
     // validate expr, ensuring it is SECURE_COMPARE()

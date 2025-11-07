@@ -37,7 +37,6 @@ pub(crate) const STARROCKS_SUCCESS_STATUS: [&str; 1] = ["OK"];
 pub(crate) const DORIS_DELETE_SIGN: &str = "__DORIS_DELETE_SIGN__";
 pub(crate) const STARROCKS_DELETE_SIGN: &str = "__op";
 
-const WAIT_HANDDLE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCALHOST: &str = "localhost";
 const LOCALHOST_IP: &str = "127.0.0.1";
@@ -233,6 +232,7 @@ pub struct InserterInnerBuilder {
     #[expect(dead_code)]
     sender: Option<Sender>,
     fe_host: String,
+    stream_load_http_timeout: Duration,
 }
 impl InserterInnerBuilder {
     pub fn new(
@@ -240,6 +240,7 @@ impl InserterInnerBuilder {
         db: String,
         table: String,
         header: HashMap<String, String>,
+        stream_load_http_timeout_ms: u64,
     ) -> Result<Self> {
         let fe_host = Url::parse(&url)
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
@@ -247,12 +248,14 @@ impl InserterInnerBuilder {
             .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't get fe host from url")))?
             .to_owned();
         let url = format!("{}/api/{}/{}/_stream_load", url, db, table);
+        let stream_load_http_timeout = Duration::from_millis(stream_load_http_timeout_ms);
 
         Ok(Self {
             url,
             sender: None,
             header,
             fe_host,
+            stream_load_http_timeout,
         })
     }
 
@@ -313,7 +316,11 @@ impl InserterInnerBuilder {
                 )))
             }
         });
-        Ok(InserterInner::new(sender, handle, WAIT_HANDDLE_TIMEOUT))
+        Ok(InserterInner::new(
+            sender,
+            handle,
+            self.stream_load_http_timeout,
+        ))
     }
 }
 

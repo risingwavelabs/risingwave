@@ -31,6 +31,8 @@ pub enum SinkType {
     ForceAppendOnly,
     #[sea_orm(string_value = "UPSERT")]
     Upsert,
+    #[sea_orm(string_value = "RETRACT")]
+    Retract,
 }
 
 impl From<SinkType> for PbSinkType {
@@ -39,6 +41,7 @@ impl From<SinkType> for PbSinkType {
             SinkType::AppendOnly => Self::AppendOnly,
             SinkType::ForceAppendOnly => Self::ForceAppendOnly,
             SinkType::Upsert => Self::Upsert,
+            SinkType::Retract => Self::Retract,
         }
     }
 }
@@ -49,6 +52,7 @@ impl From<PbSinkType> for SinkType {
             PbSinkType::AppendOnly => Self::AppendOnly,
             PbSinkType::ForceAppendOnly => Self::ForceAppendOnly,
             PbSinkType::Upsert => Self::Upsert,
+            PbSinkType::Retract => Self::Retract,
             PbSinkType::Unspecified => unreachable!("Unspecified sink type"),
         }
     }
@@ -130,12 +134,12 @@ impl From<PbSink> for ActiveModel {
             db_name: Set(pb_sink.db_name),
             sink_from_name: Set(pb_sink.sink_from_name),
             sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),
-            target_table: Set(pb_sink.target_table.map(|x| x as _)),
+            target_table: Set(pb_sink.target_table.map(|x| x.into())),
             secret_ref: Set(Some(SecretRef::from(pb_sink.secret_refs))),
             original_target_columns: Set(Some(pb_sink.original_target_columns.into())),
             auto_refresh_schema_from_table: Set(pb_sink
                 .auto_refresh_schema_from_table
-                .map(|id| id as _)),
+                .map(|id| id.into())),
         }
     }
 }

@@ -166,8 +166,8 @@ impl TryFrom<SinkParam> for RedshiftSink {
         )
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
         let is_append_only = param.sink_type.is_append_only();
-        let schema = param.schema().clone();
-        let pk_indices = param.downstream_pk.clone();
+        let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         Ok(Self {
             config,
             param,

@@ -869,7 +869,7 @@ impl Parser<'_> {
             self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
             let order_by = self.parse_order_by_expr()?;
             self.expect_token(&Token::RParen)?;
-            Some(Box::new(order_by.clone()))
+            Some(Box::new(order_by))
         } else {
             None
         };
@@ -2413,9 +2413,7 @@ impl Parser<'_> {
     }
 
     pub fn parse_with_properties(&mut self) -> ModalResult<Vec<SqlOption>> {
-        Ok(self
-            .parse_options_with_preceding_keyword(Keyword::WITH)?
-            .to_vec())
+        self.parse_options_with_preceding_keyword(Keyword::WITH)
     }
 
     pub fn parse_discard(&mut self) -> ModalResult<Statement> {
@@ -2756,7 +2754,7 @@ impl Parser<'_> {
                 if wildcard_idx.is_none() {
                     wildcard_idx = Some(columns.len());
                 } else {
-                    parser_err!("At most 1 wildcard is allowed in source definetion");
+                    parser_err!("At most 1 wildcard is allowed in source definition");
                 }
             } else if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
@@ -3812,14 +3810,25 @@ impl Parser<'_> {
     }
 
     pub fn parse_alter_fragment(&mut self) -> ModalResult<Statement> {
-        let fragment_id = self.parse_literal_u32()?;
+        let mut fragment_ids = vec![self.parse_literal_u32()?];
+        while self.consume_token(&Token::Comma) {
+            fragment_ids.push(self.parse_literal_u32()?);
+        }
         if !self.parse_keyword(Keyword::SET) {
             return self.expected("SET after ALTER FRAGMENT");
         }
-        let rate_limit = self.parse_alter_fragment_rate_limit()?;
-        let operation = AlterFragmentOperation::AlterBackfillRateLimit { rate_limit };
+        let operation = if self.parse_keyword(Keyword::PARALLELISM) {
+            if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+                return self.expected("TO or = after ALTER FRAGMENT SET PARALLELISM");
+            }
+            let parallelism = self.parse_set_variable()?;
+            AlterFragmentOperation::SetParallelism { parallelism }
+        } else {
+            let rate_limit = self.parse_alter_fragment_rate_limit()?;
+            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit }
+        };
         Ok(Statement::AlterFragment {
-            fragment_id,
+            fragment_ids,
             operation,
         })
     }

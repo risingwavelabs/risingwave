@@ -38,8 +38,8 @@ use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbThrottleTarget, RecoveryStatus, RefreshRequest,
-    RefreshResponse,
+    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
+    RefreshRequest, RefreshResponse,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
@@ -132,6 +132,12 @@ pub trait FrontendMetaClient: Send + Sync {
         rate_limit: Option<u32>,
     ) -> Result<()>;
 
+    async fn alter_fragment_parallelism(
+        &self,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
+    ) -> Result<()>;
+
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
@@ -172,6 +178,10 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
 
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>>;
+
+    async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>>;
+
     fn worker_id(&self) -> u32;
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
@@ -181,6 +191,10 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
+
+    fn cluster_id(&self) -> &str;
+
+    async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -353,6 +367,16 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .map(|_| ())
     }
 
+    async fn alter_fragment_parallelism(
+        &self,
+        fragment_ids: Vec<u32>,
+        parallelism: Option<PbTableParallelism>,
+    ) -> Result<()> {
+        self.0
+            .alter_fragment_parallelism(fragment_ids, parallelism)
+            .await
+    }
+
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
         self.0.get_cluster_recovery_status().await
     }
@@ -436,6 +460,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_fragment_by_id(fragment_id).await
     }
 
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>> {
+        self.0.get_fragment_vnodes(fragment_id).await
+    }
+
+    async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>> {
+        self.0.get_actor_vnodes(actor_id).await
+    }
+
     fn worker_id(&self) -> u32 {
         self.0.worker_id()
     }
@@ -454,5 +486,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.0.refresh(request).await
+    }
+
+    fn cluster_id(&self) -> &str {
+        self.0.cluster_id()
+    }
+
+    async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>> {
+        self.0.list_unmigrated_tables().await
     }
 }

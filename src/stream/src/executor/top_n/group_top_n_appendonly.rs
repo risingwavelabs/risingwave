@@ -29,6 +29,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTablePostCommit;
 use crate::executor::monitor::GroupTopNMetrics;
 use crate::executor::prelude::*;
+use crate::executor::top_n::top_n_cache::TopNStaging;
 
 /// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
 /// to keep all the rows seen. As long as a record
@@ -75,7 +76,7 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
     offset: usize,
 
     /// The storage key indices of the `AppendOnlyGroupTopNExecutor`
-    storage_key_indices: PkIndices,
+    storage_key_indices: Vec<usize>,
 
     managed_state: ManagedTopNState<S>,
 
@@ -150,7 +151,7 @@ where
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let keys = K::build_many(&self.group_by, chunk.data_chunk());
-        let mut stagings = HashMap::new(); // K -> `TopNStaging`
+        let mut stagings: HashMap<K, TopNStaging> = HashMap::new(); // K -> `TopNStaging`
 
         let data_types = self.schema.data_types();
         let deserializer = RowDeserializer::new(data_types.clone());
@@ -201,8 +202,8 @@ where
         let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(chunk.capacity()));
         for staging in stagings.into_values() {
             for res in staging.into_deserialized_changes(&deserializer) {
-                let (op, row) = res?;
-                let _none = chunk_builder.append_row(op, row);
+                let record = res?;
+                let _none = chunk_builder.append_record(record);
             }
         }
 

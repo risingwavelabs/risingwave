@@ -138,7 +138,7 @@ mod bind {
                     AnalyzeTarget::Table(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_table_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.table_id
+                        catalog.id.as_raw_id()
                     }
                     AnalyzeTarget::Sink(_) => {
                         let (catalog, _schema_name) =
@@ -148,7 +148,7 @@ mod bind {
                     AnalyzeTarget::MaterializedView(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_table_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.table_id
+                        catalog.id.as_raw_id()
                     }
                     AnalyzeTarget::Id(_) => unreachable!(),
                 }
