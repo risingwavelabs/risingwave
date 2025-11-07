@@ -43,6 +43,20 @@ select count(*) = 1 from rw_iceberg_files where source_name = '__iceberg_source_
 t
 
 
+statement err Invalid key
+create table iceberg_batch_table ( primary key (id) ) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh',
+  database.name = 'public',
+  refresh_mode = 'invalid_option'
+);
+
 statement ok
 create table iceberg_batch_table ( primary key (id) ) with (
   connector = 'iceberg',
@@ -54,7 +68,7 @@ create table iceberg_batch_table ( primary key (id) ) with (
   catalog.type = 'storage',
   table.name = 't_refresh',
   database.name = 'public',
-  refresh_mode = 'MANUAL_TRIGGER'
+  refresh_mode = 'FULL_RECOMPUTE'
 );
 
 
