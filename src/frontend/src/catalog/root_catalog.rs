@@ -131,7 +131,7 @@ impl Catalog {
 
     pub fn create_database(&mut self, db: &PbDatabase) {
         let name = db.name.clone();
-        let id = db.id;
+        let id = db.id.into();
 
         self.database_by_name
             .try_insert(name.clone(), db.into())
@@ -140,23 +140,25 @@ impl Catalog {
     }
 
     pub fn create_schema(&mut self, proto: &PbSchema) {
-        self.get_database_mut(proto.database_id)
+        let database_id = proto.database_id.into();
+        let id = proto.id.into();
+        self.get_database_mut(database_id)
             .unwrap()
             .create_schema(proto);
 
         for sys_table in get_sys_tables_in_schema(proto.name.as_str()) {
-            self.get_database_mut(proto.database_id)
+            self.get_database_mut(database_id)
                 .unwrap()
-                .get_schema_mut(proto.id)
+                .get_schema_mut(id)
                 .unwrap()
                 .create_sys_table(sys_table);
         }
         for mut sys_view in get_sys_views_in_schema(proto.name.as_str()) {
-            sys_view.database_id = proto.database_id;
-            sys_view.schema_id = proto.id;
-            self.get_database_mut(proto.database_id)
+            sys_view.database_id = database_id;
+            sys_view.schema_id = id;
+            self.get_database_mut(database_id)
                 .unwrap()
-                .get_schema_mut(proto.id)
+                .get_schema_mut(id)
                 .unwrap()
                 .create_sys_view(Arc::new(sys_view));
         }
@@ -164,74 +166,74 @@ impl Catalog {
 
     pub fn create_table(&mut self, proto: &PbTable) {
         let table = self
-            .get_database_mut(proto.database_id)
+            .get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_table(proto);
         self.table_by_id.insert(proto.id.into(), table);
     }
 
     pub fn create_index(&mut self, proto: &PbIndex) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_index(proto);
     }
 
     pub fn create_source(&mut self, proto: &PbSource) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_source(proto);
     }
 
     pub fn create_sink(&mut self, proto: &PbSink) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_sink(proto);
     }
 
     pub fn create_subscription(&mut self, proto: &PbSubscription) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_subscription(proto);
     }
 
     pub fn create_secret(&mut self, proto: &PbSecret) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_secret(proto);
     }
 
     pub fn create_view(&mut self, proto: &PbView) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_view(proto);
     }
 
     pub fn create_function(&mut self, proto: &PbFunction) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_function(proto);
     }
 
     pub fn create_connection(&mut self, proto: &PbConnection) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .create_connection(proto);
     }
@@ -250,8 +252,8 @@ impl Catalog {
     }
 
     pub fn update_connection(&mut self, proto: &PbConnection) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         if schema.get_connection_by_id(&proto.id).is_some() {
             schema.update_connection(proto);
         } else {
@@ -260,7 +262,7 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id
+                    schema.id().as_raw_id() != proto.schema_id
                         && schema.get_connection_by_id(&proto.id).is_some()
                 })
                 .unwrap()
@@ -269,8 +271,8 @@ impl Catalog {
     }
 
     pub fn update_secret(&mut self, proto: &PbSecret) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         let secret_id = SecretId::new(proto.id);
         if schema.get_secret_by_id(&secret_id).is_some() {
             schema.update_secret(proto);
@@ -280,7 +282,8 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id && schema.get_secret_by_id(&secret_id).is_some()
+                    schema.id().as_raw_id() != proto.schema_id
+                        && schema.get_secret_by_id(&secret_id).is_some()
                 })
                 .unwrap()
                 .drop_secret(secret_id);
@@ -309,8 +312,8 @@ impl Catalog {
     }
 
     pub fn update_table(&mut self, proto: &PbTable) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         let table = if schema.get_table_by_id(&proto.id.into()).is_some() {
             schema.update_table(proto)
         } else {
@@ -319,7 +322,7 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id
+                    schema.id().as_raw_id() != proto.schema_id
                         && schema.get_created_table_by_id(&proto.id.into()).is_some()
                 })
                 .unwrap()
@@ -331,7 +334,7 @@ impl Catalog {
     }
 
     pub fn update_database(&mut self, proto: &PbDatabase) {
-        let id = proto.id;
+        let id = proto.id.into();
         let name = proto.name.clone();
 
         let old_database_name = self.db_name_by_id.get(&id).unwrap().to_owned();
@@ -351,14 +354,14 @@ impl Catalog {
     }
 
     pub fn update_schema(&mut self, proto: &PbSchema) {
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
             .update_schema(proto);
     }
 
     pub fn update_index(&mut self, proto: &PbIndex) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         if schema.get_index_by_id(&proto.id.into()).is_some() {
             schema.update_index(proto);
         } else {
@@ -367,7 +370,7 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id
+                    schema.id().as_raw_id() != proto.schema_id
                         && schema.get_index_by_id(&proto.id.into()).is_some()
                 })
                 .unwrap()
@@ -384,8 +387,8 @@ impl Catalog {
     }
 
     pub fn update_source(&mut self, proto: &PbSource) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         if schema.get_source_by_id(&proto.id).is_some() {
             schema.update_source(proto);
         } else {
@@ -394,7 +397,8 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id && schema.get_source_by_id(&proto.id).is_some()
+                    schema.id().as_raw_id() != proto.schema_id
+                        && schema.get_source_by_id(&proto.id).is_some()
                 })
                 .unwrap()
                 .drop_source(proto.id);
@@ -418,8 +422,8 @@ impl Catalog {
     }
 
     pub fn update_sink(&mut self, proto: &PbSink) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         if schema.get_sink_by_id(&proto.id).is_some() {
             schema.update_sink(proto);
         } else {
@@ -428,7 +432,8 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id && schema.get_sink_by_id(&proto.id).is_some()
+                    schema.id().as_raw_id() != proto.schema_id
+                        && schema.get_sink_by_id(&proto.id).is_some()
                 })
                 .unwrap()
                 .drop_sink(proto.id);
@@ -449,8 +454,8 @@ impl Catalog {
     }
 
     pub fn update_subscription(&mut self, proto: &PbSubscription) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         if schema.get_subscription_by_id(&proto.id).is_some() {
             schema.update_subscription(proto);
         } else {
@@ -459,7 +464,7 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id
+                    schema.id().as_raw_id() != proto.schema_id
                         && schema.get_subscription_by_id(&proto.id).is_some()
                 })
                 .unwrap()
@@ -484,8 +489,8 @@ impl Catalog {
     }
 
     pub fn update_view(&mut self, proto: &PbView) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         if schema.get_view_by_id(&proto.id).is_some() {
             schema.update_view(proto);
         } else {
@@ -494,7 +499,8 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id && schema.get_view_by_id(&proto.id).is_some()
+                    schema.id().as_raw_id() != proto.schema_id
+                        && schema.get_view_by_id(&proto.id).is_some()
                 })
                 .unwrap()
                 .drop_view(proto.id);
@@ -515,8 +521,8 @@ impl Catalog {
     }
 
     pub fn update_function(&mut self, proto: &PbFunction) {
-        let database = self.get_database_mut(proto.database_id).unwrap();
-        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let database = self.get_database_mut(proto.database_id.into()).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id.into()).unwrap();
         if schema.get_function_by_id(proto.id.into()).is_some() {
             schema.update_function(proto);
         } else {
@@ -525,16 +531,16 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id
+                    schema.id().as_raw_id() != proto.schema_id
                         && schema.get_function_by_id(proto.id.into()).is_some()
                 })
                 .unwrap()
                 .drop_function(proto.id.into());
         }
 
-        self.get_database_mut(proto.database_id)
+        self.get_database_mut(proto.database_id.into())
             .unwrap()
-            .get_schema_mut(proto.schema_id)
+            .get_schema_mut(proto.schema_id.into())
             .unwrap()
             .update_function(proto);
     }
@@ -545,10 +551,10 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("database", db_name.to_owned()))
     }
 
-    pub fn get_database_by_id(&self, db_id: &DatabaseId) -> CatalogResult<&DatabaseCatalog> {
+    pub fn get_database_by_id(&self, db_id: DatabaseId) -> CatalogResult<&DatabaseCatalog> {
         let db_name = self
             .db_name_by_id
-            .get(db_id)
+            .get(&db_id)
             .ok_or_else(|| CatalogError::NotFound("db_id", db_id.to_string()))?;
         self.database_by_name
             .get(db_name)
@@ -608,8 +614,8 @@ impl Catalog {
 
     pub fn get_schema_by_id(
         &self,
-        db_id: &DatabaseId,
-        schema_id: &SchemaId,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
     ) -> CatalogResult<&SchemaCatalog> {
         self.get_database_by_id(db_id)?
             .get_schema_by_id(schema_id)
@@ -1136,9 +1142,9 @@ impl Catalog {
         schema_id: SchemaId,
         mv_id: TableId,
     ) -> Vec<Arc<IndexCatalog>> {
-        self.get_database_by_id(&db_id)
+        self.get_database_by_id(db_id)
             .unwrap()
-            .get_schema_by_id(&schema_id)
+            .get_schema_by_id(schema_id)
             .unwrap()
             .get_any_indexes_by_table_id(&mv_id)
     }

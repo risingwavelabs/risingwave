@@ -69,8 +69,8 @@ enum ManagedBarrierStateInner {
         list_finished_source_ids: Vec<u32>,
         load_finished_source_ids: Vec<u32>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
-        truncate_tables: Vec<u32>,
-        refresh_finished_tables: Vec<u32>,
+        truncate_tables: Vec<TableId>,
+        refresh_finished_tables: Vec<TableId>,
     },
 }
 
@@ -85,9 +85,6 @@ struct BarrierState {
 use risingwave_common::must_match;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
-use risingwave_pb::stream_service::streaming_control_stream_request::{
-    DatabaseInitialPartialGraph, InitialPartialGraph,
-};
 
 use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
@@ -326,10 +323,10 @@ pub(crate) struct PartialGraphManagedBarrierState {
     pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
 
     /// Record the tables to truncate for each epoch of concurrent checkpoints.
-    pub(crate) truncate_tables: HashMap<u64, HashSet<u32>>,
+    pub(crate) truncate_tables: HashMap<u64, HashSet<TableId>>,
     /// Record the tables that have finished refresh for each epoch of concurrent checkpoints.
     /// Used for materialized view refresh completion reporting.
-    pub(crate) refresh_finished_tables: HashMap<u64, HashSet<u32>>,
+    pub(crate) refresh_finished_tables: HashMap<u64, HashSet<TableId>>,
 
     state_store: StateStoreImpl,
 
@@ -513,7 +510,7 @@ impl DatabaseStatus {
             DatabaseStatus::Running(state) => {
                 assert_eq!(database_id, state.database_id);
                 info!(
-                    database_id = database_id.database_id,
+                    %database_id,
                     reset_request_id, "start database reset from Running"
                 );
                 tokio::spawn(SuspendedDatabaseState::new(state, None, completing_futures).reset())
@@ -525,7 +522,7 @@ impl DatabaseStatus {
                 );
                 assert_eq!(database_id, state.inner.database_id);
                 info!(
-                    database_id = database_id.database_id,
+                    %database_id,
                     reset_request_id,
                     suspend_elapsed = ?state.suspend_time.elapsed(),
                     "start database reset after suspended"
@@ -535,7 +532,7 @@ impl DatabaseStatus {
             DatabaseStatus::Resetting(state) => {
                 let prev_request_id = state.reset_request_id;
                 info!(
-                    database_id = database_id.database_id,
+                    %database_id,
                     reset_request_id, prev_request_id, "receive duplicate reset request"
                 );
                 assert!(reset_request_id > prev_request_id);
@@ -552,6 +549,7 @@ impl DatabaseStatus {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct ManagedBarrierState {
     pub(crate) databases: HashMap<DatabaseId, DatabaseStatus>,
 }
@@ -569,27 +567,6 @@ pub(super) enum ManagedBarrierStateEvent {
 }
 
 impl ManagedBarrierState {
-    pub(super) fn new(
-        actor_manager: Arc<StreamActorManager>,
-        initial_partial_graphs: Vec<DatabaseInitialPartialGraph>,
-        term_id: String,
-    ) -> Self {
-        let mut databases = HashMap::new();
-        for database in initial_partial_graphs {
-            let database_id = DatabaseId::new(database.database_id);
-            assert!(!databases.contains_key(&database_id));
-            let state = DatabaseManagedBarrierState::new(
-                database_id,
-                term_id.clone(),
-                actor_manager.clone(),
-                database.graphs,
-            );
-            databases.insert(database_id, DatabaseStatus::Running(state));
-        }
-
-        Self { databases }
-    }
-
     pub(super) fn next_event(
         &mut self,
     ) -> impl Future<Output = (DatabaseId, ManagedBarrierStateEvent)> + '_ {
@@ -632,7 +609,6 @@ impl DatabaseManagedBarrierState {
         database_id: DatabaseId,
         term_id: String,
         actor_manager: Arc<StreamActorManager>,
-        initial_partial_graphs: Vec<InitialPartialGraph>,
     ) -> Self {
         let (local_barrier_manager, barrier_event_rx, actor_failure_rx) =
             LocalBarrierManager::new(database_id, term_id, actor_manager.env.clone());
@@ -640,15 +616,7 @@ impl DatabaseManagedBarrierState {
             database_id,
             actor_states: Default::default(),
             actor_pending_new_output_requests: Default::default(),
-            graph_states: initial_partial_graphs
-                .into_iter()
-                .map(|graph| {
-                    (
-                        PartialGraphId::new(graph.partial_graph_id),
-                        PartialGraphManagedBarrierState::new(&actor_manager),
-                    )
-                })
-                .collect(),
+            graph_states: Default::default(),
             table_ids: Default::default(),
             actor_manager,
             local_barrier_manager,
@@ -1084,7 +1052,7 @@ impl DatabaseManagedBarrierState {
         &mut self,
         epoch: EpochPair,
         actor_id: ActorId,
-        _table_id: u32,
+        _table_id: TableId,
         associated_source_id: u32,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
@@ -1110,14 +1078,14 @@ impl DatabaseManagedBarrierState {
         &mut self,
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        staging_table_id: u32,
+        table_id: TableId,
+        staging_table_id: TableId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         let Some(actor_state) = self.actor_states.get(&actor_id) else {
             warn!(
                 ?epoch,
-                actor_id, table_id, "ignore refresh finished table: actor_state not found"
+                actor_id, %table_id, "ignore refresh finished table: actor_state not found"
             );
             return;
         };
@@ -1126,7 +1094,7 @@ impl DatabaseManagedBarrierState {
             warn!(
                 ?epoch,
                 actor_id,
-                table_id,
+                %table_id,
                 ?inflight_barriers,
                 "ignore refresh finished table: partial_graph_id not found in inflight_barriers"
             );
@@ -1135,7 +1103,7 @@ impl DatabaseManagedBarrierState {
         let Some(graph_state) = self.graph_states.get_mut(partial_graph_id) else {
             warn!(
                 ?epoch,
-                actor_id, table_id, "ignore refresh finished table: graph_state not found"
+                actor_id, %table_id, "ignore refresh finished table: graph_state not found"
             );
             return;
         };
@@ -1283,8 +1251,8 @@ pub(crate) struct BarrierToComplete {
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
     pub list_finished_source_ids: Vec<u32>,
     pub load_finished_source_ids: Vec<u32>,
-    pub truncate_tables: Vec<u32>,
-    pub refresh_finished_tables: Vec<u32>,
+    pub truncate_tables: Vec<TableId>,
+    pub refresh_finished_tables: Vec<TableId>,
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
 }
 

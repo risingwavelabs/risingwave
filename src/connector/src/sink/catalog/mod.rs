@@ -83,17 +83,29 @@ pub enum SinkType {
     /// The input of the sink operator can be INSERT, UPDATE, or DELETE, but it must drop any
     /// UPDATE or DELETE and write only INSERT into the sink connector.
     ForceAppendOnly,
-    /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
+    /// The data written into the sink connector can be INSERT or DELETE.
+    /// When updating a row, an INSERT with new value will be written.
     Upsert,
+    /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
+    /// When updating a row, an UPDATE pair (U- then U+) will be written.
+    ///
+    /// Currently only used by DEBEZIUM format.
+    Retract,
 }
 
 impl SinkType {
-    pub fn is_append_only(&self) -> bool {
-        self == &Self::AppendOnly || self == &Self::ForceAppendOnly
+    /// Whether the sink type is `AppendOnly` or `ForceAppendOnly`.
+    pub fn is_append_only(self) -> bool {
+        self == Self::AppendOnly || self == Self::ForceAppendOnly
     }
 
-    pub fn is_upsert(&self) -> bool {
-        self == &Self::Upsert
+    /// Convert to the string specified in `type = '...'` within the WITH options.
+    pub fn type_str(self) -> &'static str {
+        match self {
+            SinkType::AppendOnly | SinkType::ForceAppendOnly => "append-only",
+            SinkType::Upsert => "upsert",
+            SinkType::Retract => "retract",
+        }
     }
 
     pub fn to_proto(self) -> PbSinkType {
@@ -101,6 +113,7 @@ impl SinkType {
             SinkType::AppendOnly => PbSinkType::AppendOnly,
             SinkType::ForceAppendOnly => PbSinkType::ForceAppendOnly,
             SinkType::Upsert => PbSinkType::Upsert,
+            SinkType::Retract => PbSinkType::Retract,
         }
     }
 
@@ -109,6 +122,7 @@ impl SinkType {
             PbSinkType::AppendOnly => SinkType::AppendOnly,
             PbSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
             PbSinkType::Upsert => SinkType::Upsert,
+            PbSinkType::Retract => SinkType::Retract,
             PbSinkType::Unspecified => unreachable!(),
         }
     }
@@ -391,8 +405,8 @@ impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
         PbSink {
             id: self.id.into(),
-            schema_id: self.schema_id.schema_id,
-            database_id: self.database_id.database_id,
+            schema_id: self.schema_id.as_raw_id(),
+            database_id: self.database_id.as_raw_id(),
             name: self.name.clone(),
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
@@ -414,7 +428,7 @@ impl SinkCatalog {
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: self.stream_job_status.to_proto().into(),
-            target_table: self.target_table.map(|table_id| table_id.table_id()),
+            target_table: self.target_table.map(|table_id| table_id.as_raw_id()),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
@@ -426,7 +440,7 @@ impl SinkCatalog {
                 .collect_vec(),
             auto_refresh_schema_from_table: self
                 .auto_refresh_schema_from_table
-                .map(|table_id| table_id.table_id),
+                .map(|table_id| table_id.as_raw_id()),
         }
     }
 

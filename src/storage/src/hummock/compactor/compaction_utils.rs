@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -127,15 +128,15 @@ pub struct TaskConfig {
     /// `stats_target_table_ids` decides whether a dropped key should be counted as table stats
     /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
-    pub stats_target_table_ids: Option<HashSet<u32>>,
+    pub stats_target_table_ids: Option<HashSet<TableId>>,
     pub task_type: PbTaskType,
     pub use_block_based_filter: bool,
 
-    pub table_vnode_partition: BTreeMap<u32, u32>,
+    pub table_vnode_partition: BTreeMap<TableId, u32>,
     /// `TableId` -> `TableSchema`
     /// Schemas in `table_schemas` are at least as new as the one used to create `input_ssts`.
     /// For a table with schema existing in `table_schemas`, its columns not in `table_schemas` but in `input_ssts` can be safely dropped.
-    pub table_schemas: HashMap<u32, PbTableSchema>,
+    pub table_schemas: HashMap<TableId, PbTableSchema>,
     /// `disable_drop_column_optimization` should only be set in benchmark.
     pub disable_drop_column_optimization: bool,
 }

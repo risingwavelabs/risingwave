@@ -35,10 +35,10 @@ message IcebergCompactionTask {
   enum TaskType {
     UNSPECIFIED = 0;
     // Full compaction task.
-    FULL_COMPACTION = 1;
+    FULL = 1;
 
     // Small data file compaction task.
-    SMALL_DATA_FILE_COMPACTION = 2;
+    SMALL_FILES = 2;
   }
 
   TaskType task_type = 3;

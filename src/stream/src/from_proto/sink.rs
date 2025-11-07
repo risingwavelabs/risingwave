@@ -21,8 +21,9 @@ use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
-use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
+use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
     build_sink,
@@ -116,7 +117,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let chunk_size = params.env.config().developer.chunk_size;
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
-        let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let sink_id: SinkId = sink_desc.get_id().into();
         let sink_name = sink_desc.get_name().to_owned();
         let db_name = sink_desc.get_db_name().into();
@@ -209,8 +209,25 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             },
         };
 
-        let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)
+        let format_desc = SinkParam::fill_secret_for_format_desc(format_desc)
             .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?;
+
+        // Backward compatibility: DEBEZIUM format should be treated as `Retract` type instead of `Upsert`.
+        let sink_type = if let Some(format_desc) = &format_desc
+            && format_desc.format == SinkFormat::Debezium
+        {
+            SinkType::Retract
+        } else {
+            let sink_type_from_proto = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+            // For backward compatibility: Iceberg sink with Upsert type should be treated as Retract type.
+            if connector.eq_ignore_ascii_case(ICEBERG_SINK)
+                && matches!(sink_type_from_proto, SinkType::Upsert)
+            {
+                SinkType::Retract
+            } else {
+                sink_type_from_proto
+            }
+        };
 
         let sink_param = SinkParam {
             sink_id,
@@ -223,7 +240,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .collect(),
             downstream_pk,
             sink_type,
-            format_desc: format_desc_with_secret,
+            format_desc,
             db_name,
             sink_from_name,
         };

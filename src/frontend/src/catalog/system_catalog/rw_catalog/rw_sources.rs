@@ -69,7 +69,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                 RwSource {
                     id: source.id as i32,
                     name: source.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: source.owner as i32,
                     connector: source
                         .with_properties
@@ -89,10 +89,10 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                         .ok()
                         .map(|row_encode| row_encode.as_str_name().into()),
                     append_only: source.append_only,
-                    associated_table_id: source.associated_table_id.map(|id| id.table_id as i32),
+                    associated_table_id: source.associated_table_id.map(|id| id.as_raw_id() as i32),
                     connection_id: source.connection_id.map(|id| id as i32),
                     definition: source.create_sql_purified(),
-                    acl: get_acl_items(&Object::SourceId(source.id), false, &users, username_map),
+                    acl: get_acl_items(Object::SourceId(source.id), false, &users, username_map),
                     initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: source.initialized_at_cluster_version.clone(),

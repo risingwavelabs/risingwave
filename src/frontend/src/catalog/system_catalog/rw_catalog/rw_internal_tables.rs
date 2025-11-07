@@ -14,7 +14,6 @@
 
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -51,18 +50,13 @@ fn read_rw_internal_tables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIntern
             schema
                 .iter_internal_table_with_acl(current_user)
                 .map(|table| RwInternalTable {
-                    id: table.id.table_id as i32,
+                    id: table.id.as_raw_id() as i32,
                     name: table.name().into(),
-                    schema_id: schema.id() as i32,
-                    job_id: table.job_id.unwrap().table_id as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
+                    job_id: table.job_id.unwrap().as_raw_id() as i32,
                     owner: table.owner as i32,
                     definition: table.create_sql(),
-                    acl: get_acl_items(
-                        &Object::TableId(table.id.table_id),
-                        true,
-                        &users,
-                        username_map,
-                    ),
+                    acl: get_acl_items(table.id, true, &users, username_map),
                     initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),

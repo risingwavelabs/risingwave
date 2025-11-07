@@ -34,6 +34,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 
 mod cte_ref;
+mod gap_fill;
 mod join;
 mod share;
 mod subquery;
@@ -43,6 +44,7 @@ mod watermark;
 mod window_table_function;
 
 pub use cte_ref::BoundBackCteRef;
+pub use gap_fill::BoundGapFill;
 pub use join::BoundJoin;
 pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
@@ -72,6 +74,7 @@ pub enum Relation {
     /// rcte is implicitly included in share
     Share(Box<BoundShare>),
     BackCteRef(Box<BoundBackCteRef>),
+    GapFill(Box<BoundGapFill>),
 }
 
 impl RewriteExprsRecursive for Relation {

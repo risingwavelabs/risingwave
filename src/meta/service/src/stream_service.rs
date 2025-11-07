@@ -15,7 +15,8 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
+use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::SplitMetaData;
@@ -36,7 +37,6 @@ use risingwave_pb::meta::list_table_fragments_response::{
 };
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::table_fragments::PbState;
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -120,17 +120,17 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Mv => {
                 self.metadata_manager
-                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::CdcTable => {
                 self.metadata_manager
-                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::TableDml => {
                 self.metadata_manager
-                    .update_dml_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::Sink => {
@@ -162,7 +162,6 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_object_database_id(request_id as ObjectId)
             .await?;
-        let database_id = DatabaseId::new(database_id as _);
         // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
             .iter()
@@ -203,10 +202,10 @@ impl StreamManagerService for StreamServiceImpl {
 
         let canceled_jobs = self
             .stream_manager
-            .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
+            .cancel_streaming_jobs(table_ids.into_iter().map(JobId::from).collect_vec())
             .await
             .into_iter()
-            .map(|id| id.table_id)
+            .map(|id| id.as_raw_id())
             .collect_vec();
         Ok(Response::new(CancelCreatingJobsResponse {
             status: None,
@@ -226,7 +225,7 @@ impl StreamManagerService for StreamServiceImpl {
             let table_fragments = self
                 .metadata_manager
                 .catalog_controller
-                .get_job_fragments_by_id(job_id as _)
+                .get_job_fragments_by_id(job_id.into())
                 .await?;
             let mut dispatchers = self
                 .metadata_manager
@@ -237,7 +236,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .await?;
             let ctx = table_fragments.ctx.to_protobuf();
             info.insert(
-                table_fragments.stream_job_id().table_id,
+                table_fragments.stream_job_id().as_raw_id(),
                 TableFragmentInfo {
                     fragments: table_fragments
                         .fragments
@@ -306,8 +305,8 @@ impl StreamManagerService for StreamServiceImpl {
                         parallelism: Some(parallelism.into()),
                         max_parallelism: max_parallelism as _,
                         resource_group,
-                        database_id: database_id as _,
-                        schema_id: schema_id as _,
+                        database_id: database_id.as_raw_id(),
+                        schema_id: schema_id.as_raw_id(),
                     }
                 },
             )
@@ -367,6 +366,65 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(GetFragmentByIdResponse { distribution }))
     }
 
+    async fn get_fragment_vnodes(
+        &self,
+        request: Request<GetFragmentVnodesRequest>,
+    ) -> Result<Response<GetFragmentVnodesResponse>, Status> {
+        let req = request.into_inner();
+        let fragment_id = req.fragment_id;
+
+        let shared_actor_infos = self.env.shared_actor_infos();
+        let guard = shared_actor_infos.read_guard();
+
+        let fragment_info = guard
+            .get_fragment(fragment_id)
+            .ok_or_else(|| Status::not_found(format!("Fragment {} not found", fragment_id)))?;
+
+        let actor_vnodes = fragment_info
+            .actors
+            .iter()
+            .map(|(actor_id, actor_info)| {
+                let vnode_indices = if let Some(ref vnode_bitmap) = actor_info.vnode_bitmap {
+                    vnode_bitmap.iter_ones().map(|v| v as u32).collect()
+                } else {
+                    vec![]
+                };
+
+                get_fragment_vnodes_response::ActorVnodes {
+                    actor_id: *actor_id,
+                    vnode_indices,
+                }
+            })
+            .collect();
+
+        Ok(Response::new(GetFragmentVnodesResponse { actor_vnodes }))
+    }
+
+    async fn get_actor_vnodes(
+        &self,
+        request: Request<GetActorVnodesRequest>,
+    ) -> Result<Response<GetActorVnodesResponse>, Status> {
+        let req = request.into_inner();
+        let actor_id = req.actor_id;
+
+        let shared_actor_infos = self.env.shared_actor_infos();
+        let guard = shared_actor_infos.read_guard();
+
+        // Find the actor across all fragments
+        let actor_info = guard
+            .iter_over_fragments()
+            .find_map(|(_, fragment_info)| fragment_info.actors.get(&actor_id))
+            .ok_or_else(|| Status::not_found(format!("Actor {} not found", actor_id)))?;
+
+        let vnode_indices = if let Some(ref vnode_bitmap) = actor_info.vnode_bitmap {
+            vnode_bitmap.iter_ones().map(|v| v as u32).collect()
+        } else {
+            vec![]
+        };
+
+        Ok(Response::new(GetActorVnodesResponse { vnode_indices }))
+    }
+
     async fn list_actor_states(
         &self,
         _request: Request<ListActorStatesRequest>,
@@ -380,7 +438,6 @@ impl StreamManagerService for StreamServiceImpl {
             .map(|actor_location| list_actor_states_response::ActorState {
                 actor_id: actor_location.actor_id as _,
                 fragment_id: actor_location.fragment_id as _,
-                state: PbActorState::from(actor_location.status) as _,
                 worker_id: actor_location.worker_id as _,
             })
             .collect_vec();
@@ -615,7 +672,6 @@ impl StreamManagerService for StreamServiceImpl {
             .catalog_controller
             .get_object_database_id(object_id as ObjectId)
             .await?;
-        let database_id = DatabaseId::new(database_id as _);
 
         let mut mutation = HashMap::default();
         mutation.insert(object_id, new_props_plaintext);
@@ -639,7 +695,7 @@ impl StreamManagerService for StreamServiceImpl {
         self.metadata_manager
             .catalog_controller
             .mutate_fragments_by_job_id(
-                job_id as _,
+                job_id.into(),
                 |_mask, stream_node| {
                     let mut visited = false;
                     visit_stream_node_mut(stream_node, |body| {
@@ -668,7 +724,7 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .map(|(job_id, p)| {
                 (
-                    job_id,
+                    job_id.as_raw_id(),
                     PbCdcProgress {
                         split_total_count: p.split_total_count,
                         split_backfilled_count: p.split_backfilled_count,
@@ -679,6 +735,27 @@ impl StreamManagerService for StreamServiceImpl {
             .collect();
         Ok(Response::new(ListCdcProgressResponse { cdc_progress }))
     }
+
+    async fn list_unmigrated_tables(
+        &self,
+        _request: Request<ListUnmigratedTablesRequest>,
+    ) -> Result<Response<ListUnmigratedTablesResponse>, Status> {
+        let unmigrated_tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_unmigrated_tables()
+            .await?
+            .into_iter()
+            .map(|table| list_unmigrated_tables_response::UnmigratedTable {
+                table_id: table.id,
+                table_name: table.name,
+            })
+            .collect();
+
+        Ok(Response::new(ListUnmigratedTablesResponse {
+            tables: unmigrated_tables,
+        }))
+    }
 }
 
 fn fragment_desc_to_distribution(
@@ -687,13 +764,14 @@ fn fragment_desc_to_distribution(
 ) -> FragmentDistribution {
     FragmentDistribution {
         fragment_id: fragment_desc.fragment_id as _,
-        table_id: fragment_desc.job_id as _,
+        table_id: fragment_desc.job_id.as_raw_id(),
         distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
         state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
-        upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
+        upstream_fragment_ids: upstreams.into_iter().map(|id| id as _).collect(),
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,
         vnode_count: fragment_desc.vnode_count as _,
         node: Some(fragment_desc.stream_node.to_protobuf()),
+        parallelism_policy: fragment_desc.parallelism_policy,
     }
 }

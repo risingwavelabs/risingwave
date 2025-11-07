@@ -101,18 +101,8 @@ message BarrierCompleteResponse {
 }
 
 message StreamingControlStreamRequest {
-  message InitialPartialGraph {
-    uint32 partial_graph_id = 1;
-  }
-
-  message DatabaseInitialPartialGraph {
-    uint32 database_id = 1;
-    repeated InitialPartialGraph graphs = 2;
-  }
-
   message InitRequest {
-    repeated DatabaseInitialPartialGraph databases = 1;
-    string term_id = 2;
+    string term_id = 1;
   }
 
   message CreatePartialGraphRequest {

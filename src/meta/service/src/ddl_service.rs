@@ -22,15 +22,16 @@ use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
+use risingwave_common::id::TableId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_meta::MetaResult;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
-use risingwave_meta::model::TableParallelism;
+use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
-use risingwave_meta_model::ObjectId;
+use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
+use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
+use risingwave_meta_model::{ObjectId, StreamingParallelism};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
 use risingwave_pb::common::WorkerType;
@@ -42,6 +43,7 @@ use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::meta::event_log;
+use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
@@ -240,7 +242,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropDatabase(database_id as _))
+            .run_command(DdlCommand::DropDatabase(database_id.into()))
             .await?;
 
         Ok(Response::new(DropDatabaseResponse {
@@ -331,7 +333,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id as _, drop_mode))
+            .run_command(DdlCommand::DropSchema(schema_id.into(), drop_mode))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
@@ -539,7 +541,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
-                job_id: StreamingJobId::MaterializedView(table_id as _),
+                job_id: StreamingJobId::MaterializedView(TableId::new(table_id as _)),
                 drop_mode,
             })
             .await?;
@@ -687,7 +689,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Table(
                     source_id.map(|PbSourceId::Id(id)| id as _),
-                    table_id as _,
+                    TableId::new(table_id as _),
                 ),
                 drop_mode,
             })
@@ -842,7 +844,7 @@ impl DdlService for DdlServiceImpl {
             .ddl_controller
             .run_command(DdlCommand::AlterSetSchema(
                 object.unwrap(),
-                new_schema_id as _,
+                new_schema_id.into(),
             ))
             .await?;
         Ok(Response::new(AlterSetSchemaResponse {
@@ -963,7 +965,10 @@ impl DdlService for DdlServiceImpl {
             .metadata_manager
             .catalog_controller
             .get_table_by_ids(
-                table_ids.into_iter().map(|id| id as _).collect(),
+                table_ids
+                    .into_iter()
+                    .map(|id| TableId::new(id as _))
+                    .collect(),
                 include_dropped_tables,
             )
             .await?;
@@ -987,13 +992,21 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
+
+        let table_parallelism = ModelTableParallelism::from(parallelism);
+        let streaming_parallelism = match table_parallelism {
+            ModelTableParallelism::Fixed(n) => StreamingParallelism::Fixed(n),
+            _ => bail_invalid_parameter!(
+                "CDC table backfill parallelism must be set to a fixed value"
+            ),
+        };
+
         self.ddl_controller
             .reschedule_cdc_table_backfill(
                 job_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
-                    resource_group: JobResourceGroupTarget::Keep,
-                },
+                ReschedulePolicy::Parallelism(ParallelismPolicy {
+                    parallelism: streaming_parallelism,
+                }),
             )
             .await?;
         Ok(Response::new(AlterCdcTableBackfillParallelismResponse {}))
@@ -1008,18 +1021,70 @@ impl DdlService for DdlServiceImpl {
         let job_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
+
+        let parallelism = match parallelism.get_parallelism()? {
+            Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                StreamingParallelism::Fixed(*parallelism as _)
+            }
+            Parallelism::Auto(_) | Parallelism::Adaptive(_) => StreamingParallelism::Adaptive,
+            _ => bail_unavailable!(),
+        };
+
         self.ddl_controller
             .reschedule_streaming_job(
-                job_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
-                    resource_group: JobResourceGroupTarget::Keep,
-                },
+                job_id.into(),
+                ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
                 deferred,
             )
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
+    }
+
+    async fn alter_fragment_parallelism(
+        &self,
+        request: Request<AlterFragmentParallelismRequest>,
+    ) -> Result<Response<AlterFragmentParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let fragment_ids = req.fragment_ids;
+        if fragment_ids.is_empty() {
+            return Err(Status::invalid_argument(
+                "at least one fragment id must be provided",
+            ));
+        }
+
+        let parallelism = match req.parallelism {
+            Some(parallelism) => {
+                let streaming_parallelism = match parallelism.get_parallelism()? {
+                    Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                        StreamingParallelism::Fixed(*parallelism as _)
+                    }
+                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => {
+                        StreamingParallelism::Adaptive
+                    }
+                    _ => bail_unavailable!(),
+                };
+                Some(streaming_parallelism)
+            }
+            None => None,
+        };
+
+        let fragment_targets = fragment_ids
+            .into_iter()
+            .map(|fragment_id| {
+                (
+                    fragment_id as risingwave_meta_model::FragmentId,
+                    parallelism.clone(),
+                )
+            })
+            .collect();
+
+        self.ddl_controller
+            .reschedule_fragments(fragment_targets)
+            .await?;
+
+        Ok(Response::new(AlterFragmentParallelismResponse {}))
     }
 
     /// Auto schema change for cdc sources,
@@ -1288,11 +1353,8 @@ impl DdlService for DdlServiceImpl {
 
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id,
-                JobRescheduleTarget {
-                    parallelism: JobParallelismTarget::Refresh,
-                    resource_group: JobResourceGroupTarget::Update(resource_group),
-                },
+                table_id.into(),
+                ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
             .await?;
@@ -1317,7 +1379,7 @@ impl DdlService for DdlServiceImpl {
         };
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterDatabaseParam(database_id as _, param))
+            .run_command(DdlCommand::AlterDatabaseParam(database_id.into(), param))
             .await?;
 
         return Ok(Response::new(AlterDatabaseParamResponse {
@@ -1408,7 +1470,7 @@ impl DdlService for DdlServiceImpl {
         let table_catalog = self
             .metadata_manager
             .catalog_controller
-            .get_table_catalog_by_name(database_id as _, schema_id as _, &table_name)
+            .get_table_catalog_by_name(database_id.into(), schema_id.into(), &table_name)
             .await?
             .ok_or(Status::not_found("Internal error: table not found"))?;
 
@@ -1477,7 +1539,7 @@ impl DdlService for DdlServiceImpl {
             let _ = self
                 .ddl_controller
                 .run_command(DdlCommand::DropStreamingJob {
-                    job_id: StreamingJobId::Table(None, table_id as _),
+                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
                     drop_mode: DropMode::Cascade,
                 })
                 .await
@@ -1499,7 +1561,7 @@ impl DdlService for DdlServiceImpl {
             let _ = self
                 .ddl_controller
                 .run_command(DdlCommand::DropStreamingJob {
-                    job_id: StreamingJobId::Table(None, table_id as _),
+                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
                     drop_mode: DropMode::Cascade,
                 })
                 .await

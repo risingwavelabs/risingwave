@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::env;
+use std::hint::black_box;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
     DataType, Date, Datum, Interval, ScalarImpl, StructType, Time, Timestamp,

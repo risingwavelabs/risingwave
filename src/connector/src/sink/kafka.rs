@@ -376,7 +376,7 @@ impl Sink for KafkaSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        // For upsert Kafka sink, the primary key must be defined.
+        // For non-append-only Kafka sink, the primary key must be defined.
         if self.format_desc.format != SinkFormat::AppendOnly && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "primary key not defined for {:?} kafka sink (please define in `primary_key` field)",

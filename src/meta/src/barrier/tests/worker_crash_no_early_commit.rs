@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::catalog::Database;
@@ -138,13 +139,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unimplemented!()
     }
 
-    async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+    async fn finish_cdc_table_backfill(&self, _job_id: JobId) -> MetaResult<()> {
         unimplemented!()
     }
 
     async fn handle_refresh_finished_table_ids(
         &self,
-        _refresh_finished_table_ids: Vec<u32>,
+        _refresh_finished_table_ids: Vec<JobId>,
     ) -> MetaResult<()> {
         unimplemented!()
     }
@@ -177,7 +178,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         unreachable!()
     };
     let database_id = DatabaseId::new(233);
-    let job_id = TableId::new(234);
+    let job_id = JobId::new(234);
     let worker_node = |id| WorkerNode {
         id,
         r#type: PbWorkerType::ComputeNode as i32,
@@ -273,7 +274,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         background_jobs: Default::default(),
         hummock_version_stats: Default::default(),
         database_infos: vec![Database {
-            id: database_id.database_id,
+            id: database_id.as_raw_id(),
             name: "".to_owned(),
             owner: 0,
             resource_group: "test".to_owned(),
@@ -317,7 +318,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         else {
             unreachable!()
         };
-        assert_eq!(req.database_id, database_id.database_id);
+        assert_eq!(req.database_id, database_id.as_raw_id());
         let partial_graph_id = req.partial_graph_id;
         let Request::InjectBarrier(init_inject_request) =
             request_rx.recv().await.unwrap().request.unwrap()
@@ -327,14 +328,14 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         let epoch = init_inject_request.barrier.unwrap().epoch.unwrap();
         assert_eq!(epoch.prev, initial_epoch);
         assert_eq!(partial_graph_id, init_inject_request.partial_graph_id);
-        assert_eq!(init_inject_request.database_id, database_id.database_id);
+        assert_eq!(init_inject_request.database_id, database_id.as_raw_id());
         response_tx
             .send(Ok(StreamingControlStreamResponse {
                 response: Some(Response::CompleteBarrier(BarrierCompleteResponse {
                     worker_id: worker.id as _,
                     partial_graph_id,
                     epoch: epoch.prev,
-                    database_id: database_id.database_id,
+                    database_id: database_id.as_raw_id(),
                     ..Default::default()
                 })),
             }))
@@ -362,14 +363,14 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let epoch1 = init_inject_request.barrier.unwrap().epoch.unwrap();
     assert_eq!(epoch1.prev, initial_epoch.curr);
     assert_eq!(partial_graph_id, init_inject_request.partial_graph_id);
-    assert_eq!(init_inject_request.database_id, database_id.database_id);
+    assert_eq!(init_inject_request.database_id, database_id.as_raw_id());
     response_tx1
         .send(Ok(StreamingControlStreamResponse {
             response: Some(Response::CompleteBarrier(BarrierCompleteResponse {
                 worker_id: worker1.id as _,
                 partial_graph_id,
                 epoch: epoch1.prev,
-                database_id: database_id.database_id,
+                database_id: database_id.as_raw_id(),
                 ..Default::default()
             })),
         }))
@@ -390,7 +391,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         let epoch = init_inject_request.barrier.unwrap().epoch.unwrap();
         assert_eq!(epoch.prev, initial_epoch.curr);
         assert_eq!(partial_graph_id, init_inject_request.partial_graph_id);
-        assert_eq!(init_inject_request.database_id, database_id.database_id);
+        assert_eq!(init_inject_request.database_id, database_id.as_raw_id());
     }
 
     // worker2 crashes before sending the response

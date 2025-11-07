@@ -62,7 +62,7 @@ impl StreamVectorIndexWrite {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            Some(table.stream_key.clone()),
+            Some(table.stream_key()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             StreamKind::AppendOnly,
@@ -76,6 +76,7 @@ impl StreamVectorIndexWrite {
     pub fn create(
         StreamOptimizedLogicalPlanRoot {
             plan: input,
+            required_dist: user_distributed_by,
             required_order: user_order_by,
             out_fields: user_cols,
             out_names,
@@ -108,6 +109,7 @@ impl StreamVectorIndexWrite {
             name,
             database_id,
             schema_id,
+            user_distributed_by,
             user_order_by,
             columns,
             definition,
@@ -126,6 +128,7 @@ impl StreamVectorIndexWrite {
         name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
+        user_distributed_by: RequiredDist,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -144,7 +147,7 @@ impl StreamVectorIndexWrite {
         // We will record the watermark group information in `TableCatalog` in the future. For now, let's flatten the watermark columns.
         let watermark_columns = input.watermark_columns().indices().collect();
 
-        let (table_pk, stream_key) = derive_pk(input, user_order_by, &columns);
+        let (table_pk, stream_key) = derive_pk(input, user_distributed_by, user_order_by, &columns);
         // assert: `stream_key` is a subset of `table_pk`
 
         let read_prefix_len_hint = table_pk.len();
@@ -213,7 +216,7 @@ impl Distill for StreamVectorIndexWrite {
             .map(Pretty::from)
             .collect();
 
-        let stream_key = (table.stream_key.iter())
+        let stream_key = (table.stream_key().iter())
             .map(|&k| table.columns[k].name().to_owned())
             .map(Pretty::from)
             .collect();

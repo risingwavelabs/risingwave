@@ -177,7 +177,7 @@ impl SchemaCatalog {
             self.indexes_by_table_id.remove(&table_ref.id);
         } else {
             tracing::warn!(
-                id = ?id.table_id,
+                %id,
                 "table not found when dropping, frontend might not be notified yet"
             );
         }
@@ -613,7 +613,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name
             .values()
-            .filter(|v| v.is_user_table() && has_access_to_object(user, v.id.table_id, v.owner))
+            .filter(|v| v.is_user_table() && has_access_to_object(user, v.id.as_raw_id(), v.owner))
     }
 
     pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
@@ -626,9 +626,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name
-            .values()
-            .filter(|v| v.is_internal_table() && has_access_to_object(user, v.id.table_id, v.owner))
+        self.table_by_name.values().filter(|v| {
+            v.is_internal_table() && has_access_to_object(user, v.id.as_raw_id(), v.owner)
+        })
     }
 
     /// Iterate all non-internal tables, including user tables, materialized views and indices.
@@ -643,7 +643,7 @@ impl SchemaCatalog {
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name.values().filter(|v| {
-            !v.is_internal_table() && has_access_to_object(user, v.id.table_id, v.owner)
+            !v.is_internal_table() && has_access_to_object(user, v.id.as_raw_id(), v.owner)
         })
     }
 
@@ -658,7 +658,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name
             .values()
-            .filter(|v| v.is_mview() && has_access_to_object(user, v.id.table_id, v.owner))
+            .filter(|v| v.is_mview() && has_access_to_object(user, v.id.as_raw_id(), v.owner))
     }
 
     /// Iterate created materialized views, excluding the indices.
@@ -673,7 +673,7 @@ impl SchemaCatalog {
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name.values().filter(|v| {
-            v.is_mview() && v.is_created() && has_access_to_object(user, v.id.table_id, v.owner)
+            v.is_mview() && v.is_created() && has_access_to_object(user, v.id.as_raw_id(), v.owner)
         })
     }
 
@@ -1098,10 +1098,10 @@ impl OwnedByUserCatalog for SchemaCatalog {
 impl From<&PbSchema> for SchemaCatalog {
     fn from(schema: &PbSchema) -> Self {
         Self {
-            id: schema.id,
+            id: schema.id.into(),
             owner: schema.owner,
             name: schema.name.clone(),
-            database_id: schema.database_id,
+            database_id: schema.database_id.into(),
             table_by_name: HashMap::new(),
             table_by_id: HashMap::new(),
             source_by_name: HashMap::new(),

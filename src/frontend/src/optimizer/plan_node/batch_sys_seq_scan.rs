@@ -92,7 +92,7 @@ impl ToBatchPb for BatchSysSeqScan {
             .map(PbColumnDesc::from)
             .collect();
         NodeBody::SysRowSeqScan(SysRowSeqScanNode {
-            table_id: self.core.table.id.table_id,
+            table_id: self.core.table.id.as_raw_id(),
             column_descs,
         })
     }

@@ -140,11 +140,11 @@ mod tests {
             Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Int64),
         ]);
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let row_id_index = 0;
         let row_id_generator = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
         let (mut tx, upstream) = MockSource::channel();
-        let upstream = upstream.into_executor(schema.clone(), pk_indices.clone());
+        let upstream = upstream.into_executor(schema.clone(), stream_key.clone());
 
         let row_id_gen_executor = RowIdGenExecutor::new(
             ActorContext::for_test(233),
