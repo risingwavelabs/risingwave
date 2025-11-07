@@ -145,10 +145,10 @@ pub fn mysql_datum_to_rw_datum(
             }
         }
         DataType::Int16 => {
-            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i16, u16)
+            handle_data_type!(mysql_row, mysql_datum_index, column_name, i16)
         }
         DataType::Int32 => {
-            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i32, u32)
+            handle_data_type!(mysql_row, mysql_datum_index, column_name, i32)
         }
         DataType::Int64 => {
             handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i64, u64)
