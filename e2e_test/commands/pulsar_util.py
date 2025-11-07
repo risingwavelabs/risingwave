@@ -273,6 +273,21 @@ class PulsarCat:
             if exit_on_end:
                 print(f"Total messages consumed: {message_count}")
 
+    def compact(self, topic: str):
+        """Compact a topic"""
+        topic = self._normalize_topic(topic)
+        print(f"Compacting topic: {topic}")
+
+        # Use admin API to compact topic
+        encoded_topic = topic.replace('://', '/').replace('/', '%2F')
+        url = f"{self.admin_url}/admin/v2/{encoded_topic}/compact"
+        response = requests.post(url)
+        if response.status_code == 200:
+            print(f"Topic {topic} compacted successfully")
+        else:
+            print(f"Failed to compact topic: {response.status_code} - {response.text}")
+            sys.exit(1)
+
     def check_unacked(self, topic: str, subscription: str):
         """Check unacknowledged messages for a subscription"""
         topic = self._normalize_topic(topic)
@@ -351,6 +366,9 @@ def main():
     consume_parser.add_argument('--exit-on-end', action='store_true',
                                help='Exit when no more messages are available instead of waiting for new ones')
 
+    compact_parser = subparsers.add_parser('compact', help='Compact a topic')
+    compact_parser.add_argument('--topic', '-t', required=True, help='Topic name')
+
     # Unacked command
     unacked_parser = subparsers.add_parser('unacked', help='Check unacknowledged messages')
     unacked_parser.add_argument('--topic', '-t', required=True, help='Topic name')
@@ -376,6 +394,8 @@ def main():
             pulsar_cat.consume(args.topic, args.subscription, args.position, args.exit_on_end)
         elif args.command == 'unacked':
             pulsar_cat.check_unacked(args.topic, args.subscription)
+        elif args.command == 'compact':
+            pulsar_cat.compact(args.topic)
     finally:
         pulsar_cat.close()
 

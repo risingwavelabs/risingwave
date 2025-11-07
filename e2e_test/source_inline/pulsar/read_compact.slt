@@ -17,6 +17,9 @@ python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default
 {"f1":1}^{"f1":1,"f2":"3"}
 EOF
 
+system ok
+python3 e2e_test/commands/pulsar_util.py compact --topic 'persistent://public/default/read_compact'
+
 statement ok
 create table t_not_compact (
   f1 int,
