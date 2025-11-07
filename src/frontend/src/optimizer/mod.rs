@@ -843,24 +843,6 @@ impl LogicalPlanRoot {
             column_descs,
         )?;
 
-        let dists = external_source_node
-            .iter()
-            .map(|input| input.distribution())
-            .chain([dml_node.distribution()])
-            .unique()
-            .collect_vec();
-
-        let dist = match &dists[..] {
-            &[Distribution::SomeShard, Distribution::HashShard(_)]
-            | &[Distribution::HashShard(_), Distribution::SomeShard] => Distribution::SomeShard,
-            &[dist @ Distribution::SomeShard] | &[dist @ Distribution::HashShard(_)] => {
-                dist.clone()
-            }
-            _ => {
-                unreachable!()
-            }
-        };
-
         let generated_column_exprs =
             LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         let upstream_sink_union = StreamUpstreamSinkUnion::new(
@@ -873,6 +855,21 @@ impl LogicalPlanRoot {
             row_id_index.is_none(),
             generated_column_exprs,
         );
+
+        let dists = external_source_node
+            .iter()
+            .map(|input| input.distribution())
+            .chain([dml_node.distribution(), upstream_sink_union.distribution()])
+            .collect_vec();
+
+        let dist = if dists
+            .iter()
+            .any(|dist| matches!(dist, Distribution::SomeShard))
+        {
+            Distribution::SomeShard
+        } else {
+            dists.into_iter().unique().exactly_one().cloned().unwrap()
+        };
 
         let union_inputs = external_source_node
             .into_iter()
