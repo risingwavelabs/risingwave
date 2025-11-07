@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::pin::pin;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use futures::future::select;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
@@ -151,14 +151,6 @@ impl DdlServiceImpl {
                     return Ok(());
                 }
 
-                let schema_map: HashMap<u32, String> = metadata_manager
-                    .catalog_controller
-                    .list_schemas()
-                    .await?
-                    .into_iter()
-                    .map(|s| (s.id, s.name))
-                    .collect();
-
                 let client = {
                     let workers = metadata_manager
                         .list_worker_node(Some(WorkerType::Frontend), Some(State::Running))
@@ -172,37 +164,16 @@ impl DdlServiceImpl {
 
                 for table in tables {
                     let start = tokio::time::Instant::now();
-
-                    let table_name = schema_map
-                        .get(&table.schema_id)
-                        .map(|s| format!("{}.{}", s, table.name))
-                        .unwrap_or_else(|| table.name.clone());
-
                     let req = GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name,
+                        table_name: table.name.clone(),
                         cdc_table_change: None,
                     };
-                    let resp = match client.get_table_replace_plan(req).await {
-                        Ok(resp) => resp,
-                        Err(e) => {
-                            // Skip tables that no longer exist in catalog (orphaned metadata)
-                            if e.to_string().contains("table not found") {
-                                tracing::warn!(
-                                    table_id = table.id,
-                                    table_name = %table.name,
-                                    "Skipping migration for table not found in catalog (orphaned metadata): {}",
-                                    e.as_report()
-                                );
-                                continue;
-                            }
-                            return Err(MetaError::from(anyhow::anyhow!(
-                                "failed to get table replace plan from frontend: {}",
-                                e
-                            )));
-                        }
-                    };
+                    let resp = client
+                        .get_table_replace_plan(req)
+                        .await
+                        .context("failed to get table replace plan from frontend")?;
 
                     let plan = resp.into_inner().replace_plan.unwrap();
                     let replace_info = DdlServiceImpl::extract_replace_table_info(plan);
