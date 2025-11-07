@@ -358,7 +358,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+
+        // source backfill only applies to kafka, so we don't need to get pulsar's `message_id_data_idx`.
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -1171,7 +1173,7 @@ impl<S: StateStore> Debug for SourceBackfillExecutorInner<S> {
         f.debug_struct("SourceBackfillExecutor")
             .field("source_id", &self.source_id)
             .field("column_ids", &self.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("stream_key", &self.info.stream_key)
             .finish()
     }
 }

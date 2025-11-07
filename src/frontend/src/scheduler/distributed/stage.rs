@@ -803,8 +803,7 @@ impl StageRunner {
                     .inner_side_table_desc
                     .as_ref()
                     .unwrap()
-                    .table_id
-                    .into(),
+                    .table_id,
             )?;
             let id_to_worker_slots = self
                 .worker_node_manager

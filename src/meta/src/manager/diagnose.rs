@@ -649,7 +649,7 @@ impl DiagnoseCommand {
             for (table_type, tables) in &grouped {
                 let tables = tables.into_iter().map(|t| {
                     (
-                        t.id,
+                        t.id.as_raw_id(),
                         (t.name, t.schema_id, t.definition, t.created_at_epoch),
                     )
                 });

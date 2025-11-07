@@ -36,6 +36,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockReadEpoch, HummockVersionId,
 };
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::id::TableId;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
@@ -102,7 +103,7 @@ pub async fn compaction_test_main(
     );
 
     let original_meta_endpoint = "http://127.0.0.1:5690";
-    let mut table_id: u32 = opts.table_id;
+    let mut table_id = opts.table_id.into();
 
     init_metadata_for_replay(
         original_meta_endpoint,
@@ -113,7 +114,7 @@ pub async fn compaction_test_main(
     )
     .await?;
 
-    assert_ne!(0, table_id, "Invalid table_id for correctness checking");
+    assert_ne!(table_id, 0, "Invalid table_id for correctness checking");
 
     let version_deltas = pull_version_deltas(original_meta_endpoint, &advertise_addr).await?;
 
@@ -202,7 +203,7 @@ pub fn start_compactor_thread(
 
 fn start_replay_thread(
     opts: CompactionTestOpts,
-    table_id: u32,
+    table_id: TableId,
     version_deltas: Vec<HummockVersionDelta>,
 ) -> JoinHandle<()> {
     let replay_func = move || {
@@ -223,7 +224,7 @@ async fn init_metadata_for_replay(
     new_meta_endpoint: &str,
     advertise_addr: &HostAddr,
     ci_mode: bool,
-    table_id: &mut u32,
+    table_id: &mut TableId,
 ) -> anyhow::Result<()> {
     // The compactor needs to receive catalog notification from the new Meta node,
     // and we should wait the compactor finishes setup the subscription channel
@@ -311,7 +312,7 @@ async fn pull_version_deltas(
 
 async fn start_replay(
     opts: CompactionTestOpts,
-    table_to_check: u32,
+    table_to_check: TableId,
     version_delta_logs: Vec<HummockVersionDelta>,
 ) -> anyhow::Result<()> {
     let advertise_addr = "127.0.0.1:7770".parse().unwrap();
@@ -379,7 +380,7 @@ async fn start_replay(
         let (version_id, committed_epoch) = (
             current_version.id,
             current_version
-                .table_committed_epoch(table_to_check.into())
+                .table_committed_epoch(table_to_check)
                 .unwrap_or_default(),
         );
         tracing::info!(
@@ -611,14 +612,14 @@ type StateStoreIterType = Pin<
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
-    table_id: u32,
+    table_id: TableId,
 ) -> anyhow::Result<BTreeMap<HummockEpoch, StateStoreIterType>> {
     let mut results = BTreeMap::new();
 
     // Set the `table_id` to the prefix of key, since the table_id in
     // the `ReadOptions` will not be used to filter kv pairs
     let mut buf = BytesMut::with_capacity(5);
-    buf.put_u32(table_id);
+    buf.put_u32(table_id.as_raw_id());
     let b = buf.freeze();
     let range = (
         Bound::Included(b.clone()).map(TableKey),
@@ -632,9 +633,7 @@ async fn open_hummock_iters(
         let snapshot = hummock
             .new_read_snapshot(
                 HummockReadEpoch::NoWait(epoch),
-                NewReadSnapshotOptions {
-                    table_id: table_id.into(),
-                },
+                NewReadSnapshotOptions { table_id },
             )
             .await?;
         let iter = snapshot

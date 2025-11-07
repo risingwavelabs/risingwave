@@ -30,7 +30,7 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
         ],
     };
     let (tx, source) = MockSource::channel();
-    let source = source.into_executor(schema, PkIndices::new());
+    let source = source.into_executor(schema, StreamKey::new());
 
     let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
     let test_expr_watermark = build_from_pretty("(add:int8 $0:int8 1:int8)");

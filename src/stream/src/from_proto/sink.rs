@@ -23,6 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
+use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
     build_sink,
@@ -217,7 +218,15 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         {
             SinkType::Retract
         } else {
-            SinkType::from_proto(sink_desc.get_sink_type().unwrap())
+            let sink_type_from_proto = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+            // For backward compatibility: Iceberg sink with Upsert type should be treated as Retract type.
+            if connector.eq_ignore_ascii_case(ICEBERG_SINK)
+                && matches!(sink_type_from_proto, SinkType::Upsert)
+            {
+                SinkType::Retract
+            } else {
+                sink_type_from_proto
+            }
         };
 
         let sink_param = SinkParam {
@@ -270,9 +279,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                                 state_store
                                     .try_wait_epoch(
                                         HummockReadEpoch::Committed(epoch.prev),
-                                        TryWaitEpochOptions {
-                                            table_id: table_id.into(),
-                                        },
+                                        TryWaitEpochOptions { table_id },
                                     )
                                     .await?;
                             }

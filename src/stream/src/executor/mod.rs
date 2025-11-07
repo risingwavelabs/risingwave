@@ -214,10 +214,8 @@ pub struct ExecutorInfo {
     /// The schema of the OUTPUT of the executor.
     pub schema: Schema,
 
-    /// The primary key indices of the OUTPUT of the executor.
-    /// Schema is used by both OLAP and streaming, therefore
-    /// pk indices are maintained independently.
-    pub pk_indices: PkIndices,
+    /// The stream key indices of the OUTPUT of the executor.
+    pub stream_key: StreamKey,
 
     /// The stream kind of the OUTPUT of the executor.
     pub stream_kind: PbStreamKind,
@@ -230,10 +228,10 @@ pub struct ExecutorInfo {
 }
 
 impl ExecutorInfo {
-    pub fn for_test(schema: Schema, pk_indices: PkIndices, identity: String, id: u64) -> Self {
+    pub fn for_test(schema: Schema, stream_key: StreamKey, identity: String, id: u64) -> Self {
         Self {
             schema,
-            pk_indices,
+            stream_key,
             stream_kind: PbStreamKind::Retract, // dummy value for test
             identity,
             id,
@@ -277,8 +275,8 @@ impl Executor {
         &self.info.schema
     }
 
-    pub fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
+    pub fn stream_key(&self) -> StreamKeyRef<'_> {
+        &self.info.stream_key
     }
 
     pub fn stream_kind(&self) -> PbStreamKind {
@@ -868,7 +866,7 @@ impl Mutation {
                     .iter()
                     .map(|(table_id, subscriber_id)| SubscriptionUpstreamInfo {
                         subscriber_id: *subscriber_id,
-                        upstream_mv_table_id: table_id.as_raw_id(),
+                        upstream_mv_table_id: *table_id,
                     })
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
@@ -922,7 +920,7 @@ impl Mutation {
                     .map(
                         |(subscriber_id, upstream_mv_table_id)| SubscriptionUpstreamInfo {
                             subscriber_id: *subscriber_id,
-                            upstream_mv_table_id: upstream_mv_table_id.as_raw_id(),
+                            upstream_mv_table_id: *upstream_mv_table_id,
                         },
                     )
                     .collect(),
@@ -954,7 +952,7 @@ impl Mutation {
                 table_id,
                 associated_source_id,
             } => PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
-                table_id: table_id.as_raw_id(),
+                table_id: *table_id,
                 associated_source_id: associated_source_id.as_raw_id(),
             }),
             Mutation::ListFinish {
@@ -1063,9 +1061,7 @@ impl Mutation {
                         |SubscriptionUpstreamInfo {
                              subscriber_id,
                              upstream_mv_table_id,
-                         }| {
-                            (TableId::new(*upstream_mv_table_id), *subscriber_id)
-                        },
+                         }| { (*upstream_mv_table_id, *subscriber_id) },
                     )
                     .collect(),
                 backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
@@ -1112,7 +1108,7 @@ impl Mutation {
                 subscriptions_to_drop: drop
                     .info
                     .iter()
-                    .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
+                    .map(|info| (info.subscriber_id, info.upstream_mv_table_id))
                     .collect(),
             },
             PbMutation::ConnectorPropsChange(alter_connector_props) => {
@@ -1143,7 +1139,7 @@ impl Mutation {
                 }
             }
             PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
-                table_id: TableId::new(refresh_start.table_id),
+                table_id: refresh_start.table_id,
                 associated_source_id: TableId::new(refresh_start.associated_source_id),
             },
             PbMutation::ListFinish(list_finish) => Mutation::ListFinish {
@@ -1460,9 +1456,9 @@ impl DispatcherMessageBatch {
     }
 }
 
-pub type PkIndices = Vec<usize>;
-pub type PkIndicesRef<'a> = &'a [usize];
-pub type PkDataTypes = SmallVec<[DataType; 1]>;
+pub type StreamKey = Vec<usize>;
+pub type StreamKeyRef<'a> = &'a [usize];
+pub type StreamKeyDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
 pub async fn expect_first_barrier<M: Debug>(

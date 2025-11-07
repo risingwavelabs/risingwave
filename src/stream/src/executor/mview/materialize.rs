@@ -41,6 +41,7 @@ use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
 
 use crate::cache::ManagedLruCache;
+use crate::common::change_buffer::output_kind as cb_kind;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
     StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
@@ -140,7 +141,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
         progress_state_table: &Table,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let table_id = TableId::new(table_catalog.id);
+        let table_id = table_catalog.id;
 
         // staging table is pk-only, and we don't need to check value consistency
         let staging_table = StateTableInner::from_table_catalog_inconsistent_op(
@@ -267,17 +268,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             .await;
 
         let mv_metrics = metrics.new_materialize_metrics(
-            TableId::new(table_catalog.id),
+            table_catalog.id,
             actor_context.id,
             actor_context.fragment_id,
         );
 
-        let metrics_info = MetricsInfo::new(
-            metrics,
-            table_catalog.id.into(),
-            actor_context.id,
-            "Materialize",
-        );
+        let metrics_info =
+            MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
 
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
@@ -509,7 +506,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             )
                                             .await?;
 
-                                        match change_buffer.into_chunk(data_types.clone()) {
+                                        match change_buffer
+                                            .into_chunk::<{ cb_kind::RETRACT }>(data_types.clone())
+                                        {
                                             Some(output_chunk) => {
                                                 self.state_table.write_chunk(output_chunk.clone());
                                                 self.state_table.try_flush().await?;
@@ -1584,7 +1583,7 @@ mod tests {
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1687,7 +1686,7 @@ mod tests {
             Message::Chunk(chunk2),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1779,7 +1778,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -1907,7 +1906,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2085,7 +2084,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2188,7 +2187,7 @@ mod tests {
             Message::Chunk(chunk1),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2306,7 +2305,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2495,7 +2494,7 @@ mod tests {
             Message::Chunk(chunk3),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
@@ -2695,7 +2694,7 @@ mod tests {
             .collect();
         // Prepare stream executors.
         let source =
-            MockSource::with_messages(messages).into_executor(schema.clone(), PkIndices::new());
+            MockSource::with_messages(messages).into_executor(schema.clone(), StreamKey::new());
 
         let mut materialize_executor = MaterializeExecutor::for_test(
             source,

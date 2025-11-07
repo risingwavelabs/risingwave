@@ -139,12 +139,22 @@ impl CatalogController {
         };
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
-        ensure_object_id(ObjectType::Database, streaming_job.database_id() as _, &txn).await?;
-        ensure_object_id(ObjectType::Schema, streaming_job.schema_id() as _, &txn).await?;
+        ensure_object_id(
+            ObjectType::Database,
+            streaming_job.database_id().as_raw_id() as _,
+            &txn,
+        )
+        .await?;
+        ensure_object_id(
+            ObjectType::Schema,
+            streaming_job.schema_id().as_raw_id() as _,
+            &txn,
+        )
+        .await?;
         check_relation_name_duplicate(
             &streaming_job.name(),
-            streaming_job.database_id() as _,
-            streaming_job.schema_id() as _,
+            streaming_job.database_id(),
+            streaming_job.schema_id(),
             &txn,
         )
         .await?;
@@ -187,8 +197,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id as _),
-                    Some(table.schema_id as _),
+                    Some(table.database_id),
+                    Some(table.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -196,14 +206,14 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                table.id = job_id.as_raw_id() as _;
+                table.id = job_id.as_mv_table_id();
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
             }
             StreamingJob::Sink(sink) => {
                 if let Some(target_table_id) = sink.target_table
                     && check_sink_into_table_cycle(
-                        target_table_id as ObjectId,
+                        target_table_id.as_raw_id() as ObjectId,
                         dependencies.iter().cloned().collect(),
                         &txn,
                     )
@@ -216,8 +226,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Sink,
                     sink.owner as _,
-                    Some(sink.database_id as _),
-                    Some(sink.schema_id as _),
+                    Some(sink.database_id),
+                    Some(sink.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -234,8 +244,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id as _),
-                    Some(table.schema_id as _),
+                    Some(table.database_id),
+                    Some(table.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -243,14 +253,14 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                table.id = job_id.as_raw_id() as _;
+                table.id = job_id.as_mv_table_id();
                 if let Some(src) = src {
                     let src_obj = Self::create_object(
                         &txn,
                         ObjectType::Source,
                         src.owner as _,
-                        Some(src.database_id as _),
-                        Some(src.schema_id as _),
+                        Some(src.database_id),
+                        Some(src.schema_id),
                     )
                     .await?;
                     src.id = src_obj.oid as _;
@@ -267,13 +277,18 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
             }
             StreamingJob::Index(index, table) => {
-                ensure_object_id(ObjectType::Table, index.primary_table_id as _, &txn).await?;
+                ensure_object_id(
+                    ObjectType::Table,
+                    index.primary_table_id.as_raw_id() as ObjectId,
+                    &txn,
+                )
+                .await?;
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Index,
                     index.owner as _,
-                    Some(index.database_id as _),
-                    Some(index.schema_id as _),
+                    Some(index.database_id),
+                    Some(index.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -283,12 +298,12 @@ impl CatalogController {
                 .await?;
                 // to be compatible with old implementation.
                 index.id = job_id.as_raw_id();
-                index.index_table_id = job_id.as_raw_id();
-                table.id = job_id.as_raw_id();
+                index.index_table_id = job_id.as_mv_table_id();
+                table.id = job_id.as_mv_table_id();
 
                 ObjectDependency::insert(object_dependency::ActiveModel {
-                    oid: Set(index.primary_table_id as _),
-                    used_by: Set(table.id as _),
+                    oid: Set(index.primary_table_id.as_raw_id() as ObjectId),
+                    used_by: Set(table.id.as_raw_id() as ObjectId),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -304,8 +319,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Source,
                     src.owner as _,
-                    Some(src.database_id as _),
-                    Some(src.schema_id as _),
+                    Some(src.database_id),
+                    Some(src.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -363,7 +378,7 @@ impl CatalogController {
         &self,
         job: &StreamingJob,
         mut incomplete_internal_tables: Vec<PbTable>,
-    ) -> MetaResult<HashMap<u32, u32>> {
+    ) -> MetaResult<HashMap<TableId, u32>> {
         let job_id = job.id();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -377,14 +392,14 @@ impl CatalogController {
                 &txn,
                 ObjectType::Table,
                 table.owner as _,
-                Some(table.database_id as _),
-                Some(table.schema_id as _),
+                Some(table.database_id),
+                Some(table.schema_id),
             )
             .await?
             .oid;
             table_id_map.insert(table.id, table_id as u32);
-            table.id = table_id as _;
-            table.job_id = Some(job_id.as_raw_id() as _);
+            table.id = (table_id as u32).into();
+            table.job_id = Some(job_id);
 
             let table_model = table::ActiveModel {
                 table_id: Set((table_id as u32).into()),
@@ -456,7 +471,6 @@ impl CatalogController {
             if !for_replace {
                 let all_tables = StreamJobFragments::collect_tables(get_fragments());
                 for state_table_id in state_table_ids {
-                    let state_table_id = (state_table_id as u32).into();
                     // Table's vnode count is not always the fragment's vnode count, so we have to
                     // look up the table from `TableFragments`.
                     // See `ActorGraphBuilder::new`.
@@ -513,7 +527,7 @@ impl CatalogController {
             // Update dml fragment id.
             if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
                 Table::update(table::ActiveModel {
-                    table_id: Set(table.id.into()),
+                    table_id: Set(table.id),
                     dml_fragment_id: Set(table.dml_fragment_id.map(|id| id as _)),
                     ..Default::default()
                 })
@@ -650,7 +664,7 @@ impl CatalogController {
                 .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
             inner
                 .dropped_tables
-                .extend(dropped_tables.map(|t| (t.id.into(), t)));
+                .extend(dropped_tables.map(|t| (t.id, t)));
         }
 
         if need_notify {
@@ -2324,7 +2338,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let fragments: Vec<(FragmentId, ObjectId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -2383,7 +2397,7 @@ impl CatalogController {
                 if let Some(rate_limit) = rate_limit {
                     rate_limits.push(RateLimitInfo {
                         fragment_id: fragment_id as u32,
-                        job_id: job_id as u32,
+                        job_id,
                         fragment_type_mask: fragment_type_mask as u32,
                         rate_limit,
                         node_name: node_name.unwrap().to_owned(),

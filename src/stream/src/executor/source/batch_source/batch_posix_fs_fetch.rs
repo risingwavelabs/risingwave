@@ -225,7 +225,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -409,8 +409,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                         for chunk in chunks {
                             let chunk = prune_additional_cols(
                                 &chunk,
-                                split_idx,
-                                offset_idx,
+                                &[split_idx, offset_idx],
                                 &source_desc.columns,
                             );
                             yield Message::Chunk(chunk);

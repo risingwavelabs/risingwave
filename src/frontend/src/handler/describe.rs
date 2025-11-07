@@ -265,7 +265,7 @@ pub async fn handle_describe_fragments(
             match relation {
                 Relation::Source(s) => {
                     if s.is_shared() {
-                        s.catalog.id
+                        s.catalog.id.into()
                     } else {
                         bail!(ErrorCode::NotSupported(
                             "non shared source has no fragments to describe".to_owned(),
@@ -273,7 +273,7 @@ pub async fn handle_describe_fragments(
                         ));
                     }
                 }
-                Relation::BaseTable(t) => t.table_catalog.id.as_raw_id(),
+                Relation::BaseTable(t) => t.table_catalog.id.as_job_id(),
                 Relation::SystemTable(_t) => {
                     bail!(ErrorCode::NotSupported(
                         "system table has no fragments to describe".to_owned(),
@@ -292,7 +292,7 @@ pub async fn handle_describe_fragments(
                 }
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
-            sink.sink_catalog.id.sink_id
+            sink.sink_catalog.id.sink_id.into()
         } else {
             return Err(not_found_err.into());
         }

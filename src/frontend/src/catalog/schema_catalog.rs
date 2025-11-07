@@ -87,7 +87,7 @@ pub struct SchemaCatalog {
 impl SchemaCatalog {
     pub fn create_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
-        let id = prost.id.into();
+        let id = prost.id;
         let table: TableCatalog = prost.into();
         let table_ref = Arc::new(table);
 
@@ -115,7 +115,7 @@ impl SchemaCatalog {
 
     pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
-        let id = prost.id.into();
+        let id = prost.id;
         let table: TableCatalog = prost.into();
         let table_ref = Arc::new(table);
 
@@ -137,11 +137,9 @@ impl SchemaCatalog {
         let name = prost.name.clone();
         let id = prost.id.into();
         let old_index = self.index_by_id.get(&id).unwrap();
-        let index_table = self
-            .get_created_table_by_id(&prost.index_table_id.into())
-            .unwrap();
+        let index_table = self.get_created_table_by_id(&prost.index_table_id).unwrap();
         let primary_table = self
-            .get_created_table_by_id(&prost.primary_table_id.into())
+            .get_created_table_by_id(&prost.primary_table_id)
             .unwrap();
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
@@ -186,9 +184,9 @@ impl SchemaCatalog {
     pub fn create_index(&mut self, prost: &PbIndex) {
         let name = prost.name.clone();
         let id = prost.id.into();
-        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let index_table = self.get_table_by_id(&prost.index_table_id).unwrap();
         let primary_table = self
-            .get_created_table_by_id(&prost.primary_table_id.into())
+            .get_created_table_by_id(&prost.primary_table_id)
             .unwrap();
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);

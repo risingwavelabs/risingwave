@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-pub use risingwave_common::catalog::TableId;
+pub use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
@@ -76,8 +76,6 @@ pub type TransactionId = i32;
 
 type RawObjectId = i32;
 pub type ObjectId = RawObjectId;
-pub type DatabaseId = RawObjectId;
-pub type SchemaId = RawObjectId;
 pub type SourceId = RawObjectId;
 pub type SinkId = RawObjectId;
 pub type SubscriptionId = RawObjectId;
@@ -336,6 +334,8 @@ macro_rules! derive_btreemap_from_blob {
 }
 
 pub(crate) use {derive_array_from_blob, derive_from_blob};
+
+derive_from_json_struct!(TableIdArray, Vec<TableId>);
 
 derive_from_json_struct!(I32Array, Vec<i32>);
 

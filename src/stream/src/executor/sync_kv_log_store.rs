@@ -329,7 +329,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         actor_context: ActorContextRef,
-        table_id: u32,
+        table_id: TableId,
         metrics: SyncedKvLogStoreMetrics,
         serde: LogStoreRowSerde,
         state_store: S,
@@ -341,7 +341,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     ) -> Self {
         Self {
             actor_context,
-            table_id: TableId::new(table_id),
+            table_id,
             metrics,
             serde,
             state_store,
@@ -1250,9 +1250,9 @@ mod tests {
             .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
@@ -1345,9 +1345,9 @@ mod tests {
             .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 
@@ -1437,9 +1437,9 @@ mod tests {
             .map(|desc| Field::new(desc.name.clone(), desc.data_type))
             .collect_vec();
         let schema = Schema { fields };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
 
         let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
 

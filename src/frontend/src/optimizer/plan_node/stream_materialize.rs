@@ -700,7 +700,7 @@ impl StreamNode for StreamMaterialize {
         PbNodeBody::Materialize(Box::new(MaterializeNode {
             // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by
             // meta service after global information is generated.
-            table_id: 0,
+            table_id: 0.into(),
             table: None,
             // Pass staging table catalog if available for refreshable tables
             staging_table: staging_table_prost,

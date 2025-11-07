@@ -179,7 +179,7 @@ impl CompleteBarrierTask {
                     Self::report_complete_event(&env, duration_sec, &command_ctx);
                     GLOBAL_META_METRICS
                         .last_committed_barrier_time
-                        .with_label_values(&[database_id.database_id.to_string().as_str()])
+                        .with_label_values(&[database_id.to_string().as_str()])
                         .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
                 }
             }

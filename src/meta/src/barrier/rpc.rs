@@ -80,7 +80,7 @@ use crate::{MetaError, MetaResult};
 fn to_partial_graph_id(job_id: Option<JobId>) -> u32 {
     job_id
         .map(|job_id| {
-            assert_ne!(job_id.as_raw_id(), u32::MAX);
+            assert_ne!(job_id, u32::MAX);
             job_id.as_raw_id()
         })
         .unwrap_or(u32::MAX)
@@ -503,13 +503,13 @@ impl ControlStreamManager {
         initial_inflight_infos.flat_map(|(database_id, creating_job_ids)| {
             [PbCreatePartialGraphRequest {
                 partial_graph_id: to_partial_graph_id(None),
-                database_id: database_id.into(),
+                database_id,
             }]
             .into_iter()
             .chain(
                 creating_job_ids.map(move |job_id| PbCreatePartialGraphRequest {
                     partial_graph_id: to_partial_graph_id(Some(job_id)),
-                    database_id: database_id.into(),
+                    database_id,
                 }),
             )
         })
@@ -554,7 +554,7 @@ impl DatabaseInitialBarrierCollector {
     }
 
     pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
-        assert_eq!(self.database_id.database_id, resp.database_id);
+        assert_eq!(self.database_id, resp.database_id);
         if let Some(creating_job_id) = from_partial_graph_id(resp.partial_graph_id) {
             self.creating_streaming_job_controls
                 .get_mut(&creating_job_id)
@@ -799,7 +799,7 @@ impl ControlStreamManager {
                 subscribers
                     .entry(*upstream_table_id)
                     .or_default()
-                    .try_insert(job_id.into(), SubscriberType::SnapshotBackfill)
+                    .try_insert(job_id.as_raw_id(), SubscriberType::SnapshotBackfill)
                     .expect("non-duplicate");
             }
             ongoing_snapshot_backfill_jobs
@@ -863,7 +863,7 @@ impl ControlStreamManager {
             )?;
             debug!(
                 ?node_to_collect,
-                database_id = database_id.database_id,
+                %database_id,
                 "inject initial barrier"
             );
             node_to_collect
@@ -1023,9 +1023,7 @@ impl ControlStreamManager {
         }
 
         let table_ids_to_sync: HashSet<_> =
-            InflightFragmentInfo::existing_table_ids(applied_graph_info)
-                .map(|table_id| table_id.as_raw_id())
-                .collect();
+            InflightFragmentInfo::existing_table_ids(applied_graph_info).collect();
 
         let mut node_need_collect = HashMap::new();
 
@@ -1060,7 +1058,7 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
-                                        database_id: database_id.database_id,
+                                        database_id,
                                         actor_ids_to_collect,
                                         table_ids_to_sync: table_ids_to_sync
                                             .iter()
@@ -1151,7 +1149,7 @@ impl ControlStreamManager {
                     request: Some(
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             CreatePartialGraphRequest {
-                                database_id: database_id.database_id,
+                                database_id,
                                 partial_graph_id,
                             },
                         ),
@@ -1182,7 +1180,7 @@ impl ControlStreamManager {
                         streaming_control_stream_request::Request::RemovePartialGraph(
                             RemovePartialGraphRequest {
                                 partial_graph_ids: partial_graph_ids.clone(),
-                                database_id: database_id.database_id,
+                                database_id,
                             },
                         ),
                     ),
@@ -1207,7 +1205,7 @@ impl ControlStreamManager {
                     .send(StreamingControlStreamRequest {
                         request: Some(streaming_control_stream_request::Request::ResetDatabase(
                             ResetDatabaseRequest {
-                                database_id: database_id.database_id,
+                                database_id,
                                 reset_request_id,
                             },
                         )),

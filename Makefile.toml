@@ -269,7 +269,7 @@ do
 done
 
 if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 8192 )) ; then
-    echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
+    echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
 '''
@@ -1310,6 +1310,14 @@ env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
+[tasks.ci-resume]
+category = "RiseDev - CI"
+dependencies = ["pre-start-dev"]
+command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
+env = { RISEDEV_CLEAN_START = false }
+args = ["${@}"]
+description = "Resume a full RisingWave dev cluster without cleaning data (useful for offline schema change tests)"
+
 [tasks.ci-kill]
 category = "RiseDev - CI"
 dependencies = ["k", "check-logs", "wait-processes-exit"]
@@ -1484,3 +1492,61 @@ echo "Node ${NODE_NAME} restarted."
 category = "RiseDev - Benchmark"
 description = "Run a local or remote sql benchmark on a RisingWave instance"
 script = "./develop/sql_bench/main.py $@"
+
+[tasks.build-sqlsmith-reducer]
+category = "RiseDev - Build"
+description = "Build Sqlsmith Reducer"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+script = '''
+#!/usr/bin/env bash
+
+set -e
+
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
+echo + cargo build -p risedev
+cargo build -p risedev
+
+set -xe
+cargo build --bin sqlsmith-reducer \
+  --profile "${RISINGWAVE_BUILD_PROFILE}" \
+  ${RISINGWAVE_FEATURE_FLAGS} \
+  ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
+'''
+
+[tasks.sr]
+alias = "sql-reduce-short"
+
+[tasks.sql-reduce-short]
+category = "RiseDev - Reduce"
+description = "Reduce a failing SQL query while preserving error"
+dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
+script = '''
+#!/usr/bin/env bash
+INPUT_FILE="$1"
+OUTPUT_FILE=".sqlsmith/reduced.sql"
+LOG_FILE=".sqlsmith/sqlsmith.log"
+
+if [[ -z "${INPUT_FILE:-}" ]]; then
+  echo "Please pass in the query file path for shrinking."
+  exit 1
+fi
+
+mkdir -p '.sqlsmith'
+echo "Shrinking: $INPUT_FILE"
+
+RUST_LOG=info target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/sqlsmith-reducer --input-file "$INPUT_FILE" --output-file "$OUTPUT_FILE" --run-rw-cmd "./risedev k && ./risedev d" 1>"$LOG_FILE" 2>&1
+
+echo "Shrunk file: $OUTPUT_FILE"
+echo "Log file: $LOG_FILE"
+'''
+
+[tasks.sql-reduce-full]
+category = "RiseDev - Reduce"
+description = "Reduce a failing SQL query while preserving error"
+dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
+script = '''
+#!/usr/bin/env bash
+
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/sqlsmith-reducer "$@"
+'''

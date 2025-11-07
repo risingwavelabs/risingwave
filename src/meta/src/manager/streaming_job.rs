@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{DatabaseId, JobId, SchemaId};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
 use risingwave_meta_model::{SourceId, TableVersion, source, table};
@@ -120,22 +120,11 @@ impl StreamingJob {
 
     pub fn id(&self) -> JobId {
         match self {
-            Self::MaterializedView(table) => table.id,
-            Self::Sink(sink) => sink.id,
-            Self::Table(_, table, ..) => table.id,
-            Self::Index(index, _) => index.id,
-            Self::Source(source) => source.id,
-        }
-        .into()
-    }
-
-    pub fn mv_table(&self) -> Option<u32> {
-        match self {
-            Self::MaterializedView(table) => Some(table.id),
-            Self::Sink(_) => None,
-            Self::Table(_, table, ..) => Some(table.id),
-            Self::Index(_, table) => Some(table.id),
-            Self::Source(_) => None,
+            Self::MaterializedView(table) => table.id.as_job_id(),
+            Self::Sink(sink) => sink.id.into(),
+            Self::Table(_, table, ..) => table.id.as_job_id(),
+            Self::Index(index, _) => index.id.into(),
+            Self::Source(source) => source.id.into(),
         }
     }
 
@@ -149,7 +138,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn schema_id(&self) -> u32 {
+    pub fn schema_id(&self) -> SchemaId {
         match self {
             Self::MaterializedView(table) => table.schema_id,
             Self::Sink(sink) => sink.schema_id,
@@ -159,7 +148,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn database_id(&self) -> u32 {
+    pub fn database_id(&self) -> DatabaseId {
         match self {
             Self::MaterializedView(table) => table.database_id,
             Self::Sink(sink) => sink.database_id,

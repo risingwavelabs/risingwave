@@ -405,8 +405,8 @@ impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
         PbSink {
             id: self.id.into(),
-            schema_id: self.schema_id.schema_id,
-            database_id: self.database_id.database_id,
+            schema_id: self.schema_id,
+            database_id: self.database_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
@@ -428,7 +428,7 @@ impl SinkCatalog {
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: self.stream_job_status.to_proto().into(),
-            target_table: self.target_table.map(|table_id| table_id.as_raw_id()),
+            target_table: self.target_table,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
@@ -438,9 +438,7 @@ impl SinkCatalog {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            auto_refresh_schema_from_table: self
-                .auto_refresh_schema_from_table
-                .map(|table_id| table_id.as_raw_id()),
+            auto_refresh_schema_from_table: self.auto_refresh_schema_from_table,
         }
     }
 
@@ -505,8 +503,8 @@ impl From<PbSink> for SinkCatalog {
         SinkCatalog {
             id: pb.id.into(),
             name: pb.name,
-            schema_id: pb.schema_id.into(),
-            database_id: pb.database_id.into(),
+            schema_id: pb.schema_id,
+            database_id: pb.database_id,
             definition: pb.definition,
             columns: pb
                 .columns
@@ -541,8 +539,8 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
-            auto_refresh_schema_from_table: pb.auto_refresh_schema_from_table.map(TableId::new),
-            target_table: pb.target_table.map(TableId::new),
+            auto_refresh_schema_from_table: pb.auto_refresh_schema_from_table,
+            target_table: pb.target_table,
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),

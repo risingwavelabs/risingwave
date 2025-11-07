@@ -136,7 +136,7 @@ impl ComputeClient {
                     down_actor_id,
                     up_fragment_id,
                     down_fragment_id,
-                    database_id: database_id.database_id,
+                    database_id,
                     term_id,
                 })),
             },

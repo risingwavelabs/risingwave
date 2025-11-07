@@ -137,7 +137,7 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         periodic_barriers: &mut PeriodicBarriers,
     ) -> MetaResult<()> {
-        let database_id = DatabaseId::new(resp.database_id);
+        let database_id = resp.database_id;
         let database_status = self.databases.get_mut(&database_id).expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
@@ -397,7 +397,7 @@ impl CheckpointControl {
         worker_id: WorkerId,
         resp: ResetDatabaseResponse,
     ) {
-        let database_id = DatabaseId::new(resp.database_id);
+        let database_id = resp.database_id;
         match self.databases.get_mut(&database_id).expect("should exist") {
             DatabaseCheckpointControlStatus::Running(_) => {
                 unreachable!("should not receive reset database resp when running")
@@ -499,7 +499,7 @@ struct DatabaseCheckpointControlMetrics {
 
 impl DatabaseCheckpointControlMetrics {
     fn new(database_id: DatabaseId) -> Self {
-        let database_id_str = database_id.database_id.to_string();
+        let database_id_str = database_id.to_string();
         let barrier_latency = GLOBAL_META_METRICS
             .barrier_latency
             .with_guarded_label_values(&[&database_id_str]);

@@ -131,9 +131,9 @@ fn make_source_internal_table(id: u32) -> PbTable {
         make_column(TypeName::Varchar, 1),
     ];
     PbTable {
-        id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        id: id.into(),
+        schema_id: SchemaId::placeholder(),
+        database_id: DatabaseId::placeholder(),
         name: String::new(),
         columns,
         pk: vec![PbColumnOrder {
@@ -153,9 +153,9 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
         columns.push(make_column(TypeName::Int32, 1));
     }
     PbTable {
-        id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        id: id.into(),
+        schema_id: SchemaId::placeholder(),
+        database_id: DatabaseId::placeholder(),
         name: String::new(),
         columns,
         pk: vec![PbColumnOrder {
@@ -172,9 +172,9 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
 
 fn make_empty_table(id: u32) -> PbTable {
     PbTable {
-        id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        id: id.into(),
+        schema_id: SchemaId::placeholder(),
+        database_id: DatabaseId::placeholder(),
         name: String::new(),
         columns: vec![],
         pk: vec![],
@@ -360,7 +360,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
             // `table_id` and `table` are left empty when generated from frontend.
-            table_id: TableId::placeholder().as_raw_id(),
+            table_id: TableId::placeholder(),
             table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
             staging_table: None,

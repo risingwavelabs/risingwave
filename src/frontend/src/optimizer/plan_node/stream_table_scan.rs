@@ -410,7 +410,7 @@ impl StreamTableScan {
         };
 
         let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
-            table_id: self.core.table_catalog.id.as_raw_id(),
+            table_id: self.core.table_catalog.id,
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,

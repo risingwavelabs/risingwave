@@ -140,23 +140,25 @@ impl Catalog {
     }
 
     pub fn create_schema(&mut self, proto: &PbSchema) {
-        self.get_database_mut(proto.database_id)
+        let database_id = proto.database_id;
+        let id = proto.id;
+        self.get_database_mut(database_id)
             .unwrap()
             .create_schema(proto);
 
         for sys_table in get_sys_tables_in_schema(proto.name.as_str()) {
-            self.get_database_mut(proto.database_id)
+            self.get_database_mut(database_id)
                 .unwrap()
-                .get_schema_mut(proto.id)
+                .get_schema_mut(id)
                 .unwrap()
                 .create_sys_table(sys_table);
         }
         for mut sys_view in get_sys_views_in_schema(proto.name.as_str()) {
-            sys_view.database_id = proto.database_id;
-            sys_view.schema_id = proto.id;
-            self.get_database_mut(proto.database_id)
+            sys_view.database_id = database_id;
+            sys_view.schema_id = id;
+            self.get_database_mut(database_id)
                 .unwrap()
-                .get_schema_mut(proto.id)
+                .get_schema_mut(id)
                 .unwrap()
                 .create_sys_view(Arc::new(sys_view));
         }
@@ -169,7 +171,7 @@ impl Catalog {
             .get_schema_mut(proto.schema_id)
             .unwrap()
             .create_table(proto);
-        self.table_by_id.insert(proto.id.into(), table);
+        self.table_by_id.insert(proto.id, table);
     }
 
     pub fn create_index(&mut self, proto: &PbIndex) {
@@ -311,7 +313,7 @@ impl Catalog {
     pub fn update_table(&mut self, proto: &PbTable) {
         let database = self.get_database_mut(proto.database_id).unwrap();
         let schema = database.get_schema_mut(proto.schema_id).unwrap();
-        let table = if schema.get_table_by_id(&proto.id.into()).is_some() {
+        let table = if schema.get_table_by_id(&proto.id).is_some() {
             schema.update_table(proto)
         } else {
             // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
@@ -320,14 +322,14 @@ impl Catalog {
                 .iter_schemas_mut()
                 .find(|schema| {
                     schema.id() != proto.schema_id
-                        && schema.get_created_table_by_id(&proto.id.into()).is_some()
+                        && schema.get_created_table_by_id(&proto.id).is_some()
                 })
                 .unwrap()
-                .drop_table(proto.id.into());
+                .drop_table(proto.id);
             new_table
         };
 
-        self.table_by_id.insert(proto.id.into(), table);
+        self.table_by_id.insert(proto.id, table);
     }
 
     pub fn update_database(&mut self, proto: &PbDatabase) {
@@ -545,10 +547,10 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("database", db_name.to_owned()))
     }
 
-    pub fn get_database_by_id(&self, db_id: &DatabaseId) -> CatalogResult<&DatabaseCatalog> {
+    pub fn get_database_by_id(&self, db_id: DatabaseId) -> CatalogResult<&DatabaseCatalog> {
         let db_name = self
             .db_name_by_id
-            .get(db_id)
+            .get(&db_id)
             .ok_or_else(|| CatalogError::NotFound("db_id", db_id.to_string()))?;
         self.database_by_name
             .get(db_name)
@@ -608,8 +610,8 @@ impl Catalog {
 
     pub fn get_schema_by_id(
         &self,
-        db_id: &DatabaseId,
-        schema_id: &SchemaId,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
     ) -> CatalogResult<&SchemaCatalog> {
         self.get_database_by_id(db_id)?
             .get_schema_by_id(schema_id)
@@ -1136,9 +1138,9 @@ impl Catalog {
         schema_id: SchemaId,
         mv_id: TableId,
     ) -> Vec<Arc<IndexCatalog>> {
-        self.get_database_by_id(&db_id)
+        self.get_database_by_id(db_id)
             .unwrap()
-            .get_schema_by_id(&schema_id)
+            .get_schema_by_id(schema_id)
             .unwrap()
             .get_any_indexes_by_table_id(&mv_id)
     }
@@ -1154,9 +1156,9 @@ impl Catalog {
                 let schema = self.get_schema_by_name(db_name, schema_name)?;
                 #[allow(clippy::manual_map)]
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
-                    Ok(Some(item.id().into()))
+                    Ok(Some(item.id().as_raw_id()))
                 } else if let Some(item) = schema.get_any_table_by_name(class_name) {
-                    Ok(Some(item.id().into()))
+                    Ok(Some(item.id().as_raw_id()))
                 } else if let Some(item) = schema.get_any_index_by_name(class_name) {
                     Ok(Some(item.id.into()))
                 } else if let Some(item) = schema.get_source_by_name(class_name) {

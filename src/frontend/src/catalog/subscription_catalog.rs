@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{OBJECT_ID_PLACEHOLDER, TableId, UserId};
+use risingwave_common::id::{DatabaseId, SchemaId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbSubscription;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
@@ -38,10 +39,10 @@ pub struct SubscriptionCatalog {
     pub retention_seconds: u64,
 
     /// The database id
-    pub database_id: u32,
+    pub database_id: DatabaseId,
 
     /// The schema id
-    pub schema_id: u32,
+    pub schema_id: SchemaId,
 
     /// The subscription depends on the upstream list
     pub dependent_table_id: TableId,
@@ -114,7 +115,7 @@ impl SubscriptionCatalog {
             owner: self.owner.into(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             created_at_cluster_version: self.created_at_cluster_version.clone(),
-            dependent_table_id: self.dependent_table_id.as_raw_id(),
+            dependent_table_id: self.dependent_table_id,
             subscription_state: match self.subscription_state {
                 SubscriptionState::Init => PbSubscriptionState::Init.into(),
                 SubscriptionState::Created => PbSubscriptionState::Created.into(),
@@ -132,7 +133,7 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             retention_seconds: prost.retention_seconds,
             database_id: prost.database_id,
             schema_id: prost.schema_id,
-            dependent_table_id: TableId::new(prost.dependent_table_id),
+            dependent_table_id: prost.dependent_table_id,
             owner: prost.owner.into(),
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),

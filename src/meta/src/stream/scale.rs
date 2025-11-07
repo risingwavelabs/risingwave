@@ -828,7 +828,7 @@ impl ScaleController {
                 fragment_actors: all_fragment_actors,
             };
 
-            commands.insert(DatabaseId::new(*database_id as u32), command);
+            commands.insert(*database_id, command);
         }
 
         Ok(commands)

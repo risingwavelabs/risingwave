@@ -78,7 +78,7 @@ impl CreatingStreamingJobControl {
         edges: &mut FragmentEdgeBuildResult,
     ) -> MetaResult<Self> {
         let job_id = info.stream_job_fragments.stream_job_id();
-        let database_id = DatabaseId::new(info.streaming_job.database_id());
+        let database_id = info.streaming_job.database_id();
         debug!(
             %job_id,
             definition = info.definition,

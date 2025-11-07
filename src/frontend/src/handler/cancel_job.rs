@@ -48,7 +48,7 @@ pub(super) async fn handle_cancel(
                     continue;
                 }
             }
-            filtered_job_ids.push(job_id);
+            filtered_job_ids.push(job_id.into());
         }
     }
 

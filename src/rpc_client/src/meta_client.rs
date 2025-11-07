@@ -34,6 +34,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
+use risingwave_common::id::{DatabaseId, JobId, SchemaId};
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
@@ -131,8 +132,6 @@ use crate::hummock_meta_client::{
 use crate::meta_rpc_client_method_impl;
 
 type ConnectionId = u32;
-type DatabaseId = u32;
-type SchemaId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
@@ -189,8 +188,8 @@ impl MetaClient {
     pub async fn create_connection(
         &self,
         connection_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         req: create_connection_request::Payload,
     ) -> Result<WaitVersion> {
@@ -210,8 +209,8 @@ impl MetaClient {
     pub async fn create_secret(
         &self,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
@@ -445,10 +444,7 @@ impl MetaClient {
         table_id: TableId,
         cascade: bool,
     ) -> Result<WaitVersion> {
-        let request = DropMaterializedViewRequest {
-            table_id: table_id.as_raw_id(),
-            cascade,
-        };
+        let request = DropMaterializedViewRequest { table_id, cascade };
 
         let resp = self.inner.drop_materialized_view(request).await?;
         Ok(resp
@@ -613,7 +609,7 @@ impl MetaClient {
     pub async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        new_schema_id: u32,
+        new_schema_id: SchemaId,
     ) -> Result<WaitVersion> {
         let request = AlterSetSchemaRequest {
             new_schema_id,
@@ -637,12 +633,12 @@ impl MetaClient {
 
     pub async fn alter_parallelism(
         &self,
-        table_id: u32,
+        job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterParallelismRequest {
-            table_id,
+            table_id: job_id,
             parallelism: Some(parallelism),
             deferred,
         };
@@ -667,7 +663,7 @@ impl MetaClient {
 
     pub async fn alter_cdc_table_backfill_parallelism(
         &self,
-        table_id: u32,
+        table_id: JobId,
         parallelism: PbTableParallelism,
     ) -> Result<()> {
         let request = AlterCdcTableBackfillParallelismRequest {
@@ -682,7 +678,7 @@ impl MetaClient {
 
     pub async fn alter_resource_group(
         &self,
-        table_id: u32,
+        table_id: TableId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
@@ -713,8 +709,8 @@ impl MetaClient {
         &self,
         secret_id: u32,
         secret_name: String,
-        database_id: u32,
-        schema_id: u32,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
         owner_id: u32,
         value: Vec<u8>,
     ) -> Result<WaitVersion> {
@@ -802,7 +798,7 @@ impl MetaClient {
     ) -> Result<WaitVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(SourceId::Id),
-            table_id: table_id.as_raw_id(),
+            table_id,
             cascade,
         };
 
@@ -1120,8 +1116,8 @@ impl MetaClient {
 
     pub async fn list_table_fragments(
         &self,
-        table_ids: &[u32],
-    ) -> Result<HashMap<u32, TableFragmentInfo>> {
+        table_ids: &[JobId],
+    ) -> Result<HashMap<JobId, TableFragmentInfo>> {
         let request = ListTableFragmentsRequest {
             table_ids: table_ids.to_vec(),
         };
@@ -1162,6 +1158,26 @@ impl MetaClient {
             .get_fragment_by_id(GetFragmentByIdRequest { fragment_id })
             .await?;
         Ok(resp.distribution)
+    }
+
+    pub async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>> {
+        let resp = self
+            .inner
+            .get_fragment_vnodes(GetFragmentVnodesRequest { fragment_id })
+            .await?;
+        Ok(resp
+            .actor_vnodes
+            .into_iter()
+            .map(|actor| (actor.actor_id, actor.vnode_indices))
+            .collect())
+    }
+
+    pub async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>> {
+        let resp = self
+            .inner
+            .get_actor_vnodes(GetActorVnodesRequest { actor_id })
+            .await?;
+        Ok(resp.vnode_indices)
     }
 
     pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
@@ -1513,7 +1529,7 @@ impl MetaClient {
     pub async fn split_compaction_group(
         &self,
         group_id: CompactionGroupId,
-        table_ids_to_new_group: &[u32],
+        table_ids_to_new_group: &[TableId],
         partition_vnode_count: u32,
     ) -> Result<CompactionGroupId> {
         let req = SplitCompactionGroupRequest {
@@ -1527,11 +1543,11 @@ impl MetaClient {
 
     pub async fn get_tables(
         &self,
-        table_ids: &[u32],
+        table_ids: Vec<TableId>,
         include_dropped_tables: bool,
-    ) -> Result<HashMap<u32, Table>> {
+    ) -> Result<HashMap<TableId, Table>> {
         let req = GetTablesRequest {
-            table_ids: table_ids.to_vec(),
+            table_ids,
             include_dropped_tables,
         };
         let resp = self.inner.get_tables(req).await?;
@@ -1752,7 +1768,7 @@ impl MetaClient {
     pub async fn get_version_by_epoch(
         &self,
         epoch: HummockEpoch,
-        table_id: u32,
+        table_id: TableId,
     ) -> Result<PbHummockVersion> {
         let req = GetVersionByEpochRequest { epoch, table_id };
         let resp = self.inner.get_version_by_epoch(req).await?;
@@ -1787,7 +1803,7 @@ impl MetaClient {
         Ok(resp.rate_limits)
     }
 
-    pub async fn list_cdc_progress(&self) -> Result<HashMap<u32, PbCdcProgress>> {
+    pub async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>> {
         let request = ListCdcProgressRequest {};
         let resp = self.inner.list_cdc_progress(request).await?;
         Ok(resp.cdc_progress)
@@ -1831,7 +1847,7 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
+    pub async fn set_sync_log_store_aligned(&self, job_id: JobId, aligned: bool) -> Result<()> {
         let request = SetSyncLogStoreAlignedRequest { job_id, aligned };
         self.inner.set_sync_log_store_aligned(request).await?;
         Ok(())
@@ -1839,6 +1855,16 @@ impl MetaClient {
 
     pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.inner.refresh(request).await
+    }
+
+    pub async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>> {
+        let request = ListUnmigratedTablesRequest {};
+        let resp = self.inner.list_unmigrated_tables(request).await?;
+        Ok(resp
+            .tables
+            .into_iter()
+            .map(|table| (table.table_id, table.table_name))
+            .collect())
     }
 }
 
@@ -1885,7 +1911,7 @@ impl HummockMetaClient for MetaClient {
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,
-        table_id: u32,
+        table_id: JobId,
         level: u32,
         sst_ids: Vec<u64>,
     ) -> Result<()> {
@@ -1953,7 +1979,7 @@ impl HummockMetaClient for MetaClient {
     async fn get_version_by_epoch(
         &self,
         epoch: HummockEpoch,
-        table_id: u32,
+        table_id: TableId,
     ) -> Result<PbHummockVersion> {
         self.get_version_by_epoch(epoch, table_id).await
     }
@@ -2436,8 +2462,11 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
+            ,{ stream_client, get_fragment_vnodes, GetFragmentVnodesRequest, GetFragmentVnodesResponse }
+            ,{ stream_client, get_actor_vnodes, GetActorVnodesRequest, GetActorVnodesResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
             ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
+            ,{ stream_client, list_unmigrated_tables, ListUnmigratedTablesRequest, ListUnmigratedTablesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

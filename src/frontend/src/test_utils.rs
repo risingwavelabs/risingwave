@@ -31,6 +31,7 @@ use risingwave_common::catalog::{
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
+use risingwave_common::id::JobId;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -99,7 +100,7 @@ impl SessionManager for LocalFrontend {
 
     fn create_dummy_session(
         &self,
-        _database_id: u32,
+        _database_id: DatabaseId,
         _user_name: u32,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         unreachable!()
@@ -244,7 +245,7 @@ pub struct MockCatalogWriter {
     catalog: Arc<RwLock<Catalog>>,
     id: AtomicU32,
     table_id_to_schema_id: RwLock<HashMap<u32, SchemaId>>,
-    schema_id_to_database_id: RwLock<HashMap<u32, DatabaseId>>,
+    schema_id_to_database_id: RwLock<HashMap<SchemaId, DatabaseId>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
@@ -258,7 +259,7 @@ impl CatalogWriter for MockCatalogWriter {
         barrier_interval_ms: Option<u32>,
         checkpoint_frequency: Option<u64>,
     ) -> Result<()> {
-        let database_id = self.gen_id();
+        let database_id = DatabaseId::new(self.gen_id());
         self.catalog.write().create_database(&PbDatabase {
             name: db_name.to_owned(),
             id: database_id,
@@ -305,9 +306,8 @@ impl CatalogWriter for MockCatalogWriter {
         table.stream_job_status = PbStreamJobStatus::Created as _;
         table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
         self.catalog.write().create_table(&table);
-        self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
-        self.hummock_snapshot_manager
-            .add_table_for_test(TableId::new(table.id));
+        self.add_table_or_source_id(table.id.as_raw_id(), table.schema_id, table.database_id);
+        self.hummock_snapshot_manager.add_table_for_test(table.id);
         Ok(())
     }
 
@@ -401,12 +401,12 @@ impl CatalogWriter for MockCatalogWriter {
         index_table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
         self.catalog.write().create_table(&index_table);
         self.add_table_or_index_id(
-            index_table.id,
+            index_table.id.as_raw_id(),
             index_table.schema_id,
             index_table.database_id,
         );
 
-        index.id = index_table.id;
+        index.id = index_table.id.as_raw_id();
         index.index_table_id = index_table.id;
         self.catalog.write().create_index(&index);
         Ok(())
@@ -419,8 +419,8 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_connection(
         &self,
         _connection_name: String,
-        _database_id: u32,
-        _schema_id: u32,
+        _database_id: DatabaseId,
+        _schema_id: SchemaId,
         _owner_id: u32,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
@@ -430,8 +430,8 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_secret(
         &self,
         _secret_name: String,
-        _database_id: u32,
-        _schema_id: u32,
+        _database_id: DatabaseId,
+        _schema_id: SchemaId,
         _owner_id: u32,
         _payload: Vec<u8>,
     ) -> Result<()> {
@@ -566,7 +566,7 @@ impl CatalogWriter for MockCatalogWriter {
         let index = {
             let catalog_reader = self.catalog.read();
             let schema_catalog = catalog_reader
-                .get_schema_by_id(&database_id, &schema_id)
+                .get_schema_by_id(database_id, schema_id)
                 .unwrap();
             schema_catalog.get_index_by_id(&index_id).unwrap().clone()
         };
@@ -594,12 +594,12 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_database(&self, database_id: u32) -> Result<()> {
+    async fn drop_database(&self, database_id: DatabaseId) -> Result<()> {
         self.catalog.write().drop_database(database_id);
         Ok(())
     }
 
-    async fn drop_schema(&self, schema_id: u32, _cascade: bool) -> Result<()> {
+    async fn drop_schema(&self, schema_id: SchemaId, _cascade: bool) -> Result<()> {
         let database_id = self.drop_schema_id(schema_id);
         self.catalog.write().drop_schema(database_id, schema_id);
         Ok(())
@@ -653,7 +653,7 @@ impl CatalogWriter for MockCatalogWriter {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        new_schema_id: u32,
+        new_schema_id: SchemaId,
     ) -> Result<()> {
         match object {
             alter_set_schema_request::Object::TableId(table_id) => {
@@ -675,7 +675,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_parallelism(
         &self,
-        _table_id: u32,
+        _job_id: JobId,
         _parallelism: PbTableParallelism,
         _deferred: bool,
     ) -> Result<()> {
@@ -690,8 +690,8 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _secret_id: u32,
         _secret_name: String,
-        _database_id: u32,
-        _schema_id: u32,
+        _database_id: DatabaseId,
+        _schema_id: SchemaId,
         _owner_id: u32,
         _payload: Vec<u8>,
     ) -> Result<()> {
@@ -700,7 +700,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_resource_group(
         &self,
-        _table_id: u32,
+        _table_id: TableId,
         _resource_group: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
@@ -709,12 +709,12 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_database_param(
         &self,
-        database_id: u32,
+        database_id: DatabaseId,
         param: AlterDatabaseParam,
     ) -> Result<()> {
         let mut pb_database = {
             let reader = self.catalog.read();
-            let database = reader.get_database_by_id(&database_id)?.to_owned();
+            let database = reader.get_database_by_id(database_id)?.to_owned();
             database.to_prost()
         };
         match param {
@@ -746,7 +746,7 @@ impl MockCatalogWriter {
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         catalog.write().create_database(&PbDatabase {
-            id: 0,
+            id: 0.into(),
             name: DEFAULT_DATABASE_NAME.to_owned(),
             owner: DEFAULT_SUPER_USER_ID,
             resource_group: DEFAULT_RESOURCE_GROUP.to_owned(),
@@ -754,27 +754,27 @@ impl MockCatalogWriter {
             checkpoint_frequency: None,
         });
         catalog.write().create_schema(&PbSchema {
-            id: 1,
+            id: 1.into(),
             name: DEFAULT_SCHEMA_NAME.to_owned(),
-            database_id: 0,
+            database_id: 0.into(),
             owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(&PbSchema {
-            id: 2,
+            id: 2.into(),
             name: PG_CATALOG_SCHEMA_NAME.to_owned(),
-            database_id: 0,
+            database_id: 0.into(),
             owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(&PbSchema {
-            id: 3,
+            id: 3.into(),
             name: RW_CATALOG_SCHEMA_NAME.to_owned(),
-            database_id: 0,
+            database_id: 0.into(),
             owner: DEFAULT_SUPER_USER_ID,
         });
-        let mut map: HashMap<u32, DatabaseId> = HashMap::new();
-        map.insert(1_u32, 0_u32);
-        map.insert(2_u32, 0_u32);
-        map.insert(3_u32, 0_u32);
+        let mut map: HashMap<SchemaId, DatabaseId> = HashMap::new();
+        map.insert(1_u32.into(), 0_u32.into());
+        map.insert(2_u32.into(), 0_u32.into());
+        map.insert(3_u32.into(), 0_u32.into());
         Self {
             catalog,
             id: AtomicU32::new(3),
@@ -784,9 +784,9 @@ impl MockCatalogWriter {
         }
     }
 
-    fn gen_id(&self) -> u32 {
+    fn gen_id<T: From<u32>>(&self) -> T {
         // Since the 0 value is `dev` schema and database, so jump out the 0 value.
-        self.id.fetch_add(1, Ordering::SeqCst) + 1
+        (self.id.fetch_add(1, Ordering::SeqCst) + 1).into()
     }
 
     fn add_table_or_source_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
@@ -854,13 +854,13 @@ impl MockCatalogWriter {
         (self.get_database_id_by_schema(schema_id), schema_id)
     }
 
-    fn add_schema_id(&self, schema_id: u32, database_id: DatabaseId) {
+    fn add_schema_id(&self, schema_id: SchemaId, database_id: DatabaseId) {
         self.schema_id_to_database_id
             .write()
             .insert(schema_id, database_id);
     }
 
-    fn drop_schema_id(&self, schema_id: u32) -> DatabaseId {
+    fn drop_schema_id(&self, schema_id: SchemaId) -> DatabaseId {
         self.schema_id_to_database_id
             .write()
             .remove(&schema_id)
@@ -893,7 +893,7 @@ impl MockCatalogWriter {
         Ok(())
     }
 
-    fn get_database_id_by_schema(&self, schema_id: u32) -> DatabaseId {
+    fn get_database_id_by_schema(&self, schema_id: SchemaId) -> DatabaseId {
         *self
             .schema_id_to_database_id
             .read()
@@ -1055,8 +1055,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_table_fragments(
         &self,
-        _table_ids: &[u32],
-    ) -> RpcResult<HashMap<u32, TableFragmentInfo>> {
+        _table_ids: &[JobId],
+    ) -> RpcResult<HashMap<JobId, TableFragmentInfo>> {
         Ok(HashMap::default())
     }
 
@@ -1110,9 +1110,9 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn get_tables(
         &self,
-        _table_ids: &[u32],
+        _table_ids: Vec<crate::catalog::TableId>,
         _include_dropped_tables: bool,
-    ) -> RpcResult<HashMap<u32, Table>> {
+    ) -> RpcResult<HashMap<crate::catalog::TableId, Table>> {
         Ok(HashMap::new())
     }
 
@@ -1197,7 +1197,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
-    async fn list_cdc_progress(&self) -> RpcResult<HashMap<u32, PbCdcProgress>> {
+    async fn list_cdc_progress(&self) -> RpcResult<HashMap<JobId, PbCdcProgress>> {
         Ok(HashMap::default())
     }
 
@@ -1248,11 +1248,19 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn get_fragment_vnodes(&self, _fragment_id: u32) -> RpcResult<Vec<(u32, Vec<u32>)>> {
+        unimplemented!()
+    }
+
+    async fn get_actor_vnodes(&self, _actor_id: u32) -> RpcResult<Vec<u32>> {
+        unimplemented!()
+    }
+
     fn worker_id(&self) -> u32 {
         0
     }
 
-    async fn set_sync_log_store_aligned(&self, _job_id: u32, _aligned: bool) -> RpcResult<()> {
+    async fn set_sync_log_store_aligned(&self, _job_id: JobId, _aligned: bool) -> RpcResult<()> {
         Ok(())
     }
 
@@ -1270,6 +1278,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     fn cluster_id(&self) -> &str {
         "test-cluster-uuid"
+    }
+
+    async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<crate::catalog::TableId, String>> {
+        unimplemented!()
     }
 }
 

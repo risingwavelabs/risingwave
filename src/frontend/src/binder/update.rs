@@ -20,7 +20,6 @@ use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::types::StructType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
@@ -140,7 +139,7 @@ impl Binder {
                 table_catalog.owner,
                 AclMode::Update,
                 table_name.clone(),
-                PbObject::TableId(table_catalog.id.as_raw_id()),
+                table_catalog.id,
             ),
             table_catalog.database_id,
         )?;
