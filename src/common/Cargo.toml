@@ -44,7 +44,6 @@ faiss = { workspace = true }
 fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-governor = { workspace = true }
 hashbrown = { workspace = true }
 hashbrown0_14 = { workspace = true }
 hex = "0.4.3"
@@ -122,7 +121,6 @@ toml = "0.9"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-opentelemetry = { workspace = true }
-tracing-subscriber = "0.3.20"
 twox-hash = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
