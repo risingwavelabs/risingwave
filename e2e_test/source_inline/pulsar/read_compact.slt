@@ -1,0 +1,61 @@
+control substitution on
+
+system ok
+curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
+----
+ok
+
+# test with unpartitioned topic
+system ok
+python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/read_compact' --partitions 0
+
+system ok
+python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default/read_compact" -k '^' <<EOF
+{"f1":1}^{"f1":1,"f2":"1"}
+{"f1":1}^{"f1":1,"f2":"2"}
+{"f1":1}^{"f1":1,"f2":"3"}
+EOF
+
+statement ok
+create table t_not_compact (
+  f1 int,
+  f2 varchar
+) with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/read_compact',
+  pulsar.read_compacted = 'false',
+) format plain encode json;
+
+statement ok
+create table t_compact (
+  f1 int,
+  f2 varchar
+) with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/read_compact',
+  pulsar.read_compacted = 'true'
+) format plain encode json;
+
+sleep 3s
+
+query ?? retry 3 backoff 1s
+select f1, f2 from t_not_compact order by f1, f2;
+----
+1 1
+1 2
+1 3
+
+query ?? retry 3 backoff 1s
+select f1, f2 from t_compact order by f1, f2;
+----
+1 3
+
+# ==== clean up =====
+
+statement ok
+drop table t_not_compact;
+
+statement ok
+drop table t_compact;

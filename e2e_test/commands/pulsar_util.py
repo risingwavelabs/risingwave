@@ -149,10 +149,18 @@ class PulsarCat:
             print(f"Failed to drop topic: {response.status_code} - {response.text}")
             sys.exit(1)
 
-    def produce(self, topic: str):
-        """Produce messages from stdin, each line with UTF-8 encoding"""
+    def produce(self, topic: str, key_delimiter: str = None):
+        """Produce messages from stdin, each line with UTF-8 encoding
+
+        Args:
+            topic: Topic name to produce to
+            key_delimiter: If specified, split each line by this delimiter (first occurrence only).
+                          The front part becomes the message key, the later part becomes the payload.
+        """
         topic = self._normalize_topic(topic)
         print(f"Producing to topic: {topic}")
+        if key_delimiter:
+            print(f"Key delimiter: '{key_delimiter}' (first occurrence splits key from payload)")
         print("Type messages (Ctrl+C to stop):")
 
         client = self.get_client()
@@ -163,9 +171,21 @@ class PulsarCat:
             for line in sys.stdin:
                 line = line.rstrip('\n\r')
                 if line:  # Only send non-empty lines
-                    producer.send(line.encode('utf-8'))
-                    line_count += 1
-                    print(f"Sent message {line_count}: {line}")
+                    if key_delimiter and key_delimiter in line:
+                        # Split only on first occurrence
+                        parts = line.split(key_delimiter, 1)
+                        message_key = parts[0]
+                        message_payload = parts[1] if len(parts) > 1 else ''
+                        producer.send(
+                            message_payload.encode('utf-8'),
+                            partition_key=message_key
+                        )
+                        line_count += 1
+                        print(f"Sent message {line_count}: key='{message_key}', payload='{message_payload}'")
+                    else:
+                        producer.send(line.encode('utf-8'))
+                        line_count += 1
+                        print(f"Sent message {line_count}: {line}")
         except KeyboardInterrupt:
             print(f"\nProduced {line_count} messages")
         finally:
@@ -320,6 +340,7 @@ def main():
     # Produce command
     produce_parser = subparsers.add_parser('produce', help='Produce messages from stdin')
     produce_parser.add_argument('--topic', '-t', required=True, help='Topic name')
+    produce_parser.add_argument('--key', '-k', default=None, help='Key split delimiter for the message')
 
     # Consume command
     consume_parser = subparsers.add_parser('consume', help='Consume messages from a topic')
@@ -350,7 +371,7 @@ def main():
         elif args.command == 'drop-topic':
             pulsar_cat.drop_topic(args.topic, args.force)
         elif args.command == 'produce':
-            pulsar_cat.produce(args.topic)
+            pulsar_cat.produce(args.topic, args.key)
         elif args.command == 'consume':
             pulsar_cat.consume(args.topic, args.subscription, args.position, args.exit_on_end)
         elif args.command == 'unacked':
