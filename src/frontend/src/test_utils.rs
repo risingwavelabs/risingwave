@@ -1253,6 +1253,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn get_fragment_vnodes(&self, _fragment_id: u32) -> RpcResult<Vec<(u32, Vec<u32>)>> {
+        unimplemented!()
+    }
+
+    async fn get_actor_vnodes(&self, _actor_id: u32) -> RpcResult<Vec<u32>> {
+        unimplemented!()
+    }
+
     fn worker_id(&self) -> u32 {
         0
     }
@@ -1275,6 +1283,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     fn cluster_id(&self) -> &str {
         "test-cluster-uuid"
+    }
+
+    async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<u32, String>> {
+        unimplemented!()
     }
 }
 

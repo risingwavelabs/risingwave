@@ -178,6 +178,10 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
 
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>>;
+
+    async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>>;
+
     fn worker_id(&self) -> u32;
 
     async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
@@ -189,6 +193,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
 
     fn cluster_id(&self) -> &str;
+
+    async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -454,6 +460,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_fragment_by_id(fragment_id).await
     }
 
+    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>> {
+        self.0.get_fragment_vnodes(fragment_id).await
+    }
+
+    async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>> {
+        self.0.get_actor_vnodes(actor_id).await
+    }
+
     fn worker_id(&self) -> u32 {
         self.0.worker_id()
     }
@@ -476,5 +490,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     fn cluster_id(&self) -> &str {
         self.0.cluster_id()
+    }
+
+    async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>> {
+        self.0.list_unmigrated_tables().await
     }
 }

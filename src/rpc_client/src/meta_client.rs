@@ -1170,6 +1170,26 @@ impl MetaClient {
         Ok(resp.distribution)
     }
 
+    pub async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>> {
+        let resp = self
+            .inner
+            .get_fragment_vnodes(GetFragmentVnodesRequest { fragment_id })
+            .await?;
+        Ok(resp
+            .actor_vnodes
+            .into_iter()
+            .map(|actor| (actor.actor_id, actor.vnode_indices))
+            .collect())
+    }
+
+    pub async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>> {
+        let resp = self
+            .inner
+            .get_actor_vnodes(GetActorVnodesRequest { actor_id })
+            .await?;
+        Ok(resp.vnode_indices)
+    }
+
     pub async fn list_actor_states(&self) -> Result<Vec<ActorState>> {
         let resp = self
             .inner
@@ -1846,6 +1866,16 @@ impl MetaClient {
     pub async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse> {
         self.inner.refresh(request).await
     }
+
+    pub async fn list_unmigrated_tables(&self) -> Result<HashMap<u32, String>> {
+        let request = ListUnmigratedTablesRequest {};
+        let resp = self.inner.list_unmigrated_tables(request).await?;
+        Ok(resp
+            .tables
+            .into_iter()
+            .map(|table| (table.table_id, table.table_name))
+            .collect())
+    }
 }
 
 #[async_trait]
@@ -2442,8 +2472,11 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
+            ,{ stream_client, get_fragment_vnodes, GetFragmentVnodesRequest, GetFragmentVnodesResponse }
+            ,{ stream_client, get_actor_vnodes, GetActorVnodesRequest, GetActorVnodesResponse }
             ,{ stream_client, set_sync_log_store_aligned, SetSyncLogStoreAlignedRequest, SetSyncLogStoreAlignedResponse }
             ,{ stream_client, refresh, RefreshRequest, RefreshResponse }
+            ,{ stream_client, list_unmigrated_tables, ListUnmigratedTablesRequest, ListUnmigratedTablesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
