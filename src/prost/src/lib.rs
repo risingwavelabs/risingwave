@@ -25,6 +25,8 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
+pub mod id;
+
 use std::str::FromStr;
 
 use event_recovery::RecoveryEvent;

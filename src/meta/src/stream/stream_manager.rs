@@ -49,6 +49,7 @@ use crate::manager::{
 use crate::model::{
     ActorId, DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, FragmentId,
     FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragments, StreamJobFragmentsToCreate,
+    SubscriptionId,
 };
 use crate::stream::SourceManagerRef;
 use crate::stream::cdc::{
@@ -88,8 +89,6 @@ pub struct CreateStreamingJobContext {
 
     /// DDL definition.
     pub definition: String,
-
-    pub mv_table_id: Option<u32>,
 
     pub create_type: CreateType,
 
@@ -765,12 +764,10 @@ impl GlobalStreamManager {
     /// This method is copied from `GlobalStreamManager::reschedule_streaming_job` and modified to handle reschedule CDC table backfill.
     pub(crate) async fn reschedule_cdc_table_backfill(
         &self,
-        job_id: u32,
+        job_id: JobId,
         target: ReschedulePolicy,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
-
-        let job_id = TableId::new(job_id);
 
         let parallelism_policy = match target {
             ReschedulePolicy::Parallelism(policy)
@@ -892,13 +889,13 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let command = Command::CreateSubscription {
             subscription_id: subscription.id,
-            upstream_mv_table_id: TableId::new(subscription.dependent_table_id),
+            upstream_mv_table_id: subscription.dependent_table_id,
             retention_second: subscription.retention_seconds,
         };
 
         tracing::debug!("sending Command::CreateSubscription");
         self.barrier_scheduler
-            .run_command(subscription.database_id.into(), command)
+            .run_command(subscription.database_id, command)
             .await?;
         Ok(())
     }
@@ -907,12 +904,12 @@ impl GlobalStreamManager {
     pub async fn drop_subscription(
         self: &Arc<Self>,
         database_id: DatabaseId,
-        subscription_id: u32,
-        table_id: u32,
+        subscription_id: SubscriptionId,
+        table_id: TableId,
     ) {
         let command = Command::DropSubscription {
             subscription_id,
-            upstream_mv_table_id: TableId::new(table_id),
+            upstream_mv_table_id: table_id,
         };
 
         tracing::debug!("sending Command::DropSubscriptions");

@@ -146,7 +146,7 @@ pub impl FragmentTypeMask {
 #[derive(Clone, Debug, FromQueryResult, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")] // for dashboard
 pub struct StreamingJobInfo {
-    pub job_id: ObjectId,
+    pub job_id: JobId,
     pub obj_type: ObjectType,
     pub name: String,
     pub job_status: JobStatus,
@@ -222,11 +222,7 @@ impl CatalogController {
             ..
         } = fragment;
 
-        let state_table_ids = pb_state_table_ids
-            .iter()
-            .map(|table_id| table_id.as_raw_id() as i32)
-            .collect_vec()
-            .into();
+        let state_table_ids = pb_state_table_ids.clone().into();
 
         assert!(!pb_actors.is_empty());
 
@@ -382,7 +378,7 @@ impl CatalogController {
             })
         }
 
-        let pb_state_table_ids = state_table_ids.into_u32_array();
+        let pb_state_table_ids = state_table_ids.0;
         let pb_distribution_type = PbFragmentDistributionType::from(distribution_type) as _;
         let pb_fragment = Fragment {
             fragment_id: fragment_id as _,
@@ -1167,10 +1163,10 @@ impl CatalogController {
 
             let fragment = FragmentDistribution {
                 fragment_id: fragment_desc.fragment_id as _,
-                table_id: fragment_desc.job_id.as_raw_id(),
+                table_id: fragment_desc.job_id,
                 distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type)
                     as _,
-                state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
+                state_table_ids: fragment_desc.state_table_ids.0,
                 upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
                 fragment_type_mask: fragment_desc.fragment_type_mask as _,
                 parallelism: parallelism as _,
@@ -1701,9 +1697,7 @@ impl CatalogController {
         target_table: &PbTable,
         target_fragment_id: FragmentId,
     ) -> MetaResult<Vec<UpstreamSinkInfo>> {
-        let incoming_sinks = self
-            .get_table_incoming_sinks(TableId::new(target_table.id))
-            .await?;
+        let incoming_sinks = self.get_table_incoming_sinks(target_table.id).await?;
 
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -1813,10 +1807,7 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
     use risingwave_meta_model::fragment::DistributionType;
-    use risingwave_meta_model::{
-        ActorId, ConnectorSplits, ExprContext, FragmentId, I32Array, StreamNode,
-        StreamingParallelism, TableId, VnodeBitmap, fragment,
-    };
+    use risingwave_meta_model::*;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::plan_common::PbExprContext;
     use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
@@ -1986,7 +1977,7 @@ mod tests {
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&stream_node),
-            state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID.as_raw_id() as _]),
+            state_table_ids: TableIdArray(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: Default::default(),
             vnode_count: VirtualNode::COUNT_FOR_TEST as _,
             parallelism: None,
@@ -2095,15 +2086,7 @@ mod tests {
             PbFragmentDistributionType::from(fragment.distribution_type)
         );
 
-        assert_eq!(
-            pb_state_table_ids,
-            fragment
-                .state_table_ids
-                .into_u32_array()
-                .into_iter()
-                .map_into()
-                .collect_vec()
-        );
+        assert_eq!(pb_state_table_ids, fragment.state_table_ids.0);
         assert_eq!(fragment.stream_node.to_protobuf(), nodes);
     }
 
@@ -2116,7 +2099,7 @@ mod tests {
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&PbStreamNode::default()),
-            state_table_ids: I32Array::default(),
+            state_table_ids: TableIdArray::default(),
             upstream_fragment_id: Default::default(),
             vnode_count: 0,
             parallelism: None,
@@ -2142,7 +2125,7 @@ mod tests {
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&PbStreamNode::default()),
-            state_table_ids: I32Array::default(),
+            state_table_ids: TableIdArray::default(),
             upstream_fragment_id: Default::default(),
             vnode_count: 0,
             parallelism: None,

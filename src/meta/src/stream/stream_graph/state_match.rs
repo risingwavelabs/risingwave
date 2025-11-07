@@ -314,7 +314,7 @@ impl Matches {
                 // the "physical" part of the table, best illustrated by `TableDesc`.
                 let table_desc_for_compare = |table: &PbTable| {
                     let mut table = table.clone();
-                    table.id = 0; // ignore id
+                    table.id = 0.into(); // ignore id
                     table.maybe_vnode_count = Some(42); // vnode count is unfilled for new fragment graph, fill it with a dummy value before proceeding
 
                     TableDesc::from_pb_table(&table)
@@ -332,11 +332,9 @@ impl Matches {
                     );
                 }
 
-                table_matches
-                    .try_insert(ut.id.into(), vt)
-                    .unwrap_or_else(|_| {
-                        panic!("duplicated table id {} in fragment {}", ut.id, u.id)
-                    });
+                table_matches.try_insert(ut.id, vt).unwrap_or_else(|_| {
+                    panic!("duplicated table id {} in fragment {}", ut.id, u.id)
+                });
             }
         }
 

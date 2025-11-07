@@ -86,7 +86,9 @@ pub mod field_generator;
 pub mod gap_fill;
 pub mod global_jvm;
 pub mod hash;
-pub mod id;
+pub mod id {
+    pub use risingwave_pb::id::*;
+}
 pub mod memory;
 pub mod metrics_reader;
 pub mod telemetry;

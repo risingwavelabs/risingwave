@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
@@ -96,7 +96,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let database_name = table_config.database.clone();
 
         let external_table = ExternalStorageTable::new(
-            TableId::new(table_desc.table_id),
+            table_desc.table_id,
             schema_table_name,
             database_name,
             table_config,

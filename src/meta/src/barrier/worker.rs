@@ -22,7 +22,6 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::TryFutureExt;
 use itertools::Itertools;
-use risingwave_common::catalog::DatabaseId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_pb::meta::Recovery;
@@ -447,7 +446,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if !self.enable_per_database_isolation() {
                                         Err(anyhow!("database {} reset", resp.database_id))?;
                                     }
-                                let database_id = DatabaseId::new(resp.database_id);
+                                let database_id = resp.database_id;
                                 if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                     warn!(%database_id, "database entering recovery");
                                     self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
@@ -848,7 +847,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     resp
                                 }
                                 Response::ReportDatabaseFailure(resp) => {
-                                    let database_id = DatabaseId::new(resp.database_id);
+                                    let database_id = resp.database_id;
                                     if collecting_databases.remove(&database_id).is_some() {
                                         warn!(%database_id, worker_id, "database reset during global recovery");
                                         assert!(failed_databases.insert(database_id));
@@ -867,7 +866,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     };
                     assert_eq!(worker_id, resp.worker_id as WorkerId);
-                    let database_id = DatabaseId::new(resp.database_id);
+                    let database_id = resp.database_id;
                     if failed_databases.contains(&database_id) {
                         assert!(!collecting_databases.contains_key(&database_id));
                         // ignore the lately arrived collect resp of failed database

@@ -96,7 +96,7 @@ pub async fn handle_drop_index(
             .env()
             .meta_client()
             .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
-                job_ids: vec![index_id.index_id],
+                job_ids: vec![index_id.index_id.into()],
             }))
             .await?;
         tracing::info!(?canceled_jobs, "cancelled creating index job");

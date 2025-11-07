@@ -449,7 +449,7 @@ impl CatalogController {
             .filter_map(|t| {
                 if t.version.is_some() {
                     let ret = (
-                        t.id.into(),
+                        t.id,
                         t.columns
                             .iter()
                             .map(|c| c.column_desc.as_ref().unwrap().column_id)

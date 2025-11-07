@@ -139,8 +139,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     .get_table_by_associate_source_id(associated_source_id.as_raw_id() as _)
                     .await
                     .context("Failed to get table id for source")?
-                    .id
-                    .into();
+                    .id;
 
                 // Find the database ID for this table
                 let database_id = self
@@ -195,8 +194,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     .get_table_by_associate_source_id(associated_source_id.as_raw_id() as _)
                     .await
                     .context("Failed to get table id for source")?
-                    .id
-                    .into();
+                    .id;
 
                 // Find the database ID for this table
                 let database_id = self

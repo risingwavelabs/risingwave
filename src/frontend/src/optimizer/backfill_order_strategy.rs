@@ -64,7 +64,7 @@ pub mod auto {
             }
             StreamPlanNodeType::StreamTableScan => {
                 let table_scan = plan.as_stream_table_scan().expect("table scan");
-                let relation_id = table_scan.core().table_catalog.id().into();
+                let relation_id = table_scan.core().table_catalog.id().as_raw_id();
                 Some(BackfillTreeNode::Scan { id: relation_id })
             }
             StreamPlanNodeType::StreamSourceScan => {
@@ -254,7 +254,7 @@ mod fixed {
             match plan.node_type() {
                 StreamPlanNodeType::StreamTableScan => {
                     let table_scan = plan.as_stream_table_scan().expect("table scan");
-                    let relation_id = table_scan.core().table_catalog.id().into();
+                    let relation_id = table_scan.core().table_catalog.id().as_raw_id();
                     relation_ids.insert(relation_id);
                 }
                 StreamPlanNodeType::StreamSourceScan => {

@@ -56,7 +56,7 @@ impl ExecutorBuilder for VectorIndexWriteExecutorBuilder {
         };
         assert_eq!(dimension, input_dimension);
 
-        let executor = VectorIndexWriteExecutor::new(input, store, table.id.into()).await?;
+        let executor = VectorIndexWriteExecutor::new(input, store, table.id).await?;
         Ok(Executor::new(params.info, Box::new(executor)))
     }
 }

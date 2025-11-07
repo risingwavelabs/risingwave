@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
+use risingwave_pb::id::TableId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::GroupStateValidator;
@@ -53,7 +54,7 @@ pub struct Versioning {
     pub disable_commit_epochs: bool,
     /// Latest hummock version
     pub current_version: HummockVersion,
-    pub local_metrics: HashMap<u32, LocalTableMetrics>,
+    pub local_metrics: HashMap<TableId, LocalTableMetrics>,
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
@@ -306,7 +307,7 @@ pub(super) fn calc_new_write_limits(
                         .state_table_info
                         .compaction_group_member_table_ids(*id)
                         .iter()
-                        .map(|table_id| table_id.as_raw_id())
+                        .copied()
                         .collect(),
                     reason: group_state.reason().unwrap().to_owned(),
                 },
@@ -357,7 +358,7 @@ fn estimate_table_stats(sst: &SstableInfo) -> PbTableStatsMap {
     }
     let estimated_total_value_size = sst.uncompressed_file_size - estimated_total_key_size;
     for table_id in &sst.table_ids {
-        let e = changes.entry(table_id.as_raw_id()).or_default();
+        let e = changes.entry(*table_id).or_default();
         e.total_key_count += weighted_value(sst.total_key_count as i64);
         e.total_key_size += weighted_value(estimated_total_key_size as i64);
         e.total_value_size += weighted_value(estimated_total_value_size as i64);
@@ -370,6 +371,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use itertools::Itertools;
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::{Level, Levels};
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
@@ -469,7 +471,7 @@ mod tests {
         let origin_snapshot: HashMap<CompactionGroupId, WriteLimit> = [(
             2,
             WriteLimit {
-                table_ids: vec![1, 2, 3],
+                table_ids: [1, 2, 3].into_iter().map_into().collect(),
                 reason: "for test".to_owned(),
             },
         )]
@@ -686,7 +688,7 @@ mod tests {
         let changes = estimate_table_stats(&sst);
         assert_eq!(changes.len(), 3);
         for t in &sst.table_ids {
-            let stats = changes.get(&t.as_raw_id()).unwrap();
+            let stats = changes.get(t).unwrap();
             assert_eq!(stats.total_key_count, 6000 / 3);
             assert_eq!(stats.total_key_size, 60_000 / 2 / 3);
             assert_eq!(stats.total_value_size, (60_000 - 60_000 / 2) / 3);

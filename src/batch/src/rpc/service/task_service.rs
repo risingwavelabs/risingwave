@@ -213,7 +213,6 @@ impl BatchServiceImpl {
             .await?;
         if wait_for_persistence {
             dispatch_state_store!(self.env.state_store(), store, {
-                use risingwave_common::catalog::TableId;
                 use risingwave_hummock_sdk::HummockReadEpoch;
                 use risingwave_storage::StateStore;
                 use risingwave_storage::store::TryWaitEpochOptions;
@@ -221,9 +220,7 @@ impl BatchServiceImpl {
                 store
                     .try_wait_epoch(
                         HummockReadEpoch::Committed(epoch.0),
-                        TryWaitEpochOptions {
-                            table_id: TableId::new(table_id),
-                        },
+                        TryWaitEpochOptions { table_id },
                     )
                     .await
                     .map_err(BatchError::from)?;

@@ -706,8 +706,7 @@ impl DatabaseManagedBarrierState {
             .get_mut(&partial_graph_id)
             .expect("should exist");
 
-        let table_ids =
-            HashSet::from_iter(request.table_ids_to_sync.iter().cloned().map(TableId::new));
+        let table_ids = HashSet::from_iter(request.table_ids_to_sync);
         self.table_ids.extend(table_ids.iter().cloned());
 
         graph_state.transform_to_issued(

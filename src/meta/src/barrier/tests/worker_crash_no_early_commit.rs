@@ -274,7 +274,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         background_jobs: Default::default(),
         hummock_version_stats: Default::default(),
         database_infos: vec![Database {
-            id: database_id.as_raw_id(),
+            id: database_id,
             name: "".to_owned(),
             owner: 0,
             resource_group: "test".to_owned(),
@@ -335,7 +335,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                     worker_id: worker.id as _,
                     partial_graph_id,
                     epoch: epoch.prev,
-                    database_id: database_id.as_raw_id(),
+                    database_id,
                     ..Default::default()
                 })),
             }))
@@ -370,7 +370,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 worker_id: worker1.id as _,
                 partial_graph_id,
                 epoch: epoch1.prev,
-                database_id: database_id.as_raw_id(),
+                database_id,
                 ..Default::default()
             })),
         }))

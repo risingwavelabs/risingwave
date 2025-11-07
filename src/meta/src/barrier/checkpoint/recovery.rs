@@ -203,7 +203,7 @@ impl DatabaseRecoveringState {
             } => {
                 if resp.reset_request_id < *reset_request_id {
                     info!(
-                        database_id = resp.database_id,
+                        database_id = %resp.database_id,
                         worker_id,
                         received_request_id = resp.reset_request_id,
                         ongoing_request_id = reset_request_id,

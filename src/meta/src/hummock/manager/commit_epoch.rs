@@ -359,11 +359,8 @@ impl HummockManager {
         for (table_id, stat) in table_stats {
             let throughput = ((stat.total_value_size + stat.total_key_size) as f64
                 / checkpoint_secs as f64) as u64;
-            table_throughput_statistic_manager.add_table_throughput_with_ts(
-                table_id.into(),
-                throughput,
-                timestamp,
-            );
+            table_throughput_statistic_manager
+                .add_table_throughput_with_ts(table_id, throughput, timestamp);
         }
     }
 

@@ -92,7 +92,7 @@ impl RefreshManager {
     /// 4. Sends a refresh command through the barrier system
     /// 5. Returns the result of the refresh operation
     pub async fn refresh_table(&self, request: RefreshRequest) -> MetaResult<RefreshResponse> {
-        let table_id = TableId::new(request.table_id);
+        let table_id = request.table_id;
         let associated_source_id = TableId::new(request.associated_source_id);
 
         // Validate that the table exists and is refreshable
