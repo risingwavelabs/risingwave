@@ -630,8 +630,7 @@ impl Barrier {
                 _,
             )) => backfill_nodes_to_pause.contains(&backfill_fragment_id),
             _ => {
-                tracing::warn!("expected an AddMutation on Startup, instead got {:?}", self);
-                true
+                panic!("expected an AddMutation on Startup, instead got {:?}", self);
             }
         }
     }
