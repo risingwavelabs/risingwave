@@ -149,7 +149,7 @@ impl CreatingStreamingJobInfo {
     async fn cancel_jobs(
         &self,
         job_ids: Vec<JobId>,
-    ) -> (HashMap<JobId, oneshot::Receiver<bool>>, Vec<JobId>) {
+    ) -> MetaResult<(HashMap<JobId, oneshot::Receiver<bool>>, Vec<JobId>)> {
         let mut jobs = self.streaming_jobs.lock().await;
         let mut receivers = HashMap::new();
         let mut background_job_ids = vec![];
@@ -157,10 +157,17 @@ impl CreatingStreamingJobInfo {
             if let Some(job) = jobs.get_mut(&job_id) {
                 if let Some(shutdown_tx) = job.shutdown_tx.take() {
                     let (tx, rx) = oneshot::channel();
-                    if shutdown_tx.send(tx).is_ok() {
-                        receivers.insert(job_id, rx);
-                    } else {
-                        tracing::warn!(id=?job_id, "failed to send canceling state");
+                    match shutdown_tx.send(tx) {
+                        Ok(()) => {
+                            receivers.insert(job_id, rx);
+                        }
+                        Err(_) => {
+                            return Err(anyhow::anyhow!(
+                                "failed to send shutdown signal for streaming job {}: receiver dropped",
+                                job_id
+                            )
+                            .into());
+                        }
                     }
                 }
             } else {
@@ -168,7 +175,8 @@ impl CreatingStreamingJobInfo {
                 background_job_ids.push(job_id);
             }
         }
-        (receivers, background_job_ids)
+
+        Ok((receivers, background_job_ids))
     }
 
     async fn check_job_exists(&self, job_id: JobId) -> bool {
@@ -633,74 +641,70 @@ impl GlobalStreamManager {
     ///
     /// Cleanup of their state will be cleaned up after the `CancelStreamJob` command succeeds,
     /// by the barrier manager for both of them.
-    pub async fn cancel_streaming_jobs(&self, job_ids: Vec<JobId>) -> Vec<JobId> {
+    pub async fn cancel_streaming_jobs(&self, job_ids: Vec<JobId>) -> MetaResult<Vec<JobId>> {
         if job_ids.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
 
         let _reschedule_job_lock = self.reschedule_lock_read_guard().await;
-        let (receivers, background_job_ids) = self.creating_job_info.cancel_jobs(job_ids).await;
+        let (receivers, background_job_ids) = self.creating_job_info.cancel_jobs(job_ids).await?;
 
         let futures = receivers.into_iter().map(|(id, receiver)| async move {
             if let Ok(cancelled) = receiver.await
                 && cancelled
             {
                 tracing::info!("canceled streaming job {id}");
-                Some(id)
+                Ok(id)
             } else {
-                tracing::warn!("failed to cancel streaming job {id}");
-                None
+                Err(MetaError::from(anyhow::anyhow!(
+                    "failed to cancel streaming job {id}"
+                )))
             }
         });
-        let mut cancelled_ids = join_all(futures).await.into_iter().flatten().collect_vec();
+        let mut cancelled_ids = join_all(futures)
+            .await
+            .into_iter()
+            .collect::<MetaResult<Vec<_>>>()?;
 
         // NOTE(kwannoel): For background_job_ids stream jobs that not tracked in streaming manager,
         // we can directly cancel them by running the barrier command.
         let futures = background_job_ids.into_iter().map(|id| async move {
-            tracing::debug!(?id, "cancelling background streaming job");
-            let result: MetaResult<()> = try {
-                let fragment = self
-                    .metadata_manager.get_job_fragments_by_id(id)
-                    .await?;
-                if fragment.is_created() {
-                    Err(MetaError::invalid_parameter(format!(
-                        "streaming job {} is already created",
-                        id
-                    )))?;
-                }
-
-                let cancel_command = self
-                    .metadata_manager
-                    .catalog_controller
-                    .build_cancel_command(&fragment)
-                    .await?;
-
-                let (_, database_id) = self.metadata_manager
-                    .catalog_controller
-                    .try_abort_creating_streaming_job(id, true)
-                    .await?;
-
-                if let Some(database_id) = database_id {
-                    self.barrier_scheduler
-                        .run_command(database_id, cancel_command)
-                        .await?;
-                }
-            };
-            match result {
-                Ok(_) => {
-                    tracing::info!(?id, "cancelled recovered streaming job");
-                    Some(id)
-                }
-                Err(err) => {
-                    tracing::error!(error=?err.as_report(), "failed to cancel recovered streaming job {id}, does it correspond to any jobs in `SHOW JOBS`?");
-                    None
-                }
+            let fragment = self.metadata_manager.get_job_fragments_by_id(id).await?;
+            if fragment.is_created() {
+                Err(MetaError::invalid_parameter(format!(
+                    "streaming job {} is already created",
+                    id
+                )))?;
             }
+
+            let cancel_command = self
+                .metadata_manager
+                .catalog_controller
+                .build_cancel_command(&fragment)
+                .await?;
+
+            let (_, database_id) = self
+                .metadata_manager
+                .catalog_controller
+                .try_abort_creating_streaming_job(id, true)
+                .await?;
+
+            if let Some(database_id) = database_id {
+                self.barrier_scheduler
+                    .run_command(database_id, cancel_command)
+                    .await?;
+            }
+
+            tracing::info!(?id, "cancelled recovered streaming job");
+            Ok(id)
         });
-        let cancelled_recovered_ids = join_all(futures).await.into_iter().flatten().collect_vec();
+        let cancelled_recovered_ids = join_all(futures)
+            .await
+            .into_iter()
+            .collect::<MetaResult<Vec<_>>>()?;
 
         cancelled_ids.extend(cancelled_recovered_ids);
-        cancelled_ids
+        Ok(cancelled_ids)
     }
 
     pub(crate) async fn reschedule_streaming_job(
