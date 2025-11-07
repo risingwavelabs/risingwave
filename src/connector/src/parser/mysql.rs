@@ -17,13 +17,13 @@ use std::sync::LazyLock;
 use mysql_async::Row as MysqlRow;
 use mysql_common::constants::ColumnFlags;
 use risingwave_common::catalog::Schema;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use thiserror_ext::AsReport;
 
 use crate::parser::utils::log_error;
 
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 use anyhow::anyhow;
 use chrono::NaiveDate;
 use risingwave_common::bail;

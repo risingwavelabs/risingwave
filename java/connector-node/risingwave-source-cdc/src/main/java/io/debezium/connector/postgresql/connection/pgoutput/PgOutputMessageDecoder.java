@@ -27,11 +27,18 @@ import io.debezium.connector.postgresql.PostgresStreamingChangeEventSource.PgCon
 import io.debezium.connector.postgresql.PostgresType;
 import io.debezium.connector.postgresql.TypeRegistry;
 import io.debezium.connector.postgresql.UnchangedToastedReplicationMessageColumn;
-import io.debezium.connector.postgresql.connection.*;
+import io.debezium.connector.postgresql.connection.AbstractMessageDecoder;
+import io.debezium.connector.postgresql.connection.AbstractReplicationMessageColumn;
+import io.debezium.connector.postgresql.connection.LogicalDecodingMessage;
+import io.debezium.connector.postgresql.connection.Lsn;
+import io.debezium.connector.postgresql.connection.MessageDecoderContext;
+import io.debezium.connector.postgresql.connection.PostgresConnection;
 import io.debezium.connector.postgresql.connection.ReplicationMessage.Column;
 import io.debezium.connector.postgresql.connection.ReplicationMessage.NoopMessage;
 import io.debezium.connector.postgresql.connection.ReplicationMessage.Operation;
 import io.debezium.connector.postgresql.connection.ReplicationStream.ReplicationMessageProcessor;
+import io.debezium.connector.postgresql.connection.TransactionMessage;
+import io.debezium.connector.postgresql.connection.WalPositionLocator;
 import io.debezium.data.Envelope;
 import io.debezium.relational.ColumnEditor;
 import io.debezium.relational.Table;
@@ -42,13 +49,19 @@ import io.debezium.util.Strings;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.sql.DatabaseMetaData;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import org.postgresql.replication.fluent.logical.ChainedLogicalStreamBuilder;
 import org.slf4j.Logger;
@@ -212,7 +225,6 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                 handleCommitMessage(buffer, processor);
                 break;
             case RELATION:
-                /* patch code */
                 var table = handleRelationMessage(buffer, typeRegistry);
                 var dispatcher = processor.getEventDispatcher();
                 var partition = processor.getPartition();
@@ -239,7 +251,6 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                                 }
                             }));
                 }
-                /* patch code */
                 break;
             case LOGICAL_DECODING_MESSAGE:
                 handleLogicalDecodingMessage(buffer, processor);
@@ -359,7 +370,8 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
         final TableId tableId = new TableId(null, schemaName, tableName);
 
         final List<io.debezium.relational.Column> readColumns =
-                getTableColumnsFromDatabase(connection, databaseMetadata, tableId);
+                connection.getTableColumnsForDecoder(
+                        tableId, decoderContext.getConfig().getColumnFilter());
         columnDefaults =
                 readColumns.stream()
                         .filter(io.debezium.relational.Column::hasDefaultValue)
@@ -456,33 +468,6 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
         return table;
     }
 
-    private List<io.debezium.relational.Column> getTableColumnsFromDatabase(
-            PostgresConnection connection, DatabaseMetaData databaseMetadata, TableId tableId)
-            throws SQLException {
-        List<io.debezium.relational.Column> readColumns = new ArrayList<>();
-        try {
-            try (ResultSet columnMetadata =
-                    databaseMetadata.getColumns(null, tableId.schema(), tableId.table(), null)) {
-                while (columnMetadata.next()) {
-                    connection
-                            .readColumnForDecoder(
-                                    columnMetadata,
-                                    tableId,
-                                    decoderContext.getConfig().getColumnFilter())
-                            .ifPresent(readColumns::add);
-                }
-            }
-        } catch (SQLException e) {
-            LOGGER.error(
-                    "Failed to read column metadata for '{}.{}'",
-                    tableId.schema(),
-                    tableId.table());
-            throw e;
-        }
-
-        return readColumns;
-    }
-
     private boolean isColumnInPrimaryKey(
             String schemaName,
             String tableName,
@@ -539,7 +524,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
 
         // non-captured table
         if (!resolvedTable.isPresent()) {
-            processor.process(new NoopMessage(transactionId, commitTimestamp));
+            processor.process(new NoopMessage(transactionId, commitTimestamp, Operation.INSERT));
         } else {
             Table table = resolvedTable.get();
             List<Column> columns = resolveColumnsFromStreamTupleData(buffer, typeRegistry, table);
@@ -572,7 +557,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
 
         // non-captured table
         if (!resolvedTable.isPresent()) {
-            processor.process(new NoopMessage(transactionId, commitTimestamp));
+            processor.process(new NoopMessage(transactionId, commitTimestamp, Operation.UPDATE));
         } else {
             Table table = resolvedTable.get();
 
@@ -630,7 +615,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
 
         // non-captured table
         if (!resolvedTable.isPresent()) {
-            processor.process(new NoopMessage(transactionId, commitTimestamp));
+            processor.process(new NoopMessage(transactionId, commitTimestamp, Operation.DELETE));
         } else {
             Table table = resolvedTable.get();
             List<Column> columns = resolveColumnsFromStreamTupleData(buffer, typeRegistry, table);
@@ -808,7 +793,6 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                 editor.defaultValueExpression(columnMetadata.getDefaultValueExpression());
             }
 
-            /* patch code */
             // Check if this column is an enum type and set enum values
             //
             // Caveat: The actual list of enum values is currently only used to determine whether
@@ -829,7 +813,6 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                             enumValues);
                 }
             }
-            /* patch code */
 
             columns.add(editor.create());
         }

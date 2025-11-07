@@ -87,7 +87,6 @@ pub mod gap_fill;
 pub mod global_jvm;
 pub mod hash;
 pub mod id;
-pub mod log;
 pub mod memory;
 pub mod metrics_reader;
 pub mod telemetry;
@@ -108,8 +107,8 @@ pub use risingwave_common_metrics::{
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
 pub use {
-    risingwave_common_metrics as metrics, risingwave_common_secret as secret,
-    risingwave_license as license,
+    risingwave_common_log as log, risingwave_common_metrics as metrics,
+    risingwave_common_secret as secret, risingwave_license as license,
 };
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");

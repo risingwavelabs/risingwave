@@ -41,8 +41,6 @@ src/prost/src/sim/*.rs
 !src/prost/src/lib.rs
 !src/prost/src/imp.rs
 **/file_descriptor_set.bin
-# runtime log
-src/log/
 # srcy-tags
 **/srcy-tags.vi
 
@@ -51,8 +49,6 @@ rustc-ice-*
 
 # ctags
 **/tags
-
-log/
 
 *.log
 

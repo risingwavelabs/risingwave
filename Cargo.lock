@@ -11472,7 +11472,6 @@ dependencies = [
  "fixedbitset 0.5.7",
  "foyer",
  "futures",
- "governor",
  "hashbrown 0.14.5",
  "hashbrown 0.16.0",
  "hex",
@@ -11511,6 +11510,7 @@ dependencies = [
  "reqwest 0.12.15",
  "risingwave-fields-derive",
  "risingwave_common_estimate_size",
+ "risingwave_common_log",
  "risingwave_common_metrics",
  "risingwave_common_proc_macro",
  "risingwave_common_secret",
@@ -11549,7 +11549,6 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "tracing-opentelemetry",
- "tracing-subscriber",
  "twox-hash 2.1.0",
  "url",
  "uuid",
@@ -11582,6 +11581,16 @@ dependencies = [
  "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tracing",
+]
+
+[[package]]
+name = "risingwave_common_log"
+version = "2.7.0-alpha"
+dependencies = [
+ "governor",
+ "madsim-tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -11865,6 +11874,7 @@ dependencies = [
  "pretty_assertions",
  "proc-macro2",
  "prometheus",
+ "prost 0.11.9",
  "prost 0.13.4",
  "prost-reflect",
  "prost-types 0.13.4",
@@ -13022,6 +13032,7 @@ dependencies = [
  "madsim-tokio",
  "prost 0.13.4",
  "reqwest 0.12.15",
+ "risingwave_common_log",
  "risingwave_pb",
  "thiserror-ext",
  "tracing",

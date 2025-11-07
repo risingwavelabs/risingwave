@@ -254,6 +254,68 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
         }
     }
 
+    /** The set of predefined snapshot isolation mode options. */
+    public enum SnapshotIsolationMode implements EnumeratedValue {
+
+        /** This mode uses SERIALIZABLE isolation level. */
+        SERIALIZABLE("serializable"),
+
+        /** This mode uses REPEATABLE READ isolation level. */
+        REPEATABLE_READ("repeatable_read"),
+
+        /** This mode uses READ COMMITTED isolation level. */
+        READ_COMMITTED("read_committed"),
+
+        /** This mode uses READ UNCOMMITTED isolation level. */
+        READ_UNCOMMITTED("read_uncommitted");
+
+        private final String value;
+
+        SnapshotIsolationMode(String value) {
+            this.value = value;
+        }
+
+        @Override
+        public String getValue() {
+            return value;
+        }
+
+        /**
+         * Determine if the supplied value is one of the predefined options.
+         *
+         * @param value the configuration property value; may not be null
+         * @return the matching option, or null if no match is found
+         */
+        public static SnapshotIsolationMode parse(String value) {
+            if (value == null) {
+                return null;
+            }
+            value = value.trim();
+            for (SnapshotIsolationMode option : SnapshotIsolationMode.values()) {
+                if (option.getValue().equalsIgnoreCase(value)) {
+                    return option;
+                }
+            }
+            return null;
+        }
+
+        /**
+         * Determine if the supplied value is one of the predefined options.
+         *
+         * @param value the configuration property value; may not be null
+         * @param defaultValue the default value; may be null
+         * @return the matching option, or null if no match is found and the non-null default is
+         *     invalid
+         */
+        public static SnapshotIsolationMode parse(String value, String defaultValue) {
+            SnapshotIsolationMode mode = parse(value);
+            if (mode == null && defaultValue != null) {
+                mode = parse(defaultValue);
+            }
+            return mode;
+        }
+    }
+
     /** The set of predefined SecureConnectionMode options or aliases. */
     public enum SecureConnectionMode implements EnumeratedValue {
 
@@ -589,6 +651,18 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                             "Whether or not to drop the logical replication slot when the connector finishes orderly. "
                                     + "By default the replication is kept so that on restart progress can resume from the last recorded location");
 
+    public static final Field CREATE_FAIL_OVER_SLOT =
+            Field.create("slot.failover")
+                    .withDisplayName("Create failover slot")
+                    .withType(Type.BOOLEAN)
+                    .withGroup(
+                            Field.createGroupEntry(Field.Group.CONNECTION_ADVANCED_REPLICATION, 11))
+                    .withDefault(false)
+                    .withImportance(Importance.MEDIUM)
+                    .withDescription(
+                            "Whether or not to create a failover slot. This is only supported when connecting to a primary server of a Postgres cluster, version 17 or newer. "
+                                    + "When not specified, or when not connecting to a Postgres 17+ primary, no failover slot will be created.");
+
     public static final Field SLOT_SEEK_TO_KNOWN_OFFSET =
             Field.createInternal("slot.seek.to.known.offset.on.start")
                     .withDisplayName("Seek to last known offset on the replication slot")
@@ -601,6 +675,17 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                     .withDescription(
                             "Whether or not to seek to the last known offset on the replication slot."
                                     + "Enabling this option results in startup failure if the slot is re-created instead of data loss.");
+
+    public static final Field CREATE_SLOT_COMMAND_TIMEOUT =
+            Field.createInternal("create.slot.command.timeout")
+                    .withDisplayName("Replication slot creation timeout")
+                    .withType(Type.LONG)
+                    .withGroup(
+                            Field.createGroupEntry(Field.Group.CONNECTION_ADVANCED_REPLICATION, 4))
+                    .withDefault(90L)
+                    .withImportance(Importance.LOW)
+                    .withDescription(
+                            "The timeout in seconds for the creation of the replication slot.");
 
     public static final Field PUBLICATION_NAME =
             Field.create("publication.name")
@@ -626,7 +711,9 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
         /** Enable publication for all tables. */
         ALL_TABLES("all_tables"),
         /** Enable publication on a specific set of tables. */
-        FILTERED("filtered");
+        FILTERED("filtered"),
+        /** Enable publication with no tables. */
+        NO_TABLES("no_tables");
 
         private final String value;
 
@@ -851,6 +938,28 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                                     + "'exported': This option is deprecated; use 'initial' instead.; "
                                     + "'custom': The connector loads a custom class  to specify how the connector performs snapshots. For more information, see Custom snapshotter SPI in the PostgreSQL connector documentation.");
 
+    public static final Field SNAPSHOT_ISOLATION_MODE =
+            Field.create("snapshot.isolation.mode")
+                    .withDisplayName("Snapshot isolation mode")
+                    .withEnum(SnapshotIsolationMode.class, SnapshotIsolationMode.SERIALIZABLE)
+                    .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR_SNAPSHOT, 1))
+                    .withWidth(Width.SHORT)
+                    .withImportance(Importance.LOW)
+                    .withDescription(
+                            "Controls which transaction isolation level is used. "
+                                    + "The default is '"
+                                    + SnapshotIsolationMode.SERIALIZABLE.getValue()
+                                    + "', which means that serializable isolation level is used. "
+                                    + "When '"
+                                    + SnapshotIsolationMode.REPEATABLE_READ.getValue()
+                                    + "' is specified, connector runs the initial snapshot in REPEATABLE READ isolation level. "
+                                    + "When '"
+                                    + SnapshotIsolationMode.READ_COMMITTED.getValue()
+                                    + "' is specified, connector runs the initial snapshot in READ COMMITTED isolation level. "
+                                    + "In '"
+                                    + SnapshotIsolationMode.READ_UNCOMMITTED.getValue()
+                                    + "' is specified, connector runs the initial snapshot in READ UNCOMMITTED isolation level.");
+
     public static final Field SNAPSHOT_LOCKING_MODE =
             Field.create("snapshot.locking.mode")
                     .withDisplayName("Snapshot locking mode")
@@ -937,6 +1046,93 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                             "Frequency for sending replication connection status updates to the server, given in milliseconds. Defaults to 10 seconds (10,000 ms).")
                     .withValidation(Field::isPositiveInteger);
 
+    public static final Field LSN_FLUSH_TIMEOUT_MS =
+            Field.create("lsn.flush.timeout.ms")
+                    .withDisplayName("LSN flush timeout (ms)")
+                    .withType(Type.LONG)
+                    .withGroup(
+                            Field.createGroupEntry(Field.Group.CONNECTION_ADVANCED_REPLICATION, 12))
+                    .withDefault(30_000)
+                    .withWidth(Width.SHORT)
+                    .withImportance(Importance.MEDIUM)
+                    .withDescription(
+                            "Maximum time in milliseconds to wait for LSN flush operation to complete. "
+                                    + "If the flush operation does not complete within this timeout, the action specified by "
+                                    + "lsn.flush.timeout.action will be taken. Defaults to 30 seconds.")
+                    .withValidation(Field::isPositiveInteger);
+
+    /** The set of predefined LSN flush timeout action options */
+    public enum LsnFlushTimeoutAction implements EnumeratedValue {
+        /** Fail the connector when timeout occurs */
+        FAIL("fail"),
+
+        /** Log a warning when timeout occurs, but continue processing */
+        WARN("warn"),
+
+        /** Continue processing and ignore timeouts */
+        IGNORE("ignore");
+
+        private final String value;
+
+        LsnFlushTimeoutAction(String value) {
+            this.value = value;
+        }
+
+        @Override
+        public String getValue() {
+            return value;
+        }
+
+        /**
+         * Determine if the supplied value is one of the predefined options.
+         *
+         * @param value the configuration property value; may not be null
+         * @return the matching option, or null if no match is found
+         */
+        public static LsnFlushTimeoutAction parse(String value) {
+            if (value == null) {
+                return null;
+            }
+            value = value.trim();
+            for (LsnFlushTimeoutAction option : LsnFlushTimeoutAction.values()) {
+                if (option.getValue().equalsIgnoreCase(value)) {
+                    return option;
+                }
+            }
+            return null;
+        }
+
+        /**
+         * Determine if the supplied value is one of the predefined options.
+         *
+         * @param value the configuration property value; may not be null
+         * @param defaultValue the default value; may be null
+         * @return the matching option, or null if no match is found and the non-null default is
+         *     invalid
+         */
+        public static LsnFlushTimeoutAction parse(String value, String defaultValue) {
+            LsnFlushTimeoutAction action = parse(value);
+            if (action == null && defaultValue != null) {
+                action = parse(defaultValue);
+            }
+            return action;
+        }
+    }
+
+    public static final Field LSN_FLUSH_TIMEOUT_ACTION =
+            Field.create("lsn.flush.timeout.action")
+                    .withDisplayName("LSN flush timeout action")
+                    .withGroup(
+                            Field.createGroupEntry(Field.Group.CONNECTION_ADVANCED_REPLICATION, 13))
+                    .withEnum(LsnFlushTimeoutAction.class, LsnFlushTimeoutAction.FAIL)
+                    .withWidth(Width.MEDIUM)
+                    .withImportance(Importance.MEDIUM)
+                    .withDescription(
+                            "Action to take when an LSN flush timeout occurs. Options include: "
+                                    + "'fail' (default) to fail the connector; "
+                                    + "'warn' to log a warning and continue processing; "
+                                    + "'ignore' to continue processing and ignore the timeout.");
+
     public static final Field TCP_KEEPALIVE =
             Field.create(DATABASE_CONFIG_PREFIX + "tcpKeepAlive")
                     .withDisplayName("TCP keep-alive probe")
@@ -1013,6 +1209,19 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                     .withDescription(
                             "Number of fractional digits when money type is converted to 'precise' decimal number.");
 
+    public static final Field PUBLISH_VIA_PARTITION_ROOT =
+            Field.create("publish.via.partition.root")
+                    .withDisplayName("Publish via partition root")
+                    .withType(Type.BOOLEAN)
+                    .withGroup(Field.createGroupEntry(Field.Group.CONNECTOR, 23))
+                    .withWidth(Width.SHORT)
+                    .withImportance(Importance.MEDIUM)
+                    .withDescription(
+                            "A boolean that determines whether the connector should publish changes via the partition root. "
+                                    + "When true, changes are published through partition root. When false, changes are published directly.")
+                    .withDefault(false)
+                    .withValidation(Field::isBoolean);
+
     public static final Field SHOULD_FLUSH_LSN_IN_SOURCE_DB =
             Field.create("flush.lsn.source")
                     .withDisplayName(
@@ -1027,6 +1236,18 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                     .withValidation(
                             Field::isBoolean, PostgresConnectorConfig::validateFlushLsnSource);
 
+    public static final Field READ_ONLY_CONNECTION =
+            Field.create("read.only")
+                    .withDisplayName("Read only connection")
+                    .withType(ConfigDef.Type.BOOLEAN)
+                    .withGroup(Field.createGroupEntry(Field.Group.CONNECTION, 100))
+                    .withDefault(false)
+                    .withWidth(ConfigDef.Width.SHORT)
+                    .withImportance(ConfigDef.Importance.LOW)
+                    .withDescription(
+                            "Switched connector to use alternative methods to deliver signals to Debezium instead "
+                                    + "of writing to signaling table");
+
     public static final Field SOURCE_INFO_STRUCT_MAKER =
             CommonConnectorConfig.SOURCE_INFO_STRUCT_MAKER.withDefault(
                     PostgresSourceInfoStructMaker.class.getName());
@@ -1037,9 +1258,13 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
     private final SchemaRefreshMode schemaRefreshMode;
     private final boolean flushLsnOnSource;
     private final ReplicaIdentityMapper replicaIdentityMapper;
+    private final LsnFlushTimeoutAction lsnFlushTimeoutAction;
 
     private final SnapshotMode snapshotMode;
+    private final SnapshotIsolationMode snapshotIsolationMode;
     private final SnapshotLockingMode snapshotLockingMode;
+    private final boolean readOnlyConnection;
+    private final boolean publishViaPartitionRoot;
 
     public PostgresConnectorConfig(Configuration config) {
         super(
@@ -1070,10 +1295,18 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
         this.snapshotMode =
                 SnapshotMode.parse(
                         config.getString(SNAPSHOT_MODE), SNAPSHOT_MODE.defaultValueAsString());
+        this.snapshotIsolationMode =
+                SnapshotIsolationMode.parse(
+                        config.getString(SNAPSHOT_ISOLATION_MODE),
+                        SNAPSHOT_ISOLATION_MODE.defaultValueAsString());
         this.snapshotLockingMode =
                 SnapshotLockingMode.parse(
                         config.getString(SNAPSHOT_LOCKING_MODE),
                         SNAPSHOT_LOCKING_MODE.defaultValueAsString());
+        this.readOnlyConnection = config.getBoolean(READ_ONLY_CONNECTION);
+        this.publishViaPartitionRoot = config.getBoolean(PUBLISH_VIA_PARTITION_ROOT);
+        this.lsnFlushTimeoutAction =
+                LsnFlushTimeoutAction.parse(config.getString(LSN_FLUSH_TIMEOUT_ACTION));
     }
 
     protected String hostname() {
@@ -1097,22 +1330,23 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
     }
 
     protected boolean dropSlotOnStop() {
-        if (getConfig().hasKey(DROP_SLOT_ON_STOP.name())) {
-            return getConfig().getBoolean(DROP_SLOT_ON_STOP);
-        }
-        // Return default value
         return getConfig().getBoolean(DROP_SLOT_ON_STOP);
     }
 
-    /* patched code */
     public boolean includeSchemaChangeRecords() {
         return getConfig().getBoolean(INCLUDE_SCHEMA_CHANGES);
     }
 
-    /* patched code */
+    protected boolean createFailOverSlot() {
+        return getConfig().getBoolean(CREATE_FAIL_OVER_SLOT);
+    }
 
     public boolean slotSeekToKnownOffsetOnStart() {
         return getConfig().getBoolean(SLOT_SEEK_TO_KNOWN_OFFSET);
+    }
+
+    public long createSlotCommandTimeout() {
+        return getConfig().getLong(CREATE_SLOT_COMMAND_TIMEOUT);
     }
 
     public String publicationName() {
@@ -1138,6 +1372,14 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
     protected Duration statusUpdateInterval() {
         return Duration.ofMillis(
                 getConfig().getLong(PostgresConnectorConfig.STATUS_UPDATE_INTERVAL_MS));
+    }
+
+    protected Duration lsnFlushTimeout() {
+        return Duration.ofMillis(getConfig().getLong(PostgresConnectorConfig.LSN_FLUSH_TIMEOUT_MS));
+    }
+
+    protected LsnFlushTimeoutAction lsnFlushTimeoutAction() {
+        return lsnFlushTimeoutAction;
     }
 
     public LogicalDecodingMessageFilter getMessageFilter() {
@@ -1172,6 +1414,10 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
         return flushLsnOnSource;
     }
 
+    public boolean isPublishViaPartitionRoot() {
+        return publishViaPartitionRoot;
+    }
+
     @Override
     public byte[] getUnavailableValuePlaceholder() {
         String placeholder = getConfig().getString(UNAVAILABLE_VALUE_PLACEHOLDER);
@@ -1190,9 +1436,20 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
         return this.snapshotMode;
     }
 
+    public SnapshotIsolationMode getSnapshotIsolationMode() {
+        return this.snapshotIsolationMode;
+    }
+
     @Override
     public Optional<SnapshotLockingMode> getSnapshotLockingMode() {
         return Optional.of(this.snapshotLockingMode);
+    }
+
+    /**
+     * @return whether database connection should be treated as read-only.
+     */
+    public boolean isReadOnlyConnection() {
+        return readOnlyConnection;
     }
 
     protected int moneyFractionDigits() {
@@ -1217,12 +1474,14 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                             USER,
                             PASSWORD,
                             DATABASE_NAME,
+                            QUERY_TIMEOUT_MS,
                             PLUGIN_NAME,
                             SLOT_NAME,
                             PUBLICATION_NAME,
                             PUBLICATION_AUTOCREATE_MODE,
                             REPLICA_IDENTITY_AUTOSET_VALUES,
                             DROP_SLOT_ON_STOP,
+                            CREATE_FAIL_OVER_SLOT,
                             STREAM_PARAMS,
                             ON_CONNECT_STATEMENTS,
                             SSL_MODE,
@@ -1234,6 +1493,8 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                             RETRY_DELAY_MS,
                             SSL_SOCKET_FACTORY,
                             STATUS_UPDATE_INTERVAL_MS,
+                            LSN_FLUSH_TIMEOUT_MS,
+                            LSN_FLUSH_TIMEOUT_ACTION,
                             TCP_KEEPALIVE,
                             XMIN_FETCH_INTERVAL,
                             // Use this connector's implementation rather than common connector's
@@ -1243,6 +1504,7 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                     .events(INCLUDE_UNKNOWN_DATATYPES, SOURCE_INFO_STRUCT_MAKER)
                     .connector(
                             SNAPSHOT_MODE,
+                            SNAPSHOT_ISOLATION_MODE,
                             SNAPSHOT_QUERY_MODE,
                             SNAPSHOT_QUERY_MODE_CUSTOM_NAME,
                             SNAPSHOT_LOCKING_MODE_CUSTOM_NAME,
@@ -1255,8 +1517,8 @@ public class PostgresConnectorConfig extends RelationalDatabaseConnectorConfig {
                             INCREMENTAL_SNAPSHOT_CHUNK_SIZE,
                             UNAVAILABLE_VALUE_PLACEHOLDER,
                             LOGICAL_DECODING_MESSAGE_PREFIX_INCLUDE_LIST,
-                            LOGICAL_DECODING_MESSAGE_PREFIX_EXCLUDE_LIST)
-                    // .excluding(INCLUDE_SCHEMA_CHANGES)  // patched code
+                            LOGICAL_DECODING_MESSAGE_PREFIX_EXCLUDE_LIST,
+                            PUBLISH_VIA_PARTITION_ROOT)
                     .create();
 
     /** The set of {@link Field}s defined as part of this configuration. */
