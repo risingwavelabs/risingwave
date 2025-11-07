@@ -436,22 +436,41 @@ fn normalize_unmatched_updates(
     current_op: &Op,
 ) {
     if *unmatched_update_delete {
-        assert_eq!(*current_op, Op::UpdateInsert);
-        let visible_update_insert = current_visibility;
-        match (visible_update_delete, visible_update_insert) {
-            (true, false) => {
-                // Lazily clone the ops here.
-                let ops = normalized_ops.to_mut();
-                ops[current_op_index - 1] = Op::Delete;
+        // Expected UpdateInsert after UpdateDelete, but handle gracefully if not
+        if *current_op == Op::UpdateInsert {
+            let visible_update_insert = current_visibility;
+            match (visible_update_delete, visible_update_insert) {
+                (true, false) => {
+                    // Lazily clone the ops here.
+                    let ops = normalized_ops.to_mut();
+                    ops[current_op_index - 1] = Op::Delete;
+                }
+                (false, true) => {
+                    // Lazily clone the ops here.
+                    let ops = normalized_ops.to_mut();
+                    ops[current_op_index] = Op::Insert;
+                }
+                (true, true) | (false, false) => {}
             }
-            (false, true) => {
-                // Lazily clone the ops here.
-                let ops = normalized_ops.to_mut();
-                ops[current_op_index] = Op::Insert;
+            *unmatched_update_delete = false;
+        } else {
+            // UpdateDelete not followed by UpdateInsert, degrade U- to Delete
+            tracing::warn!(
+                op = ?current_op,
+                "UpdateDelete not followed by UpdateInsert in backfill, degrading to Delete"
+            );
+            let ops = normalized_ops.to_mut();
+            ops[current_op_index - 1] = Op::Delete;
+            *unmatched_update_delete = false;
+            // Continue processing current op normally
+            match current_op {
+                Op::UpdateDelete => {
+                    *unmatched_update_delete = true;
+                    *visible_update_delete = current_visibility;
+                }
+                _ => {}
             }
-            (true, true) | (false, false) => {}
         }
-        *unmatched_update_delete = false;
     } else {
         match current_op {
             Op::UpdateDelete => {
@@ -459,7 +478,12 @@ fn normalize_unmatched_updates(
                 *visible_update_delete = current_visibility;
             }
             Op::UpdateInsert => {
-                unreachable!("UpdateInsert should not be present without UpdateDelete")
+                // UpdateInsert without preceding UpdateDelete, degrade to Insert
+                tracing::warn!(
+                    "UpdateInsert without UpdateDelete in backfill, degrading to Insert"
+                );
+                let ops = normalized_ops.to_mut();
+                ops[current_op_index] = Op::Insert;
             }
             _ => {}
         }

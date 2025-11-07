@@ -991,10 +991,17 @@ impl Dispatcher for HashDataDispatcher {
             }
 
             if !visible {
-                assert!(
-                    last_vnode_when_update_delete.is_none(),
-                    "invisible row between U- and U+, op = {op:?}",
-                );
+                if last_vnode_when_update_delete.is_some() {
+                    // Invisible row between U- and U+, flush the pending U- as Delete
+                    tracing::warn!(
+                        dispatcher_id = self.dispatcher_id,
+                        op = ?op,
+                        "Invisible row between U- and U+, degrading pending U- to Delete"
+                    );
+                    // Push the pending UpdateDelete as Delete before pushing current invisible op
+                    new_ops.push(Op::Delete);
+                    last_vnode_when_update_delete = None;
+                }
                 new_ops.push(op);
                 continue;
             }
@@ -1005,25 +1012,38 @@ impl Dispatcher for HashDataDispatcher {
             if op == Op::UpdateDelete {
                 last_vnode_when_update_delete = Some(vnode);
             } else if op == Op::UpdateInsert {
-                if vnode
-                    != last_vnode_when_update_delete
-                        .take()
-                        .expect("missing U- before U+")
-                {
-                    new_ops.push(Op::Delete);
-                    new_ops.push(Op::Insert);
+                if let Some(last_vnode) = last_vnode_when_update_delete.take() {
+                    if vnode != last_vnode {
+                        new_ops.push(Op::Delete);
+                        new_ops.push(Op::Insert);
+                    } else {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                    }
                 } else {
-                    new_ops.push(Op::UpdateDelete);
-                    new_ops.push(Op::UpdateInsert);
+                    // Missing UpdateDelete before UpdateInsert, degrade to Insert.
+                    tracing::warn!(
+                        dispatcher_id = self.dispatcher_id,
+                        vnode = vnode.to_index(),
+                        "Unmatched U+ degraded to Insert"
+                    );
+                    new_ops.push(Op::Insert);
                 }
             } else {
                 new_ops.push(op);
             }
         }
-        assert!(
-            last_vnode_when_update_delete.is_none(),
-            "missing U+ after U-"
-        );
+
+        // Handle trailing UpdateDelete without following UpdateInsert.
+        if let Some(last_vnode) = last_vnode_when_update_delete {
+            tracing::warn!(
+                dispatcher_id = self.dispatcher_id,
+                vnode = last_vnode.to_index(),
+                "Unmatched U- degraded to Delete"
+            );
+            // The UpdateDelete was not pushed yet, push it as Delete now
+            new_ops.push(Op::Delete);
+        }
 
         let ops = new_ops;
 
