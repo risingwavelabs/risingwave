@@ -1,3 +1,5 @@
+# mysql
+
 system ok
 mysql --host=127.0.0.1 --port=4306 -u root -D rwcdc << EOF
 CREATE TABLE table_in_mysql (
@@ -26,6 +28,8 @@ CREATE TABLE mysql_table_in_rw (
 FROM cdc_source_mysql TABLE 'rwcdc.table_in_mysql';
 
 
+# postgres
+
 system ok
 PGPASSWORD=postgres psql -h 127.0.0.1 -p 8432 -d rwcdc -U postgres << EOF
 CREATE TABLE table_in_postgres (
@@ -53,4 +57,48 @@ CREATE TABLE postgres_table_in_rw (
 )
 FROM cdc_source_postgres TABLE 'public.table_in_postgres';
 
+# sqlserver
+
+system ok
+SQLCMDSERVER=127.0.0.1 SQLCMDUSER=SA SQLCMDPASSWORD="YourPassword123" SQLCMDDBNAME=master SQLCMDPORT=1433 sqlcmd <<EOF
+CREATE DATABASE rwcdc;
+GO
+USE rwcdc;
+GO
+EXEC sp_changedbowner 'SA';
+GO
+EXEC sys.sp_cdc_enable_db;
+GO
+CREATE TABLE table_in_sqlserver (
+    id INT PRIMARY KEY,
+    name VARCHAR(255)
+);
+GO
+EXEC sys.sp_cdc_enable_table
+  @source_schema = 'dbo',
+  @source_name = 'table_in_sqlserver',
+  @role_name = NULL;
+GO
+INSERT INTO table_in_sqlserver VALUES (1,'11'),(2,'22');
+GO
+EOF
+
+statement ok
+CREATE SOURCE cdc_source_sqlserver WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '127.0.0.1',
+    port = '1433',
+    username = 'SA',
+    password = 'YourPassword123',
+    database.name = 'rwcdc',
+);
+
+statement ok
+CREATE TABLE sqlserver_table_in_rw (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+FROM cdc_source_sqlserver TABLE 'rwcdc.dbo.table_in_sqlserver';
+
+# wait for all cdc backfill to complete
 sleep 3s

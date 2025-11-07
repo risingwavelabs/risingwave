@@ -1,3 +1,5 @@
+# mysql
+
 query I rowsort
 SELECT * FROM mysql_table_in_rw;
 ----
@@ -9,13 +11,15 @@ mysql --host=127.0.0.1 --port=4306 -u root -D rwcdc << EOF
 UPDATE table_in_mysql SET name='xxx' WHERE id=1;
 EOF
 
-sleep 2s
+sleep 3s
 
 query II rowsort
 SELECT * FROM mysql_table_in_rw;
 ----
 1 xxx
 2 22
+
+# postgres
 
 query I rowsort
 SELECT * FROM postgres_table_in_rw;
@@ -28,10 +32,32 @@ PGPASSWORD=postgres psql -h 127.0.0.1 -p 8432 -d rwcdc -U postgres << EOF
 UPDATE table_in_postgres SET name='xxx' WHERE id=1;
 EOF
 
-sleep 2s
+sleep 3s
 
 query II rowsort
 SELECT * FROM postgres_table_in_rw;
+----
+1 xxx
+2 22
+
+# sqlserver
+
+query I rowsort
+SELECT * FROM sqlserver_table_in_rw;
+----
+1 11
+2 22
+
+system ok
+SQLCMDSERVER=127.0.0.1 SQLCMDUSER=SA SQLCMDPASSWORD="YourPassword123" SQLCMDDBNAME=rwcdc SQLCMDPORT=1433 sqlcmd <<EOF
+UPDATE table_in_sqlserver SET name='xxx' WHERE id=1;
+GO
+EOF
+
+sleep 5s
+
+query II rowsort
+SELECT * FROM sqlserver_table_in_rw;
 ----
 1 xxx
 2 22

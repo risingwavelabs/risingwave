@@ -42,7 +42,7 @@ impl DockerServiceConfig for SqlServerConfig {
 
     fn data_path(&self) -> Option<String> {
         self.persist_data
-            .then(|| "/var/lib/sqlserver/data".to_owned())
+            .then(|| "/var/opt/mssql/data".to_owned())
     }
 }
 

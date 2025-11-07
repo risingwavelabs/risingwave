@@ -76,6 +76,7 @@ full-without-monitoring:
      user: postgres
      database: rwcdc
      application: connector
+   - use: sqlserver
 EOF
   fi
 

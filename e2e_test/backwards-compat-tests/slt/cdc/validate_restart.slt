@@ -1,3 +1,5 @@
+# mysql
+
 query I rowsort
 SELECT * FROM mysql_table_in_rw;
 ----
@@ -11,13 +13,15 @@ DELETE FROM table_in_mysql WHERE id=2;
 UPDATE table_in_mysql SET name='nnn' WHERE id=1;
 EOF
 
-sleep 2s
+sleep 3s
 
 query II rowsort
 SELECT * FROM mysql_table_in_rw;
 ----
 1 nnn
 3 33
+
+# postgres
 
 query I rowsort
 SELECT * FROM postgres_table_in_rw;
@@ -32,10 +36,36 @@ DELETE FROM table_in_postgres WHERE id=2;
 UPDATE table_in_postgres SET name='nnn' WHERE id=1;
 EOF
 
-sleep 2s
+sleep 3s
 
 query II rowsort
 SELECT * FROM postgres_table_in_rw;
+----
+1 nnn
+3 33
+
+# sqlserver
+
+query I rowsort
+SELECT * FROM sqlserver_table_in_rw;
+----
+1 xxx
+2 22
+
+system ok
+SQLCMDSERVER=127.0.0.1 SQLCMDUSER=SA SQLCMDPASSWORD="YourPassword123" SQLCMDDBNAME=rwcdc SQLCMDPORT=1433 sqlcmd <<EOF
+INSERT INTO table_in_sqlserver VALUES (3,'33');
+GO
+DELETE FROM table_in_sqlserver WHERE id=2;
+GO
+UPDATE table_in_sqlserver SET name='nnn' WHERE id=1;
+GO
+EOF
+
+sleep 5s
+
+query II rowsort
+SELECT * FROM sqlserver_table_in_rw;
 ----
 1 nnn
 3 33
