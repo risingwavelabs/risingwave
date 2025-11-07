@@ -307,10 +307,10 @@ enum AdditionalColumnType {
 
 message SourceRefreshMode {
   message SourceRefreshModeStreaming {}
-  message SourceRefreshModeManualTrigger {}
+  message SourceRefreshModeFullRecompute {}
 
   oneof refresh_mode {
     SourceRefreshModeStreaming streaming = 1;
-    SourceRefreshModeManualTrigger manual_trigger = 2;
+    SourceRefreshModeFullRecompute full_recompute = 2;
   }
 }

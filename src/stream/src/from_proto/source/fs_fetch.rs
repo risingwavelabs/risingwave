@@ -31,7 +31,7 @@ use crate::executor::source::{
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
-use crate::from_proto::source::is_manual_trigger_refresh;
+use crate::from_proto::source::is_full_recompute_refresh;
 use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
@@ -47,7 +47,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
-        let is_manual_trigger_refresh = is_manual_trigger_refresh(&source.refresh_mode);
+        let is_full_recompute_refresh = is_full_recompute_refresh(&source.refresh_mode);
 
         let source_id = TableId::new(source.source_id);
         let source_name = source.source_name.clone();
@@ -110,7 +110,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                 .boxed()
             }
             risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
-                if is_manual_trigger_refresh {
+                if is_full_recompute_refresh {
                     BatchIcebergFetchExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,

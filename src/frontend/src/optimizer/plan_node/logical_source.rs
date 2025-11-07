@@ -361,7 +361,7 @@ impl ColPrunable for LogicalSource {
             catalog.refresh_mode.is_some_and(|refresh_mode| {
                 matches!(
                     refresh_mode.refresh_mode,
-                    Some(RefreshMode::ManualTrigger(_))
+                    Some(RefreshMode::FullRecompute(_))
                 )
             })
         }); // for refreshable iceberg table, we does not expose iceberg hidden columns to the user

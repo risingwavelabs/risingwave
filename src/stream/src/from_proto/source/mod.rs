@@ -34,13 +34,13 @@ fn get_connector_name(with_props: &BTreeMap<String, String>) -> String {
         .unwrap_or_default()
 }
 
-fn is_manual_trigger_refresh(refresh_mode: &Option<SourceRefreshMode>) -> bool {
+fn is_full_recompute_refresh(refresh_mode: &Option<SourceRefreshMode>) -> bool {
     refresh_mode
         .as_ref()
         .map(|refresh_mode| {
             matches!(
                 refresh_mode.refresh_mode,
-                Some(RefreshMode::ManualTrigger(_))
+                Some(RefreshMode::FullRecompute(_))
             )
         })
         .unwrap_or(false)

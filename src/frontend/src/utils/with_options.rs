@@ -28,7 +28,7 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::plan_common::SourceRefreshMode;
 use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeManualTrigger, SourceRefreshModeStreaming,
+    RefreshMode, SourceRefreshModeFullRecompute, SourceRefreshModeStreaming,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
@@ -411,14 +411,14 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             "STREAMING" => SourceRefreshMode {
                 refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
             },
-            "MANUAL_TRIGGER" => SourceRefreshMode {
-                refresh_mode: Some(RefreshMode::ManualTrigger(
-                    SourceRefreshModeManualTrigger {},
+            "FULL_RECOMPUTE" => SourceRefreshMode {
+                refresh_mode: Some(RefreshMode::FullRecompute(
+                    SourceRefreshModeFullRecompute {},
                 )),
             },
             _ => {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'MANUAL_TRIGGER'",
+                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RECOMPUTE'",
                     SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
                 ))));
             }

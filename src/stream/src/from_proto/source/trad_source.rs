@@ -34,7 +34,7 @@ use crate::executor::source::{
     BatchIcebergListExecutor, BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor,
     IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
-use crate::from_proto::source::is_manual_trigger_refresh;
+use crate::from_proto::source::is_full_recompute_refresh;
 
 pub struct SourceExecutorBuilder;
 
@@ -143,7 +143,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let is_manual_trigger_refresh = is_manual_trigger_refresh(&source.refresh_mode);
+            let is_full_recompute_refresh = is_full_recompute_refresh(&source.refresh_mode);
             let exec = {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();
@@ -214,7 +214,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    if is_manual_trigger_refresh {
+                    if is_full_recompute_refresh {
                         BatchIcebergListExecutor::new(
                             params.actor_context.clone(),
                             stream_source_core,

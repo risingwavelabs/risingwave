@@ -609,7 +609,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.SourceRefreshMode", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.SourceRefreshMode.refresh_mode", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeStreaming", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeManualTrigger", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullRecompute", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalCollectionName",
             "#[derive(Eq, Hash)]",
