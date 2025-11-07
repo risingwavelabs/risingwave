@@ -59,17 +59,6 @@ impl GlobalRefreshTableProgressTracker {
             self.inner.remove(&table_id);
         }
     }
-
-    /// Remove a single table from the tracker when the table is dropped.
-    pub fn remove_tracker_by_table_id(&mut self, table_id: TableId) {
-        self.inner.remove(&table_id);
-        // Remove the table_id from all database mappings
-        self.table_id_by_database_id
-            .values_mut()
-            .for_each(|table_ids| {
-                table_ids.remove(&table_id);
-            });
-    }
 }
 
 /// # High level design for refresh table

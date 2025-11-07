@@ -86,7 +86,6 @@ use crate::manager::{
     get_referred_connection_ids_from_source, get_referred_secret_ids_from_source,
 };
 use crate::rpc::ddl_controller::DropMode;
-use crate::stream::REFRESH_TABLE_PROGRESS_TRACKER;
 use crate::telemetry::{MetaTelemetryJobDesc, report_event};
 use crate::{MetaError, MetaResult};
 
@@ -705,33 +704,14 @@ impl CatalogController {
     }
 
     pub async fn complete_dropped_tables(&self, table_ids: impl IntoIterator<Item = TableId>) {
-        let table_ids_vec: Vec<_> = table_ids.into_iter().collect();
-
-        // Clean up refresh progress tracker for dropped tables
-        {
-            let mut tracker = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-            for table_id in &table_ids_vec {
-                tracker.remove_tracker_by_table_id(*table_id);
-            }
-        }
-
         let mut inner = self.inner.write().await;
-        let tables = inner.complete_dropped_tables(table_ids_vec);
+        let tables = inner.complete_dropped_tables(table_ids);
         self.notify_hummock_dropped_tables(tables).await;
     }
 
     pub async fn cleanup_dropped_tables(&self) {
         let mut inner = self.inner.write().await;
-        let tables: Vec<_> = inner.dropped_tables.drain().map(|(_, t)| t).collect();
-
-        // Clean up refresh progress tracker for dropped tables
-        {
-            let mut tracker = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-            for table in &tables {
-                tracker.remove_tracker_by_table_id(table.id);
-            }
-        }
-
+        let tables = inner.dropped_tables.drain().map(|(_, t)| t).collect();
         self.notify_hummock_dropped_tables(tables).await;
     }
 
