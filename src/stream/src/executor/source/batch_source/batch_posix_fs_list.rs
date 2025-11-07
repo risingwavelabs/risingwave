@@ -290,7 +290,7 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                             }
 
                             // Report list finished after all files are listed
-                            if is_refreshing {
+                            if is_refreshing && barrier.is_checkpoint() {
                                 self.report_list_finished(barrier.epoch);
                                 is_refreshing = false;
                             }

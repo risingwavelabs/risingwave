@@ -345,6 +345,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 && file_queue.is_empty()
                                 && list_finished
                                 && is_refreshing
+                                && barrier.is_checkpoint()
                             {
                                 tracing::info!(
                                     ?epoch,
