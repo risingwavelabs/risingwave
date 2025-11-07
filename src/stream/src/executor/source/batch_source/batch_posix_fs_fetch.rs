@@ -19,6 +19,7 @@ use std::path::Path;
 use either::Either;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::id::TableId;
 use risingwave_common::types::{JsonbVal, ScalarRef};
 use risingwave_connector::parser::{ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig};
 use risingwave_connector::source::filesystem::OpendalFsSplit;
@@ -65,6 +66,9 @@ pub struct BatchPosixFsFetchExecutor<S: StateStore> {
     /// In-memory queue of file assignments to process (`file_path`, `split_json`).
     /// This is ephemeral and cleared on recovery and `RefreshStart` mutations.
     file_queue: VecDeque<(String, JsonbVal)>,
+
+    /// Associated table ID for reporting load finished
+    associated_table_id: TableId,
 }
 
 /// Fetched data from a file, along with file path for logging
@@ -83,7 +87,9 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         upstream: Executor,
         rate_limit_rps: Option<u32>,
         barrier_manager: LocalBarrierManager,
+        associated_table_id: Option<TableId>,
     ) -> Self {
+        assert!(associated_table_id.is_some());
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
@@ -91,6 +97,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             rate_limit_rps,
             barrier_manager,
             file_queue: VecDeque::new(),
+            associated_table_id: associated_table_id.unwrap(),
         }
     }
 
@@ -348,7 +355,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 barrier_manager.report_source_load_finished(
                                     epoch,
                                     actor_ctx.id,
-                                    core.source_id,
+                                    self.associated_table_id,
                                     core.source_id,
                                 );
                                 // Reset the flag to avoid duplicate reports

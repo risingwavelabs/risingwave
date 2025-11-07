@@ -263,6 +263,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             system_params,
                             source.rate_limit,
                             params.local_barrier_manager.clone(),
+                            associated_table_id,
                         )
                         .boxed()
                     } else {

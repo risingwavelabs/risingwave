@@ -19,6 +19,7 @@ use either::Either;
 use futures_async_stream::try_stream;
 use glob::Pattern as GlobPattern;
 use risingwave_common::array::Op;
+use risingwave_common::id::TableId;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::OpendalPosixFs;
@@ -56,9 +57,12 @@ pub struct BatchPosixFsListExecutor<S: StateStore> {
 
     /// Local barrier manager for reporting list finished
     barrier_manager: LocalBarrierManager,
+
+    associated_table_id: TableId,
 }
 
 impl<S: StateStore> BatchPosixFsListExecutor<S> {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
@@ -67,7 +71,9 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
         system_params: SystemParamsReaderRef,
         rate_limit_rps: Option<u32>,
         barrier_manager: LocalBarrierManager,
+        associated_table_id: Option<TableId>,
     ) -> Self {
+        assert!(associated_table_id.is_some());
         Self {
             actor_ctx,
             stream_source_core,
@@ -76,6 +82,7 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
             system_params,
             rate_limit_rps,
             barrier_manager,
+            associated_table_id: associated_table_id.unwrap(),
         }
     }
 
@@ -143,7 +150,7 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
         self.barrier_manager.report_source_list_finished(
             epoch,
             self.actor_ctx.id,
-            self.stream_source_core.source_id,
+            self.associated_table_id,
             self.stream_source_core.source_id,
         );
     }
