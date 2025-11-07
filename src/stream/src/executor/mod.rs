@@ -630,6 +630,7 @@ impl Barrier {
                 _,
             )) => backfill_nodes_to_pause.contains(&backfill_fragment_id),
             _ => {
+                println!("mutation {:#?}", self.mutation);
                 panic!("expected an AddMutation on Startup, instead got {:?}", self);
             }
         }
