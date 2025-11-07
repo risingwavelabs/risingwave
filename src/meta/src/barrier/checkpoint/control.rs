@@ -976,7 +976,7 @@ impl DatabaseCheckpointControl {
             .flat_map(|resp| {
                 resp.refresh_finished_tables
                     .iter()
-                    .map(|table_id| JobId::new(*table_id))
+                    .map(|table_id| table_id.as_job_id())
             })
             .collect::<Vec<_>>();
         if !refresh_finished_table_ids.is_empty() {

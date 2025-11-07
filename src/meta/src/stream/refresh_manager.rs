@@ -133,7 +133,7 @@ impl RefreshManager {
         request: RefreshRequest,
         shared_actor_infos: &SharedActorInfos,
     ) -> MetaResult<RefreshResponse> {
-        let table_id = TableId::new(request.table_id);
+        let table_id = request.table_id;
         let associated_source_id = TableId::new(request.associated_source_id);
 
         // Validate that the table exists and is refreshable
@@ -143,12 +143,11 @@ impl RefreshManager {
         tracing::info!("Starting refresh operation for table {}", table_id);
 
         // Get database_id for the table
-        let database_id = DatabaseId::new(
-            self.metadata_manager
-                .catalog_controller
-                .get_object_database_id(table_id.as_raw_id() as _)
-                .await? as _,
-        );
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(table_id.as_raw_id() as _)
+            .await?;
 
         // load actor info for refresh
         let job_fragments = self

@@ -845,7 +845,7 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(|sst| sst.sst_info.into())
                             .collect(),
-                        database_id: database_id.database_id,
+                        database_id,
                         list_finished_sources: list_finished_source_ids,
                         load_finished_sources: load_finished_source_ids,
                         vector_index_adds: vector_index_adds
