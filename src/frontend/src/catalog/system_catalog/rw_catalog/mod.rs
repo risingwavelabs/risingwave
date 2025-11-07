@@ -54,6 +54,7 @@ mod rw_table_fragments;
 mod rw_table_stats;
 mod rw_tables;
 pub(super) mod rw_types;
+mod rw_unmigrated_tables;
 mod rw_user_secrets;
 mod rw_users;
 mod rw_views;

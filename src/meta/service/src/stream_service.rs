@@ -203,7 +203,7 @@ impl StreamManagerService for StreamServiceImpl {
         let canceled_jobs = self
             .stream_manager
             .cancel_streaming_jobs(table_ids.into_iter().map(JobId::from).collect_vec())
-            .await
+            .await?
             .into_iter()
             .map(|id| id.as_raw_id())
             .collect_vec();
@@ -364,6 +364,65 @@ impl StreamManagerService for StreamServiceImpl {
         let distribution =
             fragment_desc.map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams));
         Ok(Response::new(GetFragmentByIdResponse { distribution }))
+    }
+
+    async fn get_fragment_vnodes(
+        &self,
+        request: Request<GetFragmentVnodesRequest>,
+    ) -> Result<Response<GetFragmentVnodesResponse>, Status> {
+        let req = request.into_inner();
+        let fragment_id = req.fragment_id;
+
+        let shared_actor_infos = self.env.shared_actor_infos();
+        let guard = shared_actor_infos.read_guard();
+
+        let fragment_info = guard
+            .get_fragment(fragment_id)
+            .ok_or_else(|| Status::not_found(format!("Fragment {} not found", fragment_id)))?;
+
+        let actor_vnodes = fragment_info
+            .actors
+            .iter()
+            .map(|(actor_id, actor_info)| {
+                let vnode_indices = if let Some(ref vnode_bitmap) = actor_info.vnode_bitmap {
+                    vnode_bitmap.iter_ones().map(|v| v as u32).collect()
+                } else {
+                    vec![]
+                };
+
+                get_fragment_vnodes_response::ActorVnodes {
+                    actor_id: *actor_id,
+                    vnode_indices,
+                }
+            })
+            .collect();
+
+        Ok(Response::new(GetFragmentVnodesResponse { actor_vnodes }))
+    }
+
+    async fn get_actor_vnodes(
+        &self,
+        request: Request<GetActorVnodesRequest>,
+    ) -> Result<Response<GetActorVnodesResponse>, Status> {
+        let req = request.into_inner();
+        let actor_id = req.actor_id;
+
+        let shared_actor_infos = self.env.shared_actor_infos();
+        let guard = shared_actor_infos.read_guard();
+
+        // Find the actor across all fragments
+        let actor_info = guard
+            .iter_over_fragments()
+            .find_map(|(_, fragment_info)| fragment_info.actors.get(&actor_id))
+            .ok_or_else(|| Status::not_found(format!("Actor {} not found", actor_id)))?;
+
+        let vnode_indices = if let Some(ref vnode_bitmap) = actor_info.vnode_bitmap {
+            vnode_bitmap.iter_ones().map(|v| v as u32).collect()
+        } else {
+            vec![]
+        };
+
+        Ok(Response::new(GetActorVnodesResponse { vnode_indices }))
     }
 
     async fn list_actor_states(
@@ -675,6 +734,27 @@ impl StreamManagerService for StreamServiceImpl {
             })
             .collect();
         Ok(Response::new(ListCdcProgressResponse { cdc_progress }))
+    }
+
+    async fn list_unmigrated_tables(
+        &self,
+        _request: Request<ListUnmigratedTablesRequest>,
+    ) -> Result<Response<ListUnmigratedTablesResponse>, Status> {
+        let unmigrated_tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_unmigrated_tables()
+            .await?
+            .into_iter()
+            .map(|table| list_unmigrated_tables_response::UnmigratedTable {
+                table_id: table.id,
+                table_name: table.name,
+            })
+            .collect();
+
+        Ok(Response::new(ListUnmigratedTablesResponse {
+            tables: unmigrated_tables,
+        }))
     }
 }
 

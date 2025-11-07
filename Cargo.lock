@@ -868,9 +868,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.44.2"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f834a80c3ab6109b9c8f5ca6661a578cf31e088e831b6ce07c6b23cca04f6742"
+checksum = "86dde77d8a733a9dbaf865a9eb65c72e09c88f3d14d3dd0d2aecf511920ee4fe"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -11865,6 +11865,7 @@ dependencies = [
  "pretty_assertions",
  "proc-macro2",
  "prometheus",
+ "prost 0.11.9",
  "prost 0.13.4",
  "prost-reflect",
  "prost-types 0.13.4",

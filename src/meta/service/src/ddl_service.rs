@@ -169,7 +169,7 @@ impl DdlServiceImpl {
                     let req = GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name: table.name.clone(),
+                        table_id: table.id,
                         cdc_table_change: None,
                     };
                     let resp = client
@@ -1232,7 +1232,7 @@ impl DdlService for DdlServiceImpl {
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name: table.name.clone(),
+                        table_id: table.id,
                         cdc_table_change: Some(table_change.clone()),
                     })
                     .await;
