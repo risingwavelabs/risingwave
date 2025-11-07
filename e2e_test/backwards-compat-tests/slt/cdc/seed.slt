@@ -1,0 +1,56 @@
+system ok
+mysql --host=127.0.0.1 --port=4306 -u root -D rwcdc << EOF
+CREATE TABLE table_in_mysql (
+    id INT PRIMARY KEY,
+    name VARCHAR(255)
+);
+INSERT INTO table_in_mysql VALUES (1,'11'),(2,'22');
+EOF
+
+statement ok
+CREATE SOURCE cdc_source_mysql WITH (
+    connector = 'mysql-cdc',
+    hostname='127.0.0.1',
+    port=4306,
+    database.name='rwcdc',
+    username='root',
+    password='',
+    auto.schema.change = 'true'
+);
+
+statement ok
+CREATE TABLE mysql_table_in_rw (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+FROM cdc_source_mysql TABLE 'rwcdc.table_in_mysql';
+
+
+system ok
+PGPASSWORD=postgres psql -h 127.0.0.1 -p 8432 -d rwcdc -U postgres << EOF
+CREATE TABLE table_in_postgres (
+    id INT PRIMARY KEY,
+    name VARCHAR(255)
+);
+INSERT INTO table_in_postgres VALUES (1,'11'),(2,'22');
+EOF
+
+statement ok
+CREATE SOURCE cdc_source_postgres WITH (
+    connector = 'postgres-cdc',
+    hostname='127.0.0.1',
+    port=8432,
+    database.name='rwcdc',
+    username='postgres',
+    password='',
+    auto.schema.change = 'true'
+);
+
+statement ok
+CREATE TABLE postgres_table_in_rw (
+    id INT PRIMARY KEY,
+    name VARCHAR
+)
+FROM cdc_source_postgres TABLE 'public.table_in_postgres';
+
+sleep 3s

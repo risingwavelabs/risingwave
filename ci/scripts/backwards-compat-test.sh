@@ -66,6 +66,16 @@ full-without-monitoring:
    - use: compute-node
    - use: frontend
    - use: compactor
+   - use: mysql
+     port: 4306
+     user: root
+     database: rwcdc
+     application: connector
+   - use: postgres
+     port: 8432
+     user: postgres
+     database: rwcdc
+     application: connector
 EOF
   fi
 
