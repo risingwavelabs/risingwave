@@ -18,7 +18,7 @@ use indexmap::IndexMap;
 use indexmap::map::Entry;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, StreamChunkBuilder};
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 
@@ -39,10 +39,10 @@ impl InconsistencyBehavior {
         match self {
             InconsistencyBehavior::Panic => consistency_panic!("{}", msg),
             InconsistencyBehavior::Warn => {
-                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                    LazyLock::new(LogSuppresser::default);
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(LogSuppressor::default);
 
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                     tracing::warn!(suppressed_count, "{}", msg);
                 }
             }

@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Decimal, ScalarImpl};
 use thiserror_ext::AsReport;
@@ -23,7 +23,7 @@ use thiserror_ext::AsReport;
 use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::parser::utils::log_error;
 
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
 macro_rules! handle_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty) => {{

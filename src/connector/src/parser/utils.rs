@@ -27,7 +27,7 @@ use crate::source::SourceMeta;
 
 macro_rules! log_error {
     ($name:expr, $err:expr, $message:expr) => {
-        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
             tracing::error!(
                 column = $name,
                 error = %$err.as_report(),

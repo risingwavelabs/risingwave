@@ -12,6 +12,7 @@ members = [
     "src/common/estimate_size",
     "src/common/fields-derive",
     "src/common/heap_profiling",
+    "src/common/log",
     "src/common/metrics",
     "src/common/telemetry_event",
     "src/compute",

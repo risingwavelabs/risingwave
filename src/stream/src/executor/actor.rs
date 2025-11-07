@@ -24,7 +24,7 @@ use hytra::TrAdder;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, IntGaugeExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
@@ -130,8 +130,8 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
-        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
+        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
             tracing::error!(identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
         }
 
