@@ -76,6 +76,8 @@ macro_rules! handle_data_type_with_signed {
         if column_flags.contains(ColumnFlags::UNSIGNED_FLAG) {
             // UNSIGNED type: use unsigned type conversion, then convert to signed
             match $mysql_row.take_opt::<Option<$unsigned_type>, _>($mysql_datum_index) {
+                // Note: We are intentionally converting unsigned to signed here.
+                // For example, 18446251075179777772u64 will be converted to -492998529773844i64.
                 Some(Ok(Some(val))) => Ok(Some(ScalarImpl::from(val as $signed_type))),
                 Some(Ok(None)) => Ok(None),
                 Some(Err(e)) => Err(anyhow::Error::new(e.clone())

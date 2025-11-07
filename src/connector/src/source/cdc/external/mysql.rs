@@ -536,12 +536,11 @@ impl MySqlExternalTableReader {
 
     /// Check if a column is unsigned type
     fn is_unsigned_type(&self, column_name: &str) -> bool {
-        for (col_name, col_type) in &self.upstream_mysql_pk_infos {
-            if col_name == column_name {
-                return col_type.to_lowercase().contains("unsigned");
-            }
-        }
-        false
+        self.upstream_mysql_pk_infos
+            .iter()
+            .find(|(col_name, _)| col_name == column_name)
+            .map(|(_, col_type)| col_type.to_lowercase().contains("unsigned"))
+            .unwrap_or(false)
     }
 
     /// Convert negative i64 to unsigned u64 based on column type
@@ -780,8 +779,6 @@ mod tests {
 
     #[test]
     fn test_mysql_filter_expr() {
-        // This test is commented out because filter_expression now requires &self
-        // and we need a proper MySqlExternalTableReader instance to test it
         let cols = vec!["id".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(`id` > :id)");
