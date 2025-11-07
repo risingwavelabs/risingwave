@@ -117,6 +117,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         upstream,
                         params.local_barrier_manager.clone(),
                         params.env.config().clone(),
+                        source.associated_table_id.map(TableId::new),
                     )
                     .boxed()
                 } else {
@@ -155,6 +156,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     upstream,
                     source.rate_limit,
                     params.local_barrier_manager.clone(),
+                    source.associated_table_id.map(TableId::new),
                 )
                 .boxed()
             }

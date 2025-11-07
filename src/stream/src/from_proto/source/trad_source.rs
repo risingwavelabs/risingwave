@@ -148,6 +148,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();
                 let mut source_info = source.get_info()?.clone();
+                let associated_table_id = source.associated_table_id.map(TableId::new);
 
                 if source_info.format_encode_options.is_empty() {
                     // compatible code: quick fix for <https://github.com/risingwavelabs/risingwave/issues/14755>,
@@ -224,6 +225,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             params.executor_stats.clone(),
                             barrier_receiver,
                             params.local_barrier_manager.clone(),
+                            associated_table_id,
                         )
                         .boxed()
                     } else {
@@ -261,6 +263,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             system_params,
                             source.rate_limit,
                             params.local_barrier_manager.clone(),
+                            associated_table_id,
                         )
                         .boxed()
                     } else {

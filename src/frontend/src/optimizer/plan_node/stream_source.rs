@@ -95,6 +95,7 @@ impl Distill for StreamSource {
 impl StreamNode for StreamSource {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         let source_catalog = self.source_catalog();
+
         let source_inner = source_catalog.map(|source_catalog| {
             let (with_properties, secret_refs) =
                 source_catalog.with_properties.clone().into_parts();
@@ -121,6 +122,7 @@ impl StreamNode for StreamSource {
                     columns: cols.iter().map(|c| c.to_protobuf()).collect_vec(),
                 }),
                 refresh_mode: source_catalog.refresh_mode,
+                associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))

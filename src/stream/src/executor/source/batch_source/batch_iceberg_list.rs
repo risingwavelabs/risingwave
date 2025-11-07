@@ -18,6 +18,7 @@ use iceberg::scan::FileScanTask;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::id::TableId;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::IcebergProperties;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
@@ -40,6 +41,7 @@ pub struct BatchIcebergListExecutor<S: StateStore> {
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
     /// Local barrier manager for reporting list finished
     barrier_manager: LocalBarrierManager,
+    associated_table_id: TableId,
     /// Metrics for monitor.
     _metrics: Arc<StreamingMetrics>,
 }
@@ -52,13 +54,16 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         barrier_manager: LocalBarrierManager,
+        associated_table_id: Option<TableId>,
     ) -> Self {
+        assert!(associated_table_id.is_some());
         Self {
             actor_ctx,
             stream_source_core,
             downstream_columns,
             barrier_receiver: Some(barrier_receiver),
             barrier_manager,
+            associated_table_id: associated_table_id.unwrap(),
             _metrics: metrics,
         }
     }
@@ -134,6 +139,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                             ?barrier.epoch,
                                             actor_id = self.actor_ctx.id,
                                             source_id = %self.stream_source_core.source_id,
+                                            table_id = %self.associated_table_id,
                                             "RefreshStart triggered file re-listing"
                                         );
                                         is_refreshing = true;
@@ -151,16 +157,18 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                 }
                             }
 
-                            if is_refreshing && *is_list_finished.read() {
+                            if is_refreshing && *is_list_finished.read() && barrier.is_checkpoint()
+                            {
                                 tracing::info!(
                                     ?barrier.epoch,
                                     source_id = %self.stream_source_core.source_id,
+                                    table_id = %self.associated_table_id,
                                     "reporting batch iceberg list finished"
                                 );
                                 self.barrier_manager.report_source_list_finished(
                                     barrier.epoch,
                                     self.actor_ctx.id,
-                                    self.stream_source_core.source_id,
+                                    self.associated_table_id,
                                     self.stream_source_core.source_id,
                                 );
                                 is_refreshing = false;

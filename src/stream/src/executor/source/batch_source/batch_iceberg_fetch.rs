@@ -22,6 +22,7 @@ use parking_lot::RwLock;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME};
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::id::TableId;
 use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
@@ -48,6 +49,8 @@ pub struct BatchIcebergFetchExecutor<S: StateStore> {
     barrier_manager: LocalBarrierManager,
 
     streaming_config: Arc<StreamingConfig>,
+
+    associated_table_id: TableId,
 }
 
 impl<S: StateStore> BatchIcebergFetchExecutor<S> {
@@ -57,13 +60,16 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         upstream: Executor,
         barrier_manager: LocalBarrierManager,
         streaming_config: Arc<StreamingConfig>,
+        associated_table_id: Option<TableId>,
     ) -> Self {
+        assert!(associated_table_id.is_some());
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             barrier_manager,
             streaming_config,
+            associated_table_id: associated_table_id.unwrap(),
         }
     }
 }
@@ -129,7 +135,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                                     ?barrier.epoch,
                                                     actor_id = self.actor_ctx.id,
                                                     source_id = %core.source_id,
-
+                                                    table_id = %self.associated_table_id,
                                                     "RefreshStart:"
                                                 );
 
@@ -149,6 +155,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                                     ?barrier.epoch,
                                                     actor_id = self.actor_ctx.id,
                                                     source_id = %core.source_id,
+                                                    table_id = %self.associated_table_id,
                                                     "ListFinish:"
                                                 );
                                                 is_list_finished = true;
@@ -163,18 +170,19 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                         && file_queue.is_empty()
                                         && is_list_finished
                                         && is_refreshing
-                                    // && *is_load_finished.read()
+                                        && barrier.is_checkpoint()
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,
                                             actor_id = self.actor_ctx.id,
                                             source_id = %core.source_id,
+                                            table_id = %self.associated_table_id,
                                             "Reporting load finished"
                                         );
                                         self.barrier_manager.report_source_load_finished(
                                             barrier.epoch,
                                             self.actor_ctx.id,
-                                            core.source_id,
+                                            self.associated_table_id,
                                             core.source_id,
                                         );
 
