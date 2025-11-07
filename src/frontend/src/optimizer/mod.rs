@@ -865,9 +865,10 @@ impl LogicalPlanRoot {
             LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         let upstream_sink_union = StreamUpstreamSinkUnion::new(
             context.clone(),
+            // reuse dml to avoid repeated calls to project generated columns
             dml_node.schema(),
             dml_node.stream_key(),
-            dist.clone(), // should always be the same as dist of `Union`
+            pk_column_indices.clone(),
             append_only,
             row_id_index.is_none(),
             generated_column_exprs,

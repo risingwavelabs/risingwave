@@ -56,7 +56,7 @@ impl StreamUpstreamSinkUnion {
         ctx: OptimizerContextRef,
         schema: &Schema,
         stream_key: Option<&[usize]>,
-        dist: Distribution,
+        pk_column_indices: Vec<usize>,
         append_only: bool,
         user_defined_pk: bool,
         generated_column_exprs: Option<Vec<ExprImpl>>,
@@ -72,7 +72,7 @@ impl StreamUpstreamSinkUnion {
             ctx,
             schema: schema.clone(),
             stream_key: stream_key.map(|keys| keys.to_vec()),
-            dist,
+            dist: Distribution::HashShard(pk_column_indices),
             stream_kind,
             generated_column_exprs,
         };
