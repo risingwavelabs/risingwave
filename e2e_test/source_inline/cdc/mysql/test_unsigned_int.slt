@@ -199,7 +199,7 @@ select id, unsigned_bigint, info from rw_unsigned_int_to_signed where id = 53;
 53	-492998529773844	debezium
 
 # Test schema check: unsigned int -> int32 should fail
-statement error
+statement error Incompatible data type of column unsigned_int. MySQL type: int unsigned, RisingWave type: INT32
 create table rw_unsigned_int_to_int32 (
   id DECIMAL,
   unsigned_bigint BIGINT,
@@ -213,7 +213,7 @@ create table rw_unsigned_int_to_int32 (
 ) from s_unsigned_int_to_signed table 'risedev.test_unsigned_int';
 
 # Test schema check: unsigned smallint -> smallint should fail
-statement error
+statement error Incompatible data type of column unsigned_smallint. MySQL type: smallint unsigned, RisingWave type: INT16
 create table rw_unsigned_smallint_to_smallint (
   id DECIMAL,
   unsigned_bigint BIGINT,
