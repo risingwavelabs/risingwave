@@ -503,7 +503,7 @@ impl Graph {
             .fragments
             .iter()
             .map(|(&id, f)| {
-                let id = id.as_global_id().into();
+                let id = id.as_global_id();
                 (
                     id,
                     Fragment {
@@ -519,10 +519,10 @@ impl Graph {
             .iter()
             .map(|(&id, downstreams)| {
                 (
-                    id.as_global_id().into(),
+                    id.as_global_id(),
                     downstreams
                         .iter()
-                        .map(|(&id, _)| id.as_global_id().into())
+                        .map(|(&id, _)| id.as_global_id())
                         .collect(),
                 )
             })
@@ -533,11 +533,8 @@ impl Graph {
             .iter()
             .map(|(&id, upstreams)| {
                 (
-                    id.as_global_id().into(),
-                    upstreams
-                        .iter()
-                        .map(|(&id, _)| id.as_global_id().into())
-                        .collect(),
+                    id.as_global_id(),
+                    upstreams.iter().map(|(&id, _)| id.as_global_id()).collect(),
                 )
             })
             .collect();

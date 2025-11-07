@@ -31,7 +31,7 @@ impl ExecutorBuilder for UpstreamSinkUnionExecutorBuilder {
             .get_init_upstreams()
             .iter()
             .map(|init_upstream| {
-                let upstream_fragment_id = init_upstream.get_upstream_fragment_id().into();
+                let upstream_fragment_id = init_upstream.get_upstream_fragment_id();
                 UpstreamFragmentInfo::new(
                     upstream_fragment_id,
                     &params.actor_context.initial_upstream_actors,

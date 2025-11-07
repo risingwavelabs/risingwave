@@ -16,7 +16,7 @@ use std::any::type_name;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Formatter;
 use std::num::TryFromIntError;
-use std::ops::Add;
+use std::ops::{Add, AddAssign};
 use std::str::FromStr;
 
 use sea_orm::sea_query::{ArrayType, ValueTypeErr};
@@ -218,6 +218,12 @@ impl<const N: usize> Add<u32> for TypedId<N> {
 
     fn add(self, rhs: u32) -> Self::Output {
         Self(self.0.checked_add(rhs).unwrap())
+    }
+}
+
+impl<const N: usize> AddAssign<u32> for TypedId<N> {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 = self.0.checked_add(rhs).unwrap()
     }
 }
 

@@ -459,7 +459,7 @@ impl UpstreamSinkBarrierManager {
             .map(|e| build_non_strict_from_prost(e, self.build_input_ctx.eval_error_report.clone()))
             .try_collect()
             .map_err(|err| anyhow::anyhow!(err))?;
-        let upstream_fragment_id = info.get_upstream_fragment_id().into();
+        let upstream_fragment_id = info.get_upstream_fragment_id();
         self.new_sink_input_impl(UpstreamFragmentInfo {
             upstream_fragment_id,
             upstream_actors: pb_upstream_info.get_upstream_actors().clone(),
@@ -711,7 +711,7 @@ mod tests {
 
         let actor_id = 2;
         let fragment_id = 0.into(); // from ActorContext::for_test
-        let upstream_fragment_id = 11;
+        let upstream_fragment_id = 11.into();
         let upstream_actor_id = 101;
 
         let upstream_actor = helper_make_local_actor(upstream_actor_id);
@@ -734,7 +734,7 @@ mod tests {
         let b3 = Barrier::new_test_barrier(test_epoch(3));
         let b4 =
             Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Stop(StopMutation {
-                dropped_sink_fragments: HashSet::from([upstream_fragment_id.into()]),
+                dropped_sink_fragments: HashSet::from([upstream_fragment_id]),
                 ..Default::default()
             }));
         for barrier in [&b1, &b2, &b3, &b4] {

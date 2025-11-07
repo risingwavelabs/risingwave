@@ -22,12 +22,10 @@ use risingwave_common::id::{FragmentId, JobId, TableId};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
-use risingwave_pb::id::JobId;
 
 use super::prelude::{PlanRef, *};
 use crate::TableCatalog;
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::{FragmentId, TableId};
 use crate::expr::{AggCall, ExprImpl, InputRef, Literal, OrderBy, TableFunctionType};
 use crate::optimizer::OptimizerContext;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -127,7 +125,7 @@ impl TableFunctionToInternalBackfillProgressRule {
 
     fn build_project(backfill_info: &BackfillInfo, agg: PlanRef) -> anyhow::Result<LogicalProject> {
         let job_id_expr = Self::build_u32_expr(backfill_info.job_id.as_raw_id());
-        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id);
+        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id.as_raw_id());
         let table_id_expr = Self::build_u32_expr(backfill_info.table_id.as_raw_id());
 
         let current_count_per_vnode = ExprImpl::InputRef(Box::new(InputRef {
@@ -152,9 +150,9 @@ impl TableFunctionToInternalBackfillProgressRule {
         ))
     }
 
-    fn build_u32_expr(id: impl Into<u32>) -> ExprImpl {
+    fn build_u32_expr(id: u32) -> ExprImpl {
         ExprImpl::Literal(Box::new(Literal::new(
-            Some(ScalarImpl::Int32(id.into() as i32)),
+            Some(ScalarImpl::Int32(id as i32)),
             DataType::Int32,
         )))
     }

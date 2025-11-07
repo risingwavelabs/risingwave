@@ -477,8 +477,8 @@ impl CatalogController {
                     let table = all_tables
                         .get(&state_table_id)
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
-                    assert_eq!(table.id, state_table_id.as_raw_id());
-                    assert_eq!(table.fragment_id, fragment_id.as_raw_id());
+                    assert_eq!(table.id, state_table_id);
+                    assert_eq!(table.fragment_id, fragment_id);
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
@@ -1322,9 +1322,9 @@ impl CatalogController {
                 visit_stream_node_mut(&mut stream_node, |body| {
                     if let PbNodeBody::Merge(m) = body
                         && let Some(new_fragment_id) =
-                            fragment_replace_map.get(&m.upstream_fragment_id.into())
+                            fragment_replace_map.get(&m.upstream_fragment_id)
                     {
-                        m.upstream_fragment_id = new_fragment_id.as_raw_id();
+                        m.upstream_fragment_id = *new_fragment_id;
                     }
                 });
                 fragment::ActiveModel {

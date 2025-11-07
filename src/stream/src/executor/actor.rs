@@ -122,11 +122,7 @@ impl ActorContext {
                 .iter()
                 .copied()
                 .collect(),
-            initial_upstream_actors: stream_actor
-                .fragment_upstreams
-                .iter()
-                .map(|(k, v)| (k.into(), v.clone()))
-                .collect(),
+            initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
             meta_client,
             streaming_config,
             stream_env,

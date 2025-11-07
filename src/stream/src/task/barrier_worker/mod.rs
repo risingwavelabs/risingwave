@@ -860,7 +860,7 @@ impl LocalBarrierWorker {
                             })
                             .collect(),
                         cdc_table_backfill_progress,
-                        truncate_tables: truncate_tables.into_iter().map_into().collect(),
+                        truncate_tables,
                         refresh_finished_tables,
                     },
                 )

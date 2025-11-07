@@ -819,7 +819,7 @@ impl DatabaseCheckpointControl {
                         source_backfill_fragments
                             .entry(source_id as SourceId)
                             .or_insert(BTreeSet::new())
-                            .insert((info.fragment_id, upstream_source_fragment_id.into()));
+                            .insert((info.fragment_id, upstream_source_fragment_id));
                     }
                 }
                 let source_change = if !source_backfill_fragments.is_empty() {

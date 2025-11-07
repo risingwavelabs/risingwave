@@ -1434,7 +1434,7 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
     };
 
     PbFragmentWorkerSlotMapping {
-        fragment_id: fragment.fragment_id.as_raw_id(),
+        fragment_id: fragment.fragment_id,
         mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
     }
 }

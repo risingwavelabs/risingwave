@@ -285,7 +285,6 @@ impl MergeExecutor {
                     {
                         let new_upstream_fragment_id = update
                             .new_upstream_fragment_id
-                            .map(Into::into)
                             .unwrap_or(self.upstream_fragment_id);
                         let removed_upstream_actor_id: HashSet<_> =
                             if update.new_upstream_fragment_id.is_some() {
@@ -676,7 +675,7 @@ mod tests {
         // old -> actor_id
         // new -> actor_id
 
-        let (upstream_fragment_id, fragment_id) = (10, 18);
+        let (upstream_fragment_id, fragment_id) = (10.into(), 18.into());
 
         let inputs: Vec<_> =
             try_join_all([untouched, old].into_iter().map(async |upstream_actor_id| {
@@ -684,9 +683,9 @@ mod tests {
                     &barrier_test_env.local_barrier_manager,
                     metrics.clone(),
                     actor_id,
-                    fragment_id.into(),
+                    fragment_id,
                     &helper_make_local_actor(upstream_actor_id),
-                    upstream_fragment_id.into(),
+                    upstream_fragment_id,
                 )
                 .await
             }))
@@ -694,7 +693,7 @@ mod tests {
             .unwrap();
 
         let merge_updates = maplit::hashmap! {
-            (actor_id, upstream_fragment_id.into()) => MergeUpdate {
+            (actor_id, upstream_fragment_id) => MergeUpdate {
                 actor_id,
                 upstream_fragment_id,
                 new_upstream_fragment_id: None,
@@ -720,8 +719,8 @@ mod tests {
 
         let mut merge = MergeExecutor::new(
             actor_ctx,
-            fragment_id.into(),
-            upstream_fragment_id.into(),
+            fragment_id,
+            upstream_fragment_id,
             upstream,
             barrier_test_env.local_barrier_manager.clone(),
             metrics.clone(),

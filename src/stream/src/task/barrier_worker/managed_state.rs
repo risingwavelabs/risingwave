@@ -728,7 +728,7 @@ impl DatabaseManagedBarrierState {
                     fragment_actors
                         .actors
                         .into_iter()
-                        .map(move |actor| (node.clone(), fragment_actors.fragment_id.into(), actor))
+                        .map(move |actor| (node.clone(), fragment_actors.fragment_id, actor))
                 })
         {
             let actor_id = actor.actor_id;

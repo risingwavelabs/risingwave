@@ -536,7 +536,7 @@ impl Command {
                     changes.insert(
                         downstream_fragment_id,
                         CommandFragmentChanges::AddNodeUpstream(PbUpstreamSinkInfo {
-                            upstream_fragment_id: ctx.sink_fragment_id.as_raw_id(),
+                            upstream_fragment_id: ctx.sink_fragment_id,
                             sink_output_schema: ctx.sink_output_fields.clone(),
                             project_exprs: ctx.project_exprs.clone(),
                         }),
@@ -918,7 +918,6 @@ impl Command {
                     .values()
                     .flatten()
                     .cloned()
-                    .map_into()
                     .collect(),
             })),
 
@@ -959,7 +958,6 @@ impl Command {
                 let backfill_nodes_to_pause: Vec<_> =
                     get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()
-                        .map_into()
                         .collect();
 
                 let new_upstream_sinks =
@@ -984,14 +982,14 @@ impl Command {
                             .unwrap_or_else(|_| panic!("should have exactly one sink actor"));
                         let new_upstream_sink = PbNewUpstreamSink {
                             info: Some(PbUpstreamSinkInfo {
-                                upstream_fragment_id: sink_fragment_id.as_raw_id(),
+                                upstream_fragment_id: *sink_fragment_id,
                                 sink_output_schema: sink_output_fields.clone(),
                                 project_exprs: project_exprs.clone(),
                             }),
                             upstream_actors: new_sink_actors.collect(),
                         };
                         HashMap::from([(
-                            new_sink_downstream.downstream_fragment_id.into(),
+                            new_sink_downstream.downstream_fragment_id,
                             new_upstream_sink,
                         )])
                     } else {
@@ -1184,7 +1182,7 @@ impl Command {
                                     (actor_id, fragment_id),
                                     MergeUpdate {
                                         actor_id,
-                                        upstream_fragment_id: fragment_id.as_raw_id(),
+                                        upstream_fragment_id: fragment_id,
                                         new_upstream_fragment_id: None,
                                         added_upstream_actors: reschedule
                                             .added_actors
@@ -1323,7 +1321,7 @@ impl Command {
             }
             Command::StartFragmentBackfill { fragment_ids } => Some(
                 Mutation::StartFragmentBackfill(StartFragmentBackfillMutation {
-                    fragment_ids: fragment_ids.iter().map_into().collect(),
+                    fragment_ids: fragment_ids.clone(),
                 }),
             ),
             Command::Refresh {

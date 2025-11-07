@@ -326,7 +326,7 @@ pub(super) mod handlers {
         let mut fragment_to_relation_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for fragment_id in tf.fragments.keys() {
-                fragment_to_relation_map.insert(fragment_id.as_raw_id(), relation_id.as_raw_id());
+                fragment_to_relation_map.insert(*fragment_id, relation_id.as_raw_id());
             }
         }
         let map = FragmentToRelationMap {
@@ -350,8 +350,7 @@ pub(super) mod handlers {
             let mut fragment_id_to_actor_ids = HashMap::new();
             for (fragment_id, fragment) in &tf.fragments {
                 let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
-                fragment_id_to_actor_ids
-                    .insert(fragment_id.as_raw_id(), ActorIds { ids: actor_ids });
+                fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
             }
             map.insert(
                 id.as_raw_id(),

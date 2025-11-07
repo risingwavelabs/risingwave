@@ -91,8 +91,8 @@ pub(crate) fn to_fragment_worker_slot_mapping(
 ) -> Vec<FragmentWorkerSlotMapping> {
     mappings
         .iter()
-        .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
-            fragment_id: fragment_id.as_raw_id(),
+        .map(|(&fragment_id, mapping)| FragmentWorkerSlotMapping {
+            fragment_id,
             mapping: Some(mapping.to_protobuf()),
         })
         .collect()
@@ -103,8 +103,8 @@ pub(crate) fn to_deleted_fragment_worker_slot_mapping(
 ) -> Vec<FragmentWorkerSlotMapping> {
     fragment_ids
         .iter()
-        .map(|fragment_id| FragmentWorkerSlotMapping {
-            fragment_id: fragment_id.as_raw_id(),
+        .map(|&fragment_id| FragmentWorkerSlotMapping {
+            fragment_id,
             mapping: None,
         })
         .collect()

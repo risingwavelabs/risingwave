@@ -1073,7 +1073,7 @@ impl ControlStreamManager {
                                             .flatten()
                                             .map(|(fragment_id, (node, actors, initial_subscriber_ids))| {
                                                 FragmentBuildActorInfo {
-                                                    fragment_id: fragment_id.as_raw_id(),
+                                                    fragment_id,
                                                     node: Some(node),
                                                     actors: actors
                                                         .into_iter()
@@ -1084,7 +1084,7 @@ impl ControlStreamManager {
                                                                     .into_iter()
                                                                     .map(|(fragment_id, upstreams)| {
                                                                         (
-                                                                            fragment_id.as_raw_id(),
+                                                                            fragment_id,
                                                                             UpstreamActors {
                                                                                 actors: upstreams
                                                                                     .into_values()

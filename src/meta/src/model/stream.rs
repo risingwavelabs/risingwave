@@ -169,7 +169,7 @@ impl StreamActor {
     fn to_protobuf(&self, dispatchers: impl Iterator<Item = Dispatcher>) -> PbStreamActor {
         PbStreamActor {
             actor_id: self.actor_id,
-            fragment_id: self.fragment_id.into(),
+            fragment_id: self.fragment_id,
             dispatcher: dispatchers.collect(),
             vnode_bitmap: self
                 .vnode_bitmap
@@ -199,7 +199,7 @@ impl Fragment {
         dispatchers: Option<&HashMap<ActorId, Vec<Dispatcher>>>,
     ) -> PbFragment {
         PbFragment {
-            fragment_id: self.fragment_id.into(),
+            fragment_id: self.fragment_id,
             fragment_type_mask: self.fragment_type_mask.into(),
             distribution_type: self.distribution_type as _,
             actors: self
@@ -319,7 +319,7 @@ impl StreamJobFragments {
                 .iter()
                 .map(|(id, fragment)| {
                     (
-                        id.into(),
+                        *id,
                         fragment.to_protobuf(
                             fragment_upstreams.get(id).into_iter().flatten().cloned(),
                             fragment_dispatchers.get(&(*id as _)),
@@ -579,7 +579,7 @@ impl StreamJobFragments {
                     source_backfill_fragments
                         .entry(source_id as SourceId)
                         .or_insert(BTreeSet::new())
-                        .insert((fragment_id, upstream_source_fragment_id.into()));
+                        .insert((fragment_id, upstream_source_fragment_id));
                 }
             }
         }

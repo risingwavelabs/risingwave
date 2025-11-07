@@ -79,7 +79,7 @@ use tempfile::{Builder, NamedTempFile};
 use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{DatabaseId, SchemaId, SecretId, SinkId};
+use crate::catalog::{DatabaseId, FragmentId, SchemaId, SecretId, SinkId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
@@ -1179,7 +1179,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn alter_fragment_parallelism(
         &self,
-        _fragment_ids: Vec<u32>,
+        _fragment_ids: Vec<FragmentId>,
         _parallelism: Option<PbTableParallelism>,
     ) -> RpcResult<()> {
         unimplemented!()
@@ -1243,12 +1243,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn get_fragment_by_id(
         &self,
-        _fragment_id: u32,
+        _fragment_id: FragmentId,
     ) -> RpcResult<Option<FragmentDistribution>> {
         unimplemented!()
     }
 
-    async fn get_fragment_vnodes(&self, _fragment_id: u32) -> RpcResult<Vec<(u32, Vec<u32>)>> {
+    async fn get_fragment_vnodes(
+        &self,
+        _fragment_id: FragmentId,
+    ) -> RpcResult<Vec<(u32, Vec<u32>)>> {
         unimplemented!()
     }
 

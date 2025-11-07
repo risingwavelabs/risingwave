@@ -20,12 +20,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, is_source_backfill_table};
 use risingwave_common::id::{FragmentId, JobId, TableId};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_pb::id::JobId;
 
 use super::prelude::{PlanRef, *};
 use crate::TableCatalog;
 use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::{FragmentId, TableId};
 use crate::expr::{ExprImpl, InputRef, Literal, TableFunctionType};
 use crate::optimizer::OptimizerContext;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -93,7 +91,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
         scan: PlanRef,
     ) -> anyhow::Result<LogicalProject> {
         let job_id_expr = Self::build_u32_expr(backfill_info.job_id.as_raw_id());
-        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id);
+        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id.as_raw_id());
         let table_id_expr = Self::build_u32_expr(backfill_info.table_id.as_raw_id());
 
         let backfill_progress = ExprImpl::InputRef(Box::new(InputRef {
@@ -112,9 +110,9 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
         ))
     }
 
-    fn build_u32_expr(id: impl Into<u32>) -> ExprImpl {
+    fn build_u32_expr(id: u32) -> ExprImpl {
         ExprImpl::Literal(Box::new(Literal::new(
-            Some(ScalarImpl::Int32(id.into() as i32)),
+            Some(ScalarImpl::Int32(id as i32)),
             DataType::Int32,
         )))
     }

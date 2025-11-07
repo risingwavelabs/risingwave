@@ -258,7 +258,7 @@ impl ActorBuilder {
 
         Ok(StreamActor {
             actor_id: self.actor_id.as_global_id(),
-            fragment_id: self.fragment_id.as_global_id().into(),
+            fragment_id: self.fragment_id.as_global_id(),
             vnode_bitmap: self.vnode_bitmap,
             mview_definition,
             expr_context: Some(expr_context),
@@ -778,12 +778,12 @@ impl ActorGraphBuilder {
             // As all fragments are processed, we can now `build` the actors where the `Exchange`
             // and `Chain` are rewritten.
             for (fragment_id, builder) in fragment_actor_builders {
-                let global_fragment_id = fragment_id.as_global_id().into();
+                let global_fragment_id = fragment_id.as_global_id();
                 let node = builder.rewrite()?;
                 for (upstream_fragment_id, no_shuffle_upstream) in builder.upstreams.into_values() {
                     if let Some(no_shuffle_upstream) = no_shuffle_upstream {
                         new_no_shuffle
-                            .entry(upstream_fragment_id.as_global_id().into())
+                            .entry(upstream_fragment_id.as_global_id())
                             .or_default()
                             .try_insert(
                                 global_fragment_id,
@@ -803,7 +803,7 @@ impl ActorGraphBuilder {
                         builder
                             .downstreams
                             .into_iter()
-                            .map(|(id, dispatch)| (id.as_global_id().into(), dispatch).into())
+                            .map(|(id, dispatch)| (id.as_global_id(), dispatch).into())
                             .collect(),
                     )
                     .expect("non-duplicate");
@@ -833,7 +833,7 @@ impl ActorGraphBuilder {
                             distribution,
                             stream_node,
                         );
-                        let fragment_id = fragment_id.as_global_id().into();
+                        let fragment_id = fragment_id.as_global_id();
                         (fragment_id, fragment)
                     })
                     .collect()
@@ -848,12 +848,12 @@ impl ActorGraphBuilder {
             .into_iter()
             .map(|(fragment_id, changes)| {
                 (
-                    fragment_id.as_global_id().into(),
+                    fragment_id.as_global_id(),
                     changes
                         .new_downstreams
                         .into_iter()
                         .map(|(downstream_fragment_id, new_dispatch)| {
-                            (downstream_fragment_id.as_global_id().into(), new_dispatch).into()
+                            (downstream_fragment_id.as_global_id(), new_dispatch).into()
                         })
                         .collect(),
                 )
@@ -864,7 +864,7 @@ impl ActorGraphBuilder {
         let replace_upstream = downstream_fragment_changes
             .into_iter()
             .map(|(fragment_id, changes)| {
-                let fragment_id = fragment_id.as_global_id().into();
+                let fragment_id = fragment_id.as_global_id();
                 let new_no_shuffle = &mut new_no_shuffle;
                 (
                     fragment_id,
@@ -873,8 +873,7 @@ impl ActorGraphBuilder {
                         .into_iter()
                         .map(
                             move |(edge_id, (upstream_fragment_id, upstream_new_no_shuffle))| {
-                                let upstream_fragment_id =
-                                    upstream_fragment_id.as_global_id().into();
+                                let upstream_fragment_id = upstream_fragment_id.as_global_id();
                                 if let Some(upstream_new_no_shuffle) = upstream_new_no_shuffle
                                     && !upstream_new_no_shuffle.is_empty()
                                 {
@@ -899,7 +898,7 @@ impl ActorGraphBuilder {
                                     ..
                                 } = edge_id;
                                 (
-                                    original_upstream_fragment_id.as_global_id().into(),
+                                    original_upstream_fragment_id.as_global_id(),
                                     upstream_fragment_id,
                                 )
                             },

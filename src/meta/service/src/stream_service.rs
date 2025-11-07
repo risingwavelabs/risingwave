@@ -242,7 +242,7 @@ impl StreamManagerService for StreamServiceImpl {
                         .fragments
                         .into_iter()
                         .map(|(id, fragment)| FragmentInfo {
-                            id: id.as_raw_id(),
+                            id,
                             actors: fragment
                                 .actors
                                 .into_iter()
@@ -359,7 +359,7 @@ impl StreamManagerService for StreamServiceImpl {
         let fragment_desc = self
             .metadata_manager
             .catalog_controller
-            .get_fragment_desc_by_id(req.fragment_id.into())
+            .get_fragment_desc_by_id(req.fragment_id)
             .await?;
         let distribution =
             fragment_desc.map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams));
@@ -437,7 +437,7 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {
                 actor_id: actor_location.actor_id as _,
-                fragment_id: actor_location.fragment_id.as_raw_id(),
+                fragment_id: actor_location.fragment_id,
                 worker_id: actor_location.worker_id as _,
             })
             .collect_vec();
@@ -557,7 +557,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .map(move |split| list_actor_splits_response::ActorSplit {
                         actor_id: actor_id as _,
                         source_id: source_id as _,
-                        fragment_id: fragment_id.as_raw_id(),
+                        fragment_id,
                         split_id: split.id().to_string(),
                         fragment_type: fragment_type.into(),
                     })

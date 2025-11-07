@@ -960,7 +960,7 @@ mod tests {
 
     /// Helper function to create a `HashSet` from a slice easily.
     fn to_hashset(ids: &[u32]) -> HashSet<FragmentId> {
-        ids.iter().map_into().collect()
+        ids.iter().map(|id| (*id).into()).collect()
     }
 
     #[allow(deprecated)]

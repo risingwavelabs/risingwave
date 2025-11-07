@@ -376,8 +376,7 @@ fn clone_fragment(
 ) -> Fragment {
     let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
         .to_global_id(0)
-        .as_global_id()
-        .into();
+        .as_global_id();
     let actor_id_gen = GlobalActorIdGen::new(actor_id_counter, fragment.actors.len() as _);
     Fragment {
         fragment_id,
@@ -624,7 +623,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
             .to_prost()
         })
         .collect();
-    merge.upstream_fragment_id = upstream_table_fragment_id.as_raw_id();
+    merge.upstream_fragment_id = upstream_table_fragment_id;
     Ok((new_sink_fragment, new_sink_columns, new_log_store_table))
 }
 
@@ -694,7 +693,7 @@ impl StreamFragmentGraph {
             .fragments
             .into_iter()
             .map(|(id, fragment)| {
-                let id = fragment_id_gen.to_global_id(id);
+                let id = fragment_id_gen.to_global_id(id.as_raw_id());
                 let fragment = BuildingFragment::new(id, fragment, job, table_id_gen);
                 (id, fragment)
             })
@@ -713,8 +712,8 @@ impl StreamFragmentGraph {
         let mut upstreams = HashMap::new();
 
         for edge in proto.edges {
-            let upstream_id = fragment_id_gen.to_global_id(edge.upstream_id);
-            let downstream_id = fragment_id_gen.to_global_id(edge.downstream_id);
+            let upstream_id = fragment_id_gen.to_global_id(edge.upstream_id.as_raw_id());
+            let downstream_id = fragment_id_gen.to_global_id(edge.downstream_id.as_raw_id());
             let edge = StreamFragmentEdge::from_protobuf(&edge);
 
             upstreams
@@ -852,7 +851,7 @@ impl StreamFragmentGraph {
         self.fragments
             .values()
             .filter(|b| b.job_id.is_some())
-            .map(|b| b.fragment_id.into())
+            .map(|b| b.fragment_id)
             .exactly_one()
             .expect("require exactly 1 materialize/sink/cdc source node when creating the streaming job")
     }
@@ -864,7 +863,7 @@ impl StreamFragmentGraph {
             .filter(|b| {
                 FragmentTypeMask::from(b.fragment_type_mask).contains(FragmentTypeFlag::Dml)
             })
-            .map(|b| b.fragment_id.into())
+            .map(|b| b.fragment_id)
             .at_most_one()
             .expect("require at most 1 dml node when creating the streaming job")
     }
@@ -1004,7 +1003,7 @@ impl StreamFragmentGraph {
     pub fn collect_backfill_mapping(&self) -> HashMap<u32, Vec<FragmentId>> {
         let mut mapping = HashMap::new();
         for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id().into();
+            let fragment_id = fragment_id.as_global_id();
             let fragment_mask = fragment.fragment_type_mask;
             let candidates = [FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan];
             let has_some_scan = candidates
@@ -1113,7 +1112,7 @@ impl StreamFragmentGraph {
         let mut mapping: HashMap<FragmentId, Vec<TableId>> = HashMap::new();
 
         for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id().into();
+            let fragment_id = fragment_id.as_global_id();
 
             // Check if this fragment contains a LocalityProvider node
             if let Some(node) = fragment.node.as_ref() {
@@ -1158,7 +1157,7 @@ impl StreamFragmentGraph {
 
         // First, identify all fragments that contain LocalityProvider nodes
         for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id().into();
+            let fragment_id = fragment_id.as_global_id();
             let has_locality_provider = self.fragment_has_locality_provider(fragment);
 
             if has_locality_provider {
@@ -1226,7 +1225,7 @@ impl StreamFragmentGraph {
 
         // Check all downstream fragments
         for &downstream_id in self.get_downstreams(current_fragment_id).keys() {
-            let downstream_fragment_id = downstream_id.as_global_id().into();
+            let downstream_fragment_id = downstream_id.as_global_id();
 
             // If the downstream fragment is a LocalityProvider, add it to results
             if locality_provider_fragments.contains(&downstream_fragment_id) {
@@ -1857,7 +1856,7 @@ impl CompleteStreamFragmentGraph {
             .collect();
 
         Fragment {
-            fragment_id: inner.fragment_id.into(),
+            fragment_id: inner.fragment_id,
             fragment_type_mask: inner.fragment_type_mask.into(),
             distribution_type,
             actors,

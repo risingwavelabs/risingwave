@@ -56,7 +56,7 @@ pub async fn handle_explain_analyze_stream_job(
     let fragments = net::get_fragments(meta_client, job_id.into()).await?;
     let fragment_parallelisms = fragments
         .iter()
-        .map(|f| (f.id.into(), f.actors.len()))
+        .map(|f| (f.id, f.actors.len()))
         .collect::<HashMap<_, _>>();
     let (root_node, dispatcher_fragment_ids, adjacency_list) = extract_stream_node_infos(fragments);
     let (executor_ids, operator_to_executor) = extract_executor_infos(&adjacency_list);
@@ -162,7 +162,6 @@ mod bind {
 mod net {
     use std::collections::HashSet;
 
-    use itertools::Itertools;
     use risingwave_common::id::FragmentId;
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::id::JobId;
@@ -218,7 +217,7 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.iter().map_into().collect(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -239,7 +238,7 @@ mod net {
                 .monitor_client
                 .get_profile_stats(GetProfileStatsRequest {
                     executor_ids: executor_ids.iter().copied().collect(),
-                    dispatcher_fragment_ids: dispatcher_fragment_ids.iter().map_into().collect(),
+                    dispatcher_fragment_ids: dispatcher_fragment_ids.clone(),
                 })
                 .await
                 .expect("get profiling stats failed");
@@ -350,15 +349,14 @@ mod metrics {
             }
 
             for fragment_id in dispatch_fragment_ids {
-                let Some(total_output_throughput) = metrics
-                    .dispatch_fragment_output_row_count
-                    .get(&fragment_id.as_raw_id())
+                let Some(total_output_throughput) =
+                    metrics.dispatch_fragment_output_row_count.get(fragment_id)
                 else {
                     continue;
                 };
                 let Some(total_output_pending_ns) = metrics
                     .dispatch_fragment_output_blocking_duration_ns
-                    .get(&fragment_id.as_raw_id())
+                    .get(fragment_id)
                 else {
                     continue;
                 };
@@ -640,7 +638,7 @@ mod graph {
     ) {
         let job_fragment_ids = fragments
             .iter()
-            .map(|f| f.id.into())
+            .map(|f| f.id)
             .collect::<HashSet<FragmentId>>();
 
         // Finds root nodes of the graph
@@ -675,7 +673,7 @@ mod graph {
                     ..
                 }) = merge_node
             {
-                fragment_id_to_merge_operator_id.insert(upstream_fragment_id.into(), operator_id);
+                fragment_id_to_merge_operator_id.insert(*upstream_fragment_id, operator_id);
             }
             let dependencies = &node.input;
             let dependency_ids = dependencies
@@ -717,7 +715,7 @@ mod graph {
             let actor_ids = actors.iter().map(|actor| actor.id).collect::<HashSet<_>>();
             let node = actors[0].node.as_ref().expect("should have stream node");
             extract_stream_node_info(
-                fragment.id.into(),
+                fragment.id,
                 &mut fragment_id_to_merge_operator_id,
                 &mut operator_id_to_stream_node,
                 node,

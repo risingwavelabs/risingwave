@@ -202,9 +202,9 @@ impl CdcTableBackfillTrackerInner {
     }
 
     fn update_split_progress(&mut self, progress: &PbCdcTableBackfillProgress) -> Vec<JobId> {
-        let Some(job_id) = self.fragment_id_to_job_id.get(&progress.fragment_id.into()) else {
+        let Some(job_id) = self.fragment_id_to_job_id.get(&progress.fragment_id) else {
             tracing::warn!(
-                fragment_id = progress.fragment_id,
+                fragment_id = %progress.fragment_id,
                 "CDC table mapping not found."
             );
             return vec![];
@@ -402,7 +402,7 @@ mod test {
                     split_id_start_inclusive: 1,
                     split_id_end_inclusive: 2,
                     generation,
-                    fragment_id: 12,
+                    fragment_id: 12.into(),
                     ..Default::default()
                 },
                 CdcTableBackfillProgress {
@@ -410,7 +410,7 @@ mod test {
                     split_id_start_inclusive: 5,
                     split_id_end_inclusive: 10,
                     generation,
-                    fragment_id: 11,
+                    fragment_id: 11.into(),
                     ..Default::default()
                 },
             ],
@@ -440,7 +440,7 @@ mod test {
                 split_id_end_inclusive: 4,
                 // Expired generation.
                 generation: generation - 1,
-                fragment_id: 13,
+                fragment_id: 13.into(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -466,7 +466,7 @@ mod test {
                     split_id_start_inclusive: 1,
                     split_id_end_inclusive: 2,
                     generation,
-                    fragment_id: 12,
+                    fragment_id: 12.into(),
                     ..Default::default()
                 },
                 CdcTableBackfillProgress {
@@ -474,7 +474,7 @@ mod test {
                     split_id_start_inclusive: 5,
                     split_id_end_inclusive: 10,
                     generation,
-                    fragment_id: 11,
+                    fragment_id: 11.into(),
                     ..Default::default()
                 },
                 CdcTableBackfillProgress {
@@ -482,7 +482,7 @@ mod test {
                     split_id_start_inclusive: 3,
                     split_id_end_inclusive: 4,
                     generation,
-                    fragment_id: 13,
+                    fragment_id: 13.into(),
                     ..Default::default()
                 },
             ],

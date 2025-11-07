@@ -295,10 +295,13 @@ for_all_wrapped_id_fields! (
         GetServerlessStreamingJobsStatusResponse.Status {
             table_id: TableId,
         }
+        GetServingVnodeMappingsResponse {
+            fragment_to_table: FragmentId,
+        }
         ListActorSplitsResponse.ActorSplit {
             fragment_id: FragmentId,
         }
-        ListActorStatesResponse {
+        ListActorStatesResponse.ActorState {
             fragment_id: FragmentId,
         }
         ListCdcProgressResponse {
@@ -319,6 +322,9 @@ for_all_wrapped_id_fields! (
         ListTableFragmentsResponse {
             table_fragments: JobId,
         }
+        ListTableFragmentsResponse.FragmentInfo {
+            id: FragmentId,
+        }
         ListUnmigratedTablesResponse.UnmigratedTable {
             table_id: TableId,
         }
@@ -330,12 +336,22 @@ for_all_wrapped_id_fields! (
         }
         TableFragments {
             table_id: JobId,
+            fragments: FragmentId,
         }
         TableFragments.Fragment {
             fragment_id: FragmentId,
             upstream_fragment_ids: FragmentId,
             state_table_ids: TableId,
             table_id: JobId,
+        }
+    }
+    monitor_service {
+        GetProfileStatsRequest {
+            dispatcher_fragment_ids: FragmentId,
+        }
+        GetProfileStatsResponse {
+            dispatch_fragment_output_row_count: FragmentId,
+            dispatch_fragment_output_blocking_duration_ns: FragmentId,
         }
     }
     plan_common {
@@ -350,6 +366,10 @@ for_all_wrapped_id_fields! (
         }
     }
     stream_plan {
+        AddMutation {
+            new_upstream_sinks: FragmentId,
+            backfill_nodes_to_pause: FragmentId,
+        }
         DeltaIndexJoinNode {
             left_table_id: TableId,
             right_table_id: TableId,
@@ -360,20 +380,47 @@ for_all_wrapped_id_fields! (
         MaterializeNode {
             table_id: TableId,
         }
+        MergeNode {
+            upstream_fragment_id: FragmentId,
+        }
         RefreshStartMutation {
             table_id: TableId,
+        }
+        StartFragmentBackfillMutation {
+            fragment_ids: FragmentId,
+        }
+        StopMutation {
+            dropped_sink_fragments: FragmentId,
+        }
+        StreamActor {
+            fragment_id: FragmentId,
         }
         StreamCdcScanNode {
             table_id: TableId,
         }
         StreamFragmentGraph {
             dependent_table_ids: TableId,
+            fragments: FragmentId,
+        }
+        StreamFragmentGraph.StreamFragment {
+            fragment_id: FragmentId,
+        }
+        StreamFragmentGraph.StreamFragmentEdge {
+            upstream_id: FragmentId,
+            downstream_id: FragmentId,
         }
         StreamScanNode {
             table_id: TableId,
         }
         SubscriptionUpstreamInfo {
             upstream_mv_table_id: TableId,
+        }
+        UpdateMutation.MergeUpdate {
+            upstream_fragment_id: FragmentId,
+            new_upstream_fragment_id: FragmentId,
+        }
+        UpstreamSinkInfo {
+            upstream_fragment_id: FragmentId,
         }
     }
     stream_service {
@@ -384,12 +431,21 @@ for_all_wrapped_id_fields! (
             table_watermarks: TableId,
             vector_index_adds: TableId,
         }
+        BarrierCompleteResponse.CdcTableBackfillProgress {
+            fragment_id: FragmentId,
+        }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
         }
         InjectBarrierRequest {
             database_id: DatabaseId,
             table_ids_to_sync: TableId,
+        }
+        InjectBarrierRequest.BuildActorInfo {
+            fragment_upstreams: FragmentId,
+        }
+        InjectBarrierRequest.FragmentBuildActorInfo {
+            fragment_id: FragmentId,
         }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
             database_id: DatabaseId,

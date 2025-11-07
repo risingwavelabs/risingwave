@@ -195,8 +195,8 @@ impl FragmentEdgeBuilder {
                 if let Some(new_upstreams) = actor_upstreams.remove(&new_upstream_fragment_id) {
                     fragment_merge_updates.push(MergeUpdate {
                         actor_id,
-                        upstream_fragment_id: original_upstream_fragment_id.as_raw_id(),
-                        new_upstream_fragment_id: Some(new_upstream_fragment_id.as_raw_id()),
+                        upstream_fragment_id: original_upstream_fragment_id,
+                        new_upstream_fragment_id: Some(new_upstream_fragment_id),
                         added_upstream_actors: new_upstreams.into_values().collect(),
                         removed_upstream_actor_id: vec![],
                     })

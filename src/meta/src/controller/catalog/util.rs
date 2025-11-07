@@ -397,8 +397,7 @@ impl CatalogController {
                                     let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
                                         unreachable!("expect merge node");
                                     };
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id.into()))
+                                    if all_fragment_ids.contains(&(merge_node.upstream_fragment_id))
                                     {
                                         true
                                     } else {
@@ -408,8 +407,7 @@ impl CatalogController {
                                     }
                                 }
                                 Some(NodeBody::Merge(merge_node)) => {
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id.into()))
+                                    if all_fragment_ids.contains(&(merge_node.upstream_fragment_id))
                                     {
                                         true
                                     } else {

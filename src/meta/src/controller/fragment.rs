@@ -165,7 +165,7 @@ impl NotificationManager {
     ) {
         let fragment_ids = fragment_mappings
             .iter()
-            .map(|mapping| mapping.fragment_id.into())
+            .map(|mapping| mapping.fragment_id)
             .collect_vec();
         if fragment_ids.is_empty() {
             return;
@@ -385,7 +385,7 @@ impl CatalogController {
             fragment_type_mask: fragment_type_mask.into(),
             distribution_type: pb_distribution_type,
             actors: pb_actors,
-            state_table_ids: pb_state_table_ids.into_iter().map_into().collect(),
+            state_table_ids: pb_state_table_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
             nodes: stream_node,
         };
@@ -1167,7 +1167,7 @@ impl CatalogController {
                 distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type)
                     as _,
                 state_table_ids: fragment_desc.state_table_ids.0,
-                upstream_fragment_ids: upstreams,
+                upstream_fragment_ids: upstreams.clone(),
                 fragment_type_mask: fragment_desc.fragment_type_mask as _,
                 parallelism: parallelism as _,
                 vnode_count: fragment_desc.vnode_count as _,
@@ -1684,7 +1684,7 @@ impl CatalogController {
                 source_fragment_ids
                     .entry(source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
-                    .insert((fragment_id, upstream_source_fragment_id.into()));
+                    .insert((fragment_id, upstream_source_fragment_id));
             }
         }
         Ok(source_fragment_ids)
@@ -1844,10 +1844,10 @@ mod tests {
 
     fn generate_merger_stream_node(actor_upstream_actor_ids: &ActorUpstreams) -> PbStreamNode {
         let mut input = vec![];
-        for upstream_fragment_id in actor_upstream_actor_ids.keys() {
+        for &upstream_fragment_id in actor_upstream_actor_ids.keys() {
             input.push(PbStreamNode {
                 node_body: Some(PbNodeBody::Merge(Box::new(MergeNode {
-                    upstream_fragment_id: upstream_fragment_id.as_raw_id(),
+                    upstream_fragment_id,
                     ..Default::default()
                 }))),
                 ..Default::default()
@@ -2049,7 +2049,7 @@ mod tests {
                         actor_upstreams
                             .get(&(actor_id as _))
                             .unwrap()
-                            .contains_key(&m.upstream_fragment_id.into())
+                            .contains_key(&m.upstream_fragment_id)
                     );
                 }
             });
@@ -2092,7 +2092,7 @@ mod tests {
     fn test_parallelism_policy_with_root_fragments() {
         #[expect(deprecated)]
         let fragment = fragment::Model {
-            fragment_id: 3,
+            fragment_id: 3.into(),
             job_id: TEST_JOB_ID,
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
@@ -2118,7 +2118,7 @@ mod tests {
     fn test_parallelism_policy_with_upstream_roots() {
         #[expect(deprecated)]
         let fragment = fragment::Model {
-            fragment_id: 5,
+            fragment_id: 5.into(),
             job_id: TEST_JOB_ID,
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
@@ -2132,7 +2132,7 @@ mod tests {
         let policy = super::CatalogController::format_fragment_parallelism_policy(
             &fragment,
             None,
-            &[3, 1, 2, 1],
+            &[3.into(), 1.into(), 2.into(), 1.into()],
         );
 
         assert_eq!(policy, "upstream_fragment([1, 2, 3])");

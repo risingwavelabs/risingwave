@@ -21,7 +21,6 @@ use std::mem::take;
 use std::ops::Bound::{Excluded, Unbounded};
 
 use barrier_control::CreatingStreamingJobBarrierControl;
-use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -97,7 +96,6 @@ impl CreatingStreamingJobControl {
         let backfill_nodes_to_pause =
             get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering)
                 .into_iter()
-                .map_into()
                 .collect();
         let backfill_order_state = BackfillOrderState::new(
             info.fragment_backfill_ordering.clone(),

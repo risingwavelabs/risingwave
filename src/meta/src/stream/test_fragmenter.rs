@@ -219,7 +219,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         ..Default::default()
     };
     fragments.push(StreamFragment {
-        fragment_id: 2,
+        fragment_id: 2.into(),
         node: Some(source_node),
         fragment_type_mask: FragmentTypeFlag::Source as u32,
         requires_singleton: false,
@@ -287,7 +287,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     };
 
     fragments.push(StreamFragment {
-        fragment_id: 1,
+        fragment_id: 1.into(),
         node: Some(simple_agg_node),
         fragment_type_mask: 0,
         requires_singleton: false,
@@ -373,7 +373,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     };
 
     fragments.push(StreamFragment {
-        fragment_id: 0,
+        fragment_id: 0.into(),
         node: Some(mview_node),
         fragment_type_mask: FragmentTypeFlag::Mview as u32,
         requires_singleton: true,
@@ -391,8 +391,8 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 4,
-            upstream_id: 1,
-            downstream_id: 0,
+            upstream_id: 1.into(),
+            downstream_id: 0.into(),
         },
         StreamFragmentEdge {
             dispatch_strategy: Some(DispatchStrategy {
@@ -401,8 +401,8 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 1,
-            upstream_id: 2,
-            downstream_id: 1,
+            upstream_id: 2.into(),
+            downstream_id: 1.into(),
         },
     ]
 }
@@ -503,7 +503,7 @@ async fn test_graph_builder() -> MetaResult<()> {
             NodeBody::Merge(merge_node) => {
                 assert!(
                     new_fragment_relation().any(|(upstream_fragment_id, fragment_id)| {
-                        upstream_fragment_id.as_raw_id() == merge_node.upstream_fragment_id
+                        upstream_fragment_id == merge_node.upstream_fragment_id
                             && fragment_id == fragment.fragment_id
                     })
                 );

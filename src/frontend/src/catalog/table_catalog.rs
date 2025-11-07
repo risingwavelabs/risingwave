@@ -34,7 +34,6 @@ use risingwave_pb::catalog::{
     PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
 };
 use risingwave_pb::common::PbColumnOrder;
-use risingwave_pb::id::JobId;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast;
@@ -590,8 +589,8 @@ impl TableCatalog {
                 .collect_vec(),
             append_only: self.append_only,
             owner: self.owner,
-            fragment_id: self.fragment_id.into(),
-            dml_fragment_id: self.dml_fragment_id.map(Into::into),
+            fragment_id: self.fragment_id,
+            dml_fragment_id: self.dml_fragment_id,
             vnode_col_index: self.vnode_col_index.map(|i| i as _),
             row_id_index: self.row_id_index.map(|i| i as _),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
@@ -825,8 +824,8 @@ impl From<PbTable> for TableCatalog {
             stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             append_only: tb.append_only,
             owner: tb.owner,
-            fragment_id: tb.fragment_id.into(),
-            dml_fragment_id: tb.dml_fragment_id.map(Into::into),
+            fragment_id: tb.fragment_id,
+            dml_fragment_id: tb.dml_fragment_id,
             vnode_col_index: tb.vnode_col_index.map(|x| x as usize),
             row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
@@ -923,7 +922,7 @@ mod tests {
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
-            fragment_id: 0,
+            fragment_id: 0.into(),
             dml_fragment_id: None,
             initialized_at_epoch: None,
             value_indices: vec![0],

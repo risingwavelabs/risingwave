@@ -1063,7 +1063,7 @@ impl DdlService for DdlServiceImpl {
 
         let fragment_targets = fragment_ids
             .into_iter()
-            .map(|fragment_id| (fragment_id.into(), parallelism.clone()))
+            .map(|fragment_id| (fragment_id, parallelism.clone()))
             .collect();
 
         self.ddl_controller

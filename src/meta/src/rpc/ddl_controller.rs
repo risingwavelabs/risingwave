@@ -2346,7 +2346,7 @@ pub fn refill_upstream_sink_union_in_table(
             let init_upstreams = upstream_sink_infos
                 .iter()
                 .map(|info| PbUpstreamSinkInfo {
-                    upstream_fragment_id: info.sink_fragment_id.into(),
+                    upstream_fragment_id: info.sink_fragment_id,
                     sink_output_schema: info.sink_output_fields.clone(),
                     project_exprs: info.project_exprs.clone(),
                 })

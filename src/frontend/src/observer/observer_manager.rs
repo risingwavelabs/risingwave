@@ -294,7 +294,7 @@ impl FrontendObserverNode {
                                     .unwrap()
                                     .fragment_id;
                                 catalog_guard.update_table(table);
-                                if old_fragment_id.as_raw_id() != table.fragment_id {
+                                if old_fragment_id != table.fragment_id {
                                     // FIXME: the frontend node delete its fragment for the update
                                     // operation by itself.
                                     self.worker_node_manager
@@ -466,7 +466,7 @@ impl FrontendObserverNode {
         };
         match info {
             Info::StreamingWorkerSlotMapping(streaming_worker_slot_mapping) => {
-                let fragment_id = streaming_worker_slot_mapping.fragment_id.into();
+                let fragment_id = streaming_worker_slot_mapping.fragment_id;
                 let mapping = || {
                     WorkerSlotMapping::from_protobuf(
                         streaming_worker_slot_mapping.mapping.as_ref().unwrap(),
@@ -506,7 +506,7 @@ impl FrontendObserverNode {
             Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
                 mappings
                     .into_iter()
-                    .map(|m| m.fragment_id.into())
+                    .map(|m| m.fragment_id)
                     .collect_vec()
                     .as_slice(),
             ),
@@ -572,7 +572,7 @@ fn convert_worker_slot_mapping(
                  mapping,
              }| {
                 let mapping = WorkerSlotMapping::from_protobuf(mapping.as_ref().unwrap());
-                (fragment_id.into(), mapping)
+                (*fragment_id, mapping)
             },
         )
         .collect()

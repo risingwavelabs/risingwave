@@ -145,7 +145,6 @@ impl Execute for ReceiverExecutor {
                         {
                             let new_upstream_fragment_id = update
                                 .new_upstream_fragment_id
-                                .map(Into::into)
                                 .unwrap_or(self.upstream_fragment_id);
                             let removed_upstream_actor_id: Vec<_> =
                                 if update.new_upstream_fragment_id.is_some() {
@@ -225,11 +224,11 @@ mod tests {
         // old -> actor_id
         // new -> actor_id
 
-        let (upstream_fragment_id, fragment_id) = (10, 18);
+        let (upstream_fragment_id, fragment_id) = (10.into(), 18);
 
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
-            (actor_id, upstream_fragment_id.into()) => MergeUpdate {
+            (actor_id, upstream_fragment_id) => MergeUpdate {
                 actor_id,
                 upstream_fragment_id,
                 new_upstream_fragment_id: None,
@@ -260,7 +259,7 @@ mod tests {
             actor_id,
             fragment_id.into(),
             &helper_make_local_actor(old),
-            upstream_fragment_id.into(),
+            upstream_fragment_id,
         )
         .await
         .unwrap();
@@ -268,7 +267,7 @@ mod tests {
         let receiver = ReceiverExecutor::new(
             ActorContext::for_test(actor_id),
             fragment_id.into(),
-            upstream_fragment_id.into(),
+            upstream_fragment_id,
             input,
             barrier_test_env.local_barrier_manager.clone(),
             metrics.clone(),
