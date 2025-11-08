@@ -548,16 +548,6 @@ impl MySqlExternalTableReader {
         negative_val as u64
     }
 
-    /// Convert negative i32 to unsigned u32 based on column type
-    fn convert_negative_to_unsigned_i32(&self, negative_val: i32) -> u32 {
-        negative_val as u32
-    }
-
-    /// Convert negative i16 to unsigned u16 based on column type
-    fn convert_negative_to_unsigned_i16(&self, negative_val: i16) -> u16 {
-        negative_val as u16
-    }
-
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
     async fn snapshot_read_inner(
         &self,
@@ -608,22 +598,8 @@ impl MySqlExternalTableReader {
                         let ty = field_map.get(pk.as_str()).unwrap();
                         let val = match ty {
                             DataType::Boolean => Value::from(value.into_bool()),
-                            DataType::Int16 => {
-                                let int16_val = value.into_int16();
-                                if int16_val < 0 && self.is_unsigned_type(pk.as_str()) {
-                                    Value::from(self.convert_negative_to_unsigned_i16(int16_val))
-                                } else {
-                                    Value::from(int16_val)
-                                }
-                            }
-                            DataType::Int32 => {
-                                let int32_val = value.into_int32();
-                                if int32_val < 0 && self.is_unsigned_type(pk.as_str()) {
-                                    Value::from(self.convert_negative_to_unsigned_i32(int32_val))
-                                } else {
-                                    Value::from(int32_val)
-                                }
-                            }
+                            DataType::Int16 => Value::from(value.into_int16()),
+                            DataType::Int32 => Value::from(value.into_int32()),
                             DataType::Int64 => {
                                 let int64_val = value.into_int64();
                                 if int64_val < 0 && self.is_unsigned_type(pk.as_str()) {
