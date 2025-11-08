@@ -217,10 +217,16 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             class ColumnInfo {
                 String dataType;
                 long charMaxLength; // Use long to avoid overflow for 4294967295
+                String columnType; // Full column type including UNSIGNED modifier
 
-                ColumnInfo(String dataType, long charMaxLength) {
+                ColumnInfo(String dataType, long charMaxLength, String columnType) {
                     this.dataType = dataType;
                     this.charMaxLength = charMaxLength;
+                    this.columnType = columnType;
+                }
+
+                boolean isUnsigned() {
+                    return columnType != null && columnType.toLowerCase().contains("unsigned");
                 }
             }
 
@@ -233,12 +239,14 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 var dataType = res.getString(2);
                 var key = res.getString(3);
                 long charMaxLength = res.getLong(4);
+                var columnType = res.getString(5); // Get full column type (e.g., "bigint unsigned")
                 // In MySQL, some types (such as text/blob) will return 4294967295 for
                 // charMaxLength, need special handling
                 if (res.wasNull()) {
                     charMaxLength = -1;
                 }
-                upstreamSchema.put(field.toLowerCase(), new ColumnInfo(dataType, charMaxLength));
+                upstreamSchema.put(
+                        field.toLowerCase(), new ColumnInfo(dataType, charMaxLength, columnType));
                 if (key.equalsIgnoreCase("PRI")) {
                     pkFields.add(field.toLowerCase());
                 }
@@ -256,9 +264,17 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
                 if (!isDataTypeCompatible(
-                        columnInfo.dataType, e.getValue(), columnInfo.charMaxLength)) {
+                        columnInfo.dataType,
+                        e.getValue(),
+                        columnInfo.charMaxLength,
+                        columnInfo.isUnsigned())) {
                     throw ValidatorUtils.invalidArgument(
-                            "Incompatible data type of column " + e.getKey());
+                            "Incompatible data type of column "
+                                    + e.getKey()
+                                    + ". MySQL type: "
+                                    + columnInfo.columnType
+                                    + ", RisingWave type: "
+                                    + e.getValue());
                 }
             }
 
@@ -294,9 +310,53 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     private boolean isDataTypeCompatible(
-            String mysqlDataType, Data.DataType.TypeName typeName, long charMaxLength) {
+            String mysqlDataType,
+            Data.DataType.TypeName typeName,
+            long charMaxLength,
+            boolean isUnsigned) {
         int val = typeName.getNumber();
 
+        // Special handling for unsigned types
+        // For all MySQL unsigned integer types, the recommended approach is to upcast to a larger
+        // signed type in RisingWave to avoid overflow:
+        //   - unsigned tinyint (u8) -> smallint (i16) or larger
+        //   - unsigned smallint (u16) -> int (i32) or larger
+        //   - unsigned int (u32) -> bigint (i64)
+        //   - unsigned bigint (u64) -> decimal (precise, no overflow)
+        //
+        // Special case for unsigned bigint:
+        // Although the best practice is to use DECIMAL to preserve the full range (0 to 2^64-1),
+        // we also allow unsigned bigint -> bigint mapping. This is because Debezium's default
+        // behavior (without 'debezium.bigint.unsigned.handling.mode=precise') converts MySQL
+        // unsigned bigint to signed i64 in the CDC stream. When values exceed i64::MAX, they
+        // overflow to negative numbers (e.g., 18446251075179777772u64 -> -492998529773844i64).
+        // We intentionally support this conversion for backward compatibility and to handle
+        // existing CDC sources.
+        if (isUnsigned) {
+            switch (mysqlDataType) {
+                case "tinyint": // unsigned tinyint (0-255)
+                    // Allow upcast: tinyint unsigned -> smallint/int/bigint
+                    return Data.DataType.TypeName.INT16_VALUE <= val
+                            && val <= Data.DataType.TypeName.INT64_VALUE;
+                case "smallint": // unsigned smallint (0-65535)
+                    // Allow upcast: smallint unsigned -> int/bigint
+                    return Data.DataType.TypeName.INT32_VALUE <= val
+                            && val <= Data.DataType.TypeName.INT64_VALUE;
+                case "mediumint": // unsigned mediumint (0-16777215)
+                case "int": // unsigned int (0-4294967295)
+                    // Allow upcast: int unsigned -> bigint
+                    return val == Data.DataType.TypeName.INT64_VALUE;
+                case "bigint": // unsigned bigint (0-18446744073709551615)
+                    // Allow: bigint unsigned -> bigint (with overflow) or decimal (precise)
+                    return val == Data.DataType.TypeName.INT64_VALUE
+                            || val == Data.DataType.TypeName.DECIMAL_VALUE;
+                default:
+                    // For other types, fall through to standard validation
+                    break;
+            }
+        }
+
+        // Standard validation for signed types
         switch (mysqlDataType) {
             case "tinyint": // boolean
                 return (val == Data.DataType.TypeName.BOOLEAN_VALUE)
