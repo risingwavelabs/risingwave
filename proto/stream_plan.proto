@@ -276,6 +276,8 @@ message StreamSource {
   map<string, secret.SecretRef> secret_refs = 10;
   // Downstream columns are used by list node to know which columns are needed.
   optional Columns downstream_columns = 11;
+  plan_common.SourceRefreshMode refresh_mode = 12;
+  optional uint32 associated_table_id = 13;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -292,6 +294,8 @@ message StreamFsFetch {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  plan_common.SourceRefreshMode refresh_mode = 11;
+  optional uint32 associated_table_id = 12;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves

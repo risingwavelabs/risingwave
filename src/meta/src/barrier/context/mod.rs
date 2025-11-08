@@ -23,6 +23,9 @@ use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::JobId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    PbListFinishedSource, PbLoadFinishedSource,
+};
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -84,12 +87,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
 
     fn handle_list_finished_source_ids(
         &self,
-        list_finished_source_ids: Vec<u32>,
+        list_finished_source_ids: Vec<PbListFinishedSource>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     fn handle_load_finished_source_ids(
         &self,
-        load_finished_source_ids: Vec<u32>,
+        load_finished_source_ids: Vec<PbLoadFinishedSource>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     fn handle_refresh_finished_table_ids(

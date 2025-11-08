@@ -127,14 +127,18 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
 
     async fn handle_list_finished_source_ids(
         &self,
-        _list_finished_source_ids: Vec<u32>,
+        _list_finished_source_ids: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::PbListFinishedSource,
+        >,
     ) -> MetaResult<()> {
         unimplemented!()
     }
 
     async fn handle_load_finished_source_ids(
         &self,
-        _load_finished_source_ids: Vec<u32>,
+        _load_finished_source_ids: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::PbLoadFinishedSource,
+        >,
     ) -> MetaResult<()> {
         unimplemented!()
     }

@@ -34,6 +34,7 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
@@ -173,6 +174,11 @@ impl BuildingFragment {
                     && let Some(source) = table_source
                 {
                     node_inner.source_id = source.id;
+                    if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
+                        source.optional_associated_table_id
+                    {
+                        node_inner.associated_table_id = Some(id);
+                    }
                 }
             }
             NodeBody::Source(source_node) => {
@@ -185,6 +191,11 @@ impl BuildingFragment {
                         {
                             debug_assert_ne!(source.id, job_id.as_raw_id());
                             source_inner.source_id = source.id;
+                            if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
+                                source.optional_associated_table_id
+                            {
+                                source_inner.associated_table_id = Some(id);
+                            }
                         }
                     }
                     StreamingJob::Source(source) => {
@@ -192,6 +203,11 @@ impl BuildingFragment {
                         if let Some(source_inner) = source_node.source_inner.as_mut() {
                             debug_assert_eq!(source.id, job_id.as_raw_id());
                             source_inner.source_id = source.id;
+                            if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
+                                source.optional_associated_table_id
+                            {
+                                source_inner.associated_table_id = Some(id);
+                            }
                         }
                     }
                     // For other job types, no need to fill the source id, since it refers to an existing source.
