@@ -17,9 +17,6 @@ python3 e2e_test/commands/pulsar_util.py produce -t "persistent://public/default
 {"f1":1}^{"f1":1,"f2":"3"}
 EOF
 
-system ok
-python3 e2e_test/commands/pulsar_util.py compact --topic 'persistent://public/default/read_compact'
-
 statement ok
 create table t_not_compact (
   f1 int,
@@ -29,6 +26,7 @@ create table t_not_compact (
   service.url = '${PULSAR_BROKER_URL}',
   topic = 'persistent://public/default/read_compact',
   pulsar.read_compacted = 'false',
+  source_rate_limit = 0,
 ) format plain encode json;
 
 statement ok
@@ -39,10 +37,21 @@ create table t_compact (
   connector = 'pulsar',
   service.url = '${PULSAR_BROKER_URL}',
   topic = 'persistent://public/default/read_compact',
-  pulsar.read_compacted = 'true'
+  pulsar.read_compacted = 'true',
+  source_rate_limit = 0,
 ) format plain encode json;
 
+# need to create subscrption first then do compact
+system ok
+python3 e2e_test/commands/pulsar_util.py compact --topic 'persistent://public/default/read_compact'
+
 sleep 3s
+
+statement ok
+alter table t_not_compact set source_rate_limit to default;
+
+statement ok
+alter table t_compact set source_rate_limit to default;
 
 query ?? retry 3 backoff 1s
 select f1, f2 from t_not_compact order by f1, f2;
