@@ -81,6 +81,35 @@ message BarrierCompleteResponse {
   // prev_epoch of barrier
   uint64 epoch = 9;
   uint32 database_id = 10;
+
+  reserved 11;
+  reserved "load_finished_source_ids";
+
+  map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
+  repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
+  // Used for truncating tables in storage layer.
+  // MaterializeExecutor reports the tables to truncate, and then
+  // meta will apply truncate operation in next commit epoch.
+  repeated uint32 truncate_tables = 14;
+  // Used for reporting materialized view refresh completion.
+  // MaterializeExecutor reports when refresh has finished, and then
+  // meta will update the table's refresh state to Finished.
+  repeated uint32 refresh_finished_tables = 15;
+
+  reserved 16;
+  reserved "list_finished_source_ids";
+
+   // SourceExecutor reports the source list is finished, and then
+  // meta will issue a ListFinish barrier to notify the source to start loading.
+  message ListFinishedSource {
+    // The actor that reported the completion event.
+    uint32 reporter_actor_id = 1;
+    // The table ID for the refreshable batch source.
+    uint32 table_id = 2;
+    // The source identifier associated with the completed listing.
+    uint32 associated_source_id = 3;
+  }
+
   // Used for refreshable batch source.
   // SourceExecutor reports the source load is finished, and then
   // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
@@ -92,28 +121,9 @@ message BarrierCompleteResponse {
     // The source identifier associated with the finished load.
     uint32 associated_source_id = 3;
   }
-  repeated LoadFinishedSource load_finished_sources = 11;
-  map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
-  repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
-  // Used for truncating tables in storage layer.
-  // MaterializeExecutor reports the tables to truncate, and then
-  // meta will apply truncate operation in next commit epoch.
-  repeated uint32 truncate_tables = 14;
-  // Used for reporting materialized view refresh completion.
-  // MaterializeExecutor reports when refresh has finished, and then
-  // meta will update the table's refresh state to Finished.
-  repeated uint32 refresh_finished_tables = 15;
-  // SourceExecutor reports the source list is finished, and then
-  // meta will issue a ListFinish barrier to notify the source to start loading.
-  message ListFinishedSource {
-    // The actor that reported the completion event.
-    uint32 reporter_actor_id = 1;
-    // The table ID for the refreshable batch source.
-    uint32 table_id = 2;
-    // The source identifier associated with the completed listing.
-    uint32 associated_source_id = 3;
-  }
-  repeated ListFinishedSource list_finished_sources = 16;
+
+  repeated LoadFinishedSource load_finished_sources = 17;
+  repeated ListFinishedSource list_finished_sources = 18;
 }
 
 message StreamingControlStreamRequest {
