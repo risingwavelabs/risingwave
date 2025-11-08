@@ -43,7 +43,7 @@ select count(*) = 1 from rw_iceberg_files where source_name = '__iceberg_source_
 t
 
 
-statement err Invalid key
+statement error Invalid key
 create table iceberg_batch_table ( primary key (id) ) with (
   connector = 'iceberg',
   warehouse.path = 's3://hummock001/iceberg_connection',
