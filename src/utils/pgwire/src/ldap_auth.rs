@@ -451,7 +451,7 @@ impl LdapAuthenticator {
 
         if config.certs_required() {
             let tls_config = LdapTlsConfig::from_env();
-            tracing::info!("fetched tls config from env: {:?}", tls_config);
+            tracing::debug!("fetched tls config from env: {:?}", tls_config);
 
             let client_config = tls_config.init_client_config()?;
             settings = settings.set_config(Arc::new(client_config));
