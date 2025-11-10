@@ -92,7 +92,7 @@ impl StreamReaderBuilder {
                 let meta_client = meta_client.clone();
                 let source_id = self.source_id;
                 Some(CdcAutoSchemaChangeFailCallback::new(
-                    move |table_id: u32,
+                    move |table_id: TableId,
                           table_name: String,
                           cdc_table_id: String,
                           upstream_ddl: String,
@@ -235,7 +235,7 @@ impl StreamReaderBuilder {
                         error = %e.as_report(),
                         source_name = self.source_name,
                         source_id = %self.source_id,
-                        actor_id = self.actor_ctx.id,
+                        actor_id = %self.actor_ctx.id,
                         "build stream source reader error, retry in 1s"
                     );
                     GLOBAL_ERROR_METRICS.user_source_error.report([
@@ -270,7 +270,7 @@ impl StreamReaderBuilder {
                             error = %e.as_report(),
                             source_name = self.source_name,
                             source_id = %self.source_id,
-                            actor_id = self.actor_ctx.id,
+                            actor_id = %self.actor_ctx.id,
                             "stream source reader error"
                         );
                         GLOBAL_ERROR_METRICS.user_source_error.report([

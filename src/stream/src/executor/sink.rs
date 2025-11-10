@@ -279,7 +279,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         tracing::info!(
             sink_id = sink_param.sink_id.sink_id,
-            actor_id = actor_context.id,
+            actor_id = %actor_context.id,
             ?non_append_only_behavior,
             "Sink executor info"
         );

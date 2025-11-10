@@ -935,7 +935,7 @@ impl Command {
                 ..
             } => {
                 let edges = edges.as_mut().expect("should exist");
-                let added_actors = table_fragments.actor_ids();
+                let added_actors = table_fragments.actor_ids().collect();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
@@ -1070,7 +1070,7 @@ impl Command {
                         )
                     };
                 Self::generate_update_mutation_for_replace_table(
-                    old_fragments.actor_ids().into_iter().chain(
+                    old_fragments.actor_ids().chain(
                         auto_refresh_schema_sinks
                             .as_ref()
                             .into_iter()
@@ -1190,8 +1190,8 @@ impl Command {
                                             .flat_map(|(worker_id, actors)| {
                                                 let host =
                                                     control_stream_manager.host_addr(*worker_id);
-                                                actors.iter().map(move |actor_id| PbActorInfo {
-                                                    actor_id: *actor_id,
+                                                actors.iter().map(move |&actor_id| PbActorInfo {
+                                                    actor_id,
                                                     host: Some(host.clone()),
                                                 })
                                             })
@@ -1229,7 +1229,7 @@ impl Command {
                 for reschedule in reschedules.values() {
                     for (actor_id, splits) in &reschedule.actor_splits {
                         actor_splits.insert(
-                            *actor_id as ActorId,
+                            *actor_id,
                             ConnectorSplits {
                                 splits: splits.iter().map(ConnectorSplit::from).collect(),
                             },

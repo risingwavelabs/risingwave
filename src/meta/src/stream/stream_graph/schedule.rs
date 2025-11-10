@@ -463,8 +463,8 @@ impl Locations {
     pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
         self.actor_locations
             .iter()
-            .map(|(actor_id, alignment_id)| ActorInfo {
-                actor_id: *actor_id,
+            .map(|(&actor_id, alignment_id)| ActorInfo {
+                actor_id,
                 host: self.worker_locations[&(alignment_id.worker_id() as WorkerId)]
                     .host
                     .clone(),

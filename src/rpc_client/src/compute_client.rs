@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, RpcClientConfig, STREAM_WINDOW_SIZE};
-use risingwave_common::id::FragmentId;
+use risingwave_common::id::{ActorId, FragmentId};
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
@@ -114,8 +114,8 @@ impl ComputeClient {
 
     pub async fn get_stream(
         &self,
-        up_actor_id: u32,
-        down_actor_id: u32,
+        up_actor_id: ActorId,
+        down_actor_id: ActorId,
         up_fragment_id: FragmentId,
         down_fragment_id: FragmentId,
         database_id: DatabaseId,

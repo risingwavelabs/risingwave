@@ -667,7 +667,7 @@ impl SinkWriterParam {
             meta_client: Default::default(),
             extra_partition_col_idx: Default::default(),
 
-            actor_id: 1,
+            actor_id: 1.into(),
             sink_id: SinkId::new(1),
             sink_name: "test_sink".to_owned(),
             connector: "test_connector".to_owned(),

@@ -296,7 +296,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,
-                                            actor_id = actor_ctx.id,
+                                            actor_id = %actor_ctx.id,
                                             source_id = %core.source_id,
                                             queue_len = file_queue.len(),
                                             files_in_progress,
@@ -321,7 +321,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         {
                                             tracing::info!(
                                                 ?barrier.epoch,
-                                                actor_id = actor_ctx.id,
+                                                actor_id = %actor_ctx.id,
                                                 source_id = %core.source_id,
                                                 "received ListFinish mutation"
                                             );
@@ -349,7 +349,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                             {
                                 tracing::info!(
                                     ?epoch,
-                                    actor_id = actor_ctx.id,
+                                    actor_id = %actor_ctx.id,
                                     source_id = %core.source_id,
                                     "Reporting source load finished"
                                 );
@@ -389,7 +389,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                             }
 
                             tracing::debug!(
-                                actor_id = actor_ctx.id,
+                                actor_id = %actor_ctx.id,
                                 queue_len = file_queue.len(),
                                 "Added file assignments to queue"
                             );

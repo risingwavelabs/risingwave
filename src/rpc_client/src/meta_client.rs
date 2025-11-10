@@ -78,7 +78,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -1164,7 +1164,7 @@ impl MetaClient {
     pub async fn get_fragment_vnodes(
         &self,
         fragment_id: FragmentId,
-    ) -> Result<Vec<(u32, Vec<u32>)>> {
+    ) -> Result<Vec<(ActorId, Vec<u32>)>> {
         let resp = self
             .inner
             .get_fragment_vnodes(GetFragmentVnodesRequest { fragment_id })
@@ -1176,7 +1176,7 @@ impl MetaClient {
             .collect())
     }
 
-    pub async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>> {
+    pub async fn get_actor_vnodes(&self, actor_id: ActorId) -> Result<Vec<u32>> {
         let resp = self
             .inner
             .get_actor_vnodes(GetActorVnodesRequest { actor_id })
@@ -1740,7 +1740,7 @@ impl MetaClient {
 
     pub async fn add_cdc_auto_schema_change_fail_event(
         &self,
-        table_id: u32,
+        table_id: TableId,
         table_name: String,
         cdc_table_id: String,
         upstream_ddl: String,

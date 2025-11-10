@@ -26,7 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -270,7 +270,7 @@ impl Cluster {
     }
 
     /// `actor_id -> splits`
-    pub async fn list_source_splits(&self) -> Result<BTreeMap<u32, String>> {
+    pub async fn list_source_splits(&self) -> Result<BTreeMap<ActorId, String>> {
         let info = self.get_cluster_info().await?;
         let mut res = BTreeMap::new();
 

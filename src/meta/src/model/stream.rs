@@ -327,7 +327,11 @@ impl StreamJobFragments {
                     )
                 })
                 .collect(),
-            actor_status: self.actor_status.clone().into_iter().collect(),
+            actor_status: self
+                .actor_status
+                .iter()
+                .map(|(actor_id, status)| (*actor_id, *status))
+                .collect(),
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),
@@ -419,11 +423,10 @@ impl StreamJobFragments {
     }
 
     /// Returns actor ids associated with this table.
-    pub fn actor_ids(&self) -> Vec<ActorId> {
+    pub fn actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.fragments
             .values()
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-            .collect()
     }
 
     pub fn actor_fragment_mapping(&self) -> HashMap<ActorId, FragmentId> {

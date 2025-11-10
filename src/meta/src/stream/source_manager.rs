@@ -510,7 +510,7 @@ pub enum SourceChange {
 
 pub fn build_actor_connector_splits(
     splits: &HashMap<ActorId, Vec<SplitImpl>>,
-) -> HashMap<u32, ConnectorSplits> {
+) -> HashMap<ActorId, ConnectorSplits> {
     splits
         .iter()
         .map(|(&actor_id, splits)| {
@@ -525,7 +525,7 @@ pub fn build_actor_connector_splits(
 }
 
 pub fn build_actor_split_impls(
-    actor_splits: &HashMap<u32, ConnectorSplits>,
+    actor_splits: &HashMap<ActorId, ConnectorSplits>,
 ) -> HashMap<ActorId, Vec<SplitImpl>> {
     actor_splits
         .iter()

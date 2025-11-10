@@ -28,7 +28,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
-use risingwave_pb::id::JobId;
+use risingwave_pb::id::{ActorId, JobId};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -182,9 +182,12 @@ pub trait FrontendMetaClient: Send + Sync {
         fragment_id: FragmentId,
     ) -> Result<Option<FragmentDistribution>>;
 
-    async fn get_fragment_vnodes(&self, fragment_id: FragmentId) -> Result<Vec<(u32, Vec<u32>)>>;
+    async fn get_fragment_vnodes(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Vec<(ActorId, Vec<u32>)>>;
 
-    async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>>;
+    async fn get_actor_vnodes(&self, actor_id: ActorId) -> Result<Vec<u32>>;
 
     fn worker_id(&self) -> u32;
 
@@ -467,11 +470,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_fragment_by_id(fragment_id).await
     }
 
-    async fn get_fragment_vnodes(&self, fragment_id: FragmentId) -> Result<Vec<(u32, Vec<u32>)>> {
+    async fn get_fragment_vnodes(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Vec<(ActorId, Vec<u32>)>> {
         self.0.get_fragment_vnodes(fragment_id).await
     }
 
-    async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>> {
+    async fn get_actor_vnodes(&self, actor_id: ActorId) -> Result<Vec<u32>> {
         self.0.get_actor_vnodes(actor_id).await
     }
 

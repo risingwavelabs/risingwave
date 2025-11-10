@@ -55,6 +55,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
+use risingwave_pb::id::ActorId;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -1251,11 +1252,11 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn get_fragment_vnodes(
         &self,
         _fragment_id: FragmentId,
-    ) -> RpcResult<Vec<(u32, Vec<u32>)>> {
+    ) -> RpcResult<Vec<(ActorId, Vec<u32>)>> {
         unimplemented!()
     }
 
-    async fn get_actor_vnodes(&self, _actor_id: u32) -> RpcResult<Vec<u32>> {
+    async fn get_actor_vnodes(&self, _actor_id: ActorId) -> RpcResult<Vec<u32>> {
         unimplemented!()
     }
 

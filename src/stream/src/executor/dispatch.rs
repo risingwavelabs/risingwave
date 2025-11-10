@@ -107,7 +107,7 @@ impl DispatchExecutorMetrics {
 
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
-    actor_id: u32,
+    actor_id: ActorId,
     local_barrier_manager: LocalBarrierManager,
     metrics: DispatchExecutorMetrics,
     new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
@@ -126,10 +126,10 @@ impl DispatchExecutorInner {
             Output::new(downstream_actor, tx)
         }
         let mut outputs = Vec::with_capacity(downstream_actors.len());
-        for downstream_actor in downstream_actors {
+        for &downstream_actor in downstream_actors {
             let output =
-                if let Some(request) = self.pending_new_output_requests.remove(downstream_actor) {
-                    resolve_output(*downstream_actor, request)
+                if let Some(request) = self.pending_new_output_requests.remove(&downstream_actor) {
+                    resolve_output(downstream_actor, request)
                 } else {
                     loop {
                         let (requested_actor, request) = self
@@ -137,7 +137,7 @@ impl DispatchExecutorInner {
                             .recv()
                             .await
                             .ok_or_else(|| anyhow!("end of new output request"))?;
-                        if requested_actor == *downstream_actor {
+                        if requested_actor == downstream_actor {
                             break resolve_output(requested_actor, request);
                         } else {
                             assert!(
@@ -1049,7 +1049,7 @@ impl Dispatcher for HashDataDispatcher {
                         event!(
                             tracing::Level::TRACE,
                             msg = "chunk",
-                            downstream = output.actor_id(),
+                            downstream = %output.actor_id(),
                             "send = \n{:#?}",
                             new_stream_chunk
                         );
@@ -1298,12 +1298,15 @@ mod tests {
         let outputs = output_tx_vecs
             .into_iter()
             .enumerate()
-            .map(|(actor_id, tx)| Output::new(1 + actor_id as u32, tx))
+            .map(|(actor_id, tx)| Output::new(ActorId::new(actor_id as u32 + 1), tx))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
+            .flat_map(|id| vec![ActorId::new(id as u32); VirtualNode::COUNT_FOR_TEST / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT_FOR_TEST, num_outputs as u32);
+        hash_mapping.resize(
+            VirtualNode::COUNT_FOR_TEST,
+            ActorId::new(num_outputs as u32),
+        );
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1359,13 +1362,13 @@ mod tests {
     async fn test_configuration_change() {
         let _schema = Schema { fields: vec![] };
         let (tx, rx) = channel_for_test();
-        let actor_id = 233;
+        let actor_id = 233.into();
         let fragment_id = 666.into();
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
         let metrics = Arc::new(StreamingMetrics::unused());
 
-        let (untouched, old, new) = (234, 235, 238); // broadcast downstream actors
-        let (old_simple, new_simple) = (114, 514); // simple downstream actors
+        let (untouched, old, new) = (234.into(), 235.into(), 238.into()); // broadcast downstream actors
+        let (old_simple, new_simple) = (114.into(), 514.into()); // simple downstream actors
 
         // actor_id -> untouched, old, new, old_simple, new_simple
 
@@ -1549,12 +1552,15 @@ mod tests {
         let outputs = output_tx_vecs
             .into_iter()
             .enumerate()
-            .map(|(actor_id, tx)| Output::new(1 + actor_id as u32, tx))
+            .map(|(actor_id, tx)| Output::new(ActorId::new(1 + actor_id as u32), tx))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT_FOR_TEST / num_outputs])
+            .flat_map(|id| vec![ActorId::new(id as _); VirtualNode::COUNT_FOR_TEST / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VirtualNode::COUNT_FOR_TEST, num_outputs as u32);
+        hash_mapping.resize(
+            VirtualNode::COUNT_FOR_TEST,
+            ActorId::new(num_outputs as u32),
+        );
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
             key_indices.to_vec(),
@@ -1587,8 +1593,9 @@ mod tests {
                 let bytes = val.to_le_bytes();
                 hasher.update(&bytes);
             }
-            let output_idx =
-                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT_FOR_TEST] as usize - 1;
+            let output_idx = hash_mapping[hasher.finish() as usize % VirtualNode::COUNT_FOR_TEST]
+                .as_raw_id() as usize
+                - 1;
             for (builder, val) in builders.iter_mut().zip_eq_fast(one_row.iter()) {
                 builder.append(Some(*val));
             }

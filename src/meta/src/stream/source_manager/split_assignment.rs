@@ -87,7 +87,7 @@ impl SourceManager {
             }
 
             for fragment_id in fragments {
-                let empty_actor_splits: HashMap<u32, Vec<SplitImpl>> = table_fragments
+                let empty_actor_splits: HashMap<ActorId, Vec<SplitImpl>> = table_fragments
                     .fragments
                     .get(&fragment_id)
                     .unwrap()
@@ -670,9 +670,9 @@ mod tests {
     #[test]
     fn test_drop_splits() {
         let mut actor_splits: HashMap<ActorId, _> = HashMap::new();
-        actor_splits.insert(0, vec![TestSplit { id: 0 }, TestSplit { id: 1 }]);
-        actor_splits.insert(1, vec![TestSplit { id: 2 }, TestSplit { id: 3 }]);
-        actor_splits.insert(2, vec![TestSplit { id: 4 }, TestSplit { id: 5 }]);
+        actor_splits.insert(0.into(), vec![TestSplit { id: 0 }, TestSplit { id: 1 }]);
+        actor_splits.insert(1.into(), vec![TestSplit { id: 2 }, TestSplit { id: 3 }]);
+        actor_splits.insert(2.into(), vec![TestSplit { id: 4 }, TestSplit { id: 5 }]);
 
         let mut prev_split_to_actor = HashMap::new();
         for (actor_id, splits) in &actor_splits {
@@ -730,7 +730,7 @@ mod tests {
     #[test]
     fn test_drop_splits_to_empty() {
         let mut actor_splits: HashMap<ActorId, _> = HashMap::new();
-        actor_splits.insert(0, vec![TestSplit { id: 0 }]);
+        actor_splits.insert(0.into(), vec![TestSplit { id: 0 }]);
 
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
 
@@ -764,7 +764,7 @@ mod tests {
             .is_none()
         );
 
-        let actor_splits = (0..3).map(|i| (i, vec![])).collect();
+        let actor_splits = (0..3).map(|i| (i.into(), vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
         let diff = reassign_splits(
             FragmentId::default(),
@@ -778,7 +778,7 @@ mod tests {
             assert!(splits.is_empty())
         }
 
-        let actor_splits = (0..3).map(|i| (i, vec![])).collect();
+        let actor_splits = (0..3).map(|i| (i.into(), vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..3)
             .map(|i| {
                 let split = TestSplit { id: i };
@@ -800,7 +800,9 @@ mod tests {
 
         check_all_splits(&discovered_splits, &diff);
 
-        let actor_splits = (0..3).map(|i| (i, vec![TestSplit { id: i }])).collect();
+        let actor_splits = (0..3)
+            .map(|i| (i.into(), vec![TestSplit { id: i }]))
+            .collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..5)
             .map(|i| {
                 let split = TestSplit { id: i };
@@ -823,10 +825,11 @@ mod tests {
 
         check_all_splits(&discovered_splits, &diff);
 
-        let mut actor_splits: HashMap<ActorId, Vec<TestSplit>> =
-            (0..3).map(|i| (i, vec![TestSplit { id: i }])).collect();
-        actor_splits.insert(3, vec![]);
-        actor_splits.insert(4, vec![]);
+        let mut actor_splits: HashMap<ActorId, Vec<TestSplit>> = (0..3)
+            .map(|i| (i.into(), vec![TestSplit { id: i }]))
+            .collect();
+        actor_splits.insert(3.into(), vec![]);
+        actor_splits.insert(4.into(), vec![]);
 
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..5)
             .map(|i| {

@@ -133,6 +133,11 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
         }
     }
+    common {
+        ActorInfo {
+            actor_id: ActorId,
+        }
+    }
     ddl_service {
         AlterCdcTableBackfillParallelismRequest {
             table_id: JobId,
@@ -242,6 +247,9 @@ for_all_wrapped_id_fields! (
         }
     }
     meta {
+        ActorIds {
+            ids: ActorId,
+        }
         CancelCreatingJobsRequest.CreatingJobIds {
             job_ids: JobId,
         }
@@ -257,6 +265,9 @@ for_all_wrapped_id_fields! (
         }
         DatabaseRecoverySuccess {
             database_id: DatabaseId,
+        }
+        EventLog.EventAutoSchemaChangeFail {
+            table_id: TableId,
         }
         EventLog.EventCreateStreamJobFail {
             id: JobId,
@@ -286,11 +297,20 @@ for_all_wrapped_id_fields! (
         FragmentWorkerSlotMapping {
             fragment_id: FragmentId,
         }
+        GetActorVnodesRequest {
+            actor_id: ActorId,
+        }
+        GetClusterInfoResponse {
+            actor_splits: ActorId,
+        }
         GetFragmentByIdRequest {
             fragment_id: FragmentId,
         }
         GetFragmentVnodesRequest {
             fragment_id: FragmentId,
+        }
+        GetFragmentVnodesResponse.ActorVnodes {
+            actor_id: ActorId,
         }
         GetServerlessStreamingJobsStatusResponse.Status {
             table_id: TableId,
@@ -299,9 +319,11 @@ for_all_wrapped_id_fields! (
             fragment_to_table: FragmentId,
         }
         ListActorSplitsResponse.ActorSplit {
+            actor_id: ActorId,
             fragment_id: FragmentId,
         }
         ListActorStatesResponse.ActorState {
+            actor_id: ActorId,
             fragment_id: FragmentId,
         }
         ListCdcProgressResponse {
@@ -322,6 +344,9 @@ for_all_wrapped_id_fields! (
         ListTableFragmentsResponse {
             table_fragments: JobId,
         }
+        ListTableFragmentsResponse.ActorInfo {
+            id: ActorId,
+        }
         ListTableFragmentsResponse.FragmentInfo {
             id: FragmentId,
         }
@@ -337,6 +362,7 @@ for_all_wrapped_id_fields! (
         TableFragments {
             table_id: JobId,
             fragments: FragmentId,
+            actor_status: ActorId,
         }
         TableFragments.Fragment {
             fragment_id: FragmentId,
@@ -365,14 +391,34 @@ for_all_wrapped_id_fields! (
             table_id: TableId,
         }
     }
+    source {
+        CdcTableSnapshotSplitsWithGeneration {
+            splits: ActorId,
+        }
+        SourceActorInfo {
+            actor_id: ActorId,
+        }
+    }
     stream_plan {
+        ActorMapping {
+            data: ActorId,
+        }
         AddMutation {
             new_upstream_sinks: FragmentId,
             backfill_nodes_to_pause: FragmentId,
+            added_actors: ActorId,
+            actor_splits: ActorId,
+            actor_dispatchers: ActorId,
+        }
+        Barrier {
+            passed_actors: ActorId,
         }
         DeltaIndexJoinNode {
             left_table_id: TableId,
             right_table_id: TableId,
+        }
+        Dispatcher {
+            downstream_actor_id: ActorId,
         }
         DmlNode {
             table_id: TableId,
@@ -386,13 +432,18 @@ for_all_wrapped_id_fields! (
         RefreshStartMutation {
             table_id: TableId,
         }
+        SourceChangeSplitMutation {
+            actor_splits: ActorId,
+        }
         StartFragmentBackfillMutation {
             fragment_ids: FragmentId,
         }
         StopMutation {
             dropped_sink_fragments: FragmentId,
+            actors: ActorId,
         }
         StreamActor {
+            actor_id: ActorId,
             fragment_id: FragmentId,
         }
         StreamCdcScanNode {
@@ -415,9 +466,29 @@ for_all_wrapped_id_fields! (
         SubscriptionUpstreamInfo {
             upstream_mv_table_id: TableId,
         }
+        ThrottleMutation {
+            actor_throttle: ActorId,
+        }
+        UpdateMutation {
+            dropped_actors: ActorId,
+            actor_splits: ActorId,
+            actor_vnode_bitmap_update: ActorId,
+            actor_new_dispatchers: ActorId,
+        }
+        UpdateMutation.DispatcherUpdate {
+            actor_id: ActorId,
+            added_downstream_actor_id: ActorId,
+            removed_downstream_actor_id: ActorId,
+        }
         UpdateMutation.MergeUpdate {
             upstream_fragment_id: FragmentId,
             new_upstream_fragment_id: FragmentId,
+            actor_id: ActorId,
+            removed_upstream_actor_id: ActorId,
+            actor_vnode_bitmap_update: ActorId,
+            dropped_actors: ActorId,
+            actor_splits: ActorId,
+            actor_new_dispatchers: ActorId,
         }
         UpstreamSinkInfo {
             upstream_fragment_id: FragmentId,
@@ -433,6 +504,18 @@ for_all_wrapped_id_fields! (
         }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
+            actor_id: ActorId,
+        }
+        BarrierCompleteResponse.CreateMviewProgress {
+            backfill_actor_id: ActorId,
+        }
+        BarrierCompleteResponse.ListFinishedSource {
+            reporter_actor_id: ActorId,
+            table_id: TableId,
+        }
+        BarrierCompleteResponse.LoadFinishedSource {
+            reporter_actor_id: ActorId,
+            table_id: TableId,
         }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
@@ -440,9 +523,11 @@ for_all_wrapped_id_fields! (
         InjectBarrierRequest {
             database_id: DatabaseId,
             table_ids_to_sync: TableId,
+            actor_ids_to_collect: ActorId,
         }
         InjectBarrierRequest.BuildActorInfo {
             fragment_upstreams: FragmentId,
+            actor_id: ActorId,
         }
         InjectBarrierRequest.FragmentBuildActorInfo {
             fragment_id: FragmentId,
@@ -471,6 +556,8 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             up_fragment_id: FragmentId,
             down_fragment_id: FragmentId,
+            up_actor_id: ActorId,
+            down_actor_id: ActorId,
         }
     }
     user {

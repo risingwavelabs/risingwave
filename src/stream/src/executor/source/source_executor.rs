@@ -345,7 +345,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if split_changed {
             tracing::info!(
-                actor_id = self.actor_ctx.id,
+                actor_id = %self.actor_ctx.id,
                 state = ?target_state,
                 "apply split change"
             );
@@ -380,7 +380,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let core = &mut self.stream_source_core;
         tracing::error!(
             error = ?e.as_report(),
-            actor_id = self.actor_ctx.id,
+            actor_id = %self.actor_ctx.id,
             source_id = %core.source_id,
             "stream source reader error",
         );
@@ -635,7 +635,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
-                                    actor_id = self.actor_ctx.id,
+                                    actor_id = %self.actor_ctx.id,
                                     actor_splits = ?actor_splits,
                                     "source change split received"
                                 );
@@ -807,7 +807,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // The source executor should only be stopped by the actor when finding a `Stop` mutation.
         tracing::error!(
-            actor_id = self.actor_ctx.id,
+            actor_id = %self.actor_ctx.id,
             "source executor exited unexpectedly"
         )
     }

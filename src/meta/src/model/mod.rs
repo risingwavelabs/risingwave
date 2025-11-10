@@ -22,12 +22,9 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 pub use error::*;
-pub use risingwave_common::id::FragmentId;
+pub use risingwave_common::id::{ActorId, FragmentId};
 pub use stream::*;
 use uuid::Uuid;
-
-/// A global, unique identifier of an actor
-pub type ActorId = u32;
 
 /// Should be used together with `ActorId` to uniquely identify a dispatcher
 pub type DispatcherId = u64;
