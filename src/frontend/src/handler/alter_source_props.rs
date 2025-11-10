@@ -91,6 +91,17 @@ async fn handle_alter_source_props_inner(
         .into());
     }
 
+    // Validate cdc.source.wait.streaming.start.timeout if present
+    if let Some(timeout_value) = changed_props.get("cdc.source.wait.streaming.start.timeout")
+        && timeout_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "cdc.source.wait.streaming.start.timeout".to_owned(),
+            config_value: timeout_value.to_owned(),
+        }
+        .into());
+    }
+
     meta_client
         .alter_source_connector_props(
             source_id,
