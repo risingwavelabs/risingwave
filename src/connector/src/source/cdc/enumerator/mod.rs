@@ -210,7 +210,12 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
             .get("database.name")
             .ok_or_else(|| anyhow::anyhow!("database.name not found in CDC properties"))?;
 
-        let ssl_mode = SslMode::Preferred;
+        // Get SSL mode from properties, default to Preferred if not specified
+        let ssl_mode = self
+            .properties
+            .get("ssl.mode")
+            .and_then(|s| serde_json::from_value(serde_json::Value::String(s.clone())).ok())
+            .unwrap_or(SslMode::Preferred);
         let ssl_root_cert = self.properties.get("database.ssl.root.cert").cloned();
 
         let slot_name = self
@@ -386,16 +391,9 @@ impl DebeziumSplitEnumerator<Mysql> {
         // Get SSL mode configuration (default to Disabled if not specified)
         let ssl_mode = self
             .properties
-            .get("database.ssl.mode")
-            .map(|s| match s.to_lowercase().as_str() {
-                "disabled" | "disable" => SslMode::Disabled,
-                "preferred" | "prefer" => SslMode::Preferred,
-                "required" | "require" => SslMode::Required,
-                "verify-ca" => SslMode::VerifyCa,
-                "verify-full" => SslMode::VerifyFull,
-                _ => SslMode::Disabled,
-            })
-            .unwrap_or(SslMode::Disabled);
+            .get("ssl.mode")
+            .and_then(|s| serde_json::from_value(serde_json::Value::String(s.clone())).ok())
+            .unwrap_or(SslMode::Preferred);
 
         // Build MySQL connection pool with proper SSL configuration
         let pool =

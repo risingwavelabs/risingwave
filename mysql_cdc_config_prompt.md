@@ -7,7 +7,7 @@
 
 ### 必填参数 (Required Parameters)
 
-1. **connector** 
+1. **connector**
    - 类型: 固定值
    - 值: `mysql-cdc`
    - 说明: 连接器类型，固定为 mysql-cdc
@@ -255,12 +255,12 @@ FROM mysql_source TABLE 'mydb.products';
 
 ### 参数说明特点
 
-1. **自动生成参数**: 
+1. **自动生成参数**:
    - `server.id` 如果留空，RisingWave 会自动生成一个随机的唯一 ID
-   
+
 2. **条件显示**:
    - `transactional` 的默认值根据是否为共享源自动确定
-   
+
 3. **智能提示**:
    - 提示用户 `database.name` 不能使用 MySQL 内置数据库
    - 创建共享源时提示需要填写 `server.id`
