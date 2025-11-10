@@ -308,7 +308,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
-        let need_checkpoint = options.need_checkpoint();
+        let is_checkpoint = options.is_checkpoint;
         self.item_tx
             .send(InMemLogStoreItem::Barrier {
                 next_epoch,
@@ -323,7 +323,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
             .replace(next_epoch)
             .expect("should have epoch");
 
-        if need_checkpoint {
+        if is_checkpoint {
             let truncated_epoch = self
                 .truncated_epoch_rx
                 .recv()

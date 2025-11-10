@@ -150,15 +150,6 @@ pub struct FlushCurrentEpochOptions {
     pub add_columns: Option<Vec<Field>>,
 }
 
-impl FlushCurrentEpochOptions {
-    pub fn need_checkpoint(&self) -> bool {
-        self.is_checkpoint
-            || self.new_vnode_bitmap.is_some()
-            || self.is_stop
-            || self.add_columns.is_some()
-    }
-}
-
 pub trait LogWriter: Send {
     /// Initialize the log writer with an epoch
     fn init(
