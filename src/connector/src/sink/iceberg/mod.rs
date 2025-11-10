@@ -1732,6 +1732,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
     }
 
     async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {
+        // TODO: Files that have been written but not committed should be deleted.
         tracing::debug!("Abort not implemented yet");
     }
 }
