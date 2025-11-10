@@ -40,16 +40,13 @@ pub(crate) mod dummy {
     use phf::{Set, phf_set};
     use risingwave_common::catalog::Field;
     use risingwave_pb::connector_service::SinkMetadata;
-    use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::UnboundedSender;
 
     use crate::connector_common::IcebergSinkCompactionUpdate;
     use crate::enforce_secret::EnforceSecret;
     use crate::error::ConnectorResult;
     use crate::sink::prelude::*;
-    use crate::sink::{
-        LogSinker, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkLogReader,
-    };
+    use crate::sink::{LogSinker, SinkCommitCoordinator, SinkCommitStrategy, SinkLogReader};
 
     #[allow(dead_code)]
     pub fn err_feature_not_enabled(sink_name: &'static str) -> SinkError {
@@ -69,11 +66,15 @@ pub(crate) mod dummy {
     pub struct FeatureNotEnabledCoordinator<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
     impl<S: FeatureNotEnabledSinkMarker> SinkCommitCoordinator for FeatureNotEnabledCoordinator<S> {
-        async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+        fn strategy(&self) -> SinkCommitStrategy {
+            SinkCommitStrategy::SinglePhase
+        }
+
+        async fn init(&mut self) -> Result<()> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
 
-        async fn commit(
+        async fn commit_directly(
             &mut self,
             _epoch: u64,
             _metadata: Vec<SinkMetadata>,
@@ -147,7 +148,6 @@ pub(crate) mod dummy {
 
         async fn new_coordinator(
             &self,
-            _db: DatabaseConnection,
             _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
         ) -> Result<Self::Coordinator> {
             Err(err_feature_not_enabled(S::SINK_NAME))

@@ -417,6 +417,7 @@ mod tests {
     use risingwave_pb::connector_service::SinkMetadata;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_rpc_client::CoordinatorStreamHandle;
+    use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio_stream::wrappers::ReceiverStream;
 
@@ -439,14 +440,15 @@ mod tests {
     impl<C: Send, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send>
         SinkCommitCoordinator for MockCoordinator<C, F>
     {
-        async fn init(
-            &mut self,
-            _subscriber: SinkCommittedEpochSubscriber,
-        ) -> risingwave_connector::sink::Result<Option<u64>> {
-            Ok(None)
+        fn strategy(&self) -> risingwave_connector::sink::SinkCommitStrategy {
+            risingwave_connector::sink::SinkCommitStrategy::SinglePhase
         }
 
-        async fn commit(
+        async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
+            Ok(())
+        }
+
+        async fn commit_directly(
             &mut self,
             epoch: u64,
             metadata: Vec<SinkMetadata>,
@@ -510,6 +512,7 @@ mod tests {
                             // validate the start request
                             assert_eq!(param, expected_param);
                             CoordinatorWorker::execute_coordinator(
+                                DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
                                 MockCoordinator::new(
@@ -702,6 +705,7 @@ mod tests {
                             // validate the start request
                             assert_eq!(param, expected_param);
                             CoordinatorWorker::execute_coordinator(
+                                DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
                                 MockCoordinator::new(
@@ -838,6 +842,7 @@ mod tests {
                             // validate the start request
                             assert_eq!(param, expected_param);
                             CoordinatorWorker::execute_coordinator(
+                                DatabaseConnection::Disconnected,
                                 param,
                                 new_writer_rx,
                                 MockCoordinator::new((), |_, _, _| unreachable!()),
@@ -930,6 +935,7 @@ mod tests {
                                 // validate the start request
                                 assert_eq!(param, expected_param);
                                 CoordinatorWorker::execute_coordinator(
+                                    DatabaseConnection::Disconnected,
                                     param,
                                     new_writer_rx,
                                     MockCoordinator::new((), |_, _, _| {
@@ -1054,6 +1060,7 @@ mod tests {
                             // validate the start request
                             assert_eq!(param, expected_param);
                             CoordinatorWorker::execute_coordinator(
+                                DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
                                 MockCoordinator::new(

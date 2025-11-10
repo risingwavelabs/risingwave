@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod coordinator_worker;
+mod exactly_once_util;
 mod handle;
 mod manager;
 

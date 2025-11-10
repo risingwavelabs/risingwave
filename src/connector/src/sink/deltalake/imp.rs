@@ -37,7 +37,6 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
@@ -50,7 +49,7 @@ use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interva
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
-    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
+    SinkCommitStrategy, SinkError, SinkParam, SinkWriterParam,
 };
 
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -413,7 +412,6 @@ impl Sink for DeltaLakeSink {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         Ok(DeltaLakeSinkCommitter {
@@ -530,12 +528,16 @@ pub struct DeltaLakeSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(None)
+    fn strategy(&self) -> SinkCommitStrategy {
+        SinkCommitStrategy::SinglePhase
     }
 
-    async fn commit(
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!("DeltaLake commit coordinator inited.");
+        Ok(())
+    }
+
+    async fn commit_directly(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
@@ -694,7 +696,10 @@ mod test {
             table: deltalake_table,
         };
         let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
-        committer.commit(1, vec![metadata], None).await.unwrap();
+        committer
+            .commit_directly(1, vec![metadata], None)
+            .await
+            .unwrap();
 
         // The following code is to test reading the deltalake data table written with test data.
         // To enable the following code, add `deltalake = { workspace = true, features = ["datafusion"] }`

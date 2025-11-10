@@ -201,61 +201,56 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                     };
                     if is_checkpoint {
                         current_checkpoint += 1;
-                        if current_checkpoint >= commit_checkpoint_interval.get()
-                            || new_vnode_bitmap.is_some()
-                            || is_stop
-                            || add_columns.is_some()
-                        {
-                            let start_time = Instant::now();
-                            let metadata = sink_writer.barrier(true).await?;
-                            let metadata = metadata.ok_or_else(|| {
-                                SinkError::Coordinator(anyhow!(
-                                    "should get metadata on checkpoint barrier"
-                                ))
-                            })?;
-                            if add_columns.is_some() {
-                                assert!(
-                                    is_stop,
-                                    "add columns should stop current sink for sink {}",
-                                    self.param.sink_id
-                                );
-                            }
-                            coordinator_stream_handle
-                                .commit(epoch, metadata, add_columns)
-                                .await?;
-                            sink_writer_metrics
-                                .sink_commit_duration
-                                .observe(start_time.elapsed().as_millis() as f64);
+                    }
+                    if current_checkpoint >= commit_checkpoint_interval.get()
+                        || new_vnode_bitmap.is_some()
+                        || is_stop
+                        || add_columns.is_some()
+                    {
+                        let start_time = Instant::now();
+                        let metadata = sink_writer.barrier(true).await?;
+                        let metadata = metadata.ok_or_else(|| {
+                            SinkError::Coordinator(anyhow!(
+                                "should get metadata on checkpoint barrier"
+                            ))
+                        })?;
+                        if add_columns.is_some() {
+                            assert!(
+                                is_stop,
+                                "add columns should stop current sink for sink {}",
+                                self.param.sink_id
+                            );
+                        }
+                        coordinator_stream_handle
+                            .commit(epoch, metadata, add_columns)
+                            .await?;
+                        sink_writer_metrics
+                            .sink_commit_duration
+                            .observe(start_time.elapsed().as_millis() as f64);
 
-                            current_checkpoint = 0;
-                            if let Some(new_vnode_bitmap) = new_vnode_bitmap {
-                                let epoch = coordinator_stream_handle
-                                    .update_vnode_bitmap(&new_vnode_bitmap)
-                                    .await?;
-                                if epoch != prev_epoch {
-                                    bail!(
-                                        "newly start epoch {} after update vnode bitmap not matched with prev_epoch {}",
-                                        epoch,
-                                        prev_epoch
-                                    );
-                                }
-                            }
-                            if is_stop {
-                                coordinator_stream_handle.stop().await?;
-                                info!(
-                                    sink_id = self.param.sink_id.sink_id,
-                                    "coordinated log sinker stops"
+                        current_checkpoint = 0;
+                        if let Some(new_vnode_bitmap) = new_vnode_bitmap {
+                            let epoch = coordinator_stream_handle
+                                .update_vnode_bitmap(&new_vnode_bitmap)
+                                .await?;
+                            if epoch != prev_epoch {
+                                bail!(
+                                    "newly start epoch {} after update vnode bitmap not matched with prev_epoch {}",
+                                    epoch,
+                                    prev_epoch
                                 );
-                                log_reader.truncate(TruncateOffset::Barrier { epoch })?;
-                                return pending().await;
-                            }
-                            log_reader.truncate(TruncateOffset::Barrier { epoch })?;
-                        } else {
-                            let metadata = sink_writer.barrier(false).await?;
-                            if let Some(metadata) = metadata {
-                                warn!(?metadata, "get metadata on non-checkpoint barrier");
                             }
                         }
+                        if is_stop {
+                            coordinator_stream_handle.stop().await?;
+                            info!(
+                                sink_id = self.param.sink_id.sink_id,
+                                "coordinated log sinker stops"
+                            );
+                            log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                            return pending().await;
+                        }
+                        log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                     } else {
                         let metadata = sink_writer.barrier(false).await?;
                         if let Some(metadata) = metadata {

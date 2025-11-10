@@ -24,7 +24,6 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
-use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_json::json;
 use serde_with::{DisplayFromStr, serde_as};
@@ -47,7 +46,7 @@ use crate::sink::snowflake_redshift::{
 };
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    Result, Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam,
+    Result, Sink, SinkCommitCoordinator, SinkCommitStrategy, SinkError, SinkParam,
     SinkWriterMetrics,
 };
 
@@ -243,7 +242,6 @@ impl Sink for RedshiftSink {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         let pk_column_names: Vec<_> = self
@@ -571,11 +569,15 @@ impl Drop for RedshiftSinkCommitter {
 
 #[async_trait]
 impl SinkCommitCoordinator for RedshiftSinkCommitter {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+    fn strategy(&self) -> SinkCommitStrategy {
+        SinkCommitStrategy::SinglePhase
     }
 
-    async fn commit(
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn commit_directly(
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,

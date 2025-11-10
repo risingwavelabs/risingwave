@@ -92,7 +92,6 @@ use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
-use sea_orm::DatabaseConnection;
 use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -758,7 +757,6 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
@@ -813,20 +811,51 @@ pub type SinkCommittedEpochSubscriber = Arc<
         + 'static,
 >;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum SinkCommitStrategy {
+    /// for at-least-once semantics
+    SinglePhase,
+    /// for exactly-once semantics
+    TwoPhase,
+}
+
 #[async_trait]
-pub trait SinkCommitCoordinator {
+pub trait SinkCommitCoordinator: Send {
+    /// Based on the sink type, return the commit strategy.
+    fn strategy(&self) -> SinkCommitStrategy;
+
     /// Initialize the sink committer coordinator, return the log store rewind start offset.
-    async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>>;
-    /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
-    /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
-    /// to be passed between different gRPC node, so in this general trait, the metadata is
-    /// serialized bytes.
-    async fn commit(
+    async fn init(&mut self) -> Result<()>;
+
+    /// Return serialized commit metadata to be passed to `commit`.
+    async fn pre_commit(
         &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
-    ) -> Result<()>;
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
+    ) -> Result<Vec<u8>> {
+        unimplemented!()
+    }
+
+    /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
+    async fn commit(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) -> Result<()> {
+        unimplemented!()
+    }
+
+    /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
+    async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {
+        unimplemented!()
+    }
+
+    /// Commit directly without two-phase commit.
+    async fn commit_directly(
+        &mut self,
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 #[deprecated]
@@ -848,17 +877,12 @@ pub struct NoSinkCommitCoordinator(!);
 #[expect(deprecated)]
 #[async_trait]
 impl SinkCommitCoordinator for NoSinkCommitCoordinator {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        unreachable!()
+    fn strategy(&self) -> SinkCommitStrategy {
+        unimplemented!()
     }
 
-    async fn commit(
-        &mut self,
-        _epoch: u64,
-        _metadata: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
-    ) -> Result<()> {
-        unreachable!()
+    async fn init(&mut self) -> Result<()> {
+        unimplemented!()
     }
 }
 

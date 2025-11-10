@@ -165,7 +165,7 @@ impl MockSinkCoordinationRpcClient {
                             .clone()
                             .lock()
                             .await
-                            .commit(epoch, vec![metadata.unwrap()], None)
+                            .commit_directly(epoch, vec![metadata.unwrap()], None)
                             .await
                             .map_err(|e| Status::from_error(Box::new(e)))?;
                         response_tx_clone

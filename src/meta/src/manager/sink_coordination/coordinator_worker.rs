@@ -28,11 +28,14 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Field;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::dispatch_sink;
+use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{
-    Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkParam, build_sink,
+    Sink, SinkCommitCoordinator, SinkCommitStrategy, SinkCommittedEpochSubscriber, SinkParam,
+    build_sink,
 };
+use risingwave_meta_model::pending_sink_state::SinkState;
 use risingwave_pb::connector_service::{SinkMetadata, coordinate_request};
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, TransactionTrait};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -40,6 +43,10 @@ use tokio::time::sleep;
 use tonic::Status;
 use tracing::{error, warn};
 
+use crate::manager::sink_coordination::exactly_once_util::{
+    delete_aborted_and_outdated_records, list_sink_states_ordered_by_epoch, mark_record_committed,
+    persist_pre_commit_metadata,
+};
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
 
 async fn run_future_with_periodic_fn<F: Future>(
@@ -392,7 +399,7 @@ impl CoordinatorWorker {
 
         dispatch_sink!(sink, sink, {
             let coordinator = match sink
-                .new_coordinator(db, Some(iceberg_compact_stat_sender))
+                .new_coordinator(Some(iceberg_compact_stat_sender))
                 .await
             {
                 Ok(coordinator) => coordinator,
@@ -405,11 +412,12 @@ impl CoordinatorWorker {
                     return;
                 }
             };
-            Self::execute_coordinator(param, request_rx, coordinator, subscriber).await
+            Self::execute_coordinator(db, param, request_rx, coordinator, subscriber).await
         });
     }
 
     pub async fn execute_coordinator(
+        db: DatabaseConnection,
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         coordinator: impl SinkCommitCoordinator,
@@ -424,7 +432,7 @@ impl CoordinatorWorker {
             },
         };
 
-        if let Err(e) = worker.run_coordination(coordinator, subscriber).await {
+        if let Err(e) = worker.run_coordination(db, coordinator, subscriber).await {
             for handle in worker.handle_manager.writer_handles.into_values() {
                 handle.abort(Status::internal(format!(
                     "failed to run coordination: {:?}",
@@ -436,11 +444,17 @@ impl CoordinatorWorker {
 
     async fn run_coordination(
         &mut self,
+        db: DatabaseConnection,
         mut coordinator: impl SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
     ) -> anyhow::Result<()> {
-        let initial_log_store_rewind_start_epoch = coordinator.init(subscriber).await?;
         let sink_id = self.handle_manager.param.sink_id;
+
+        let initial_log_store_rewind_start_epoch = self
+            .init_state_from_store(&db, sink_id, &mut coordinator)
+            .await?;
+
+        coordinator.init().await?;
         let mut running_handles = self
             .handle_manager
             .wait_init_handles(initial_log_store_rewind_start_epoch)
@@ -523,23 +537,136 @@ impl CoordinatorWorker {
                     metadatas.push(metadata);
                 }
 
-                let start_time = Instant::now();
-                run_future_with_periodic_fn(
-                    coordinator.commit(epoch, metadatas, first_add_columns),
-                    Duration::from_secs(5),
-                    || {
-                        warn!(
-                            elapsed = ?start_time.elapsed(),
-                            sink_id = sink_id.sink_id,
-                            "committing"
-                        );
-                    },
-                )
-                .await
-                .map_err(|e| anyhow!(e))?;
-                self.handle_manager
-                    .ack_commit(epoch, commit_requests.handle_ids)?;
+                match coordinator.strategy() {
+                    SinkCommitStrategy::SinglePhase => {
+                        let start_time = Instant::now();
+                        run_future_with_periodic_fn(
+                            coordinator.commit_directly(epoch, metadatas, first_add_columns),
+                            Duration::from_secs(5),
+                            || {
+                                warn!(
+                                    elapsed = ?start_time.elapsed(),
+                                    sink_id = sink_id.sink_id,
+                                    "committing"
+                                );
+                            },
+                        )
+                        .await
+                        .map_err(|e| anyhow!(e))?;
+                        self.handle_manager
+                            .ack_commit(epoch, commit_requests.handle_ids)?;
+                    }
+                    SinkCommitStrategy::TwoPhase => {
+                        let commit_metadata = coordinator
+                            .pre_commit(epoch, metadatas, first_add_columns)
+                            .await?;
+                        persist_pre_commit_metadata(
+                            &db,
+                            sink_id.sink_id as _,
+                            epoch,
+                            commit_metadata.clone(),
+                        )
+                        .await?;
+                        self.handle_manager
+                            .ack_commit(epoch, commit_requests.handle_ids)?;
+                        // Get the latest hummock_committed_epoch and the receiver
+                        let (hummock_committed_epoch, mut rw_futures_utilrx) =
+                            subscriber(sink_id).await?;
+                        if hummock_committed_epoch < epoch {
+                            tracing::info!(
+                                "Waiting for the committed epoch to rise. Current: {}, Waiting for: {}",
+                                hummock_committed_epoch,
+                                epoch
+                            );
+                            while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
+                                tracing::info!(
+                                    "Received next committed epoch: {}",
+                                    next_committed_epoch
+                                );
+                                if next_committed_epoch >= epoch {
+                                    break;
+                                }
+                            }
+                        }
+
+                        let start_time = Instant::now();
+                        run_future_with_periodic_fn(
+                            coordinator.commit(epoch, commit_metadata),
+                            Duration::from_secs(5),
+                            || {
+                                warn!(
+                                    elapsed = ?start_time.elapsed(),
+                                    sink_id = sink_id.sink_id,
+                                    "committing"
+                                );
+                            },
+                        )
+                        .await
+                        .map_err(|e| anyhow!(e))?;
+
+                        mark_record_committed(&db, sink_id.sink_id as _, epoch).await?;
+                    }
+                }
                 prev_commit_epoch = Some(epoch);
+            }
+        }
+    }
+
+    /// Return the log store rewind start epoch if exists.
+    async fn init_state_from_store(
+        &mut self,
+        db: &DatabaseConnection,
+        sink_id: SinkId,
+        coordinator: &mut impl SinkCommitCoordinator,
+    ) -> anyhow::Result<Option<u64>> {
+        match coordinator.strategy() {
+            SinkCommitStrategy::SinglePhase => Ok(None),
+            SinkCommitStrategy::TwoPhase => {
+                let ordered_metadata =
+                    list_sink_states_ordered_by_epoch(db, sink_id.sink_id as _).await?;
+
+                if ordered_metadata.is_empty() {
+                    Ok(None)
+                } else {
+                    let mut last_committed_epoch = None;
+                    let mut aborted_epochs = vec![];
+                    for (epoch, state, metadata) in ordered_metadata {
+                        assert!(
+                            last_committed_epoch.is_none() || epoch > last_committed_epoch.unwrap()
+                        );
+                        match state {
+                            SinkState::Committed => {
+                                last_committed_epoch = Some(epoch);
+                            }
+                            SinkState::Pending => {
+                                coordinator.commit(epoch, metadata).await?;
+                                last_committed_epoch = Some(epoch);
+                            }
+                            SinkState::Aborted => {
+                                coordinator.abort(epoch, metadata).await;
+                                aborted_epochs.push(epoch);
+                            }
+                        }
+                    }
+
+                    let txn = db.begin().await?;
+                    // Records for all aborted epochs and previously committed epochs are no longer needed.
+                    delete_aborted_and_outdated_records(
+                        &txn,
+                        sink_id.sink_id as _,
+                        aborted_epochs,
+                        last_committed_epoch,
+                    )
+                    .await?;
+
+                    if let Some(last_committed_epoch) = last_committed_epoch {
+                        mark_record_committed(&txn, sink_id.sink_id as _, last_committed_epoch)
+                            .await?;
+                    }
+                    txn.commit().await?;
+
+                    Ok(last_committed_epoch)
+                }
             }
         }
     }

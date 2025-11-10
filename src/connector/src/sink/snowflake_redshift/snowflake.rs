@@ -21,7 +21,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
-use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
@@ -40,7 +39,7 @@ use crate::sink::snowflake_redshift::{AugmentedChunk, SnowflakeRedshiftSinkS3Wri
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkCommitCoordinator,
-    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
+    SinkCommitStrategy, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
 pub const SNOWFLAKE_SINK_V2: &str = "snowflake_v2";
@@ -492,7 +491,6 @@ impl Sink for SnowflakeV2Sink {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> Result<Self::Coordinator> {
         let coordinator = SnowflakeSinkCommitter::new(
@@ -741,16 +739,20 @@ impl SnowflakeSinkCommitter {
 
 #[async_trait]
 impl SinkCommitCoordinator for SnowflakeSinkCommitter {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+    fn strategy(&self) -> SinkCommitStrategy {
+        SinkCommitStrategy::SinglePhase
+    }
+
+    async fn init(&mut self) -> Result<()> {
         if let Some(client) = &self.client {
             // Todo: move this to validate
             client.execute_create_pipe().await?;
             client.execute_create_merge_into_task().await?;
         }
-        Ok(None)
+        Ok(())
     }
 
-    async fn commit(
+    async fn commit_directly(
         &mut self,
         _epoch: u64,
         _metadata: Vec<SinkMetadata>,

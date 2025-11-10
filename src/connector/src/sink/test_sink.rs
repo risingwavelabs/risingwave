@@ -17,7 +17,6 @@ use std::sync::{Arc, OnceLock};
 use anyhow::anyhow;
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
-use sea_orm::DatabaseConnection;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
@@ -28,11 +27,7 @@ use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
 pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFuture<'static, crate::sink::Result<BoxLogSinker>>
     + Send
     + 'static;
-pub trait BuildBoxCoordinatorTrait = FnMut(
-        DatabaseConnection,
-        SinkParam,
-        Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> BoxCoordinator
+pub trait BuildBoxCoordinatorTrait = FnMut(SinkParam, Option<UnboundedSender<IcebergSinkCompactionUpdate>>) -> BoxCoordinator
     + Send
     + 'static;
 
@@ -78,11 +73,9 @@ impl Sink for TestSink {
 
     async fn new_coordinator(
         &self,
-        db: DatabaseConnection,
         iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> crate::sink::Result<Self::Coordinator> {
         Ok(build_box_coordinator(
-            db,
             self.param.clone(),
             iceberg_compact_stat_sender,
         ))
@@ -141,13 +134,12 @@ pub fn register_build_coordinated_sink(
 pub fn register_build_sink(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
 ) -> TestSinkRegistryGuard {
-    register_build_sink_inner(build_box_log_sinker, |_, _, _| {
+    register_build_sink_inner(build_box_log_sinker, |_, _| {
         unreachable!("no coordinator registered")
     })
 }
 
 fn build_box_coordinator(
-    db: DatabaseConnection,
     sink_param: SinkParam,
     iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
 ) -> BoxCoordinator {
@@ -156,7 +148,7 @@ fn build_box_coordinator(
         .lock()
         .as_mut()
         .expect("should not be empty")
-        .1)(db, sink_param, iceberg_compact_stat_sender)
+        .1)(sink_param, iceberg_compact_stat_sender)
 }
 
 async fn build_box_log_sinker(
