@@ -117,21 +117,13 @@ impl<S: StateStore> ManagedGapFillState<S> {
         self.state_table.delete(value);
     }
 
-    /// Batch delete multiple rows from state table.
-    pub fn batch_delete(&mut self, rows: Vec<impl Row>) {
-        for row in rows {
-            self.state_table.delete(row);
-        }
-    }
-
     /// Scans `StateStore` for filled rows between two time points (exclusive).
-    pub async fn scan_filled_rows_between_in_state(
-        &self,
-        start_time: &GapFillCacheKey,
-        end_time: &GapFillCacheKey,
-    ) -> StreamExecutorResult<Vec<(OwnedRow, OwnedRow)>> {
-        let mut filled_rows_to_delete = Vec::new();
-
+    #[try_stream(ok = (OwnedRow, OwnedRow), error = StreamExecutorError)]
+    pub async fn scan_filled_rows_from_state<'a>(
+        &'a self,
+        start_time: &'a GapFillCacheKey,
+        end_time: &'a GapFillCacheKey,
+    ) {
         let start_time_row = self.time_key_serde.deserialize(start_time)?;
         let end_time_row = self.time_key_serde.deserialize(end_time)?;
 
@@ -154,15 +146,13 @@ impl<S: StateStore> ManagedGapFillState<S> {
             let row = row_result?.into_owned_row();
 
             if self.extract_is_filled_flag(&row) {
-                // This is a filled row, add to deletion list.
+                // This is a filled row, yield it for processing.
                 // For state table, we use the time column as the key.
                 let time_datum = row.datum_at(self.time_column_index);
                 let state_key = OwnedRow::new(vec![time_datum.to_owned_datum()]);
-                filled_rows_to_delete.push((state_key, row));
+                yield (state_key, row);
             }
         }
-
-        Ok(filled_rows_to_delete)
     }
 
     /// Serialize time value to cache key.
@@ -465,24 +455,6 @@ impl GapFillCacheManager {
         result
     }
 
-    /// Removes entries from the cache that are marked for deletion in the state table.
-    pub fn sync_clean_cache_entries(
-        &mut self,
-        state_rows_to_delete: &[(OwnedRow, OwnedRow)],
-        managed_state: &ManagedGapFillState<impl StateStore>,
-    ) {
-        let mut removed_any = false;
-        for (_state_key, data_row) in state_rows_to_delete {
-            let cache_key = managed_state.serialize_time_to_cache_key(data_row);
-            if self.cache.remove(&cache_key).is_some() {
-                removed_any = true;
-            }
-        }
-        if removed_any {
-            self.update_window_bounds_after_removal();
-        }
-    }
-
     /// Finds the closest previous original row in the cache.
     fn find_prev_original_in_cache(
         &self,
@@ -556,22 +528,18 @@ impl GapFillCacheManager {
     }
 
     /// Scans cache for filled rows between two time points (exclusive).
-    pub fn scan_filled_rows_between_in_cache<S: StateStore>(
-        &self,
-        start_time: &GapFillCacheKey,
-        end_time: &GapFillCacheKey,
-        managed_state: &ManagedGapFillState<S>,
-    ) -> StreamExecutorResult<(Vec<(OwnedRow, OwnedRow)>, bool)> {
-        let mut filled_rows_in_cache = Vec::new();
-
-        // Check if both start_time and end_time are within cache bounds
-        let range_fully_in_cache = self.contains_time(start_time) && self.contains_time(end_time);
-
-        if range_fully_in_cache {
-            for (_cache_key, (compacted_row, row_type)) in self.cache.range::<GapFillCacheKey, _>((
+    pub fn scan_filled_rows_from_cache<'a, S: StateStore>(
+        &'a self,
+        start_time: &'a GapFillCacheKey,
+        end_time: &'a GapFillCacheKey,
+        managed_state: &'a ManagedGapFillState<S>,
+    ) -> impl Iterator<Item = StreamExecutorResult<(OwnedRow, OwnedRow)>> + 'a {
+        self.cache
+            .range::<GapFillCacheKey, _>((
                 std::ops::Bound::Excluded(start_time),
                 std::ops::Bound::Excluded(end_time),
-            )) {
+            ))
+            .filter_map(move |(_cache_key, (compacted_row, row_type))| {
                 if *row_type == RowType::Filled {
                     // Convert compacted row back to owned row
                     let data_types = managed_state.state_table.get_data_types();
@@ -579,37 +547,44 @@ impl GapFillCacheManager {
                     // Remove the is_filled column type since cache stores original schema
                     row_data_types.pop();
 
-                    let row = compacted_row.deserialize(&row_data_types)?;
-                    let time_datum = row.datum_at(managed_state.time_column_index);
-                    let state_key = OwnedRow::new(vec![time_datum.to_owned_datum()]);
-                    // Convert to state row format (with is_filled flag)
-                    let state_row = ManagedGapFillState::<S>::row_to_state_row(&row, true);
-                    filled_rows_in_cache.push((state_key, state_row));
+                    let row = compacted_row.deserialize(&row_data_types);
+                    Some(row.map_err(StreamExecutorError::from).map(|row| {
+                        let time_datum = row.datum_at(managed_state.time_column_index);
+                        let state_key = OwnedRow::new(vec![time_datum.to_owned_datum()]);
+                        // Convert to state row format (with is_filled flag)
+                        let state_row = ManagedGapFillState::<S>::row_to_state_row(&row, true);
+                        (state_key, state_row)
+                    }))
+                } else {
+                    None
                 }
-            }
-        }
-
-        Ok((filled_rows_in_cache, range_fully_in_cache))
+            })
     }
 
-    pub async fn scan_filled_rows_between<S: StateStore>(
-        &self,
-        start_time: &GapFillCacheKey,
-        end_time: &GapFillCacheKey,
-        managed_state: &ManagedGapFillState<S>,
-    ) -> StreamExecutorResult<Vec<(OwnedRow, OwnedRow)>> {
-        // Try to scan filled rows from cache first
-        let (filled_rows_cache, range_fully_in_cache) =
-            self.scan_filled_rows_between_in_cache(start_time, end_time, managed_state)?;
+    #[try_stream(ok = (OwnedRow, OwnedRow), error = StreamExecutorError)]
+    pub async fn scan_filled_rows<'a, S: StateStore>(
+        &'a self,
+        start_time: &'a GapFillCacheKey,
+        end_time: &'a GapFillCacheKey,
+        managed_state: &'a ManagedGapFillState<S>,
+    ) {
+        // Check if both start_time and end_time are within cache bounds
+        let range_fully_in_cache = self.contains_time(start_time) && self.contains_time(end_time);
 
         if range_fully_in_cache {
-            // Cache covers the entire range, use cache results
-            Ok(filled_rows_cache)
+            // Fast path: stream from in-memory
+            for result in self.scan_filled_rows_from_cache(start_time, end_time, managed_state) {
+                yield result?;
+            }
         } else {
-            // Cache doesn't cover the range, fall back to state table scan
-            managed_state
-                .scan_filled_rows_between_in_state(start_time, end_time)
-                .await
+            // Slow path: stream from state table
+            let state_stream = managed_state.scan_filled_rows_from_state(start_time, end_time);
+            pin_mut!(state_stream);
+
+            #[for_await]
+            for result in state_stream {
+                yield result?;
+            }
         }
     }
 }
@@ -956,35 +931,52 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 if let (Some((prev_key, _)), Some((next_key, _))) =
                                     (&prev_original, &next_original)
                                 {
-                                    let filled_rows_to_delete = cache_manager
-                                        .scan_filled_rows_between(
+                                    // Use streaming to read filled rows, then batch delete.
+                                    // This avoids loading all rows at once but still, accumulates them in memory before deletion.
+                                    let mut cache_keys_to_remove = Vec::new();
+                                    let mut state_rows_to_delete = Vec::new();
+
+                                    {
+                                        let filled_rows_stream = cache_manager.scan_filled_rows(
                                             prev_key,
                                             next_key,
                                             &managed_state,
-                                        )
-                                        .await?;
+                                        );
+                                        pin_mut!(filled_rows_stream);
 
-                                    cache_manager.sync_clean_cache_entries(
-                                        &filled_rows_to_delete,
-                                        &managed_state,
-                                    );
+                                        #[for_await]
+                                        for result in filled_rows_stream {
+                                            let (_state_key, state_row) = result?;
 
-                                    let mut state_rows_to_delete = Vec::new();
-                                    for (_state_key, state_row) in filled_rows_to_delete {
-                                        state_rows_to_delete.push(state_row.clone());
+                                            // Store cache key for later removal
+                                            let cache_key = managed_state
+                                                .serialize_time_to_cache_key(&state_row);
+                                            cache_keys_to_remove.push(cache_key);
 
-                                        let output_row =
-                                            ManagedGapFillState::<S>::state_row_to_output_row(
-                                                &state_row,
-                                            );
-                                        if let Some(chunk) =
-                                            chunk_builder.append_row(Op::Delete, &output_row)
-                                        {
-                                            yield Message::Chunk(chunk);
+                                            // Generate delete chunk for output
+                                            let output_row =
+                                                ManagedGapFillState::<S>::state_row_to_output_row(
+                                                    &state_row,
+                                                );
+                                            if let Some(chunk) =
+                                                chunk_builder.append_row(Op::Delete, &output_row)
+                                            {
+                                                yield Message::Chunk(chunk);
+                                            }
+
+                                            state_rows_to_delete.push(state_row);
                                         }
+                                        // filled_rows_stream is dropped here
                                     }
 
-                                    managed_state.batch_delete(state_rows_to_delete);
+                                    // Now process deletions
+                                    for cache_key in cache_keys_to_remove {
+                                        cache_manager.remove(&cache_key);
+                                    }
+
+                                    for state_row in state_rows_to_delete {
+                                        managed_state.delete(&state_row);
+                                    }
                                 }
 
                                 // Insert new original row.
@@ -1066,50 +1058,86 @@ impl<S: StateStore> GapFillExecutor<S> {
                                     .await?;
 
                                 // Delete fill rows on both sides of the row to be deleted.
-                                let mut filled_rows_to_delete = Vec::new();
+                                // Use streaming to read filled rows.
+                                let mut cache_keys_to_remove = Vec::new();
+                                let mut state_rows_to_delete = Vec::new();
 
-                                if let Some((prev_key, _)) = &prev_original {
-                                    let fills_left = cache_manager
-                                        .scan_filled_rows_between(
+                                {
+                                    // Process left side fills (between prev and current)
+                                    if let Some((prev_key, _)) = &prev_original {
+                                        let fills_left = cache_manager.scan_filled_rows(
                                             prev_key,
                                             &cache_key,
                                             &managed_state,
-                                        )
-                                        .await?;
-                                    filled_rows_to_delete.extend(fills_left);
-                                }
+                                        );
+                                        pin_mut!(fills_left);
 
-                                if let Some((next_key, _)) = &next_original {
-                                    let fills_right = cache_manager
-                                        .scan_filled_rows_between(
+                                        #[for_await]
+                                        for result in fills_left {
+                                            let (_state_key, state_row) = result?;
+
+                                            // Store cache key for later removal
+                                            let cache_key = managed_state
+                                                .serialize_time_to_cache_key(&state_row);
+                                            cache_keys_to_remove.push(cache_key);
+
+                                            // Generate delete chunk for output
+                                            let output_row =
+                                                ManagedGapFillState::<S>::state_row_to_output_row(
+                                                    &state_row,
+                                                );
+                                            if let Some(chunk) =
+                                                chunk_builder.append_row(Op::Delete, &output_row)
+                                            {
+                                                yield Message::Chunk(chunk);
+                                            }
+
+                                            state_rows_to_delete.push(state_row);
+                                        }
+                                    }
+
+                                    // Process right side fills (between current and next)
+                                    if let Some((next_key, _)) = &next_original {
+                                        let fills_right = cache_manager.scan_filled_rows(
                                             &cache_key,
                                             next_key,
                                             &managed_state,
-                                        )
-                                        .await?;
-                                    filled_rows_to_delete.extend(fills_right);
-                                }
-
-                                cache_manager.sync_clean_cache_entries(
-                                    &filled_rows_to_delete,
-                                    &managed_state,
-                                );
-
-                                let mut state_rows_to_delete = Vec::new();
-                                for (_state_key, state_row) in filled_rows_to_delete {
-                                    state_rows_to_delete.push(state_row.clone());
-
-                                    let output_row =
-                                        ManagedGapFillState::<S>::state_row_to_output_row(
-                                            &state_row,
                                         );
-                                    if let Some(chunk) =
-                                        chunk_builder.append_row(Op::Delete, &output_row)
-                                    {
-                                        yield Message::Chunk(chunk);
+                                        pin_mut!(fills_right);
+
+                                        #[for_await]
+                                        for result in fills_right {
+                                            let (_state_key, state_row) = result?;
+
+                                            // Store cache key for later removal
+                                            let cache_key = managed_state
+                                                .serialize_time_to_cache_key(&state_row);
+                                            cache_keys_to_remove.push(cache_key);
+
+                                            // Generate delete chunk for output
+                                            let output_row =
+                                                ManagedGapFillState::<S>::state_row_to_output_row(
+                                                    &state_row,
+                                                );
+                                            if let Some(chunk) =
+                                                chunk_builder.append_row(Op::Delete, &output_row)
+                                            {
+                                                yield Message::Chunk(chunk);
+                                            }
+
+                                            state_rows_to_delete.push(state_row);
+                                        }
                                     }
                                 }
-                                managed_state.batch_delete(state_rows_to_delete);
+
+                                // process deletions
+                                for cache_key in cache_keys_to_remove {
+                                    cache_manager.remove(&cache_key);
+                                }
+
+                                for state_row in state_rows_to_delete {
+                                    managed_state.delete(&state_row);
+                                }
 
                                 // Delete the original row.
                                 let state_row =
