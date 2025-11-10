@@ -150,20 +150,19 @@ impl LdapTlsConfig {
                     )
                 })?;
 
-            let mut private_keys = rustls_pemfile::pkcs8_private_keys(
-                &mut client_key_bytes.clone().as_slice(),
-            )
-            .map_err(|e| {
-                PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
-            })?;
-            if private_keys.is_empty() {
-                // Try RSA private keys as a fallback
-                private_keys = rustls_pemfile::rsa_private_keys(&mut client_key_bytes.as_slice())
+            let mut private_keys =
+                rustls_pemfile::pkcs8_private_keys(&mut client_key_bytes.clone().as_slice())
                     .map_err(|e| {
                         PsqlError::StartupError(
                             anyhow!(e).context("Failed to parse client key").into(),
                         )
                     })?;
+            if private_keys.is_empty() {
+                // Try RSA private keys as a fallback
+                private_keys = rustls_pemfile::rsa_private_keys(&mut client_key_bytes.as_slice())
+                    .map_err(|e| {
+                    PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
+                })?;
             }
             let client_private_key = private_keys.pop().ok_or_else(|| {
                 PsqlError::StartupError("No private key found in client key file".into())
