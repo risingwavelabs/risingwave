@@ -80,7 +80,7 @@ def _actor_busy_time_relative_target(panels: Panels):
 # - Busy rate equals: 1 - idle rate.
 # - Idle time is approximated by max(output_blocking_duration, input_blocking_duration) per fragment,
 #   because output and input blocking events can overlap across actors and edges. We therefore use the max as an estimate.
-def _actor_busy_rate_alt_target(panels: Panels, rate_interval: str):
+def _actor_busy_rate_expr(rate_interval: str):
     output_blocking_rate_per_edge_expr = (
         f"sum(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[{rate_interval}]))"
         f"  by (fragment_id, downstream_fragment_id)"
@@ -106,14 +106,39 @@ def _actor_busy_rate_alt_target(panels: Panels, rate_interval: str):
         f"    {input_blocking_rate_per_edge_expr}"
         f") by (fragment_id)"
     )
-    return panels.target(
+    busy_rate_expr = (
         f"1 - ("
         f"  ({output_blocking_rate_expr}) > ({input_blocking_rate_expr}) or"
         f"  ({input_blocking_rate_expr})"
-        f")",
+        f")"
+    )
+    return busy_rate_expr
+
+def _actor_busy_rate_target(panels: Panels, rate_interval: str):
+    actor_busy_rate_expr = _actor_busy_rate_expr(rate_interval)
+    return panels.target(
+        f"({actor_busy_rate_expr})",
         "fragment {{fragment_id}}",
     )
 
+def _relation_busy_rate_expr(rate_interval: str):
+    actor_busy_rate_expr = _actor_busy_rate_expr(rate_interval)
+    relation_busy_rate_expr = (
+        f"topk (1,"
+        f"  ({actor_busy_rate_expr}) * on (fragment_id) group_right {metric('table_info')}"
+        f") by (materialized_view_id)"
+    )
+    relation_busy_rate_with_metadata_expr = (
+        f"label_replace(({relation_busy_rate_expr}), 'id', '$1', 'materialized_view_id', '(.*)')"
+        f"* on (id) group_left (name, type) {metric('relation_info')}"
+    )
+    return relation_busy_rate_with_metadata_expr
+
+def _relation_busy_rate_target(panels: Panels, rate_interval: str):
+    return panels.target(
+        _relation_busy_rate_expr(rate_interval),
+        "name {{name}} id {{id}} type {{type}} fragment {{fragment_id}}",
+    )
 
 @section
 def _(outer_panels: Panels):
@@ -324,31 +349,59 @@ def _(outer_panels: Panels):
             ),
             panels.subheader("Busy Rate"),
             panels.timeseries_percentage(
+                "Relation Busy Rate",
+                "1 - output_blocking - input_blocking, clamped to 0%",
+                [
+                    _relation_busy_rate_target(panels, "$__rate_interval"),
+                ],
+            ),
+            panels.timeseries_percentage(
+                "Relation Busy Rate (10m)",
+                "1 - output_blocking - input_blocking, clamped to 0%",
+                [
+                    _relation_busy_rate_target(panels, "10m"),
+                ],
+            ),
+            panels.timeseries_percentage(
+                "Relation Busy Rate (5m)",
+                "1 - output_blocking - input_blocking, clamped to 0%",
+                [
+                    _relation_busy_rate_target(panels, "5m"),
+                ],
+            ),
+            panels.timeseries_percentage(
+                "Relation Busy Rate (3m)",
+                "1 - output_blocking - input_blocking, clamped to 0%",
+                [
+                    _relation_busy_rate_target(panels, "3m"),
+                ],
+            ),
+            panels.timeseries_percentage(
                 "Actor Busy Rate",
                 "The rate that an actor is busy, i.e. the rate that an actor is not blocked by its downstream or upstream.",
                 [
-                    _actor_busy_rate_alt_target(panels, "$__rate_interval"),
+                    _actor_busy_rate_target(panels, "$__rate_interval"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Actor Busy Rate (10m)",
                 "The rate that an actor is busy, i.e. the rate that an actor is not blocked by its downstream or upstream, over the last 10 minutes.",
                 [
-                    _actor_busy_rate_alt_target(panels, "10m"),
+                    _actor_busy_rate_target(panels, "10m"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Actor Busy Rate (5m)",
                 "The rate that an actor is busy, i.e. the rate that an actor is not blocked by its downstream or upstream, over the last 5 minutes.",
                 [
-                    _actor_busy_rate_alt_target(panels, "5m"),
+                    _actor_busy_rate_target(panels, "5m"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Actor Busy Rate (3m)",
                 "The rate that an actor is busy, i.e. the rate that an actor is not blocked by its downstream or upstream, over the last 3 minutes.",
                 [
-                    _actor_busy_rate_alt_target(panels, "3m"),
+                    _actor_busy_rate_target(panels, "3m"),
                 ],
             ),
             panels.timeseries_latency_ns(
