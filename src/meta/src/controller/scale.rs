@@ -19,7 +19,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
@@ -653,11 +652,7 @@ fn render_actors(
                 vnode_count,
                 nodes: stream_node.to_protobuf(),
                 actors,
-                state_table_ids: state_table_ids
-                    .inner_ref()
-                    .iter()
-                    .map(|id| catalog::TableId::new(*id as _))
-                    .collect(),
+                state_table_ids: state_table_ids.inner_ref().iter().copied().collect(),
             };
 
             let &database_id = streaming_job_databases.get(&job_id).ok_or_else(|| {
@@ -932,7 +927,7 @@ mod tests {
 
     use risingwave_connector::source::SplitImpl;
     use risingwave_connector::source::test_source::TestSourceSplit;
-    use risingwave_meta_model::{CreateType, I32Array, JobStatus, StreamNode};
+    use risingwave_meta_model::{CreateType, I32Array, JobStatus, StreamNode, TableIdArray};
     use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
 
     use super::*;
@@ -976,7 +971,7 @@ mod tests {
             fragment_type_mask,
             distribution_type,
             stream_node: StreamNode::from(&PbStreamNode::default()),
-            state_table_ids: I32Array::default(),
+            state_table_ids: TableIdArray::default(),
             upstream_fragment_id: I32Array::default(),
             vnode_count,
             parallelism: Some(parallelism),

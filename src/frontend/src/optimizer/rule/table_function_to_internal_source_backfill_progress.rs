@@ -19,10 +19,12 @@ use anyhow::bail;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, is_source_backfill_table};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_pb::id::JobId;
 
 use super::prelude::{PlanRef, *};
 use crate::TableCatalog;
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::{FragmentId, TableId};
 use crate::expr::{ExprImpl, InputRef, Literal, TableFunctionType};
 use crate::optimizer::OptimizerContext;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -89,9 +91,9 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
         backfill_info: &SourceBackfillInfo,
         scan: PlanRef,
     ) -> anyhow::Result<LogicalProject> {
-        let job_id_expr = Self::build_u32_expr(backfill_info.job_id);
+        let job_id_expr = Self::build_u32_expr(backfill_info.job_id.as_raw_id());
         let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id);
-        let table_id_expr = Self::build_u32_expr(backfill_info.table_id);
+        let table_id_expr = Self::build_u32_expr(backfill_info.table_id.as_raw_id());
 
         let backfill_progress = ExprImpl::InputRef(Box::new(InputRef {
             index: backfill_info.backfill_progress_column_index,
@@ -132,15 +134,15 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
 }
 
 struct SourceBackfillInfo {
-    job_id: u32,
-    fragment_id: u32,
-    table_id: u32,
+    job_id: JobId,
+    fragment_id: FragmentId,
+    table_id: TableId,
     backfill_progress_column_index: usize,
 }
 
 impl SourceBackfillInfo {
     fn new(table: &TableCatalog) -> anyhow::Result<Self> {
-        let Some(job_id) = table.job_id.map(|id| id.as_raw_id()) else {
+        let Some(job_id) = table.job_id else {
             bail!("`job_id` column not found in source backfill table catalog");
         };
         let Some(backfill_progress_column_index) = table
@@ -154,7 +156,7 @@ impl SourceBackfillInfo {
             );
         };
         let fragment_id = table.fragment_id;
-        let table_id = table.id.as_raw_id();
+        let table_id = table.id;
 
         Ok(Self {
             job_id,

@@ -329,7 +329,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         actor_context: ActorContextRef,
-        table_id: u32,
+        table_id: TableId,
         metrics: SyncedKvLogStoreMetrics,
         serde: LogStoreRowSerde,
         state_store: S,
@@ -341,7 +341,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     ) -> Self {
         Self {
             actor_context,
-            table_id: TableId::new(table_id),
+            table_id,
             metrics,
             serde,
             state_store,

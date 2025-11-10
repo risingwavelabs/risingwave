@@ -94,7 +94,7 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        if !env.config().unsafe_enable_strict_consistency {
+        if !env.global_config().unsafe_enable_strict_consistency {
             // If strict consistency is disabled, should disable storage sanity check.
             // Since this is a special config, we have to check it here.
             risingwave_storage::hummock::utils::disable_sanity_check();

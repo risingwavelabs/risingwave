@@ -27,6 +27,7 @@ use risingwave_pb::stream_plan::{DispatcherType, StreamFragmentGraph, StreamNode
 
 use super::PrettySerde;
 use crate::TableCatalog;
+use crate::catalog::TableId;
 
 /// ice: in the future, we may allow configurable width, boundaries, etc.
 pub fn explain_stream_graph(
@@ -68,7 +69,7 @@ struct StreamGraphFormatter {
     /// exchange's `operator_id` -> edge
     edges: HashMap<u64, StreamFragmentEdge>,
     verbose: bool,
-    tables: BTreeMap<u32, Table>,
+    tables: BTreeMap<TableId, Table>,
 }
 
 impl StreamGraphFormatter {
@@ -81,7 +82,7 @@ impl StreamGraphFormatter {
     }
 
     /// collect the table catalog and return the table id
-    fn add_table(&mut self, tb: &Table) -> u32 {
+    fn add_table(&mut self, tb: &Table) -> TableId {
         self.tables.insert(tb.id, tb.clone());
         tb.id
     }
@@ -203,7 +204,7 @@ impl StreamGraphFormatter {
             _ => node.identity.clone(),
         };
 
-        let mut tables: Vec<(String, u32)> = Vec::with_capacity(7);
+        let mut tables: Vec<(String, TableId)> = Vec::with_capacity(7);
         let mut node_copy = node.clone();
 
         stream_graph_visitor::visit_stream_node_tables_inner(

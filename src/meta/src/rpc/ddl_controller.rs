@@ -217,7 +217,7 @@ impl DdlCommand {
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
             DdlCommand::DropSecret(id) => Right(*id),
-            DdlCommand::CommentOn(comment) => Right(comment.table_id as _),
+            DdlCommand::CommentOn(comment) => Right(comment.table_id.as_raw_id() as _),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(*id),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_raw_id() as _),
@@ -509,7 +509,7 @@ impl DdlController {
 
     pub async fn reschedule_cdc_table_backfill(
         &self,
-        job_id: u32,
+        job_id: JobId,
         target: ReschedulePolicy,
     ) -> MetaResult<()> {
         tracing::info!("alter CDC table backfill parallelism");
@@ -775,7 +775,7 @@ impl DdlController {
             .get_subscription_by_id(subscription_id)
             .await?;
         let table_id = subscription.dependent_table_id;
-        let database_id = subscription.database_id.into();
+        let database_id = subscription.database_id;
         let (_, version) = self
             .metadata_manager
             .catalog_controller
@@ -862,7 +862,7 @@ impl DdlController {
     async fn validate_cdc_table_inner(
         &self,
         node_body: &Option<NodeBody>,
-        table_id: u32,
+        table_id: TableId,
     ) -> MetaResult<bool> {
         let meta_store = self.env.meta_store_ref();
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
@@ -929,7 +929,7 @@ impl DdlController {
         if let StreamingJob::Sink(sink) = &streaming_job
             && let Some(target_table) = sink.target_table
         {
-            self.validate_table_for_sink(target_table.into()).await?;
+            self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         let check_ret = self
@@ -1002,7 +1002,7 @@ impl DdlController {
             Err(err) => {
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
-                    id: job_id.as_raw_id(),
+                    id: job_id,
                     name,
                     definition,
                     error: err.as_report().to_string(),
@@ -1271,13 +1271,13 @@ impl DdlController {
             let auto_refresh_schema_sinks = self
                 .metadata_manager
                 .catalog_controller
-                .get_sink_auto_refresh_schema_from(table.id.into())
+                .get_sink_auto_refresh_schema_from(table.id)
                 .await?;
             if !auto_refresh_schema_sinks.is_empty() {
                 let original_table_columns = self
                     .metadata_manager
                     .catalog_controller
-                    .get_table_columns(table.id.into())
+                    .get_table_columns(table.id)
                     .await?;
                 // compare column id to find newly added columns
                 let mut original_table_column_ids: HashSet<_> = original_table_columns
@@ -1421,7 +1421,7 @@ impl DdlController {
                             new_log_store_table: sink
                                 .new_log_store_table
                                 .as_ref()
-                                .map(|table| (table.id.into(), table.columns.clone())),
+                                .map(|table| (table.id, table.columns.clone())),
                         })
                         .collect()
                 });
@@ -1543,13 +1543,9 @@ impl DdlController {
                 );
             }
             JobStatus::Creating => {
-                let canceled_jobs = self
-                    .stream_manager
+                self.stream_manager
                     .cancel_streaming_jobs(vec![job_id.id()])
-                    .await;
-                if canceled_jobs.is_empty() {
-                    tracing::warn!(job_id = %job_id.id(), "failed to cancel streaming job");
-                }
+                    .await?;
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Created => {
@@ -1802,7 +1798,7 @@ impl DdlController {
         {
             let tables = self
                 .metadata_manager
-                .get_table_catalog_by_ids(&[TableId::new(*table_id)])
+                .get_table_catalog_by_ids(&[*table_id])
                 .await?;
             let target_table = tables
                 .first()
@@ -1813,7 +1809,7 @@ impl DdlController {
             let mview_fragment_id = self
                 .metadata_manager
                 .catalog_controller
-                .get_mview_fragment_by_id(table_id.into())
+                .get_mview_fragment_by_id(table_id.as_job_id())
                 .await?;
             let upstream_sink_info = build_upstream_sink_info(
                 sink,
@@ -1832,7 +1828,6 @@ impl DdlController {
             upstream_actors,
             building_locations,
             definition: stream_job.definition(),
-            mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
             streaming_job: stream_job,

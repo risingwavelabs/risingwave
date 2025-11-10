@@ -215,7 +215,7 @@ impl Fragment {
                     )
                 })
                 .collect(),
-            state_table_ids: self.state_table_ids.iter().map_into().collect(),
+            state_table_ids: self.state_table_ids.clone(),
             upstream_fragment_ids: upstream_fragments.collect(),
             maybe_vnode_count: self.maybe_vnode_count,
             nodes: Some(self.nodes.clone()),
@@ -312,7 +312,7 @@ impl StreamJobFragments {
         fragment_dispatchers: &FragmentActorDispatchers,
     ) -> PbTableFragments {
         PbTableFragments {
-            table_id: self.stream_job_id.as_raw_id(),
+            table_id: self.stream_job_id,
             state: self.state as _,
             fragments: self
                 .fragments
@@ -619,8 +619,8 @@ impl StreamJobFragments {
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
         let table_id = match stream_node.node_body.as_ref() {
-            Some(NodeBody::StreamScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
-            Some(NodeBody::StreamCdcScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
+            Some(NodeBody::StreamScan(stream_scan)) => Some(stream_scan.table_id),
+            Some(NodeBody::StreamCdcScan(stream_scan)) => Some(stream_scan.table_id),
             _ => None,
         };
         if let Some(table_id) = table_id {
@@ -700,7 +700,7 @@ impl StreamJobFragments {
                 |table, _| {
                     let table_id = table.id;
                     tables
-                        .try_insert(table_id.into(), table.clone())
+                        .try_insert(table_id, table.clone())
                         .unwrap_or_else(|_| panic!("duplicated table id `{}`", table_id));
                 },
             );

@@ -374,7 +374,7 @@ impl PeriodicBarriers {
         let mut databases = HashMap::with_capacity(database_infos.len());
         let mut timer_streams = StreamMap::with_capacity(database_infos.len());
         database_infos.into_iter().for_each(|database| {
-            let database_id: DatabaseId = database.id.into();
+            let database_id: DatabaseId = database.id;
             let barrier_interval_ms = database.barrier_interval_ms;
             let checkpoint_frequency = database.checkpoint_frequency;
             databases.insert(
@@ -785,7 +785,7 @@ mod tests {
         checkpoint_frequency: Option<u64>,
     ) -> Database {
         Database {
-            id,
+            id: id.into(),
             name: format!("test_db_{}", id),
             barrier_interval_ms,
             checkpoint_frequency,
@@ -875,14 +875,18 @@ mod tests {
 
         async fn handle_list_finished_source_ids(
             &self,
-            _list_finished_source_ids: Vec<u32>,
+            _list_finished_source_ids: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbListFinishedSource,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }
 
         async fn handle_load_finished_source_ids(
             &self,
-            _load_finished_source_ids: Vec<u32>,
+            _load_finished_source_ids: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbLoadFinishedSource,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }

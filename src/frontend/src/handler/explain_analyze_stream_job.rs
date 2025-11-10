@@ -53,7 +53,7 @@ pub async fn handle_explain_analyze_stream_job(
     let job_id = bind::bind_relation(&target, &handler_args)?;
 
     let meta_client = handler_args.session.env().meta_client();
-    let fragments = net::get_fragments(meta_client, job_id).await?;
+    let fragments = net::get_fragments(meta_client, job_id.into()).await?;
     let fragment_parallelisms = fragments
         .iter()
         .map(|f| (f.id, f.actors.len()))
@@ -163,6 +163,7 @@ mod net {
     use std::collections::HashSet;
 
     use risingwave_pb::common::WorkerNode;
+    use risingwave_pb::id::JobId;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::monitor_service::GetProfileStatsRequest;
     use tokio::time::{Duration, sleep};
@@ -191,7 +192,7 @@ mod net {
     // TODO(kwannoel): Only fetch the names, actor_ids and graph of the fragments
     pub(super) async fn get_fragments(
         meta_client: &dyn FrontendMetaClient,
-        job_id: u32,
+        job_id: JobId,
     ) -> Result<Vec<FragmentInfo>> {
         let mut fragment_map = meta_client.list_table_fragments(&[job_id]).await?;
         assert_eq!(fragment_map.len(), 1, "expected only one fragment");

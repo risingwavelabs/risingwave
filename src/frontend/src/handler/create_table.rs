@@ -478,7 +478,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
@@ -523,6 +524,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         CreateSourceType::Table,
         rate_limit,
         sql_column_strategy,
+        refresh_mode,
     )
     .await?;
 
@@ -2127,7 +2129,8 @@ pub async fn create_iceberg_engine_table(
 
     let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
-    let with_properties = bind_connector_props(&source_handler_args, &format_encode, true)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&source_handler_args, &format_encode, true)?;
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
     // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
@@ -2167,6 +2170,7 @@ pub async fn create_iceberg_engine_table(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
+        refresh_mode,
     )
     .await?;
 

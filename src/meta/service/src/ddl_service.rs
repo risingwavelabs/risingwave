@@ -169,7 +169,7 @@ impl DdlServiceImpl {
                     let req = GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name: table.name.clone(),
+                        table_id: table.id,
                         cdc_table_change: None,
                     };
                     let resp = client
@@ -182,7 +182,7 @@ impl DdlServiceImpl {
                     ddl_controller
                         .run_command(DdlCommand::ReplaceStreamJob(replace_info))
                         .await?;
-                    tracing::info!(elapsed=?start.elapsed(), table_id=table.id, "migrated table fragments");
+                    tracing::info!(elapsed=?start.elapsed(), table_id=%table.id, "migrated table fragments");
                 }
                 tracing::info!("successfully migrated all legacy table fragments");
 
@@ -242,7 +242,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropDatabase(database_id.into()))
+            .run_command(DdlCommand::DropDatabase(database_id))
             .await?;
 
         Ok(Response::new(DropDatabaseResponse {
@@ -333,7 +333,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id.into(), drop_mode))
+            .run_command(DdlCommand::DropSchema(schema_id, drop_mode))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
@@ -541,7 +541,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
-                job_id: StreamingJobId::MaterializedView(TableId::new(table_id as _)),
+                job_id: StreamingJobId::MaterializedView(table_id),
                 drop_mode,
             })
             .await?;
@@ -689,7 +689,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Table(
                     source_id.map(|PbSourceId::Id(id)| id as _),
-                    TableId::new(table_id as _),
+                    table_id,
                 ),
                 drop_mode,
             })
@@ -842,10 +842,7 @@ impl DdlService for DdlServiceImpl {
         } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSetSchema(
-                object.unwrap(),
-                new_schema_id.into(),
-            ))
+            .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
             .await?;
         Ok(Response::new(AlterSetSchemaResponse {
             status: None,
@@ -964,13 +961,7 @@ impl DdlService for DdlServiceImpl {
         let ret = self
             .metadata_manager
             .catalog_controller
-            .get_table_by_ids(
-                table_ids
-                    .into_iter()
-                    .map(|id| TableId::new(id as _))
-                    .collect(),
-                include_dropped_tables,
-            )
+            .get_table_by_ids(table_ids, include_dropped_tables)
             .await?;
 
         let mut tables = HashMap::default();
@@ -1032,7 +1023,7 @@ impl DdlService for DdlServiceImpl {
 
         self.ddl_controller
             .reschedule_streaming_job(
-                job_id.into(),
+                job_id,
                 ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
                 deferred,
             )
@@ -1187,7 +1178,7 @@ impl DdlService for DdlServiceImpl {
                     || original_columns.is_superset(&new_columns))
                 {
                     tracing::warn!(target: "auto_schema_change",
-                                    table_id = table.id,
+                                    table_id = %table.id,
                                     cdc_table_id = table.cdc_table_id,
                                     upstraem_ddl = table_change.upstream_ddl,
                                     original_columns = ?original_columns,
@@ -1212,7 +1203,7 @@ impl DdlService for DdlServiceImpl {
                 // skip the schema change if there is no change to original columns
                 if original_columns == new_columns {
                     tracing::warn!(target: "auto_schema_change",
-                                   table_id = table.id,
+                                   table_id = %table.id,
                                    cdc_table_id = table.cdc_table_id,
                                    upstraem_ddl = table_change.upstream_ddl,
                                     original_columns = ?original_columns,
@@ -1232,7 +1223,7 @@ impl DdlService for DdlServiceImpl {
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name: table.name.clone(),
+                        table_id: table.id,
                         cdc_table_change: Some(table_change.clone()),
                     })
                     .await;
@@ -1245,7 +1236,7 @@ impl DdlService for DdlServiceImpl {
                             plan.streaming_job.table().inspect(|t| {
                                 tracing::info!(
                                     target: "auto_schema_change",
-                                    table_id = t.id,
+                                    table_id = %t.id,
                                     cdc_table_id = t.cdc_table_id,
                                     upstraem_ddl = table_change.upstream_ddl,
                                     "Start the replace config change")
@@ -1260,7 +1251,7 @@ impl DdlService for DdlServiceImpl {
                                 Ok(_) => {
                                     tracing::info!(
                                         target: "auto_schema_change",
-                                        table_id = table.id,
+                                        table_id = %table.id,
                                         cdc_table_id = table.cdc_table_id,
                                         "Table replaced success");
 
@@ -1277,7 +1268,7 @@ impl DdlService for DdlServiceImpl {
                                     tracing::error!(
                                         target: "auto_schema_change",
                                         error = %e.as_report(),
-                                        table_id = table.id,
+                                        table_id = %table.id,
                                         cdc_table_id = table.cdc_table_id,
                                         upstraem_ddl = table_change.upstream_ddl,
                                         "failed to replace the table",
@@ -1301,7 +1292,7 @@ impl DdlService for DdlServiceImpl {
                         tracing::error!(
                             target: "auto_schema_change",
                             error = %e.as_report(),
-                            table_id = table.id,
+                            table_id = %table.id,
                             cdc_table_id = table.cdc_table_id,
                             "failed to get replace table plan",
                         );
@@ -1353,7 +1344,7 @@ impl DdlService for DdlServiceImpl {
 
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id.into(),
+                table_id.as_job_id(),
                 ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
@@ -1379,7 +1370,7 @@ impl DdlService for DdlServiceImpl {
         };
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterDatabaseParam(database_id.into(), param))
+            .run_command(DdlCommand::AlterDatabaseParam(database_id, param))
             .await?;
 
         return Ok(Response::new(AlterDatabaseParamResponse {
@@ -1470,7 +1461,7 @@ impl DdlService for DdlServiceImpl {
         let table_catalog = self
             .metadata_manager
             .catalog_controller
-            .get_table_catalog_by_name(database_id.into(), schema_id.into(), &table_name)
+            .get_table_catalog_by_name(database_id, schema_id, &table_name)
             .await?
             .ok_or(Status::not_found("Internal error: table not found"))?;
 
@@ -1521,7 +1512,7 @@ impl DdlService for DdlServiceImpl {
             });
         }
 
-        let table_id = table_catalog.id as ObjectId;
+        let table_id = table_catalog.id.as_raw_id() as ObjectId;
         let dependencies = HashSet::from_iter([table_id]);
         let stream_job = StreamingJob::Sink(sink);
         let res = self
@@ -1582,7 +1573,7 @@ impl DdlService for DdlServiceImpl {
 
 fn add_auto_schema_change_fail_event_log(
     meta_metrics: &Arc<MetaMetrics>,
-    table_id: u32,
+    table_id: TableId,
     table_name: String,
     cdc_table_id: String,
     upstream_ddl: String,
@@ -1594,7 +1585,7 @@ fn add_auto_schema_change_fail_event_log(
         .with_guarded_label_values(&[&table_id.to_string(), &table_name])
         .inc();
     let event = event_log::EventAutoSchemaChangeFail {
-        table_id,
+        table_id: table_id.as_raw_id(),
         table_name,
         cdc_table_id,
         upstream_ddl,

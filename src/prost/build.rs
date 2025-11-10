@@ -24,6 +24,384 @@ macro_rules! debug {
     }
 }
 
+macro_rules! for_all_wrapped_id_fields {
+    ($(
+        $outer_part:ident {
+            $(
+                $($type_part:ident).* {
+                    $(
+                        $field_name:ident: $type_name:ty,
+                    )+
+                }
+            )+
+        }
+    )+) => {
+        fn wrapped_fields() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+            vec![
+                $($(
+                    (
+                        &concat!(stringify!($outer_part), $(stringify!(.$type_part)),*),
+                        vec![
+                            $(
+                                (stringify!($field_name), stringify!($type_name))
+                            ),*
+                        ]
+                    ),
+                )+)+
+            ]
+        }
+    };
+}
+
+for_all_wrapped_id_fields! (
+    backup_service {
+        MetaSnapshotMetadata {
+            state_table_info: TableId,
+        }
+    }
+    batch_plan {
+        DeleteNode {
+            table_id: TableId,
+        }
+        InsertNode {
+            table_id: TableId,
+        }
+        SysRowSeqScanNode {
+            table_id: TableId,
+        }
+        UpdateNode {
+            table_id: TableId,
+        }
+    }
+    catalog {
+        Comment {
+            table_id: TableId,
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+        Connection {
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+        Database {
+            id: DatabaseId,
+        }
+        Function {
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+        Index {
+            index_table_id: TableId,
+            primary_table_id: TableId,
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+        Schema {
+            id: SchemaId,
+            database_id: DatabaseId,
+        }
+        Secret {
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+        Sink {
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+            target_table: TableId,
+            auto_refresh_schema_from_table: TableId,
+        }
+        Source {
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+        Subscription {
+            dependent_table_id: TableId,
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+        Table {
+            id: TableId,
+            primary_table_id: TableId,
+            job_id: JobId,
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+        View {
+            schema_id: SchemaId,
+            database_id: DatabaseId,
+        }
+    }
+    ddl_service {
+        AlterCdcTableBackfillParallelismRequest {
+            table_id: JobId,
+        }
+        AlterDatabaseParamRequest {
+            database_id: DatabaseId,
+        }
+        AlterParallelismRequest {
+            table_id: JobId,
+        }
+        AlterResourceGroupRequest {
+            table_id: TableId,
+        }
+        AlterSecretRequest {
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+        }
+        AlterSetSchemaRequest {
+            new_schema_id: SchemaId,
+        }
+        CreateConnectionRequest {
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+        }
+        CreateSecretRequest {
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+        }
+        DropDatabaseRequest {
+            database_id: DatabaseId,
+        }
+        DropMaterializedViewRequest {
+            table_id: TableId,
+        }
+        DropSchemaRequest {
+            schema_id: SchemaId,
+        }
+        DropTableRequest {
+            table_id: TableId,
+        }
+        GetTablesRequest {
+            table_ids: TableId,
+        }
+        GetTablesResponse {
+            tables: TableId,
+        }
+    }
+    frontend_service {
+        GetTableReplacePlanRequest {
+            table_id: TableId,
+            database_id: DatabaseId,
+        }
+    }
+    hummock {
+        CompactTask {
+            existing_table_ids: TableId,
+            table_options: TableId,
+            table_vnode_partition: TableId,
+            table_watermarks: TableId,
+            table_schemas: TableId,
+        }
+        CompactionGroupInfo {
+            member_table_ids: TableId,
+        }
+        GetVersionByEpochRequest {
+            table_id: TableId,
+        }
+        HummockVersion {
+            table_watermarks: TableId,
+            table_change_logs: TableId,
+            state_table_info: TableId,
+            vector_indexes: TableId,
+        }
+        HummockVersionDelta {
+            new_table_watermarks: TableId,
+            removed_table_ids: TableId,
+            change_log_delta: TableId,
+            state_table_info_delta: TableId,
+            vector_index_delta: TableId,
+        }
+        HummockVersionStats {
+            table_stats: TableId,
+        }
+        ReportCompactionTaskRequest.ReportTask {
+            table_stats_change: TableId,
+        }
+        SplitCompactionGroupRequest {
+            table_ids: TableId,
+        }
+        SstableInfo {
+            table_ids: TableId,
+        }
+        SubscribeCompactionEventRequest.ReportTask {
+            table_stats_change: TableId,
+        }
+        TriggerManualCompactionRequest {
+            table_id: JobId,
+        }
+        TruncateTables {
+            table_ids: TableId,
+        }
+        WriteLimits.WriteLimit {
+            table_ids: TableId,
+        }
+    }
+    meta {
+        CancelCreatingJobsRequest.CreatingJobIds {
+            job_ids: JobId,
+        }
+        CancelCreatingJobsRequest.CreatingJobInfo {
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+        }
+        DatabaseRecoveryFailure {
+            database_id: DatabaseId,
+        }
+        DatabaseRecoveryStart {
+            database_id: DatabaseId,
+        }
+        DatabaseRecoverySuccess {
+            database_id: DatabaseId,
+        }
+        EventLog.EventCreateStreamJobFail {
+            id: JobId,
+        }
+        EventLog.EventDirtyStreamJobClear {
+            id: JobId,
+        }
+        EventLog.GlobalRecoverySuccess {
+            running_database_ids: DatabaseId,
+            recovering_database_ids: DatabaseId,
+        }
+        FlushRequest {
+            database_id: DatabaseId,
+        }
+        FragmentDistribution {
+            table_id: JobId,
+            state_table_ids: TableId,
+        }
+        GetServerlessStreamingJobsStatusResponse.Status {
+            table_id: TableId,
+        }
+        ListCdcProgressResponse {
+            cdc_progress: JobId,
+        }
+        ListRateLimitsResponse.RateLimitInfo {
+            job_id: JobId,
+        }
+        ListStreamingJobStatesResponse.StreamingJobState {
+            table_id: JobId,
+            database_id: DatabaseId,
+            schema_id: SchemaId,
+        }
+        ListTableFragmentsRequest {
+            table_ids: JobId,
+        }
+        ListTableFragmentsResponse {
+            table_fragments: JobId,
+        }
+        ListUnmigratedTablesResponse.UnmigratedTable {
+            table_id: TableId,
+        }
+        RefreshRequest {
+            table_id: TableId,
+        }
+        SetSyncLogStoreAlignedRequest {
+            job_id: JobId,
+        }
+        TableFragments {
+            table_id: JobId,
+        }
+        TableFragments.Fragment {
+            state_table_ids: TableId,
+            table_id: JobId,
+        }
+    }
+    plan_common {
+        ExternalTableDesc {
+            table_id: TableId,
+        }
+        StorageTableDesc {
+            table_id: TableId,
+        }
+        VectorIndexReaderDesc {
+            table_id: TableId,
+        }
+    }
+    stream_plan {
+        DeltaIndexJoinNode {
+            left_table_id: TableId,
+            right_table_id: TableId,
+        }
+        DmlNode {
+            table_id: TableId,
+        }
+        MaterializeNode {
+            table_id: TableId,
+        }
+        RefreshStartMutation {
+            table_id: TableId,
+        }
+        StreamCdcScanNode {
+            table_id: TableId,
+        }
+        StreamFragmentGraph {
+            dependent_table_ids: TableId,
+        }
+        StreamScanNode {
+            table_id: TableId,
+        }
+        SubscriptionUpstreamInfo {
+            upstream_mv_table_id: TableId,
+        }
+    }
+    stream_service {
+        BarrierCompleteResponse {
+            database_id: DatabaseId,
+            truncate_tables: TableId,
+            refresh_finished_tables: TableId,
+            table_watermarks: TableId,
+            vector_index_adds: TableId,
+        }
+        BarrierCompleteResponse.LocalSstableInfo {
+            table_stats_map: TableId,
+        }
+        InjectBarrierRequest {
+            database_id: DatabaseId,
+            table_ids_to_sync: TableId,
+        }
+        StreamingControlStreamRequest.CreatePartialGraphRequest {
+            database_id: DatabaseId,
+        }
+        StreamingControlStreamRequest.RemovePartialGraphRequest {
+            database_id: DatabaseId,
+        }
+        StreamingControlStreamRequest.ResetDatabaseRequest {
+            database_id: DatabaseId,
+        }
+        StreamingControlStreamResponse.ReportDatabaseFailureResponse {
+            database_id: DatabaseId,
+        }
+        StreamingControlStreamResponse.ResetDatabaseResponse {
+            database_id: DatabaseId,
+        }
+    }
+    task_service {
+        FastInsertRequest {
+            table_id: TableId,
+        }
+        GetStreamRequest.Get {
+            database_id: DatabaseId,
+        }
+    }
+    user {
+        AlterDefaultPrivilegeRequest {
+            database_id: DatabaseId,
+            schema_ids: SchemaId,
+        }
+    }
+);
+
+fn check_declared_wrapped_fields_sorted() {
+    let wrapped_fields = wrapped_fields();
+    assert!(
+        wrapped_fields
+            .iter()
+            .map(|(type_name, _)| type_name)
+            .is_sorted()
+    );
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_dir = "../../proto";
 
@@ -201,6 +579,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalColumn", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.AdditionalColumnPulsarMessageIdData", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalColumn.column_type",
             "#[derive(Eq, Hash)]",
@@ -227,6 +606,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.AdditionalSchemaName", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalTableName", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.AdditionalSubject", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.SourceRefreshMode", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.SourceRefreshMode.refresh_mode", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeStreaming", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullRecompute", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalCollectionName",
             "#[derive(Eq, Hash)]",
@@ -303,6 +686,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // TODO:
         //"stream_plan.StreamNode"
     ]);
+
+    check_declared_wrapped_fields_sorted();
+
+    for (wrapped_type, wrapped_fields) in &wrapped_fields() {
+        for (field_name, field_type) in wrapped_fields {
+            prost_config.field_wrapper(
+                format!("{wrapped_type}.{field_name}"),
+                format!("crate::id::{field_type}"),
+            );
+        }
+    }
     // Compile the proto files.
     tonic_config
         .out_dir(out_dir.as_path())
@@ -324,10 +718,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for serde_proto_file in &rewrite_files {
         let out_file = out_dir.join(format!("{}.serde.rs", serde_proto_file));
         let file_content = String::from_utf8(fs_err::read(&out_file)?)?;
+        let file_content = file_content.replace(
+            ".map(|(k,v)| (k.0, v)).collect()",
+            ".map(|(k,v)| (k.0.into(), v)).collect()",
+        );
+        let file_content = file_content.replace(
+            ".map(|(k,v)| (k.0, v.0)).collect()",
+            ".map(|(k,v)| (k.0.into(), v.0)).collect()",
+        );
         let module_path_id = serde_proto_file.replace('.', "::");
         fs_err::write(
             &out_file,
-            format!("use crate::{}::*;\n{}", module_path_id, file_content),
+            format!(
+                "#![allow(clippy::useless_conversion)]\nuse crate::{}::*;\n{}",
+                module_path_id, file_content
+            ),
         )?;
     }
 

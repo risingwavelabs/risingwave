@@ -20,7 +20,7 @@ use itertools::Itertools;
 use num_bigint::BigInt;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
     ToOwnedDatum,
@@ -596,8 +596,8 @@ impl JsonParseOptions {
                                     path: struct_type_info.to_string(), // TODO: this is not good, we should maintain a path stack
                                 };
                                 // TODO: is it possible to unify the logging with the one in `do_action`?
-                                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =  LazyLock::new(LogSuppresser::default);
-                                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =  LazyLock::new(LogSuppressor::default);
+                                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                                     tracing::warn!(error = %error.as_report(), suppressed_count, "undefined nested field, padding with `NULL`");
                                 }
                                 &BorrowedValue::Static(simd_json::StaticNode::Null)

@@ -866,7 +866,7 @@ impl Mutation {
                     .iter()
                     .map(|(table_id, subscriber_id)| SubscriptionUpstreamInfo {
                         subscriber_id: *subscriber_id,
-                        upstream_mv_table_id: table_id.as_raw_id(),
+                        upstream_mv_table_id: *table_id,
                     })
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
@@ -920,7 +920,7 @@ impl Mutation {
                     .map(
                         |(subscriber_id, upstream_mv_table_id)| SubscriptionUpstreamInfo {
                             subscriber_id: *subscriber_id,
-                            upstream_mv_table_id: upstream_mv_table_id.as_raw_id(),
+                            upstream_mv_table_id: *upstream_mv_table_id,
                         },
                     )
                     .collect(),
@@ -952,7 +952,7 @@ impl Mutation {
                 table_id,
                 associated_source_id,
             } => PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
-                table_id: table_id.as_raw_id(),
+                table_id: *table_id,
                 associated_source_id: associated_source_id.as_raw_id(),
             }),
             Mutation::ListFinish {
@@ -1061,9 +1061,7 @@ impl Mutation {
                         |SubscriptionUpstreamInfo {
                              subscriber_id,
                              upstream_mv_table_id,
-                         }| {
-                            (TableId::new(*upstream_mv_table_id), *subscriber_id)
-                        },
+                         }| { (*upstream_mv_table_id, *subscriber_id) },
                     )
                     .collect(),
                 backfill_nodes_to_pause: add.backfill_nodes_to_pause.iter().copied().collect(),
@@ -1110,7 +1108,7 @@ impl Mutation {
                 subscriptions_to_drop: drop
                     .info
                     .iter()
-                    .map(|info| (info.subscriber_id, TableId::new(info.upstream_mv_table_id)))
+                    .map(|info| (info.subscriber_id, info.upstream_mv_table_id))
                     .collect(),
             },
             PbMutation::ConnectorPropsChange(alter_connector_props) => {
@@ -1141,7 +1139,7 @@ impl Mutation {
                 }
             }
             PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
-                table_id: TableId::new(refresh_start.table_id),
+                table_id: refresh_start.table_id,
                 associated_source_id: TableId::new(refresh_start.associated_source_id),
             },
             PbMutation::ListFinish(list_finish) => Mutation::ListFinish {

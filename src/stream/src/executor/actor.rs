@@ -24,7 +24,7 @@ use hytra::TrAdder;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, IntGaugeExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
@@ -40,6 +40,7 @@ use tracing::Instrument;
 use super::StreamConsumer;
 use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
+use crate::CONFIG;
 use crate::error::StreamResult;
 use crate::task::{ActorId, FragmentId, LocalBarrierManager, StreamEnvironment};
 
@@ -66,7 +67,10 @@ pub struct ActorContext {
     // Meta client. currently used for auto schema change. `None` for test only
     pub meta_client: Option<MetaClient>,
 
-    pub streaming_config: Arc<StreamingConfig>,
+    /// The local streaming configuration for this specific actor.
+    ///
+    /// Compared to `stream_env.global_config`, this config can have some entries overridden by the user.
+    pub config: Arc<StreamingConfig>,
 
     pub stream_env: StreamEnvironment,
 }
@@ -89,7 +93,7 @@ impl ActorContext {
             initial_subscriber_ids: Default::default(),
             initial_upstream_actors: Default::default(),
             meta_client: None,
-            streaming_config: Arc::new(StreamingConfig::default()),
+            config: Arc::new(StreamingConfig::default()),
             stream_env: StreamEnvironment::for_test(),
         })
     }
@@ -124,14 +128,14 @@ impl ActorContext {
                 .collect(),
             initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
             meta_client,
-            streaming_config,
+            config: streaming_config,
             stream_env,
         })
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
-        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
+        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
             tracing::error!(identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
         }
 
@@ -199,6 +203,7 @@ where
         let expr_context = self.expr_context.clone();
         let fragment_id = self.actor_context.fragment_id;
         let vnode_count = self.actor_context.vnode_count;
+        let config = self.actor_context.config.clone();
 
         let run = async move {
             tokio::join!(
@@ -214,6 +219,7 @@ where
         let run = expr_context_scope(expr_context, run);
         let run = FRAGMENT_ID::scope(fragment_id, run);
         let run = VNODE_COUNT::scope(vnode_count, run);
+        let run = CONFIG.scope(config, run);
 
         run.await
     }

@@ -96,7 +96,7 @@ impl<S: StateStore> VectorIndexReader<S> {
         Self {
             vector_info_struct_type,
             state_store,
-            table_id: reader_desc.table_id.into(),
+            table_id: reader_desc.table_id,
 
             info_output_indices: reader_desc
                 .info_output_indices

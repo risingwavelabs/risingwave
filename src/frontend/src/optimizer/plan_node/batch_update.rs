@@ -94,7 +94,7 @@ impl ToBatchPb for BatchUpdate {
             .collect();
 
         NodeBody::Update(UpdateNode {
-            table_id: self.core.table_id.as_raw_id(),
+            table_id: self.core.table_id,
             table_version_id: self.core.table_version_id,
             returning: self.core.returning,
             old_exprs,
