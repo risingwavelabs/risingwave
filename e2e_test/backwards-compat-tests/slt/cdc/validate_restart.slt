@@ -7,7 +7,7 @@ SELECT * FROM mysql_table_in_rw;
 2 22
 
 system ok
-mysql --host=127.0.0.1 --port=4306 -u root -D rwcdc << EOF
+mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
 INSERT INTO table_in_mysql VALUES (3,'33');
 DELETE FROM table_in_mysql WHERE id=2;
 UPDATE table_in_mysql SET name='nnn' WHERE id=1;
@@ -30,7 +30,7 @@ SELECT * FROM postgres_table_in_rw;
 2 22
 
 system ok
-PGPASSWORD=postgres psql -h 127.0.0.1 -p 8432 -d rwcdc -U postgres << EOF
+PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD='post\tgres' PGDATABASE=rwcdc psql << EOF
 INSERT INTO table_in_postgres VALUES (3,'33');
 DELETE FROM table_in_postgres WHERE id=2;
 UPDATE table_in_postgres SET name='nnn' WHERE id=1;
@@ -53,7 +53,7 @@ SELECT * FROM sqlserver_table_in_rw;
 2 22
 
 system ok
-SQLCMDSERVER=127.0.0.1 SQLCMDUSER=SA SQLCMDPASSWORD="YourPassword123" SQLCMDDBNAME=rwcdc SQLCMDPORT=1433 sqlcmd <<EOF
+SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433 sqlcmd <<EOF
 INSERT INTO table_in_sqlserver VALUES (3,'33');
 GO
 DELETE FROM table_in_sqlserver WHERE id=2;

@@ -1,7 +1,9 @@
 # mysql
 
 system ok
-mysql --host=127.0.0.1 --port=4306 -u root -D rwcdc << EOF
+mysql --host=mysql --port=3306 -u root -p123456 << EOF
+CREATE DATABASE rwcdc;
+USE rwcdc;
 CREATE TABLE table_in_mysql (
     id INT PRIMARY KEY,
     name VARCHAR(255)
@@ -12,11 +14,11 @@ EOF
 statement ok
 CREATE SOURCE cdc_source_mysql WITH (
     connector = 'mysql-cdc',
-    hostname='127.0.0.1',
-    port=4306,
+    hostname='mysql',
+    port=3306,
     database.name='rwcdc',
     username='root',
-    password='',
+    password='123456',
     auto.schema.change = 'true'
 );
 
@@ -31,7 +33,10 @@ FROM cdc_source_mysql TABLE 'rwcdc.table_in_mysql';
 # postgres
 
 system ok
-PGPASSWORD=postgres psql -h 127.0.0.1 -p 8432 -d rwcdc -U postgres << EOF
+PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD='post\tgres' PGDATABASE=rwcdc createdb
+
+system ok
+PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD='post\tgres' PGDATABASE=rwcdc psql << EOF
 CREATE TABLE table_in_postgres (
     id INT PRIMARY KEY,
     name VARCHAR(255)
@@ -42,11 +47,11 @@ EOF
 statement ok
 CREATE SOURCE cdc_source_postgres WITH (
     connector = 'postgres-cdc',
-    hostname='127.0.0.1',
-    port=8432,
+    hostname='postgres',
+    port=5432,
     database.name='rwcdc',
     username='postgres',
-    password='',
+    password='post\tgres',
     auto.schema.change = 'true'
 );
 
@@ -60,7 +65,7 @@ FROM cdc_source_postgres TABLE 'public.table_in_postgres';
 # sqlserver
 
 system ok
-SQLCMDSERVER=127.0.0.1 SQLCMDUSER=SA SQLCMDPASSWORD="YourPassword123" SQLCMDDBNAME=master SQLCMDPORT=1433 sqlcmd <<EOF
+SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433 sqlcmd <<EOF
 CREATE DATABASE rwcdc;
 GO
 USE rwcdc;
@@ -86,10 +91,10 @@ EOF
 statement ok
 CREATE SOURCE cdc_source_sqlserver WITH (
     connector = 'sqlserver-cdc',
-    hostname = '127.0.0.1',
+    hostname = 'sqlserver-server',
     port = '1433',
     username = 'SA',
-    password = 'YourPassword123',
+    password = 'SomeTestOnly@SA',
     database.name = 'rwcdc',
 );
 
