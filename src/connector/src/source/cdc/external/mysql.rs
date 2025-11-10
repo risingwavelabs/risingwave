@@ -37,12 +37,60 @@ use sqlx::MySqlPool;
 use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
 
+use crate::connector_common::SslMode;
+// Re-export SslMode for convenience
+pub use crate::connector_common::SslMode as MySqlSslMode;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode, mysql_row_to_owned_row,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName, mysql_row_to_owned_row,
 };
+
+/// Build MySQL connection pool with proper SSL configuration.
+///
+/// This helper function creates a `mysql_async::Pool` with all necessary configurations
+/// including SSL settings. Use this function to ensure consistent MySQL connection setup
+/// across the codebase.
+///
+/// # Arguments
+/// * `host` - MySQL server hostname or IP address
+/// * `port` - MySQL server port
+/// * `username` - MySQL username
+/// * `password` - MySQL password
+/// * `database` - Database name
+/// * `ssl_mode` - SSL mode configuration (disabled, preferred, required, verify-ca, verify-full)
+///
+/// # Returns
+/// Returns a configured `mysql_async::Pool` ready for use
+pub fn build_mysql_connection_pool(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+    database: &str,
+    ssl_mode: SslMode,
+) -> mysql_async::Pool {
+    let mut opts_builder = mysql_async::OptsBuilder::default()
+        .user(Some(username))
+        .pass(Some(password))
+        .ip_or_hostname(host)
+        .tcp_port(port)
+        .db_name(Some(database));
+
+    opts_builder = match ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
+        // verify-ca and verify-full are same as required for mysql now
+        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
+            let ssl_without_verify = mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true);
+            opts_builder.ssl_opts(Some(ssl_without_verify))
+        }
+    };
+
+    mysql_async::Pool::new(opts_builder)
+}
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct MySqlOffset {
@@ -438,24 +486,14 @@ impl MySqlExternalTableReader {
     }
 
     pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
-        let mut opts_builder = mysql_async::OptsBuilder::default()
-            .user(Some(config.username))
-            .pass(Some(config.password))
-            .ip_or_hostname(config.host)
-            .tcp_port(config.port.parse::<u16>().unwrap())
-            .db_name(Some(config.database));
-
-        opts_builder = match config.ssl_mode {
-            SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-            // verify-ca and verify-full are same as required for mysql now
-            SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-                let ssl_without_verify = mysql_async::SslOpts::default()
-                    .with_danger_accept_invalid_certs(true)
-                    .with_danger_skip_domain_validation(true);
-                opts_builder.ssl_opts(Some(ssl_without_verify))
-            }
-        };
-        let pool = mysql_async::Pool::new(opts_builder);
+        let pool = build_mysql_connection_pool(
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.username,
+            &config.password,
+            &config.database,
+            config.ssl_mode,
+        );
 
         let field_names = rw_schema
             .fields

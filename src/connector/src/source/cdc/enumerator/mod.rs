@@ -33,6 +33,7 @@ use tokio_postgres::types::PgLsn;
 
 use crate::connector_common::{SslMode, create_pg_client};
 use crate::error::ConnectorResult;
+use crate::source::cdc::external::mysql::build_mysql_connection_pool;
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
     SqlServer, table_schema_exclude_additional_columns,
@@ -366,8 +367,10 @@ impl DebeziumSplitEnumerator<Mysql> {
         let port = self
             .properties
             .get("port")
-            .ok_or_else(|| anyhow::anyhow!("port not found in CDC properties"))?;
-        let user = self
+            .ok_or_else(|| anyhow::anyhow!("port not found in CDC properties"))?
+            .parse::<u16>()
+            .context("failed to parse port as u16")?;
+        let username = self
             .properties
             .get("username")
             .ok_or_else(|| anyhow::anyhow!("username not found in CDC properties"))?;
@@ -380,14 +383,23 @@ impl DebeziumSplitEnumerator<Mysql> {
             .get("database.name")
             .ok_or_else(|| anyhow::anyhow!("database.name not found in CDC properties"))?;
 
-        // Build MySQL connection string
-        let mysql_url = format!(
-            "mysql://{}:{}@{}:{}/{}",
-            user, password, hostname, port, database
-        );
+        // Get SSL mode configuration (default to Disabled if not specified)
+        let ssl_mode = self
+            .properties
+            .get("database.ssl.mode")
+            .map(|s| match s.to_lowercase().as_str() {
+                "disabled" | "disable" => SslMode::Disabled,
+                "preferred" | "prefer" => SslMode::Preferred,
+                "required" | "require" => SslMode::Required,
+                "verify-ca" => SslMode::VerifyCa,
+                "verify-full" => SslMode::VerifyFull,
+                _ => SslMode::Disabled,
+            })
+            .unwrap_or(SslMode::Disabled);
 
-        // Create MySQL connection
-        let pool = mysql_async::Pool::new(mysql_url.as_str());
+        // Build MySQL connection pool with proper SSL configuration
+        let pool =
+            build_mysql_connection_pool(hostname, port, username, password, database, ssl_mode);
         let mut conn = pool
             .get_conn()
             .await
