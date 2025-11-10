@@ -49,7 +49,7 @@ pub fn get_bit(bytes: &[u8], n: i64) -> Result<i32> {
 /// \x1234563890
 /// ```
 #[function("set_bit(bytea, int8, int4) -> bytea")]
-pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
+pub fn set_bit(bytes: &[u8], n: i64, value: i32, writer: &mut impl std::io::Write) -> Result<()> {
     let max_sz = (bytes.len() * 8) as i64;
     if n < 0 || n >= max_sz {
         return Err(ExprError::InvalidParam {
@@ -65,16 +65,24 @@ pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
         });
     }
 
-    let mut buf = bytes.to_vec();
     let index = (n / 8) as usize;
-    let bit_pos = (n % 8) as u8;
-
-    if value != 0 {
-        buf[index] |= 1 << bit_pos;
+    let bit_pos = (n % 8) as u32;
+    let orig = bytes[index];
+    let mask = 1u8 << bit_pos;
+    let new_byte = if value != 0 {
+        orig | mask
     } else {
-        buf[index] &= !(1 << bit_pos);
+        orig & !mask
+    };
+
+    if index > 0 {
+        writer.write_all(&bytes[..index]).unwrap();
     }
-    Ok(buf.into_boxed_slice())
+    writer.write_all(&[new_byte]).unwrap();
+    if index + 1 < bytes.len() {
+        writer.write_all(&bytes[index + 1..]).unwrap();
+    }
+    Ok(())
 }
 
 /// Extracts n'th byte from binary string.
@@ -110,7 +118,7 @@ pub fn get_byte(bytes: &[u8], n: i32) -> Result<i32> {
 /// \x1234567840
 /// ```
 #[function("set_byte(bytea, int4, int4) -> bytea")]
-pub fn set_byte(bytes: &[u8], n: i32, value: i32) -> Result<Box<[u8]>> {
+pub fn set_byte(bytes: &[u8], n: i32, value: i32, writer: &mut impl std::io::Write) -> Result<()> {
     let max_sz = bytes.len() as i32;
     if n < 0 || n >= max_sz {
         return Err(ExprError::InvalidParam {
@@ -118,9 +126,22 @@ pub fn set_byte(bytes: &[u8], n: i32, value: i32) -> Result<Box<[u8]>> {
             reason: format!("index {} out of valid range, 0..{}", n, max_sz - 1).into(),
         });
     }
-    let mut buf = bytes.to_vec();
-    buf[n as usize] = value as u8;
-    Ok(buf.into_boxed_slice())
+    let Ok(value) = TryInto::<u8>::try_into(value) else {
+        return Err(ExprError::InvalidParam {
+            name: "set_byte",
+            reason: format!("value {} out of valid byte range 0..255", value).into(),
+        });
+    };
+
+    let index = n as usize;
+    if index > 0 {
+        writer.write_all(&bytes[..index]).unwrap();
+    }
+    writer.write_all(&[value]).unwrap();
+    if index + 1 < bytes.len() {
+        writer.write_all(&bytes[index + 1..]).unwrap();
+    }
+    Ok(())
 }
 
 /// Returns the number of bits set in the binary string
@@ -153,11 +174,73 @@ pub fn bit_count(bytes: &[u8]) -> i64 {
 /// \x9078563412
 /// ```
 #[function("reverse(bytea) -> bytea")]
-pub fn reverse_bytea(bytes: &[u8]) -> Box<[u8]> {
-    bytes
-        .iter()
-        .rev()
-        .copied()
-        .collect::<Vec<_>>()
-        .into_boxed_slice()
+pub fn reverse_bytea(bytes: &[u8], writer: &mut impl std::io::Write) {
+    for byte in bytes.iter().rev() {
+        writer.write_all(&[*byte]).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_bytes() -> Vec<u8> {
+        vec![0x12, 0x34, 0x56, 0x78, 0x90]
+    }
+
+    #[test]
+    fn test_get_bit_basic_and_bounds() {
+        let b = sample_bytes();
+        // example: bit 30 is 1
+        assert_eq!(get_bit(&b, 30).unwrap(), 1);
+        // negative index -> error
+        assert!(get_bit(&b, -1i64).is_err());
+        // out of range -> error
+        let max_bits = (b.len() * 8) as i64;
+        assert!(get_bit(&b, max_bits).is_err());
+    }
+
+    #[test]
+    fn test_set_bit_basic() {
+        let b = sample_bytes();
+        let mut out = Vec::new();
+        // set bit 30 to 0, expected change at byte index 3 (0x78 -> 0x38)
+        set_bit(&b, 30, 0, &mut out).unwrap();
+        assert_eq!(&out, &[0x12, 0x34, 0x56, 0x38, 0x90]);
+    }
+
+    #[test]
+    fn test_get_byte_and_bounds() {
+        let b = sample_bytes();
+        assert_eq!(get_byte(&b, 4).unwrap(), 144); // 0x90 == 144
+        assert!(get_byte(&b, -1i32).is_err());
+        assert!(get_byte(&b, b.len() as i32).is_err());
+    }
+
+    #[test]
+    fn test_set_byte_basic_and_invalid_value() {
+        let b = sample_bytes();
+        let mut out = Vec::new();
+        // set last byte to 64 (0x40)
+        set_byte(&b, 4, 64, &mut out).unwrap();
+        assert_eq!(&out, &[0x12, 0x34, 0x56, 0x78, 0x40]);
+
+        // invalid byte value -> error
+        assert!(set_byte(&b, 4, 256, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn test_bit_count() {
+        let b = sample_bytes();
+        // expected 15 as in example
+        assert_eq!(bit_count(&b), 15);
+    }
+
+    #[test]
+    fn test_reverse_bytea() {
+        let b = sample_bytes();
+        let mut out = Vec::new();
+        reverse_bytea(&b, &mut out);
+        assert_eq!(&out, &[0x90, 0x78, 0x56, 0x34, 0x12]);
+    }
 }

@@ -529,8 +529,8 @@ struct UserFunctionAttr {
     async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
-    /// Whether contains argument `&mut impl Write`.
-    write: bool,
+    /// The writer type kind, if any, such as `impl std::fmt::Write`.
+    writer_type_kind: Option<WriterTypeKind>,
     /// Whether the last argument type is `retract: bool`.
     retract: bool,
     /// Whether each argument type is `Option<T>`.
@@ -596,6 +596,12 @@ impl AggregateFnOrImpl {
     }
 }
 
+#[derive(Debug, Clone)]
+enum WriterTypeKind {
+    FmtWrite, // std::fmt::Write
+    IoWrite,  // std::io::Write
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum ReturnTypeKind {
     T,
@@ -619,7 +625,7 @@ impl UserFunctionAttr {
     /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
         !self.async_
-            && !self.write
+            && self.writer_type_kind.is_none()
             && !self.context
             && self.args_option.iter().all(|b| !b)
             && self.return_type_kind == ReturnTypeKind::T

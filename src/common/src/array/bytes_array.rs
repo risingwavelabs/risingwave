@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::Write;
 use std::iter;
 use std::mem::size_of;
 
@@ -250,33 +251,13 @@ impl BytesArrayBuilder {
     }
 }
 
+/// Note: dropping an unfinished `BytesWriter` will rollback the partial data
 pub struct BytesWriter<'a> {
     builder: &'a mut BytesArrayBuilder,
 }
 
-impl<'a> BytesWriter<'a> {
-    /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
-    pub fn write_ref(self, value: &[u8]) {
-        self.builder.append(Some(value));
-    }
-
-    /// `begin` will create a `PartialBytesWriter`, which allow multiple appendings to create a new
-    /// record.
-    pub fn begin(self) -> PartialBytesWriter<'a> {
-        PartialBytesWriter {
-            builder: self.builder,
-        }
-    }
-}
-
-pub struct PartialBytesWriter<'a> {
-    builder: &'a mut BytesArrayBuilder,
-}
-
-impl PartialBytesWriter<'_> {
+impl BytesWriter<'_> {
     /// `write_ref` will append partial dirty data to `builder`.
-    /// `PartialBytesWriter::write_ref` is different from `BytesWriter::write_ref`
-    /// in that it allows us to call it multiple times.
     pub fn write_ref(&mut self, value: &[u8]) {
         // SAFETY: We'll clean the dirty `builder` in the `drop`.
         unsafe { self.builder.append_partial(value) }
@@ -286,10 +267,27 @@ impl PartialBytesWriter<'_> {
     /// Exactly one new record was appended and the `builder` can be safely used.
     pub fn finish(self) {
         self.builder.finish_partial();
+        std::mem::forget(self);
     }
 }
 
-impl Drop for PartialBytesWriter<'_> {
+impl Write for BytesWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.write_ref(buf);
+        Ok(buf.len())
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.write_ref(buf);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for BytesWriter<'_> {
     fn drop(&mut self) {
         // If `finish` is not called, we should rollback the data.
         self.builder.rollback_partial();

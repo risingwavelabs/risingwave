@@ -113,11 +113,11 @@ pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
 }
 
 /// Refer to PostgreSQL's implementation <https://github.com/postgres/postgres/blob/5cb54fc310fb84287cbdc74533f3420490a2f63a/src/backend/utils/adt/varlena.c#L276-L288>
-pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
+pub fn str_to_bytea(elem: &str, writer: &mut impl std::io::Write) -> Result<()> {
     if let Some(remainder) = elem.strip_prefix(r"\x") {
-        Ok(parse_bytes_hex(remainder)?.into())
+        Ok(parse_bytes_hex(remainder, writer)?)
     } else {
-        Ok(parse_bytes_traditional(elem)?.into())
+        Ok(parse_bytes_traditional(elem, writer)?)
     }
 }
 
@@ -132,9 +132,7 @@ fn get_hex(c: u8) -> Result<u8> {
 }
 
 /// Refer to <https://www.postgresql.org/docs/current/datatype-binary.html#id-1.5.7.12.10> for specification.
-pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
-    let mut res = Vec::with_capacity(s.len() / 2);
-
+pub fn parse_bytes_hex(s: &str, writer: &mut impl std::io::Write) -> Result<()> {
     let mut bytes = s.bytes();
     while let Some(c) = bytes.next() {
         // white spaces are tolerated
@@ -146,31 +144,33 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         match bytes.next() {
             Some(c) => {
                 let v2 = get_hex(c)?;
-                res.push((v1 << 4) | v2);
+                writer
+                    .write_all(&[(v1 << 4) | v2])
+                    .map_err(|e| e.to_string())?;
             }
             None => return Err("invalid hexadecimal data: odd number of digits".to_owned()),
         }
     }
 
-    Ok(res)
+    Ok(())
 }
 
 /// Refer to <https://www.postgresql.org/docs/current/datatype-binary.html#id-1.5.7.12.10> for specification.
-pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
+pub fn parse_bytes_traditional(s: &str, writer: &mut impl std::io::Write) -> Result<()> {
     let mut bytes = s.bytes();
 
-    let mut res = Vec::new();
     while let Some(b) = bytes.next() {
         if b != b'\\' {
-            res.push(b);
+            writer.write_all(&[b]).map_err(|e| e.to_string())?;
         } else {
             match bytes.next() {
                 Some(b'\\') => {
-                    res.push(b'\\');
+                    writer.write_all(b"\\").map_err(|e| e.to_string())?;
                 }
                 Some(b1 @ b'0'..=b'3') => match bytes.next_tuple() {
                     Some((b2 @ b'0'..=b'7', b3 @ b'0'..=b'7')) => {
-                        res.push(((b1 - b'0') << 6) + ((b2 - b'0') << 3) + (b3 - b'0'));
+                        let byte = (b1 - b'0') << 6 | (b2 - b'0') << 3 | (b3 - b'0');
+                        writer.write_all(&[byte]).map_err(|e| e.to_string())?;
                     }
                     _ => {
                         // one backslash, not followed by another or ### valid octal
@@ -185,7 +185,7 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
         }
     }
 
-    Ok(res)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -206,6 +206,13 @@ mod tests {
     #[test]
     fn test_bytea() {
         use crate::types::ToText;
+
+        fn str_to_bytea(s: &str) -> Result<Box<[u8]>> {
+            let mut buf = Vec::new();
+            super::str_to_bytea(s, &mut buf)?;
+            Ok(buf.into())
+        }
+
         assert_eq!(str_to_bytea("fgo").unwrap().as_ref().to_text(), r"\x66676f");
         assert_eq!(
             str_to_bytea(r"\xDeadBeef").unwrap().as_ref().to_text(),

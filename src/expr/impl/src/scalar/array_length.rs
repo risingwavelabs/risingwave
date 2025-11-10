@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_common::array::ListRef;
 use risingwave_expr::{ExprError, Result, function};
 
@@ -185,6 +183,6 @@ fn array_length_of_dim(array: ListRef<'_>, d: i32) -> Result<Option<i32>> {
 /// select array_dims(array[array[]::int[]]); -- would be `[1:1][1:0]` after multidimensional support
 /// ```
 #[function("array_dims(anyarray) -> varchar")]
-fn array_dims(array: ListRef<'_>, writer: &mut impl Write) {
+fn array_dims(array: ListRef<'_>, writer: &mut impl std::fmt::Write) {
     write!(writer, "[1:{}]", array.len()).unwrap();
 }
