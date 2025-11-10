@@ -242,5 +242,20 @@ pub fn validate_compatibility(
         props.insert("schema.name".into(), "dbo".into());
     }
 
+    // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
+    if (connector == MYSQL_CDC_CONNECTOR
+        || connector == POSTGRES_CDC_CONNECTOR
+        || connector == CITUS_CDC_CONNECTOR
+        || connector == MONGODB_CDC_CONNECTOR
+        || connector == SQL_SERVER_CDC_CONNECTOR)
+        && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
+        && timeout_value.parse::<u32>().is_err()
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "Invalid 'cdc.source.wait.streaming.start.timeout' value: '{}'. Expected a positive integer, not a string",
+            timeout_value
+        ))));
+    }
+
     Ok(())
 }

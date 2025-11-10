@@ -91,6 +91,17 @@ async fn handle_alter_source_props_inner(
         .into());
     }
 
+    // Validate cdc.source.wait.streaming.start.timeout if present
+    if let Some(timeout_value) = changed_props.get("cdc.source.wait.streaming.start.timeout")
+        && timeout_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "Invalid 'cdc.source.wait.streaming.start.timeout' value: '{}'. Expected a positive integer, not a string",
+            timeout_value
+        ))
+        .into());
+    }
+
     meta_client
         .alter_source_connector_props(
             source_id,
