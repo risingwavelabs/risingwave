@@ -1,6 +1,6 @@
 # mysql
 
-query I rowsort
+query I rowsort retry 5 backoff 3s
 SELECT * FROM mysql_table_in_rw;
 ----
 1 11
@@ -11,9 +11,7 @@ mysql --host=mysql --port=3306 -u root -p123456 -D rwcdc << EOF
 UPDATE table_in_mysql SET name='xxx' WHERE id=1;
 EOF
 
-sleep 3s
-
-query II rowsort
+query II rowsort retry 5 backoff 3s
 SELECT * FROM mysql_table_in_rw;
 ----
 1 xxx
@@ -21,7 +19,7 @@ SELECT * FROM mysql_table_in_rw;
 
 # postgres
 
-query I rowsort
+query I rowsort retry 5 backoff 3s
 SELECT * FROM postgres_table_in_rw;
 ----
 1 11
@@ -32,9 +30,7 @@ PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD='post\tgres' PGDATABASE=rwcdc p
 UPDATE table_in_postgres SET name='xxx' WHERE id=1;
 EOF
 
-sleep 3s
-
-query II rowsort
+query II rowsort retry 5 backoff 3s
 SELECT * FROM postgres_table_in_rw;
 ----
 1 xxx
@@ -42,7 +38,7 @@ SELECT * FROM postgres_table_in_rw;
 
 # sqlserver
 
-query I rowsort
+query I rowsort retry 5 backoff 3s
 SELECT * FROM sqlserver_table_in_rw;
 ----
 1 11
@@ -54,9 +50,7 @@ UPDATE table_in_sqlserver SET name='xxx' WHERE id=1;
 GO
 EOF
 
-sleep 5s
-
-query II rowsort
+query II rowsort retry 5 backoff 3s
 SELECT * FROM sqlserver_table_in_rw;
 ----
 1 xxx

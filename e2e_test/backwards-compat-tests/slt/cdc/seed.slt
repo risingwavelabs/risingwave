@@ -102,6 +102,3 @@ CREATE TABLE sqlserver_table_in_rw (
     name VARCHAR
 )
 FROM cdc_source_sqlserver TABLE 'rwcdc.dbo.table_in_sqlserver';
-
-# wait for all cdc backfill to complete
-sleep 3s
