@@ -279,12 +279,16 @@ impl DebeziumSplitEnumerator<Mysql> {
             .properties
             .get("hostname")
             .map(|s| s.as_str())
-            .unwrap_or("unknown");
+            .ok_or_else(|| {
+                anyhow::anyhow!("missing required property 'hostname' for MySQL CDC source")
+            })?;
         let port = self
             .properties
             .get("port")
             .map(|s| s.as_str())
-            .unwrap_or("unknown");
+            .ok_or_else(|| {
+                anyhow::anyhow!("missing required property 'port' for MySQL CDC source")
+            })?;
 
         // Query binlog files and update metrics
         match self.query_binlog_files().await {

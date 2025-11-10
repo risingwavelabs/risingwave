@@ -26,6 +26,7 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
+use risingwave_connector::source::cdc::split::extract_postgres_lsn_from_offset_str;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -34,7 +35,6 @@ use risingwave_connector::source::{
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::TryWaitEpochOptions;
-use serde_json;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
@@ -52,57 +52,6 @@ use crate::task::LocalBarrierManager;
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
 pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
-
-/// Extract offset value from CDC split
-///
-/// This function extracts the offset value from CDC split.
-/// For Postgres CDC, the offset is LSN.
-fn extract_split_offset(split: &SplitImpl) -> Option<u64> {
-    match split {
-        SplitImpl::PostgresCdc(pg_split) => {
-            let offset_str = pg_split.start_offset().as_ref()?;
-            extract_pg_cdc_lsn_from_offset(offset_str)
-        }
-        _ => None,
-    }
-}
-
-/// This function parses the offset JSON and extracts the LSN value from the sourceOffset.lsn field.
-/// Returns Some(lsn) if the LSN is found and can be parsed as u64, None otherwise.
-fn extract_pg_cdc_lsn_from_offset(offset_str: &str) -> Option<u64> {
-    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
-    let source_offset = offset.get("sourceOffset")?;
-    let lsn = source_offset.get("lsn")?;
-    lsn.as_u64()
-}
-
-/// Extract MySQL CDC binlog offset (file sequence and position) from the offset JSON string.
-///
-/// MySQL binlog offset format:
-/// {
-///   "sourcePartition": { "server": "..." },
-///   "sourceOffset": {
-///     "file": "binlog.000123",
-///     "pos": 456789,
-///     ...
-///   }
-/// }
-///
-/// Returns `Some((file_seq, position))` where:
-/// - `file_seq`: the numeric part of binlog filename (e.g., 123 from "binlog.000123")
-/// - `position`: the byte offset within the binlog file
-fn extract_mysql_cdc_binlog_offset(offset_str: &str) -> Option<(u64, u64)> {
-    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
-    let source_offset = offset.get("sourceOffset")?;
-
-    let file = source_offset.get("file")?.as_str()?;
-    let pos = source_offset.get("pos")?.as_u64()?;
-
-    // Extract numeric sequence from "binlog.NNNNNN"
-    let file_seq = file.strip_prefix("binlog.")?.parse::<u64>().ok()?;
-
-    Some((file_seq, pos))
-}
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -466,28 +415,30 @@ impl<S: StateStore> SourceExecutor<S> {
             // Record metrics for CDC sources before moving cache
             let source_id = core.source_id.to_string();
             for split_impl in &cache {
-                // PostgreSQL CDC: Extract and record LSN
-                if let Some(state_table_lsn_value) = extract_split_offset(split_impl) {
-                    self.metrics
-                        .pg_cdc_state_table_lsn
-                        .with_guarded_label_values(&[&source_id])
-                        .set(state_table_lsn_value as i64);
-                }
+                // Extract and record CDC-specific metrics based on split type
+                match split_impl {
+                    SplitImpl::PostgresCdc(pg_split) => {
+                        if let Some(lsn_value) = pg_split.pg_lsn() {
+                            self.metrics
+                                .pg_cdc_state_table_lsn
+                                .with_guarded_label_values(&[&source_id])
+                                .set(lsn_value as i64);
+                        }
+                    }
+                    SplitImpl::MysqlCdc(mysql_split) => {
+                        if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
+                            self.metrics
+                                .mysql_cdc_state_binlog_file_seq
+                                .with_guarded_label_values(&[&source_id])
+                                .set(file_seq as i64);
 
-                // MySQL CDC: Extract and record binlog file sequence and position
-                if let SplitImpl::MysqlCdc(mysql_split) = split_impl
-                    && let Some(offset_str) = mysql_split.start_offset().as_ref()
-                    && let Some((file_seq, position)) = extract_mysql_cdc_binlog_offset(offset_str)
-                {
-                    self.metrics
-                        .mysql_cdc_state_binlog_file_seq
-                        .with_guarded_label_values(&[&source_id])
-                        .set(file_seq as i64);
-
-                    self.metrics
-                        .mysql_cdc_state_binlog_position
-                        .with_guarded_label_values(&[&source_id])
-                        .set(position as i64);
+                            self.metrics
+                                .mysql_cdc_state_binlog_position
+                                .with_guarded_label_values(&[&source_id])
+                                .set(position as i64);
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -974,7 +925,9 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 
                             // Run task with callback to record LSN after successful commit
                             task.run_with_on_commit_success(|source_id: u64, offset| {
-                                if let Some(lsn_value) = extract_pg_cdc_lsn_from_offset(offset) {
+                                if let Some(lsn_value) =
+                                    extract_postgres_lsn_from_offset_str(offset)
+                                {
                                     self.metrics
                                         .pg_cdc_jni_commit_offset_lsn
                                         .with_guarded_label_values(&[&source_id.to_string()])
