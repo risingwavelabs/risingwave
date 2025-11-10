@@ -678,7 +678,7 @@ IcebergConfig:
   - name: compaction_type
     field_type: String
     comments: |-
-      Compaction type: `full`, `small_files`, or `files_with_delete`
+      Compaction type: `full`, `small-files`, or `files-with-delete`
       If not set, will auto set to `full`
     required: false
     default: Default::default
