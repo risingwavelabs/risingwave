@@ -201,7 +201,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     // two actors on two singleton fragments
     let new_actor = |actor_id| StreamActor {
         actor_id,
-        fragment_id: actor_id,
+        fragment_id: actor_id.into(),
         vnode_bitmap: None,
         mview_definition: "".to_owned(),
         expr_context: None,

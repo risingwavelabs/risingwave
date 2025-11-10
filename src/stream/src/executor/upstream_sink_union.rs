@@ -583,7 +583,7 @@ mod tests {
         let test_expr = build_from_pretty("$1:int8");
 
         let mut input = SinkHandlerInput::new(
-            1919, // from MergeExecutor::for_test()
+            1919.into(), // from MergeExecutor::for_test()
             Box::new(merge),
             vec![test_expr],
         )
@@ -632,7 +632,8 @@ mod tests {
             10,
             Some(barrier_rx),
         );
-        let input = SinkHandlerInput::new(actor_id, Box::new(merge), vec![]).boxed_input();
+        let input = SinkHandlerInput::new(FragmentId::new(actor_id as _), Box::new(merge), vec![])
+            .boxed_input();
         (input, tx, barrier_tx)
     }
 
@@ -709,8 +710,8 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let actor_id = 2;
-        let fragment_id = 0; // from ActorContext::for_test
-        let upstream_fragment_id = 11;
+        let fragment_id = 0.into(); // from ActorContext::for_test
+        let upstream_fragment_id = 11.into();
         let upstream_actor_id = 101;
 
         let upstream_actor = helper_make_local_actor(upstream_actor_id);

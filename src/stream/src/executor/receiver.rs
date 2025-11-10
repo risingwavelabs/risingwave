@@ -86,8 +86,8 @@ impl ReceiverExecutor {
 
         Self::new(
             ActorContext::for_test(actor_id),
-            514,
-            1919,
+            514.into(),
+            1919.into(),
             LocalInput::new(input, 0).boxed_input(),
             local_barrier_manager,
             StreamingMetrics::unused().into(),
@@ -224,7 +224,7 @@ mod tests {
         // old -> actor_id
         // new -> actor_id
 
-        let (upstream_fragment_id, fragment_id) = (10, 18);
+        let (upstream_fragment_id, fragment_id) = (10.into(), 18);
 
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
@@ -257,7 +257,7 @@ mod tests {
             &barrier_test_env.local_barrier_manager,
             metrics.clone(),
             actor_id,
-            fragment_id,
+            fragment_id.into(),
             &helper_make_local_actor(old),
             upstream_fragment_id,
         )
@@ -266,7 +266,7 @@ mod tests {
 
         let receiver = ReceiverExecutor::new(
             ActorContext::for_test(actor_id),
-            fragment_id,
+            fragment_id.into(),
             upstream_fragment_id,
             input,
             barrier_test_env.local_barrier_manager.clone(),

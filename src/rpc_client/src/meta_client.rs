@@ -78,6 +78,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -649,7 +650,7 @@ impl MetaClient {
 
     pub async fn alter_fragment_parallelism(
         &self,
-        fragment_ids: Vec<u32>,
+        fragment_ids: Vec<FragmentId>,
         parallelism: Option<PbTableParallelism>,
     ) -> Result<()> {
         let request = AlterFragmentParallelismRequest {
@@ -1151,7 +1152,7 @@ impl MetaClient {
 
     pub async fn get_fragment_by_id(
         &self,
-        fragment_id: u32,
+        fragment_id: FragmentId,
     ) -> Result<Option<FragmentDistribution>> {
         let resp = self
             .inner
@@ -1160,7 +1161,10 @@ impl MetaClient {
         Ok(resp.distribution)
     }
 
-    pub async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>> {
+    pub async fn get_fragment_vnodes(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Vec<(u32, Vec<u32>)>> {
         let resp = self
             .inner
             .get_fragment_vnodes(GetFragmentVnodesRequest { fragment_id })
@@ -1556,7 +1560,7 @@ impl MetaClient {
 
     pub async fn list_serving_vnode_mappings(
         &self,
-    ) -> Result<HashMap<u32, (u32, WorkerSlotMapping)>> {
+    ) -> Result<HashMap<FragmentId, (u32, WorkerSlotMapping)>> {
         let req = GetServingVnodeMappingsRequest {};
         let resp = self.inner.get_serving_vnode_mappings(req).await?;
         let mappings = resp

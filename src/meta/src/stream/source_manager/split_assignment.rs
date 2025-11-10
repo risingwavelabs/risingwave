@@ -49,8 +49,8 @@ impl SourceManager {
             .get(&upstream_source_fragment_id)
             .unwrap();
         tracing::info!(
-            fragment_id,
-            upstream_source_fragment_id,
+            %fragment_id,
+            %upstream_source_fragment_id,
             ?upstream_assignment,
             "migrate_splits_for_backfill_actors"
         );
@@ -448,8 +448,8 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    tracing::trace!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
-    tracing::trace!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
+    tracing::trace!(%fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
+    tracing::trace!(%fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
 
     let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
 
@@ -460,9 +460,9 @@ where
 
     if !dropped_splits.is_empty() {
         if opts.enable_scale_in {
-            tracing::info!(fragment_id, dropped_spltis = ?dropped_splits, "new dropped splits");
+            tracing::info!(%fragment_id, dropped_spltis = ?dropped_splits, "new dropped splits");
         } else {
-            tracing::warn!(fragment_id, dropped_spltis = ?dropped_splits, "split dropping happened, but it is not allowed");
+            tracing::warn!(%fragment_id, dropped_spltis = ?dropped_splits, "split dropping happened, but it is not allowed");
         }
     }
 
@@ -488,7 +488,7 @@ where
         }
     }
 
-    tracing::info!(fragment_id, new_discovered_splits = ?new_discovered_splits, "new discovered splits");
+    tracing::info!(%fragment_id, new_discovered_splits = ?new_discovered_splits, "new discovered splits");
 
     let mut heap = BinaryHeap::with_capacity(actor_splits.len());
 

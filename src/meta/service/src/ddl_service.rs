@@ -1063,12 +1063,7 @@ impl DdlService for DdlServiceImpl {
 
         let fragment_targets = fragment_ids
             .into_iter()
-            .map(|fragment_id| {
-                (
-                    fragment_id as risingwave_meta_model::FragmentId,
-                    parallelism.clone(),
-                )
-            })
+            .map(|fragment_id| (fragment_id, parallelism.clone()))
             .collect();
 
         self.ddl_controller

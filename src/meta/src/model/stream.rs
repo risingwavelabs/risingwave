@@ -158,8 +158,8 @@ impl Deref for StreamJobFragmentsToCreate {
 
 #[derive(Clone, Debug)]
 pub struct StreamActor {
-    pub actor_id: u32,
-    pub fragment_id: u32,
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
     pub vnode_bitmap: Option<Bitmap>,
     pub mview_definition: String,
     pub expr_context: Option<PbExprContext>,

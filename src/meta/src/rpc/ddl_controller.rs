@@ -1207,15 +1207,7 @@ impl DdlController {
 
         // unregister fragments and actors from source manager.
         // FIXME: need also unregister source backfill fragments.
-        let dropped_source_fragments = removed_source_fragments
-            .into_iter()
-            .map(|(source_id, fragments)| {
-                (
-                    source_id,
-                    fragments.into_iter().map(|id| id as u32).collect(),
-                )
-            })
-            .collect();
+        let dropped_source_fragments = removed_source_fragments;
         self.source_manager
             .apply_source_change(SourceChange::DropMv {
                 dropped_source_fragments,

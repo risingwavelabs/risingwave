@@ -189,8 +189,8 @@ impl MergeExecutor {
 
         Self::new(
             actor_ctx,
-            514,
-            1919,
+            514.into(),
+            1919.into(),
             upstream,
             local_barrier_manager,
             metrics.into(),
@@ -675,7 +675,7 @@ mod tests {
         // old -> actor_id
         // new -> actor_id
 
-        let (upstream_fragment_id, fragment_id) = (10, 18);
+        let (upstream_fragment_id, fragment_id) = (10.into(), 18.into());
 
         let inputs: Vec<_> =
             try_join_all([untouched, old].into_iter().map(async |upstream_actor_id| {
@@ -897,7 +897,7 @@ mod tests {
                 &test_env.local_barrier_manager,
                 addr.into(),
                 (0, 0),
-                (0, 0),
+                (0.into(), 0.into()),
                 Arc::new(StreamingMetrics::unused()),
             )
             .await

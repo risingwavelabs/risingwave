@@ -47,6 +47,7 @@ use crate::task::{DispatcherId, LocalBarrierManager, NewOutputRequest};
 
 mod output_mapping;
 pub use output_mapping::DispatchOutputMapping;
+use risingwave_common::id::FragmentId;
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -428,8 +429,8 @@ impl DispatchExecutor {
         input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<stream_plan::Dispatcher>,
-        actor_id: u32,
-        fragment_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> StreamResult<Self> {
@@ -458,8 +459,8 @@ impl DispatchExecutor {
     pub(crate) fn for_test(
         input: Executor,
         dispatchers: Vec<DispatcherImpl>,
-        actor_id: u32,
-        fragment_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> (
@@ -486,8 +487,8 @@ impl DispatchExecutor {
         mut input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<DispatcherImpl>,
-        actor_id: u32,
-        fragment_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -1359,7 +1360,7 @@ mod tests {
         let _schema = Schema { fields: vec![] };
         let (tx, rx) = channel_for_test();
         let actor_id = 233;
-        let fragment_id = 666;
+        let fragment_id = 666.into();
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
         let metrics = Arc::new(StreamingMetrics::unused());
 

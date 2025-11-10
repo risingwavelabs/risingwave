@@ -61,7 +61,7 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
             visit_stream_node_source_backfill(stream_node, |node| {
                 scan = Some(RwBackfillInfo {
                     job_id: fragment_distribution.table_id.as_raw_id() as i32,
-                    fragment_id: fragment_distribution.fragment_id as i32,
+                    fragment_id: fragment_distribution.fragment_id.as_raw_id() as i32,
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()
@@ -77,7 +77,7 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
             visit_stream_node_stream_scan(stream_node, |node| {
                 scan = Some(RwBackfillInfo {
                     job_id: fragment_distribution.table_id.as_raw_id() as i32,
-                    fragment_id: fragment_distribution.fragment_id as i32,
+                    fragment_id: fragment_distribution.fragment_id.as_raw_id() as i32,
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()

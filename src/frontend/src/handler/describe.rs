@@ -32,7 +32,7 @@ use super::explain::ExplainRow;
 use super::show::ShowColumnRow;
 use super::{RwPgResponse, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
-use crate::catalog::CatalogError;
+use crate::catalog::{CatalogError, FragmentId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::show::ShowColumnName;
 use crate::handler::{HandlerArgs, RwPgResponseBuilderExt};
@@ -372,7 +372,7 @@ fn explain_node<'a>(node: &StreamNode, verbose: bool) -> Pretty<'a> {
 
 pub async fn handle_describe_fragment(
     handler_args: HandlerArgs,
-    fragment_id: u32,
+    fragment_id: FragmentId,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let meta_client = session.env().meta_client();

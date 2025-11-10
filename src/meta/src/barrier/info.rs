@@ -709,7 +709,7 @@ impl InflightDatabaseInfo {
                                         .init_upstreams
                                         .iter()
                                         .map(|upstream| upstream.upstream_fragment_id)
-                                        .collect::<HashSet<_>>();
+                                        .collect::<HashSet<FragmentId>>();
                                     for drop_fragment_id in &drop_upstream_fragment_ids {
                                         if !current_upstream_fragment_ids.contains(drop_fragment_id)
                                         {

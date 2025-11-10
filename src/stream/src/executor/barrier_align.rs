@@ -175,7 +175,7 @@ mod tests {
             left,
             right,
             0,
-            0,
+            0.into(),
             Arc::new(StreamingMetrics::unused()),
             "dummy_executor",
         )

@@ -26,6 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -125,7 +126,7 @@ pub struct Fragment {
 
 impl Fragment {
     /// The fragment id.
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> FragmentId {
         self.inner.fragment_id
     }
 
@@ -249,8 +250,9 @@ impl Cluster {
     }
 
     /// Locate a fragment with the given id.
-    pub async fn locate_fragment_by_id(&mut self, id: u32) -> Result<Fragment> {
-        self.locate_one_fragment([predicate::id(id)]).await
+    pub async fn locate_fragment_by_id(&mut self, id: FragmentId) -> Result<Fragment> {
+        self.locate_one_fragment([predicate::id(id.as_raw_id())])
+            .await
     }
 
     #[cfg_or_panic(madsim)]
