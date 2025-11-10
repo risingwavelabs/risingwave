@@ -824,7 +824,7 @@ impl DatabaseManagedBarrierState {
         upstream_actor_id: ActorId,
         result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
     ) {
-        let (tx, rx) = channel_from_config(self.local_barrier_manager.env.config());
+        let (tx, rx) = channel_from_config(self.local_barrier_manager.env.global_config());
         self.new_actor_output_request(actor_id, upstream_actor_id, NewOutputRequest::Remote(tx));
         let _ = result_sender.send(Ok(rx));
     }

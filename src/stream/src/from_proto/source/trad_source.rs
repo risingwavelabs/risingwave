@@ -115,7 +115,7 @@ pub fn create_source_desc_builder(
         row_id_index.map(|x| x as _),
         with_properties,
         source_info,
-        params.env.config().developer.connector_message_buffer_size,
+        params.config.developer.connector_message_buffer_size,
         // `pk_indices` is used to ensure that a message will be skipped instead of parsed
         // with null pk when the pk column is missing.
         //
@@ -240,7 +240,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             barrier_receiver,
                             system_params,
                             source.rate_limit,
-                            params.env.config().clone(),
+                            params.config.clone(),
                         )
                         .boxed()
                     }
@@ -292,7 +292,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     params.info,
                     TroublemakerExecutor::new(
                         (info, exec).into(),
-                        params.env.config().developer.chunk_size,
+                        params.config.developer.chunk_size,
                     ),
                 )
                     .into())

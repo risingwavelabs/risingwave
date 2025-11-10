@@ -111,7 +111,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             // Set state table's vnodes to None to allow splits to be assigned to any actors, without following vnode constraints.
             let vnodes = None;
             let state_table = StateTableBuilder::new(node.get_state_table()?, state_store, vnodes)
-                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
             let progress = CdcProgressReporter::new(params.local_barrier_manager.clone());
@@ -134,7 +134,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             // cdc backfill should be singleton, so vnodes must be None.
             assert_eq!(None, vnodes);
             let state_table = StateTableBuilder::new(node.get_state_table()?, state_store, vnodes)
-                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
             let exec = CdcBackfillExecutor::new(
