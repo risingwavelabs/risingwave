@@ -36,7 +36,7 @@ test_failure_scenarios() {
     echo "✓ Wrong password correctly rejected"
 
     # Test non-existent user (should fail)
-    if PGPASSWORD=anypass psql -U testuser1 -c "SELECT 1;" 2>/dev/null; then
+    if PGPASSWORD=anypass psql -U non-exist-user -c "SELECT 1;" 2>/dev/null; then
         echo "ERROR: Non-existent user should have failed but succeeded"
         exit 1
     fi

@@ -18,9 +18,6 @@ addresses = ["0.0.0.0/0"]
 auth_method = "password"
 
 # "host" is for TCP/IP connections, with LDAP simple bind auth using URL format
-# NOTE: Since ldapurl format doesn't support ldapprefix/ldapsuffix parameters,
-# this configuration will use the username directly as the DN.
-# Users must provide the full DN when connecting (e.g., uid=testuser1,ou=people,dc=example,dc=com)
 [[frontend.hba_config.entries]]
 connection_type = "Host"
 databases = ["all"]

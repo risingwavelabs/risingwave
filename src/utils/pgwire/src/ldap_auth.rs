@@ -150,17 +150,15 @@ impl LdapTlsConfig {
                     )
                 })?;
 
+            let mut reader = std::io::Cursor::new(&client_key_bytes);
             let mut private_keys =
-                rustls_pemfile::pkcs8_private_keys(&mut client_key_bytes.clone().as_slice())
-                    .map_err(|e| {
-                        PsqlError::StartupError(
-                            anyhow!(e).context("Failed to parse client key").into(),
-                        )
-                    })?;
+                rustls_pemfile::pkcs8_private_keys(&mut reader).map_err(|e| {
+                    PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
+                })?;
             if private_keys.is_empty() {
                 // Try RSA private keys as a fallback
-                private_keys = rustls_pemfile::rsa_private_keys(&mut client_key_bytes.as_slice())
-                    .map_err(|e| {
+                reader.set_position(0);
+                private_keys = rustls_pemfile::rsa_private_keys(&mut reader).map_err(|e| {
                     PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
                 })?;
             }
