@@ -24,7 +24,7 @@ use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_meta_model::ObjectId;
+use risingwave_meta_model::{ObjectId, SinkId};
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
@@ -59,12 +59,57 @@ impl GlobalBarrierWorkerContextImpl {
             .reset_refreshing_tables(database_id)
             .await?;
 
+        self.resolve_pending_sink_state(database_id).await?;
+
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
                 dropped_source_ids: dirty_associated_source_ids,
             })
             .await;
+
+        Ok(())
+    }
+
+    async fn resolve_pending_sink_state(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
+        let pending_sink_epochs: HashMap<SinkId, Vec<u64>> = self
+            .metadata_manager
+            .catalog_controller
+            .list_all_pending_sink_epochs(database_id)
+            .await?;
+
+        if pending_sink_epochs.is_empty() {
+            return Ok(());
+        }
+
+        let sink_with_state_tables: HashMap<SinkId, Vec<TableId>> = self
+            .metadata_manager
+            .catalog_controller
+            .fetch_sink_with_state_table_ids(pending_sink_epochs.keys().copied().collect())
+            .await?;
+
+        let mut to_abort_records: HashMap<SinkId, Vec<u64>> = HashMap::new();
+        let version = self.hummock_manager.get_current_version().await;
+
+        for (sink_id, table_ids) in sink_with_state_tables {
+            let Some(table_id) = table_ids.first() else {
+                return Err(anyhow!("no state table id in sink: {}", sink_id).into());
+            };
+
+            if let Some(committed_epoch) = version.table_committed_epoch(*table_id) {
+                let pending_epochs = pending_sink_epochs.get(&sink_id).unwrap();
+                for epoch in pending_epochs {
+                    if *epoch > committed_epoch {
+                        to_abort_records.entry(sink_id).or_default().push(*epoch);
+                    }
+                }
+            }
+        }
+
+        self.metadata_manager
+            .catalog_controller
+            .abort_pending_sink_epochs(to_abort_records)
+            .await?;
 
         Ok(())
     }

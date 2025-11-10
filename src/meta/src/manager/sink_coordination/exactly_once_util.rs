@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_meta_model::SinkId;
-use risingwave_meta_model::pending_sink_state::{self, SinkState};
+use risingwave_meta_model::pending_sink_state::{self};
+use risingwave_meta_model::{Epoch, SinkId};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect, Set,
 };
@@ -32,8 +32,8 @@ where
 {
     let m = pending_sink_state::ActiveModel {
         sink_id: Set(sink_id),
-        epoch: Set(epoch as i64),
-        sink_state: Set(SinkState::Pending),
+        epoch: Set(epoch as Epoch),
+        sink_state: Set(pending_sink_state::SinkState::Pending),
         metadata: Set(commit_metadata),
     };
     match pending_sink_state::Entity::insert(m).exec(db).await {
@@ -54,8 +54,8 @@ where
 {
     match pending_sink_state::Entity::update(pending_sink_state::ActiveModel {
         sink_id: Set(sink_id),
-        epoch: Set(epoch as i64),
-        sink_state: Set(SinkState::Committed),
+        epoch: Set(epoch as Epoch),
+        sink_state: Set(pending_sink_state::SinkState::Committed),
         ..Default::default()
     })
     .exec(db)
@@ -107,7 +107,7 @@ where
 pub async fn list_sink_states_ordered_by_epoch<C>(
     db: &C,
     sink_id: SinkId,
-) -> anyhow::Result<Vec<(u64, SinkState, Vec<u8>)>>
+) -> anyhow::Result<Vec<(u64, pending_sink_state::SinkState, Vec<u8>)>>
 where
     C: ConnectionTrait,
 {

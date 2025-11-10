@@ -28,7 +28,7 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, SYSTEM_SCHEMAS, TableOption,
+    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableOption,
 };
 use risingwave_common::current_cluster_version;
 use risingwave_common::id::JobId;
@@ -43,8 +43,8 @@ use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
-    connection, database, fragment, function, index, object, object_dependency, schema, secret,
-    sink, source, streaming_job, subscription, table, user_privilege, view,
+    connection, database, fragment, function, index, object, object_dependency, pending_sink_state,
+    schema, secret, sink, source, streaming_job, subscription, table, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -80,6 +80,7 @@ use super::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::controller::catalog::util::update_internal_tables;
+use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::*;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
@@ -756,6 +757,103 @@ impl CatalogController {
             streaming_job_num,
             actor_num,
         })
+    }
+
+    pub async fn fetch_sink_with_state_table_ids(
+        &self,
+        sink_ids: Vec<SinkId>,
+    ) -> MetaResult<HashMap<SinkId, Vec<TableId>>> {
+        let inner = self.inner.read().await;
+
+        let query = Fragment::find()
+            .select_only()
+            .columns([fragment::Column::JobId, fragment::Column::StateTableIds])
+            .filter(
+                fragment::Column::JobId
+                    .is_in(sink_ids)
+                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
+            );
+
+        let rows: Vec<(JobId, I32Array)> = query.into_tuple().all(&inner.db).await?;
+
+        debug_assert!(rows.iter().map(|(job_id, _)| job_id).all_unique());
+
+        let result = rows
+            .into_iter()
+            .map(|(job_id, table_id_array)| {
+                (
+                    job_id.as_raw_id() as _,
+                    table_id_array
+                        .into_inner()
+                        .into_iter()
+                        .map(|id| TableId::new(id as _))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        Ok(result)
+    }
+
+    pub async fn list_all_pending_sink_epochs(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<HashMap<SinkId, Vec<u64>>> {
+        let inner = self.inner.read().await;
+
+        let mut query = pending_sink_state::Entity::find()
+            .select_only()
+            .columns([
+                pending_sink_state::Column::SinkId,
+                pending_sink_state::Column::Epoch,
+            ])
+            .filter(
+                pending_sink_state::Column::SinkState.eq(pending_sink_state::SinkState::Pending),
+            );
+
+        if let Some(db_id) = database_id {
+            query = query
+                .join(
+                    JoinType::InnerJoin,
+                    pending_sink_state::Relation::Object.def(),
+                )
+                .filter(object::Column::DatabaseId.eq(db_id));
+        }
+
+        let rows: Vec<(SinkId, u64)> = query.into_tuple().all(&inner.db).await?;
+
+        let mut result: HashMap<SinkId, Vec<u64>> = HashMap::new();
+        for (sink_id, epoch) in rows {
+            result.entry(sink_id).or_default().push(epoch);
+        }
+
+        Ok(result)
+    }
+
+    pub async fn abort_pending_sink_epochs(
+        &self,
+        to_abort_epochs: HashMap<SinkId, Vec<u64>>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        for (sink_id, epochs) in to_abort_epochs {
+            pending_sink_state::Entity::update_many()
+                .col_expr(
+                    pending_sink_state::Column::SinkState,
+                    Expr::value(pending_sink_state::SinkState::Aborted),
+                )
+                .filter(
+                    pending_sink_state::Column::SinkId
+                        .eq(sink_id)
+                        .and(pending_sink_state::Column::Epoch.is_in(epochs)),
+                )
+                .exec(&txn)
+                .await?;
+        }
+
+        txn.commit().await?;
+        Ok(())
     }
 }
 
