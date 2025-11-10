@@ -46,7 +46,7 @@ EOF
 statement ok
 CREATE SOURCE cdc_source_postgres WITH (
     connector = 'postgres-cdc',
-    hostname='postgres',
+    hostname='db',
     port=5432,
     database.name='rwcdc',
     username='postgres',
