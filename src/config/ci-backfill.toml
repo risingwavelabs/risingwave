@@ -4,6 +4,9 @@ telemetry_enabled = false
 [streaming.developer]
 stream_chunk_size = 10
 
+[storage]
+share_buffers_sync_parallelism = 4
+
 [storage.object_store.retry]
 streaming_upload_attempt_timeout_ms = 20000
 
