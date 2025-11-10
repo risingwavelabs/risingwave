@@ -141,7 +141,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
         progress_state_table: &Table,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let table_id = TableId::new(table_catalog.id);
+        let table_id = table_catalog.id;
 
         // staging table is pk-only, and we don't need to check value consistency
         let staging_table = StateTableInner::from_table_catalog_inconsistent_op(
@@ -268,17 +268,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             .await;
 
         let mv_metrics = metrics.new_materialize_metrics(
-            TableId::new(table_catalog.id),
+            table_catalog.id,
             actor_context.id,
             actor_context.fragment_id,
         );
 
-        let metrics_info = MetricsInfo::new(
-            metrics,
-            table_catalog.id.into(),
-            actor_context.id,
-            "Materialize",
-        );
+        let metrics_info =
+            MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
 
         let is_dummy_table =
             table_catalog.engine == Some(Engine::Iceberg as i32) && table_catalog.append_only;
@@ -660,7 +656,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             &self.schema.data_types(),
                         );
 
-                        tracing::debug!(table_id = %refresh_args.table_id, "yielding to delete chunk: {}", to_delete_chunk.to_pretty());
                         yield Message::Chunk(to_delete_chunk);
                     }
 

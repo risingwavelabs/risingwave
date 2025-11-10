@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_server::{Session, SessionManager};
-use risingwave_common::id::DatabaseId;
+use risingwave_common::id::{DatabaseId, TableId};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{
@@ -27,9 +27,7 @@ use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
 use crate::error::RwError;
 use crate::handler::create_source::SqlColumnStrategy;
 use crate::handler::kill_process::handle_kill_local;
-use crate::handler::{
-    fetch_table_catalog_for_alter, get_new_table_definition_for_cdc_table, get_replace_table_plan,
-};
+use crate::handler::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
 use crate::session::{SESSION_MANAGER, SessionMapRef};
 
 #[derive(Default)]
@@ -52,8 +50,8 @@ impl FrontendService for FrontendServiceImpl {
         let req = request.into_inner();
 
         let replace_plan = get_new_table_plan(
-            req.table_name,
-            req.database_id.into(),
+            req.table_id,
+            req.database_id,
             req.owner,
             req.cdc_table_change,
         )
@@ -96,12 +94,12 @@ impl FrontendService for FrontendServiceImpl {
 
 /// Rebuild the table's streaming plan, possibly with cdc column changes.
 async fn get_new_table_plan(
-    table_name: String,
+    table_id: TableId,
     database_id: DatabaseId,
     owner: u32,
     cdc_table_change: Option<TableSchemaChange>,
 ) -> Result<ReplaceJobPlan, RwError> {
-    tracing::info!("get_new_table_plan for table {}", table_name);
+    tracing::info!("get_new_table_plan for table {}", table_id);
 
     let session_mgr = SESSION_MANAGER
         .get()
@@ -110,8 +108,11 @@ async fn get_new_table_plan(
     // get a session object for the corresponding user and database
     let session = session_mgr.create_dummy_session(database_id, owner)?;
 
-    let table_name = ObjectName::from(vec![table_name.as_str().into()]);
-    let (original_catalog, _) = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let table_catalog = {
+        let reader = session.env().catalog_reader().read_guard();
+        reader.get_any_table_by_id(&table_id)?.clone()
+    };
+    let table_name = ObjectName::from(vec![table_catalog.name.as_str().into()]);
 
     let definition = if let Some(cdc_table_change) = cdc_table_change {
         let new_version_columns = cdc_table_change
@@ -119,17 +120,16 @@ async fn get_new_table_plan(
             .into_iter()
             .map(|c| c.into())
             .collect_vec();
-        get_new_table_definition_for_cdc_table(original_catalog.clone(), &new_version_columns)
-            .await?
+        get_new_table_definition_for_cdc_table(table_catalog.clone(), &new_version_columns).await?
     } else {
-        original_catalog.create_sql_ast_purified()?
+        table_catalog.create_sql_ast_purified()?
     };
 
     let (source, table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
-        &original_catalog,
+        &table_catalog,
         SqlColumnStrategy::FollowUnchecked,
     )
     .await?;

@@ -81,7 +81,7 @@ impl StreamManagerService for StreamServiceImpl {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
 
-        let version_id = self.barrier_scheduler.flush(req.database_id.into()).await?;
+        let version_id = self.barrier_scheduler.flush(req.database_id).await?;
         Ok(Response::new(FlushResponse {
             status: None,
             hummock_version_id: version_id.to_u64(),
@@ -188,22 +188,22 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<CancelCreatingJobsRequest>,
     ) -> TonicResponse<CancelCreatingJobsResponse> {
         let req = request.into_inner();
-        let table_ids = match req.jobs.unwrap() {
+        let job_ids = match req.jobs.unwrap() {
             Jobs::Infos(infos) => self
                 .metadata_manager
                 .catalog_controller
                 .find_creating_streaming_job_ids(infos.infos)
                 .await?
                 .into_iter()
-                .map(|id| id as _)
+                .map(|id| JobId::new(id as _))
                 .collect(),
             Jobs::Ids(jobs) => jobs.job_ids,
         };
 
         let canceled_jobs = self
             .stream_manager
-            .cancel_streaming_jobs(table_ids.into_iter().map(JobId::from).collect_vec())
-            .await
+            .cancel_streaming_jobs(job_ids)
+            .await?
             .into_iter()
             .map(|id| id.as_raw_id())
             .collect_vec();
@@ -218,14 +218,14 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<ListTableFragmentsRequest>,
     ) -> Result<Response<ListTableFragmentsResponse>, Status> {
         let req = request.into_inner();
-        let table_ids = HashSet::<u32>::from_iter(req.table_ids);
+        let table_ids = HashSet::<JobId>::from_iter(req.table_ids);
 
         let mut info = HashMap::new();
         for job_id in table_ids {
             let table_fragments = self
                 .metadata_manager
                 .catalog_controller
-                .get_job_fragments_by_id(job_id.into())
+                .get_job_fragments_by_id(job_id)
                 .await?;
             let mut dispatchers = self
                 .metadata_manager
@@ -236,7 +236,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .await?;
             let ctx = table_fragments.ctx.to_protobuf();
             info.insert(
-                table_fragments.stream_job_id().as_raw_id(),
+                table_fragments.stream_job_id(),
                 TableFragmentInfo {
                     fragments: table_fragments
                         .fragments
@@ -299,14 +299,14 @@ impl StreamManagerService for StreamServiceImpl {
                     };
 
                     list_streaming_job_states_response::StreamingJobState {
-                        table_id: job_id as _,
+                        table_id: job_id,
                         name,
                         state: PbState::from(job_status) as _,
                         parallelism: Some(parallelism.into()),
                         max_parallelism: max_parallelism as _,
                         resource_group,
-                        database_id: database_id.as_raw_id(),
-                        schema_id: schema_id.as_raw_id(),
+                        database_id,
+                        schema_id,
                     }
                 },
             )
@@ -594,7 +594,9 @@ impl StreamManagerService for StreamServiceImpl {
             self.barrier_scheduler.clone(),
         );
 
-        let response = refresh_manager.refresh_table(req).await?;
+        let response = refresh_manager
+            .refresh_table(req, self.env.shared_actor_infos())
+            .await?;
 
         Ok(Response::new(response))
     }
@@ -695,7 +697,7 @@ impl StreamManagerService for StreamServiceImpl {
         self.metadata_manager
             .catalog_controller
             .mutate_fragments_by_job_id(
-                job_id.into(),
+                job_id,
                 |_mask, stream_node| {
                     let mut visited = false;
                     visit_stream_node_mut(stream_node, |body| {
@@ -724,7 +726,7 @@ impl StreamManagerService for StreamServiceImpl {
             .into_iter()
             .map(|(job_id, p)| {
                 (
-                    job_id.as_raw_id(),
+                    job_id,
                     PbCdcProgress {
                         split_total_count: p.split_total_count,
                         split_backfilled_count: p.split_backfilled_count,
@@ -764,9 +766,9 @@ fn fragment_desc_to_distribution(
 ) -> FragmentDistribution {
     FragmentDistribution {
         fragment_id: fragment_desc.fragment_id as _,
-        table_id: fragment_desc.job_id.as_raw_id(),
+        table_id: fragment_desc.job_id,
         distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
-        state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
+        state_table_ids: fragment_desc.state_table_ids.0,
         upstream_fragment_ids: upstreams.into_iter().map(|id| id as _).collect(),
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,

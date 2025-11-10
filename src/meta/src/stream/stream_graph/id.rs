@@ -29,8 +29,8 @@ impl<const TYPE: IdCategoryType> GlobalId<TYPE> {
         Self(id)
     }
 
-    pub fn as_global_id(&self) -> u32 {
-        self.0
+    pub fn as_global_id<T: From<u32>>(&self) -> T {
+        self.0.into()
     }
 }
 

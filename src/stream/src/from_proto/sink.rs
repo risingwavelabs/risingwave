@@ -279,9 +279,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                                 state_store
                                     .try_wait_epoch(
                                         HummockReadEpoch::Committed(epoch.prev),
-                                        TryWaitEpochOptions {
-                                            table_id: table_id.into(),
-                                        },
+                                        TryWaitEpochOptions { table_id },
                                     )
                                     .await?;
                             }

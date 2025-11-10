@@ -709,7 +709,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("function", object_id))?;
 
                 let mut pb_function: PbFunction = ObjectModel(function, obj).into();
-                pb_function.schema_id = new_schema.as_raw_id();
+                pb_function.schema_id = new_schema;
                 check_function_signature_duplicate(&pb_function, &txn).await?;
 
                 object::ActiveModel {
@@ -736,7 +736,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
 
                 let mut pb_connection: PbConnection = ObjectModel(connection, obj).into();
-                pb_connection.schema_id = new_schema.as_raw_id();
+                pb_connection.schema_id = new_schema;
                 check_connection_name_duplicate(&pb_connection, &txn).await?;
 
                 object::ActiveModel {
@@ -785,8 +785,18 @@ impl CatalogController {
         let owner_id = pb_secret.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(ObjectType::Database, pb_secret.database_id as _, &txn).await?;
-        ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
+        ensure_object_id(
+            ObjectType::Database,
+            pb_secret.database_id.as_raw_id() as _,
+            &txn,
+        )
+        .await?;
+        ensure_object_id(
+            ObjectType::Schema,
+            pb_secret.schema_id.as_raw_id() as _,
+            &txn,
+        )
+        .await?;
 
         ensure_object_id(ObjectType::Secret, pb_secret.id as _, &txn).await?;
         let secret: secret::ActiveModel = pb_secret.clone().into();

@@ -84,7 +84,7 @@ mysql -e "
 sleep 2s
 
 statement ok
-create source s_unsigned_int with (
+create source s_unsigned_int_upcast with (
   ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
   username = '${RISEDEV_MYSQL_USER}',
   password = '${MYSQL_PWD}',
@@ -92,10 +92,18 @@ create source s_unsigned_int with (
   debezium.bigint.unsigned.handling.mode = 'precise'
 );
 
+statement ok
+create source s_unsigned_int_to_signed with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev'
+);
+
 sleep 2s
 
 statement ok
-create table rw_unsigned_int (
+create table rw_unsigned_int_upcast (
   id DECIMAL,
   unsigned_bigint DECIMAL,
   unsigned_int BIGINT,
@@ -106,7 +114,18 @@ create table rw_unsigned_int (
 ) with (
   snapshot = 'true',
   snapshot.batch_size = 10,
-) from s_unsigned_int table 'risedev.test_unsigned_int';
+) from s_unsigned_int_upcast table 'risedev.test_unsigned_int';
+
+statement ok
+create table rw_unsigned_int_to_signed (
+  id bigint,
+  unsigned_bigint bigint,
+  info VARCHAR,
+  primary key (id, unsigned_bigint)
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 10,
+) from s_unsigned_int_to_signed table 'risedev.test_unsigned_int';
 
 sleep 5s
 
@@ -124,42 +143,102 @@ sleep 3s
 
 # Verify total count in RisingWave (50 backfill + 3 debezium = 53)
 query I
-select count(*) as row_cnt from rw_unsigned_int;
+select count(*) as row_cnt from rw_unsigned_int_upcast;
+----
+53
+
+query I
+select count(*) as row_cnt from rw_unsigned_int_to_signed;
 ----
 53
 
 # Verify we have both backfill and debezium data
 query T
-select count(*) as backfill_count from rw_unsigned_int where info = 'backfill';
+select count(*) as backfill_count from rw_unsigned_int_upcast where info = 'backfill';
 ----
 50
 
 query T
-select count(*) as debezium_count from rw_unsigned_int where info = 'debezium';
+select count(*) as backfill_count from rw_unsigned_int_to_signed where info = 'backfill';
+----
+50
+
+query T
+select count(*) as debezium_count from rw_unsigned_int_upcast where info = 'debezium';
+----
+3
+
+query T
+select count(*) as debezium_count from rw_unsigned_int_to_signed where info = 'debezium';
 ----
 3
 
 # Verify specific rows match inserted data
-# Check id=50 (last backfill row with overflow data)
+# Check id=50 for upcast table(last backfill row with overflow data)
 query TTTTTT
-select id, unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info from rw_unsigned_int where id = 50;
+select id, unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info from rw_unsigned_int_upcast where id = 50;
 ----
 50	18446251075179777772	4294967295	65535	255	backfill
 
+# Check id=50 for (unsigned bigint->bigint) table
+query TTTTTT
+select id, unsigned_bigint, info from rw_unsigned_int_to_signed where id = 50;
+----
+50	-492998529773844	backfill
+
 # Check id=53 (last debezium row with overflow data)
 query TTTTTT
-select id, unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info from rw_unsigned_int where id = 53;
+select id, unsigned_bigint, unsigned_int, unsigned_smallint, unsigned_tinyint, info from rw_unsigned_int_upcast where id = 53;
 ----
 53	18446251075179777772	4294967295	65535	255	debezium
 
+# Check id=53 for unsigned bigint -> bigint table
+query TTTTTT
+select id, unsigned_bigint, info from rw_unsigned_int_to_signed where id = 53;
+----
+53	-492998529773844	debezium
+
+# Test schema check: unsigned int -> int32 should fail
+statement error Incompatible data type of column unsigned_int. MySQL type: int unsigned, RisingWave type: INT32
+create table rw_unsigned_int_to_int32 (
+  id DECIMAL,
+  unsigned_bigint BIGINT,
+  unsigned_int INT,
+  unsigned_tinyint SMALLINT,
+  info VARCHAR,
+  primary key (id, unsigned_bigint)
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 10,
+) from s_unsigned_int_to_signed table 'risedev.test_unsigned_int';
+
+# Test schema check: unsigned smallint -> smallint should fail
+statement error Incompatible data type of column unsigned_smallint. MySQL type: smallint unsigned, RisingWave type: INT16
+create table rw_unsigned_smallint_to_smallint (
+  id DECIMAL,
+  unsigned_bigint BIGINT,
+  unsigned_smallint SMALLINT,
+  unsigned_tinyint SMALLINT,
+  info VARCHAR,
+  primary key (id, unsigned_bigint)
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 10,
+) from s_unsigned_int_to_signed table 'risedev.test_unsigned_int';
 
 
 # Clean up
 statement ok
-drop table rw_unsigned_int;
+drop table rw_unsigned_int_upcast;
 
 statement ok
-drop source s_unsigned_int cascade;
+drop table rw_unsigned_int_to_signed;
+
+statement ok
+drop source s_unsigned_int_upcast cascade;
+
+statement ok
+drop source s_unsigned_int_to_signed cascade;
 
 system ok
 mysql -e "

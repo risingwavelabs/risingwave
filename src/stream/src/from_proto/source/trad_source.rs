@@ -31,9 +31,10 @@ use risingwave_pb::stream_plan::SourceNode;
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
-    SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    BatchIcebergListExecutor, BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor,
+    IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
+use crate::from_proto::source::is_full_recompute_refresh;
 
 pub struct SourceExecutorBuilder;
 
@@ -142,10 +143,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
+            let is_full_recompute_refresh = is_full_recompute_refresh(&source.refresh_mode);
             let exec = {
                 let source_id = TableId::new(source.source_id);
                 let source_name = source.source_name.clone();
                 let mut source_info = source.get_info()?.clone();
+                let associated_table_id = source.associated_table_id.map(TableId::new);
 
                 if source_info.format_encode_options.is_empty() {
                     // compatible code: quick fix for <https://github.com/risingwavelabs/risingwave/issues/14755>,
@@ -211,20 +214,36 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    IcebergListExecutor::new(
-                        params.actor_context.clone(),
-                        stream_source_core,
-                        source
-                            .downstream_columns
-                            .as_ref()
-                            .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
-                        params.executor_stats.clone(),
-                        barrier_receiver,
-                        system_params,
-                        source.rate_limit,
-                        params.env.config().clone(),
-                    )
-                    .boxed()
+                    if is_full_recompute_refresh {
+                        BatchIcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            params.local_barrier_manager.clone(),
+                            associated_table_id,
+                        )
+                        .boxed()
+                    } else {
+                        IcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            system_params,
+                            source.rate_limit,
+                            params.env.config().clone(),
+                        )
+                        .boxed()
+                    }
                 } else if source.with_properties.is_batch_connector() {
                     if source
                         .with_properties
@@ -244,6 +263,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             system_params,
                             source.rate_limit,
                             params.local_barrier_manager.clone(),
+                            associated_table_id,
                         )
                         .boxed()
                     } else {

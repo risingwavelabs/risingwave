@@ -39,8 +39,8 @@ impl From<&PbView> for ViewCatalog {
         ViewCatalog {
             id: view.id,
             name: view.name.clone(),
-            schema_id: view.schema_id.into(),
-            database_id: view.database_id.into(),
+            schema_id: view.schema_id,
+            database_id: view.database_id,
             owner: view.owner,
             properties: WithOptions::new_with_options(view.properties.clone()),
             sql: view.sql.clone(),
