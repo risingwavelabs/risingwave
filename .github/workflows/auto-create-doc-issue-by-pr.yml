@@ -16,7 +16,7 @@ jobs:
         run: echo "merged=$(echo ${{ github.event.pull_request.merged }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Retrieve PR information
-        uses: 8BitJonny/gh-get-current-pr@3.0.0
+        uses: 8BitJonny/gh-get-current-pr@4.0.0
         id: PR
         with:
           sha: ${{ github.event.pull_request.head.sha }}
