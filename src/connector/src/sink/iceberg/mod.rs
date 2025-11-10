@@ -112,6 +112,26 @@ pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
 pub const MAX_SNAPSHOTS_NUM: &str = "max_snapshots_num_before_compaction";
 
+fn deserialize_and_normalize_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(s.to_lowercase().replace('_', "-"))
+}
+
+fn deserialize_and_normalize_optional_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.map(|s| s.to_lowercase().replace('_', "-")))
+}
+
 fn default_commit_retry_num() -> u32 {
     8
 }
@@ -201,7 +221,11 @@ pub struct IcebergConfig {
     pub enable_snapshot_expiration: bool,
 
     /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
-    #[serde(rename = "write_mode", default = "default_iceberg_write_mode")]
+    #[serde(
+        rename = "write_mode",
+        default = "default_iceberg_write_mode",
+        deserialize_with = "deserialize_and_normalize_string"
+    )]
     pub write_mode: String,
 
     /// The maximum age (in milliseconds) for snapshots before they expire
@@ -260,9 +284,13 @@ pub struct IcebergConfig {
     #[with_option(allow_alter_on_fly)]
     pub target_file_size_mb: Option<u64>,
 
-    /// Compaction type: `full`, `small_files`, or `files_with_delete`
+    /// Compaction type: `full`, `small-files`, or `files-with-delete`
     /// If not set, will auto set to `full`
-    #[serde(rename = "compaction_type", default)]
+    #[serde(
+        rename = "compaction_type",
+        default,
+        deserialize_with = "deserialize_and_normalize_optional_string"
+    )]
     #[with_option(allow_alter_on_fly)]
     pub compaction_type: Option<String>,
 }
@@ -652,15 +680,16 @@ impl Sink for IcebergSink {
             );
         }
 
-        // Check COW mode constraints
+        // Check COW mode constraints first (before specific type checks)
+        // COW mode only supports 'full' compaction type
         if self.config.write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE && compaction_type != "full" {
             bail!(
-                "Compaction type must be 'full' for copy-on-write mode, got: '{}'",
+                "Copy-on-write mode only supports 'full' compaction type, got: '{}'",
                 compaction_type
             );
         }
 
-        // Check MORE mode compaction types
+        // Check MORE-specific compaction types
         if "small_files".eq_ignore_ascii_case(compaction_type) {
             // 1. check license
             risingwave_common::license::Feature::IcebergCompaction
