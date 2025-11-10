@@ -89,21 +89,27 @@ impl GlobalBarrierWorkerContextImpl {
             .await?;
 
         let mut to_abort_records: HashMap<SinkId, Vec<u64>> = HashMap::new();
-        let version = self.hummock_manager.get_current_version().await;
 
         for (sink_id, table_ids) in sink_with_state_tables {
             let Some(table_id) = table_ids.first() else {
                 return Err(anyhow!("no state table id in sink: {}", sink_id).into());
             };
 
-            if let Some(committed_epoch) = version.table_committed_epoch(*table_id) {
-                let pending_epochs = pending_sink_epochs.get(&sink_id).unwrap();
-                for epoch in pending_epochs {
-                    if *epoch > committed_epoch {
-                        to_abort_records.entry(sink_id).or_default().push(*epoch);
+            self.hummock_manager
+                .on_current_version(|version| -> MetaResult<()> {
+                    if let Some(committed_epoch) = version.table_committed_epoch(*table_id) {
+                        let pending_epochs = pending_sink_epochs.get(&sink_id).unwrap();
+                        for epoch in pending_epochs {
+                            if *epoch > committed_epoch {
+                                to_abort_records.entry(sink_id).or_default().push(*epoch);
+                            }
+                        }
+                        Ok(())
+                    } else {
+                        Err(anyhow!("cannot get committed epoch on table {}.", table_id).into())
                     }
-                }
-            }
+                })
+                .await?;
         }
 
         self.metadata_manager
