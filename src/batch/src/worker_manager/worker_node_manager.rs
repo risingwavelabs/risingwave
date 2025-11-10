@@ -37,7 +37,7 @@ pub struct WorkerNodeManager {
 struct WorkerNodeManagerInner {
     worker_nodes: HashMap<u32, WorkerNode>,
     /// fragment vnode mapping info for streaming
-    streaming_fragment_vnode_mapping: HashMap<FragmentId, WorkerSlotMapping>,
+    streaming_fragment_vnode_mapping: Option<HashMap<FragmentId, WorkerSlotMapping>>,
     /// fragment vnode mapping info for serving
     serving_fragment_vnode_mapping: HashMap<FragmentId, WorkerSlotMapping>,
 }
@@ -55,7 +55,7 @@ impl WorkerNodeManager {
         Self {
             inner: RwLock::new(WorkerNodeManagerInner {
                 worker_nodes: Default::default(),
-                streaming_fragment_vnode_mapping: Default::default(),
+                streaming_fragment_vnode_mapping: None,
                 serving_fragment_vnode_mapping: Default::default(),
             }),
             worker_node_mask: Arc::new(Default::default()),
@@ -67,7 +67,7 @@ impl WorkerNodeManager {
         let worker_nodes = worker_nodes.into_iter().map(|w| (w.id, w)).collect();
         let inner = RwLock::new(WorkerNodeManagerInner {
             worker_nodes,
-            streaming_fragment_vnode_mapping: HashMap::new(),
+            streaming_fragment_vnode_mapping: None,
             serving_fragment_vnode_mapping: HashMap::new(),
         });
         Self {
@@ -139,7 +139,7 @@ impl WorkerNodeManager {
             serving_mapping.keys()
         );
         write_guard.worker_nodes = nodes.into_iter().map(|w| (w.id, w)).collect();
-        write_guard.streaming_fragment_vnode_mapping = streaming_mapping;
+        write_guard.streaming_fragment_vnode_mapping = Some(streaming_mapping);
         write_guard.serving_fragment_vnode_mapping = serving_mapping;
     }
 
@@ -172,10 +172,13 @@ impl WorkerNodeManager {
         &self,
         fragment_id: &FragmentId,
     ) -> Result<WorkerSlotMapping> {
-        self.inner
-            .read()
-            .unwrap()
-            .streaming_fragment_vnode_mapping
+        let guard = self.inner.read().unwrap();
+
+        let Some(streaming_mapping) = guard.streaming_fragment_vnode_mapping.as_ref() else {
+            return Err(BatchError::StreamingVnodeMappingNotInitialized);
+        };
+
+        streaming_mapping
             .get(fragment_id)
             .cloned()
             .ok_or_else(|| BatchError::StreamingVnodeMappingNotFound(*fragment_id))
@@ -186,14 +189,11 @@ impl WorkerNodeManager {
         fragment_id: FragmentId,
         vnode_mapping: WorkerSlotMapping,
     ) {
-        if self
-            .inner
-            .write()
-            .unwrap()
+        let mut guard = self.inner.write().unwrap();
+        let mapping = guard
             .streaming_fragment_vnode_mapping
-            .try_insert(fragment_id, vnode_mapping)
-            .is_err()
-        {
+            .get_or_insert_with(HashMap::new);
+        if mapping.try_insert(fragment_id, vnode_mapping).is_err() {
             tracing::info!(
                 "Previous batch vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl"
             );
@@ -206,11 +206,10 @@ impl WorkerNodeManager {
         vnode_mapping: WorkerSlotMapping,
     ) {
         let mut guard = self.inner.write().unwrap();
-        if guard
+        let mapping = guard
             .streaming_fragment_vnode_mapping
-            .insert(fragment_id, vnode_mapping)
-            .is_none()
-        {
+            .get_or_insert_with(HashMap::new);
+        if mapping.insert(fragment_id, vnode_mapping).is_none() {
             tracing::info!(
                 "Previous vnode mapping not found for fragment {fragment_id}, maybe offline scaling with background ddl"
             );
@@ -220,7 +219,10 @@ impl WorkerNodeManager {
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
         let mut guard = self.inner.write().unwrap();
 
-        let res = guard.streaming_fragment_vnode_mapping.remove(fragment_id);
+        let res = guard
+            .streaming_fragment_vnode_mapping
+            .as_mut()
+            .and_then(|mapping| mapping.remove(fragment_id));
         match &res {
             Some(_) => {}
             None if OBJECT_ID_PLACEHOLDER == *fragment_id => {

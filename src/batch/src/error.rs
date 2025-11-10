@@ -135,6 +135,9 @@ pub enum BatchError {
     #[error("Serving vnode mapping not found for fragment {0}")]
     ServingVnodeMappingNotFound(FragmentId),
 
+    #[error("Streaming vnode mapping has not been initialized")]
+    StreamingVnodeMappingNotInitialized,
+
     #[error("Streaming vnode mapping not found for fragment {0}")]
     StreamingVnodeMappingNotFound(FragmentId),
 
