@@ -53,7 +53,7 @@ SELECT * FROM sqlserver_table_in_rw;
 2 22
 
 system ok
-SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433 sqlcmd <<EOF
+SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=rwcdc SQLCMDPORT=1433 sqlcmd <<EOF
 INSERT INTO table_in_sqlserver VALUES (3,'33');
 GO
 DELETE FROM table_in_sqlserver WHERE id=2;

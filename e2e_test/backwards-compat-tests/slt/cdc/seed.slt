@@ -63,7 +63,7 @@ FROM cdc_source_postgres TABLE 'public.table_in_postgres';
 # sqlserver
 
 system ok
-SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433 sqlcmd <<EOF
+SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDPORT=1433 sqlcmd <<EOF
 CREATE DATABASE rwcdc;
 GO
 USE rwcdc;
