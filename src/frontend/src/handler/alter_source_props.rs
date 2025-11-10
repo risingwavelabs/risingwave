@@ -95,10 +95,10 @@ async fn handle_alter_source_props_inner(
     if let Some(timeout_value) = changed_props.get("cdc.source.wait.streaming.start.timeout")
         && timeout_value.parse::<u32>().is_err()
     {
-        return Err(ErrorCode::InvalidInputSyntax(format!(
-            "Invalid 'cdc.source.wait.streaming.start.timeout' value: '{}'. Expected a positive integer, not a string",
-            timeout_value
-        ))
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "cdc.source.wait.streaming.start.timeout".to_owned(),
+            config_value: timeout_value.to_owned(),
+        }
         .into());
     }
 
