@@ -176,8 +176,8 @@ impl From<&BuiltinView> for ViewCatalog {
         ViewCatalog {
             id: 0,
             name: val.name.to_owned(),
-            schema_id: 0,
-            database_id: 0,
+            schema_id: 0.into(),
+            database_id: 0.into(),
             columns: val
                 .columns
                 .iter()
@@ -225,20 +225,21 @@ fn extract_parallelism_from_table_state(state: &StreamingJobState) -> String {
 
 /// get acl items of `object` in string, ignore public.
 fn get_acl_items(
-    object: &GrantObject,
+    object: impl Into<GrantObject>,
     for_dml_table: bool,
     users: &Vec<UserCatalog>,
     username_map: &HashMap<UserId, String>,
 ) -> Vec<String> {
+    let object = object.into();
     let mut res = vec![];
-    let super_privilege = available_prost_privilege(*object, for_dml_table);
+    let super_privilege = available_prost_privilege(object, for_dml_table);
     for user in users {
         let privileges = if user.is_super {
             vec![&super_privilege]
         } else {
             user.grant_privileges
                 .iter()
-                .filter(|&privilege| privilege.object.as_ref().unwrap() == object)
+                .filter(|&privilege| privilege.object.as_ref().unwrap() == &object)
                 .collect_vec()
         };
         if privileges.is_empty() {

@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, RpcClientConfig, STREAM_WINDOW_SIZE};
+use risingwave_common::id::FragmentId;
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
@@ -115,8 +116,8 @@ impl ComputeClient {
         &self,
         up_actor_id: u32,
         down_actor_id: u32,
-        up_fragment_id: u32,
-        down_fragment_id: u32,
+        up_fragment_id: FragmentId,
+        down_fragment_id: FragmentId,
         database_id: DatabaseId,
         term_id: String,
     ) -> Result<(
@@ -136,7 +137,7 @@ impl ComputeClient {
                     down_actor_id,
                     up_fragment_id,
                     down_fragment_id,
-                    database_id: database_id.database_id,
+                    database_id,
                     term_id,
                 })),
             },

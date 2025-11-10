@@ -143,7 +143,7 @@ impl BackfillOrderState {
             None => {
                 let Some(node) = self.remaining_backfill_nodes.get_mut(fragment_id) else {
                     tracing::error!(
-                        fragment_id,
+                        %fragment_id,
                         actor_id,
                         "fragment not found in current_backfill_nodes or remaining_backfill_nodes"
                     );
@@ -157,7 +157,7 @@ impl BackfillOrderState {
         tracing::debug!(
             actor_id,
             remaining_actors = node.remaining_actors.len(),
-            fragment_id,
+            %fragment_id,
             "finish_backfilling_actor"
         );
         if node.remaining_actors.is_empty() && is_in_order {
@@ -194,7 +194,7 @@ impl BackfillOrderState {
                 }
             }
         } else {
-            tracing::error!(fragment_id, "fragment not found in current_backfill_nodes");
+            tracing::error!(%fragment_id, "fragment not found in current_backfill_nodes");
             return vec![];
         }
         newly_scheduled

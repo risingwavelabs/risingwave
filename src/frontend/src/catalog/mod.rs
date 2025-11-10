@@ -55,11 +55,11 @@ pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
 pub(crate) type SubscriptionId = u32;
 pub(crate) type ViewId = u32;
-pub(crate) type DatabaseId = u32;
-pub(crate) type SchemaId = u32;
+pub(crate) type DatabaseId = risingwave_common::catalog::DatabaseId;
+pub(crate) type SchemaId = risingwave_common::catalog::SchemaId;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
-pub(crate) type FragmentId = u32;
+pub(crate) type FragmentId = risingwave_common::id::FragmentId;
 pub(crate) type SecretId = risingwave_common::catalog::SecretId;
 
 /// Check if the column name does not conflict with the internally reserved column name.

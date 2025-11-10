@@ -23,6 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
+use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
     build_sink,
@@ -113,7 +114,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
         let input_data_types = input_executor.info().schema.data_types();
-        let chunk_size = params.env.config().developer.chunk_size;
+        let chunk_size = params.config.developer.chunk_size;
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_id: SinkId = sink_desc.get_id().into();
@@ -141,7 +142,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let mut properties_with_secret =
             LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
 
-        if params.env.config().developer.switch_jdbc_pg_to_native
+        if params.config.developer.switch_jdbc_pg_to_native
             && let Some(connector_type) = properties_with_secret.get(CONNECTOR_TYPE_KEY)
             && connector_type == "jdbc"
             && let Some(url) = properties_with_secret.get("jdbc.url")
@@ -217,7 +218,15 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         {
             SinkType::Retract
         } else {
-            SinkType::from_proto(sink_desc.get_sink_type().unwrap())
+            let sink_type_from_proto = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+            // For backward compatibility: Iceberg sink with Upsert type should be treated as Retract type.
+            if connector.eq_ignore_ascii_case(ICEBERG_SINK)
+                && matches!(sink_type_from_proto, SinkType::Upsert)
+            {
+                SinkType::Retract
+            } else {
+                sink_type_from_proto
+            }
         };
 
         let sink_param = SinkParam {
@@ -246,7 +255,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_id,
             sink_name,
             connector: connector.to_owned(),
-            streaming_config: params.env.config().as_ref().clone(),
+            streaming_config: params.config.as_ref().clone(),
         };
 
         let log_store_identity = format!(
@@ -270,9 +279,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                                 state_store
                                     .try_wait_epoch(
                                         HummockReadEpoch::Committed(epoch.prev),
-                                        TryWaitEpochOptions {
-                                            table_id: table_id.into(),
-                                        },
+                                        TryWaitEpochOptions { table_id },
                                     )
                                     .await?;
                             }
@@ -315,7 +322,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     table,
                     params.vnode_bitmap.clone().map(Arc::new),
                     65536,
-                    params.env.config().developer.chunk_size,
+                    params.config.developer.chunk_size,
                     metrics,
                     log_store_identity,
                     pk_info,

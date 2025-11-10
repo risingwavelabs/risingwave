@@ -37,13 +37,13 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
         let table = node.get_state_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTableBuilder::new(table, store, vnodes)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let exec = AppendOnlyDedupExecutor::new(
             params.actor_context,
             input,
-            params.info.pk_indices.clone(), /* TODO(rc): should change to use `dedup_column_indices`, but need to check backward compatibility */
+            params.info.stream_key.clone(), /* TODO(rc): should change to use `dedup_column_indices`, but need to check backward compatibility */
             state_table,
             params.watermark_epoch,
             params.executor_stats.clone(),

@@ -311,18 +311,7 @@ impl SourceManager {
         let backfill_fragments = metadata_manager
             .catalog_controller
             .load_backfill_fragment_ids()
-            .await?
-            .into_iter()
-            .map(|(source_id, fragment_ids)| {
-                (
-                    source_id as SourceId,
-                    fragment_ids
-                        .into_iter()
-                        .map(|(id, up_id)| (id as _, up_id as _))
-                        .collect(),
-                )
-            })
-            .collect();
+            .await?;
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,

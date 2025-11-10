@@ -973,9 +973,9 @@ mod tests {
             Field::unnamed(DataType::Varchar), // _rw_offset
             Field::unnamed(DataType::Varchar), // _rw_table_name
         ]);
-        let pk_indices = vec![1];
+        let stream_key = vec![1];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
         // let payload = r#"{"before": null,"after":{"O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" },"source":{"version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null},"op":"r","ts_ms":1695277757017,"transaction":null}"#.to_string();
         let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#;
 
@@ -1029,9 +1029,9 @@ mod tests {
             Field::unnamed(DataType::Varchar), // _rw_offset
             Field::unnamed(DataType::Varchar), // _rw_table_name
         ]);
-        let pk_indices = vec![1];
+        let stream_key = vec![1];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema.clone(), pk_indices.clone());
+        let source = source.into_executor(schema.clone(), stream_key.clone());
         let output_indices = vec![1, 0, 4]; //reorder
         let output_columns = vec![
             ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),

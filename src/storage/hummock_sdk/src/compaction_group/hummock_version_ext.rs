@@ -521,7 +521,9 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                         } else {
                             #[expect(deprecated)]
                             // for backward-compatibility of previous hummock version delta
-                            BTreeSet::from_iter(group_construct.table_ids.iter().map(Into::into))
+                            BTreeSet::from_iter(
+                                group_construct.table_ids.iter().copied().map(Into::into),
+                            )
                         };
 
                         if group_construct.version() >= CompatibilityVersion::SplitGroupByTableId {
@@ -1658,7 +1660,7 @@ mod tests {
                 right: full_key_r.into(),
                 right_exclusive: false,
             },
-            table_ids: table_ids.iter().map(Into::into).collect(),
+            table_ids: table_ids.into_iter().map(Into::into).collect(),
             object_id: sst_id.into(),
             min_epoch: 20,
             max_epoch: 20,
@@ -1863,7 +1865,7 @@ mod tests {
                 right,
                 right_exclusive: false,
             },
-            table_ids: table_ids.iter().map(Into::into).collect(),
+            table_ids: table_ids.into_iter().map(Into::into).collect(),
             file_size: 100,
             sst_size: 100,
             uncompressed_file_size: 100,

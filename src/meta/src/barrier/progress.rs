@@ -789,7 +789,7 @@ fn calculate_total_key_count(
             *count as u64
                 * version_stats
                     .table_stats
-                    .get(&table_id.as_raw_id())
+                    .get(table_id)
                     .map_or(0, |stat| stat.total_key_count as u64)
         })
         .sum()

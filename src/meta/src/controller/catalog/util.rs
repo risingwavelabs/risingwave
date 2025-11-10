@@ -267,7 +267,7 @@ impl CatalogController {
                 .await?;
             for (table_id, name, definition) in table_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: table_id.as_raw_id(),
+                    id: table_id.as_job_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -291,7 +291,7 @@ impl CatalogController {
                 .await?;
             for (source_id, name, definition) in source_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: source_id as _,
+                    id: (source_id as u32).into(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -315,7 +315,7 @@ impl CatalogController {
                 .await?;
             for (sink_id, name, definition) in sink_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: sink_id as _,
+                    id: (sink_id as u32).into(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -397,8 +397,7 @@ impl CatalogController {
                                     let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
                                         unreachable!("expect merge node");
                                     };
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
+                                    if all_fragment_ids.contains(&(merge_node.upstream_fragment_id))
                                     {
                                         true
                                     } else {
@@ -408,8 +407,7 @@ impl CatalogController {
                                     }
                                 }
                                 Some(NodeBody::Merge(merge_node)) => {
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
+                                    if all_fragment_ids.contains(&(merge_node.upstream_fragment_id))
                                     {
                                         true
                                     } else {
@@ -510,9 +508,7 @@ impl CatalogController {
 
         Ok(infos
             .into_iter()
-            .flat_map(|info| {
-                job_mapping.remove(&(info.database_id as _, info.schema_id as _, info.name))
-            })
+            .flat_map(|info| job_mapping.remove(&(info.database_id, info.schema_id, info.name)))
             .collect())
     }
 }

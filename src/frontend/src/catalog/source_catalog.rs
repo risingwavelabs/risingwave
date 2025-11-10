@@ -17,6 +17,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::plan_common::SourceRefreshMode;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport as _;
@@ -53,6 +54,7 @@ pub struct SourceCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub rate_limit: Option<u32>,
+    pub refresh_mode: Option<SourceRefreshMode>,
 }
 
 impl SourceCatalog {
@@ -94,6 +96,7 @@ impl SourceCatalog {
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
             rate_limit: self.rate_limit,
+            refresh_mode: self.refresh_mode,
         }
     }
 
@@ -211,6 +214,7 @@ impl From<&PbSource> for SourceCatalog {
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
             rate_limit,
+            refresh_mode: prost.refresh_mode,
         }
     }
 }

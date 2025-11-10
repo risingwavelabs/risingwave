@@ -38,7 +38,7 @@ impl CatalogController {
         assert_eq!(obj.obj_type, object_type);
         let drop_database = object_type == ObjectType::Database;
         let database_id = if object_type == ObjectType::Database {
-            object_id
+            DatabaseId::new(object_id as _)
         } else {
             obj.database_id
                 .ok_or_else(|| anyhow!("dropped object should have database_id"))?
@@ -54,7 +54,7 @@ impl CatalogController {
             DropMode::Restrict => match object_type {
                 ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
                 ObjectType::Schema => {
-                    ensure_schema_empty(object_id, &txn).await?;
+                    ensure_schema_empty(SchemaId::new(object_id as _), &txn).await?;
                     Default::default()
                 }
                 ObjectType::Table => {
@@ -366,7 +366,7 @@ impl CatalogController {
         self.notify_users_update(user_infos).await;
         inner
             .dropped_tables
-            .extend(dropped_tables.map(|t| (t.id.into(), t)));
+            .extend(dropped_tables.map(|t| (t.id, t)));
 
         let version = match object_type {
             ObjectType::Database => {
@@ -374,7 +374,7 @@ impl CatalogController {
                 self.notify_frontend(
                     NotificationOperation::Delete,
                     NotificationInfo::Database(PbDatabase {
-                        id: database_id as _,
+                        id: database_id,
                         ..Default::default()
                     }),
                 )

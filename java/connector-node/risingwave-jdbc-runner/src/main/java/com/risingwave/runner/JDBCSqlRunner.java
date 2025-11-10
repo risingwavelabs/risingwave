@@ -16,18 +16,40 @@
 
 package com.risingwave.runner;
 
-import java.sql.*;
+import com.risingwave.connector.SnowflakeJDBCSinkConfig;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class JDBCSqlRunner {
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSqlRunner.class);
 
-    public static void executeSql(String fullUrl, String[] sqls) throws Exception {
+    public static void executeSqlWithProps(
+            String fullUrl, String[] sqls, String[] propKeys, String[] propValues)
+            throws Exception {
         Connection connection = null;
         try {
             Class.forName("net.snowflake.client.jdbc.SnowflakeDriver");
-            connection = DriverManager.getConnection(fullUrl);
+            Properties props = new Properties();
+            if (propKeys != null && propValues != null) {
+                if (propKeys.length != propValues.length) {
+                    throw new IllegalArgumentException(
+                            "Property keys and values arrays must have the same length");
+                }
+                for (int i = 0; i < propKeys.length; i++) {
+                    if (propKeys[i] != null && propValues[i] != null) {
+                        props.put(propKeys[i], propValues[i]);
+                    }
+                }
+            }
+
+            SnowflakeJDBCSinkConfig.handleSnowflakeAuth(props);
+
+            connection = DriverManager.getConnection(fullUrl, props);
             connection.setAutoCommit(false);
             LOG.info("[JDBCRunner] Transaction started, auto-commit disabled");
             Statement stmt = connection.createStatement();

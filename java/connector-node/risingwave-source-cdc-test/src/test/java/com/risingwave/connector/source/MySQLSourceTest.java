@@ -64,6 +64,12 @@ public class MySQLSourceTest {
 
     @BeforeClass
     public static void init() {
+        // Initialize object store for OpendalSchemaHistory (required for integration tests)
+        // Use memory-based object store to avoid needing a real RisingWave instance
+        com.risingwave.java.binding.Binding.initObjectStoreForTest(
+                "hummock+memory", "integration-test-data");
+        LOG.info("Initialized object store for OpendalSchemaHistory: hummock+memory");
+
         // generate orders.tbl test data
         SourceTestClient.genOrdersTable(10000);
         // start connector server and mysql...

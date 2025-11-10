@@ -137,7 +137,7 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         periodic_barriers: &mut PeriodicBarriers,
     ) -> MetaResult<()> {
-        let database_id = DatabaseId::new(resp.database_id);
+        let database_id = resp.database_id;
         let database_status = self.databases.get_mut(&database_id).expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
@@ -397,7 +397,7 @@ impl CheckpointControl {
         worker_id: WorkerId,
         resp: ResetDatabaseResponse,
     ) {
-        let database_id = DatabaseId::new(resp.database_id);
+        let database_id = resp.database_id;
         match self.databases.get_mut(&database_id).expect("should exist") {
             DatabaseCheckpointControlStatus::Running(_) => {
                 unreachable!("should not receive reset database resp when running")
@@ -499,7 +499,7 @@ struct DatabaseCheckpointControlMetrics {
 
 impl DatabaseCheckpointControlMetrics {
     fn new(database_id: DatabaseId) -> Self {
-        let database_id_str = database_id.database_id.to_string();
+        let database_id_str = database_id.to_string();
         let barrier_latency = GLOBAL_META_METRICS
             .barrier_latency
             .with_guarded_label_values(&[&database_id_str]);
@@ -847,55 +847,7 @@ impl DatabaseCheckpointControl {
                 assert!(node.state.creating_jobs_to_wait.is_empty());
                 assert!(node.state.node_to_collect.is_empty());
 
-                // Process list_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
-                let list_finished_source_ids: Vec<_> = node
-                    .state
-                    .resps
-                    .iter()
-                    .flat_map(|resp| &resp.list_finished_source_ids)
-                    .cloned()
-                    .collect::<HashSet<_>>() // deduplicate
-                    .into_iter()
-                    .collect();
-                if !list_finished_source_ids.is_empty() {
-                    // Add list_finished_source_ids to the task for processing
-                    let task = task.get_or_insert_default();
-                    task.list_finished_source_ids
-                        .extend(list_finished_source_ids);
-                }
-                // Process load_finished_source_ids for all barrier types (checkpoint and non-checkpoint)
-                let load_finished_source_ids: Vec<_> = node
-                    .state
-                    .resps
-                    .iter()
-                    .flat_map(|resp| &resp.load_finished_source_ids)
-                    .cloned()
-                    .collect::<HashSet<_>>() // deduplicate
-                    .into_iter()
-                    .collect();
-                if !load_finished_source_ids.is_empty() {
-                    // Add load_finished_source_ids to the task for processing
-                    let task = task.get_or_insert_default();
-                    task.load_finished_source_ids
-                        .extend(load_finished_source_ids);
-                }
-                // Process refresh_finished_table_ids for all barrier types (checkpoint and non-checkpoint)
-                let refresh_finished_table_ids: Vec<_> = node
-                    .state
-                    .resps
-                    .iter()
-                    .flat_map(|resp| &resp.refresh_finished_tables)
-                    .cloned()
-                    .collect::<HashSet<_>>() // deduplicate
-                    .into_iter()
-                    .map(JobId::new)
-                    .collect();
-                if !refresh_finished_table_ids.is_empty() {
-                    // Add refresh_finished_table_ids to the task for processing
-                    let task = task.get_or_insert_default();
-                    task.refresh_finished_table_job_ids
-                        .extend(refresh_finished_table_ids);
-                }
+                self.handle_refresh_table_info(task, &node);
 
                 let staging_commit_info = self.create_mview_tracker.apply_collected_command(
                     node.command_ctx.command.as_ref(),
@@ -991,6 +943,46 @@ impl DatabaseCheckpointControl {
                     .expect("should exist")
                     .ack_completed(epoch)
             }
+        }
+    }
+
+    fn handle_refresh_table_info(&self, task: &mut Option<CompleteBarrierTask>, node: &EpochNode) {
+        let list_finished_info = node
+            .state
+            .resps
+            .iter()
+            .flat_map(|resp| resp.list_finished_sources.clone())
+            .collect::<Vec<_>>();
+        if !list_finished_info.is_empty() {
+            let task = task.get_or_insert_default();
+            task.list_finished_source_ids.extend(list_finished_info);
+        }
+
+        let load_finished_info = node
+            .state
+            .resps
+            .iter()
+            .flat_map(|resp| resp.load_finished_sources.clone())
+            .collect::<Vec<_>>();
+        if !load_finished_info.is_empty() {
+            let task = task.get_or_insert_default();
+            task.load_finished_source_ids.extend(load_finished_info);
+        }
+
+        let refresh_finished_table_ids: Vec<JobId> = node
+            .state
+            .resps
+            .iter()
+            .flat_map(|resp| {
+                resp.refresh_finished_tables
+                    .iter()
+                    .map(|table_id| table_id.as_job_id())
+            })
+            .collect::<Vec<_>>();
+        if !refresh_finished_table_ids.is_empty() {
+            let task = task.get_or_insert_default();
+            task.refresh_finished_table_job_ids
+                .extend(refresh_finished_table_ids);
         }
     }
 }

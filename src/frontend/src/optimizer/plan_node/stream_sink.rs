@@ -591,7 +591,14 @@ impl StreamSink {
         if let Some(sink_type) = properties.get(SINK_TYPE_OPTION) {
             let sink_type = match sink_type.as_str() {
                 SINK_TYPE_APPEND_ONLY => SinkType::AppendOnly,
-                SINK_TYPE_UPSERT => SinkType::Upsert,
+                SINK_TYPE_UPSERT => {
+                    if properties.is_iceberg_connector() {
+                        // Iceberg sink must use retract to represent deletes
+                        SinkType::Retract
+                    } else {
+                        SinkType::Upsert
+                    }
+                }
                 SINK_TYPE_RETRACT | SINK_TYPE_DEBEZIUM => SinkType::Retract,
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(

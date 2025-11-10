@@ -22,7 +22,6 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::TryFutureExt;
 use itertools::Itertools;
-use risingwave_common::catalog::DatabaseId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_pb::meta::Recovery;
@@ -377,11 +376,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
                                 match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
-                                        warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
+                                        warn!(%database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
                                     entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
                                 } _ => {
-                                    info!(database_id = database_id.database_id, "database removed after reloading empty runtime info");
+                                    info!(%database_id, "database removed after reloading empty runtime info");
                                     // mark ready to unblock subsequent request
                                     self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                     entering_initializing.remove();
@@ -421,7 +420,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     Self::report_collect_failure(&self.env, &err);
                                     for database_id in failed_databases {
                                         if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
-                                            warn!(worker_id, database_id = database_id.database_id, "database entering recovery on node failure");
+                                            warn!(worker_id, %database_id, "database entering recovery on node failure");
                                             self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                             self.context.notify_creating_job_failed(Some(database_id), format!("database {} reset due to node {} failure: {}", database_id, worker_id, err.as_report())).await;
                                             // TODO: add log on blocking time
@@ -447,9 +446,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if !self.enable_per_database_isolation() {
                                         Err(anyhow!("database {} reset", resp.database_id))?;
                                     }
-                                let database_id = DatabaseId::new(resp.database_id);
+                                let database_id = resp.database_id;
                                 if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
-                                    warn!(database_id = database_id.database_id, "database entering recovery");
+                                    warn!(%database_id, "database entering recovery");
                                     self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                     // TODO: add log on blocking time
                                     let output = self.completing_task.wait_completing_task().await?;
@@ -824,7 +823,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if !node_to_collect.is_collected() {
                         assert!(collecting_databases.insert(database_id, node_to_collect).is_none());
                     } else {
-                        warn!(database_id = database_id.database_id, "database has no node to inject initial barrier");
+                        warn!(%database_id, "database has no node to inject initial barrier");
                         assert!(collected_databases.insert(database_id, node_to_collect.finish()).is_none());
                     }
                 }
@@ -848,7 +847,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     resp
                                 }
                                 Response::ReportDatabaseFailure(resp) => {
-                                    let database_id = DatabaseId::new(resp.database_id);
+                                    let database_id = resp.database_id;
                                     if collecting_databases.remove(&database_id).is_some() {
                                         warn!(%database_id, worker_id, "database reset during global recovery");
                                         assert!(failed_databases.insert(database_id));
@@ -867,7 +866,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     };
                     assert_eq!(worker_id, resp.worker_id as WorkerId);
-                    let database_id = DatabaseId::new(resp.database_id);
+                    let database_id = resp.database_id;
                     if failed_databases.contains(&database_id) {
                         assert!(!collecting_databases.contains_key(&database_id));
                         // ignore the lately arrived collect resp of failed database
@@ -902,7 +901,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !enable_per_database_isolation && !failed_databases.is_empty() {
                     return Err(anyhow!(
                         "global recovery failed due to failure of databases {:?}",
-                        failed_databases.iter().map(|database_id| database_id.database_id).collect_vec()).into()
+                        failed_databases.iter().map(|database_id| database_id.as_raw_id()).collect_vec()).into()
                     );
                 }
                 let checkpoint_control = CheckpointControl::recover(
@@ -956,12 +955,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let recovering_databases = self
             .checkpoint_control
             .recovering_databases()
-            .map(|database| database.database_id)
+            .map(|database| database.as_raw_id())
             .collect_vec();
         let running_databases = self
             .checkpoint_control
             .running_databases()
-            .map(|database| database.database_id)
+            .map(|database| database.as_raw_id())
             .collect_vec();
 
         event_log_manager_ref.add_event_logs(vec![Event::Recovery(

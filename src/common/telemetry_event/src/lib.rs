@@ -17,9 +17,10 @@
 mod util;
 
 use std::env;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 use prost::Message;
+use risingwave_common_log::LogSuppressor;
 use risingwave_pb::telemetry::{
     EventMessage as PbEventMessage, PbBatchEventMessage, PbTelemetryDatabaseObject,
     TelemetryEventStage as PbTelemetryEventStage,
@@ -77,7 +78,15 @@ pub fn report_event_common(
     if let Some(tracking_id) = TELEMETRY_TRACKING_ID.get() {
         event_tracking_id = tracking_id.to_string();
     } else {
-        tracing::info!("Telemetry tracking_id is not set, event reporting disabled");
+        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+            LazyLock::new(|| LogSuppressor::per_minute(1));
+        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+            tracing::info!(
+                suppressed_count,
+                event_name,
+                "Telemetry tracking_id is not set, event reporting disabled"
+            );
+        }
         return;
     }
 

@@ -652,8 +652,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
 
         let left_to_output: HashMap<usize, usize> = HashMap::from_iter(left_map.iter().cloned());
 
-        let left_stream_key_indices = self.left.pk_indices().to_vec();
-        let right_stream_key_indices = self.right.pk_indices().to_vec();
+        let left_stream_key_indices = self.left.stream_key().to_vec();
+        let right_stream_key_indices = self.right.stream_key().to_vec();
         let memo_table_lookup_prefix = self
             .left_join_keys
             .iter()

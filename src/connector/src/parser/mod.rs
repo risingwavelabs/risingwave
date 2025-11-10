@@ -29,7 +29,7 @@ pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{CDC_TABLE_NAME_COLUMN_NAME, KAFKA_TIMESTAMP_COLUMN_NAME};
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{DatumCow, DatumRef};
 use risingwave_common::util::tracing::InstrumentStream;
@@ -327,9 +327,9 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                     if let Err(error) = res {
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
-                        static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                            LazyLock::new(LogSuppresser::default);
-                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                            LazyLock::new(LogSuppressor::default);
+                        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                             tracing::error!(
                                 error = %error.as_report(),
                                 split_id = &*msg.split_id,

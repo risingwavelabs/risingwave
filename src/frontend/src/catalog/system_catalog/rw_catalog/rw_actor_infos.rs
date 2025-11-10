@@ -46,7 +46,7 @@ async fn read_rw_actors(reader: &SysCatalogReaderImpl) -> Result<Vec<RwActorInfo
                 let fragment_id = fragment.id;
                 fragment.actors.into_iter().map(move |actor| RwActorInfo {
                     actor_id: actor.id as _,
-                    fragment_id: fragment_id as _,
+                    fragment_id: fragment_id.as_raw_id() as _,
                     node: json!(actor.node).into(),
                     dispatcher: json!(actor.dispatcher).into(),
                 })

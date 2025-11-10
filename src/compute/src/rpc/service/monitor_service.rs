@@ -312,8 +312,8 @@ impl MonitorService for MonitorServiceImpl {
         // Collect count metrics by fragment_ids
         fn collect_by_fragment_ids<T: Collector>(
             m: &T,
-            fragment_ids: &HashSet<u32>,
-        ) -> HashMap<u32, u64> {
+            fragment_ids: &HashSet<FragmentId>,
+        ) -> HashMap<FragmentId, u64> {
             let mut metrics = HashMap::new();
             for mut metric_family in m.collect() {
                 for metric in metric_family.take_metric() {
@@ -547,6 +547,7 @@ impl MonitorService for MonitorServiceImpl {
 
 pub use grpc_middleware::*;
 use risingwave_common::metrics::get_label_infallible;
+use risingwave_pb::id::FragmentId;
 
 pub mod grpc_middleware {
     use std::sync::Arc;

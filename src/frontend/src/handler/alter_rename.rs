@@ -16,7 +16,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::is_system_schema;
 use risingwave_pb::ddl_service::alter_name_request;
-use risingwave_pb::user::grant_privilege;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -59,10 +58,7 @@ pub async fn handle_rename_table(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::TableId(table_id.as_raw_id()),
-            &new_table_name,
-        )
+        .alter_name(table_id.into(), &new_table_name)
         .await?;
 
     let stmt_type = match table_type {
@@ -275,9 +271,7 @@ pub async fn handle_rename_schema(
 
         // To rename a schema you must also have the CREATE privilege for the database.
         if let Some(user) = user_reader.get_user_by_name(&session.user_name()) {
-            if !user.is_super
-                && !user.has_privilege(&grant_privilege::Object::DatabaseId(db_id), AclMode::Create)
-            {
+            if !user.is_super && !user.has_privilege(db_id, AclMode::Create) {
                 return Err(ErrorCode::PermissionDenied(
                     "Do not have CREATE privilege on the current database".to_owned(),
                 )
@@ -292,10 +286,7 @@ pub async fn handle_rename_schema(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::SchemaId(schema_id),
-            &new_schema_name,
-        )
+        .alter_name(schema_id.into(), &new_schema_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SCHEMA))
@@ -343,10 +334,7 @@ pub async fn handle_rename_database(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::DatabaseId(database_id),
-            &new_database_name,
-        )
+        .alter_name(database_id.into(), &new_database_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_DATABASE))

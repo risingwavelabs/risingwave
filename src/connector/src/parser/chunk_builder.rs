@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 use risingwave_common::array::stream_record::RecordType;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::types::{Datum, DatumCow, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::{AccessError, AccessResult};
@@ -28,7 +28,8 @@ use thiserror_ext::AsReport;
 use super::MessageMeta;
 use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
-    extract_subject_from_meta, extract_timestamp_from_meta,
+    extract_pulsar_message_id_data_from_meta, extract_subject_from_meta,
+    extract_timestamp_from_meta,
 };
 use crate::source::{SourceColumnDesc, SourceColumnType, SourceCtrlOpts, SourceMeta};
 
@@ -282,9 +283,9 @@ impl SourceStreamChunkRowWriter<'_> {
                     // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
                     // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                     //       see #13105
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                        LazyLock::new(LogSuppresser::default);
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                        LazyLock::new(LogSuppressor::default);
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         tracing::warn!(
                             error = %error.as_report(),
                             split_id = self.row_meta.as_ref().map(|m| m.split_id),
@@ -397,6 +398,17 @@ impl SourceStreamChunkRowWriter<'_> {
                         .and_then(|ele| extract_headers_from_meta(ele.source_meta))
                         .unwrap_or(None),
                 )),
+                (_, &Some(AdditionalColumnType::PulsarMessageIdData(_))) => {
+                    // message_id_data is derived internally, so it's not included here
+                    Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|ele| {
+                                extract_pulsar_message_id_data_from_meta(ele.source_meta)
+                            })
+                            .unwrap_or(None),
+                    ))
+                }
                 (_, &Some(AdditionalColumnType::Filename(_))) => {
                     // Filename is used as partition in FS connectors
                     Ok(A::output_for(

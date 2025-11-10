@@ -40,12 +40,11 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor, StreamContext};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
-use crate::stream::{SourceChange, StreamFragmentGraph};
+use crate::stream::{REFRESH_TABLE_PROGRESS_TRACKER, SourceChange, StreamFragmentGraph};
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
-        let database_id = database_id.map(|database_id| database_id.database_id as _);
         self.metadata_manager
             .catalog_controller
             .clean_dirty_subscription(database_id)
@@ -85,10 +84,7 @@ impl GlobalBarrierWorkerContextImpl {
         let mgr = &self.metadata_manager;
         let job_info = mgr
             .catalog_controller
-            .list_background_creating_jobs(
-                false,
-                database_id.map(|database_id| database_id.database_id as _),
-            )
+            .list_background_creating_jobs(false, database_id)
             .await?;
 
         Ok(job_info
@@ -106,8 +102,6 @@ impl GlobalBarrierWorkerContextImpl {
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
-        let database_id = database_id.map(|database_id| database_id.database_id as _);
-
         let all_actor_infos = self
             .metadata_manager
             .catalog_controller
@@ -121,7 +115,7 @@ impl GlobalBarrierWorkerContextImpl {
                     assert_eq!(database_id, loaded_database_id);
                 }
                 (
-                    DatabaseId::new(loaded_database_id as _),
+                    loaded_database_id,
                     job_fragment_infos
                         .into_iter()
                         .map(|(job_id, fragment_infos)| {
@@ -321,7 +315,7 @@ impl GlobalBarrierWorkerContextImpl {
             .await?;
         for table in tables {
             assert_eq!(table.table_type(), PbTableType::Table);
-            let fragment_infos = jobs.get_mut(&table.id.into()).unwrap();
+            let fragment_infos = jobs.get_mut(&table.id.as_job_id()).unwrap();
             let mut target_fragment_id = None;
             for fragment in fragment_infos.values() {
                 let mut is_target_fragment = false;
@@ -706,6 +700,11 @@ impl GlobalBarrierWorkerContextImpl {
                     .next_generation(cdc_table_ids.into_iter()),
             )
         };
+
+        REFRESH_TABLE_PROGRESS_TRACKER
+            .lock()
+            .remove_tracker_by_database_id(database_id);
+
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,
@@ -753,7 +752,7 @@ impl GlobalBarrierWorkerContextImpl {
                         *actor_id,
                         StreamActor {
                             actor_id: *actor_id as _,
-                            fragment_id: *fragment_id as _,
+                            fragment_id: *fragment_id,
                             vnode_bitmap: vnode_bitmap.clone(),
                             mview_definition: job_definition.clone(),
                             expr_context: expr_context.clone(),

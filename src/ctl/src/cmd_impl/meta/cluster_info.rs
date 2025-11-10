@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::FragmentTypeFlag;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::source::ConnectorSplits;
@@ -170,7 +171,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
 
     let mut table = Table::new();
 
-    let cross_out_if_creating = |cell: Cell, fid: u32| -> Cell {
+    let cross_out_if_creating = |cell: Cell, fid: FragmentId| -> Cell {
         match fragment_states[&fid] {
             State::Unspecified => unreachable!(),
             State::Creating => cell.add_attribute(Attribute::CrossedOut),

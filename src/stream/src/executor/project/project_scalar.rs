@@ -58,11 +58,8 @@ impl ProjectExecutor {
         noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
-        let eliminate_noop_updates = noop_update_hint
-            || ctx
-                .streaming_config
-                .developer
-                .aggressive_noop_update_elimination;
+        let eliminate_noop_updates =
+            noop_update_hint || ctx.config.developer.aggressive_noop_update_elimination;
         Self {
             input,
             inner: Inner {
@@ -254,9 +251,9 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, pk_indices);
+        let source = source.into_executor(schema, stream_key);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
@@ -336,7 +333,7 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, PkIndices::new());
+        let source = source.into_executor(schema, StreamKey::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");

@@ -73,7 +73,7 @@ async fn test_merger_sum_aggr() {
             let input = Executor::new(
                 ExecutorInfo::for_test(
                     input_schema,
-                    PkIndices::new(),
+                    StreamKey::new(),
                     "ReceiverExecutor".to_owned(),
                     0,
                 ),
@@ -139,7 +139,7 @@ async fn test_merger_sum_aggr() {
                 ExecutorInfo::for_test(
                     // input schema of local simple agg
                     Schema::new(vec![Field::unnamed(DataType::Int64)]),
-                    PkIndices::new(),
+                    StreamKey::new(),
                     "ReceiverExecutor".to_owned(),
                     0,
                 ),
@@ -153,7 +153,7 @@ async fn test_merger_sum_aggr() {
                     0,
                 ))],
                 0,
-                0,
+                0.into(),
                 local_barrier_manager.clone(),
                 metrics,
             );
@@ -188,7 +188,7 @@ async fn test_merger_sum_aggr() {
                 ExecutorInfo::for_test(
                     // output schema of local simple agg
                     schema.clone(),
-                    PkIndices::new(),
+                    StreamKey::new(),
                     "MergeExecutor".to_owned(),
                     0,
                 ),

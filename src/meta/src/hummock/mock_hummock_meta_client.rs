@@ -41,6 +41,7 @@ use risingwave_pb::hummock::{
     compact_task,
 };
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
+use risingwave_pb::id::{JobId, TableId};
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
@@ -226,7 +227,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn trigger_manual_compaction(
         &self,
         _compaction_group_id: u64,
-        _table_id: u32,
+        _table_id: JobId,
         _level: u32,
         _sst_ids: Vec<u64>,
     ) -> Result<()> {
@@ -381,7 +382,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn get_version_by_epoch(
         &self,
         _epoch: HummockEpoch,
-        _table_id: u32,
+        _table_id: TableId,
     ) -> Result<PbHummockVersion> {
         unimplemented!()
     }

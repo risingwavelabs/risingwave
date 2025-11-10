@@ -25,6 +25,9 @@ use risingwave_common::id::JobId;
 use risingwave_common::must_match;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    PbListFinishedSource, PbLoadFinishedSource,
+};
 use tokio::task::JoinHandle;
 
 use crate::barrier::checkpoint::CheckpointControl;
@@ -66,10 +69,10 @@ pub(super) struct CompleteBarrierTask {
     #[expect(clippy::type_complexity)]
     pub(super) epoch_infos:
         HashMap<DatabaseId, (Option<(CommandContext, HistogramTimer)>, Vec<(JobId, u64)>)>,
-    /// Source IDs that have finished listing data and need `ListFinish` commands
-    pub(super) list_finished_source_ids: Vec<u32>,
-    /// Source IDs that have finished loading data and need `LoadFinish` commands
-    pub(super) load_finished_source_ids: Vec<u32>,
+    /// Source listing completion events that need `ListFinish` commands
+    pub(super) list_finished_source_ids: Vec<PbListFinishedSource>,
+    /// Source load completion events that need `LoadFinish` commands
+    pub(super) load_finished_source_ids: Vec<PbLoadFinishedSource>,
     /// Table IDs that have finished materialize refresh and need completion signaling
     pub(super) refresh_finished_table_job_ids: Vec<JobId>,
 }
@@ -176,7 +179,7 @@ impl CompleteBarrierTask {
                     Self::report_complete_event(&env, duration_sec, &command_ctx);
                     GLOBAL_META_METRICS
                         .last_committed_barrier_time
-                        .with_label_values(&[database_id.database_id.to_string().as_str()])
+                        .with_label_values(&[database_id.to_string().as_str()])
                         .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
                 }
             }

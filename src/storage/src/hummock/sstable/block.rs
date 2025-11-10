@@ -478,7 +478,7 @@ pub struct BlockBuilder {
     /// Compression algorithm.
     compression_algorithm: CompressionAlgorithm,
 
-    table_id: Option<u32>,
+    table_id: Option<TableId>,
     // restart_points_type_index stores only the restart_point corresponding to each type change,
     // as an index, in order to reduce space usage
     restart_points_type_index: Vec<RestartPoint>,
@@ -520,7 +520,7 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
-        let input_table_id = full_key.user_key.table_id.as_raw_id();
+        let input_table_id = full_key.user_key.table_id;
         match self.table_id {
             Some(current_table_id) => assert_eq!(current_table_id, input_table_id),
             None => self.table_id = Some(input_table_id),
@@ -686,7 +686,7 @@ impl BlockBuilder {
             }),
         );
 
-        self.buf.put_u32_le(self.table_id.unwrap());
+        self.buf.put_u32_le(self.table_id.unwrap().as_raw_id());
         let result_buf = if self.compression_algorithm != CompressionAlgorithm::None {
             self.compress_buf.clear();
             self.compress_buf = Self::compress(
@@ -802,7 +802,7 @@ impl BlockBuilder {
         }
     }
 
-    pub fn table_id(&self) -> Option<u32> {
+    pub fn table_id(&self) -> Option<TableId> {
         self.table_id
     }
 

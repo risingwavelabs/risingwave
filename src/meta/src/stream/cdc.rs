@@ -33,6 +33,7 @@ use risingwave_connector::source::cdc::external::{
 use risingwave_connector::source::cdc::{CdcScanOptions, CdcTableSnapshotSplitAssignment};
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use risingwave_meta_model::cdc_table_snapshot_split;
+use risingwave_pb::id::TableId;
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamCdcScanNode, StreamCdcScanOptions};
@@ -45,7 +46,7 @@ use crate::model::{Fragment, StreamJobFragments};
 /// A CDC table snapshot splits can only be successfully initialized once.
 /// Subsequent attempts to write to the metastore with the same primary key will be rejected.
 pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
-    table_id: u32,
+    table_id: TableId,
     table_desc: &ExternalTableDesc,
     meta_store: &SqlMetaStore,
     per_table_options: &Option<StreamCdcScanOptions>,
@@ -106,7 +107,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
         let split: CdcTableSnapshotSplit = split?;
         splits_num += 1;
         insert_batch.push(cdc_table_snapshot_split::ActiveModel {
-            table_id: Set(table_id.into()),
+            table_id: Set(table_id.as_job_id()),
             split_id: Set(split.split_id.to_owned()),
             left: Set(split.left_bound_inclusive.value_serialize()),
             right: Set(split.right_bound_exclusive.value_serialize()),

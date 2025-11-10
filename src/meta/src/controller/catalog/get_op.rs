@@ -449,7 +449,7 @@ impl CatalogController {
             .filter_map(|t| {
                 if t.version.is_some() {
                     let ret = (
-                        t.id.into(),
+                        t.id,
                         t.columns
                             .iter()
                             .map(|c| c.column_desc.as_ref().unwrap().column_id)
@@ -471,7 +471,7 @@ impl CatalogController {
         get_existing_job_resource_group(&inner.db, streaming_job_id).await
     }
 
-    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+    pub async fn get_database_resource_group(&self, database_id: DatabaseId) -> MetaResult<String> {
         let inner = self.inner.read().await;
         get_database_resource_group(&inner.db, database_id).await
     }
@@ -495,7 +495,7 @@ impl CatalogController {
         streaming_job_id: JobId,
     ) -> MetaResult<String> {
         let inner = self.inner.read().await;
-        let database_id: ObjectId = StreamingJob::find_by_id(streaming_job_id)
+        let database_id: DatabaseId = StreamingJob::find_by_id(streaming_job_id)
             .select_only()
             .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
             .column(object::Column::DatabaseId)

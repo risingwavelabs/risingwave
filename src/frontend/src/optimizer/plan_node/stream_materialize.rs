@@ -19,10 +19,10 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Engine, OBJECT_ID_PLACEHOLDER, StreamJobStatus,
-    TableId,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, StreamJobStatus, TableId,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::id::FragmentId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -354,7 +354,7 @@ impl StreamMaterialize {
             table_type,
             append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            fragment_id: OBJECT_ID_PLACEHOLDER,
+            fragment_id: FragmentId::placeholder(),
             dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index,
@@ -700,7 +700,7 @@ impl StreamNode for StreamMaterialize {
         PbNodeBody::Materialize(Box::new(MaterializeNode {
             // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by
             // meta service after global information is generated.
-            table_id: 0,
+            table_id: 0.into(),
             table: None,
             // Pass staging table catalog if available for refreshable tables
             staging_table: staging_table_prost,

@@ -50,8 +50,8 @@ pub struct CdcTableDesc {
 impl CdcTableDesc {
     pub fn to_protobuf(&self) -> ExternalTableDesc {
         ExternalTableDesc {
-            table_id: self.table_id.into(),
-            source_id: self.source_id.into(),
+            table_id: self.table_id,
+            source_id: self.source_id.as_raw_id(),
             columns: self.columns.iter().map(Into::into).collect(),
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
             table_name: self.external_table_name.clone(),

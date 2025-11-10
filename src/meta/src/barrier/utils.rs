@@ -61,7 +61,6 @@ pub(super) fn collect_resp_info(
         table_watermarks.push(resp.table_watermarks);
         old_value_ssts.extend(resp.old_value_sstables.into_iter().map(|s| s.into()));
         for (table_id, vector_index_add) in resp.vector_index_adds {
-            let table_id = TableId::new(table_id);
             vector_index_adds
                 .try_insert(
                     table_id,
@@ -73,7 +72,7 @@ pub(super) fn collect_resp_info(
                 )
                 .expect("non-duplicate");
         }
-        truncate_tables.extend(resp.truncate_tables.into_iter().map(TableId::new));
+        truncate_tables.extend(resp.truncate_tables);
     }
 
     (
@@ -86,7 +85,7 @@ pub(super) fn collect_resp_info(
                     watermarks
                         .into_iter()
                         .map(|(table_id, watermarks)| {
-                            (TableId::new(table_id), TableWatermarks::from(&watermarks))
+                            (table_id, TableWatermarks::from(&watermarks))
                         })
                         .collect()
                 })

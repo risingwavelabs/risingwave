@@ -286,11 +286,11 @@ impl FrontendObserverNode {
                             Operation::Delete => catalog_guard.drop_table(
                                 table.database_id,
                                 table.schema_id,
-                                table.id.into(),
+                                table.id,
                             ),
                             Operation::Update => {
                                 let old_fragment_id = catalog_guard
-                                    .get_any_table_by_id(&table.id.into())
+                                    .get_any_table_by_id(&table.id)
                                     .unwrap()
                                     .fragment_id;
                                 catalog_guard.update_table(table);
@@ -504,7 +504,11 @@ impl FrontendObserverNode {
                     .upsert_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
             }
             Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
-                &mappings.into_iter().map(|m| m.fragment_id).collect_vec(),
+                mappings
+                    .into_iter()
+                    .map(|m| m.fragment_id)
+                    .collect_vec()
+                    .as_slice(),
             ),
             Operation::Snapshot => {
                 self.worker_node_manager

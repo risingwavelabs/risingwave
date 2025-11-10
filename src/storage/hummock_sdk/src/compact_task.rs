@@ -232,7 +232,7 @@ impl From<PbCompactTask> for CompactTask {
             .into_iter()
             .map(|(table_id, pb_table_watermark)| {
                 let table_watermark = TableWatermarks::from(pb_table_watermark);
-                (table_id.into(), table_watermark)
+                (table_id, table_watermark)
             })
             .partition(|(_table_id, table_watermarke)| {
                 matches!(
@@ -268,18 +268,14 @@ impl From<PbCompactTask> for CompactTask {
             base_level: pb_compact_task.base_level,
             task_status: TaskStatus::try_from(pb_compact_task.task_status).unwrap(),
             compaction_group_id: pb_compact_task.compaction_group_id,
-            existing_table_ids: pb_compact_task
-                .existing_table_ids
-                .iter()
-                .map(Into::into)
-                .collect(),
+            existing_table_ids: pb_compact_task.existing_table_ids.clone(),
             compression_algorithm: pb_compact_task.compression_algorithm,
             target_file_size: pb_compact_task.target_file_size,
             compaction_filter_mask: pb_compact_task.compaction_filter_mask,
             table_options: pb_compact_task
                 .table_options
                 .iter()
-                .map(|(table_id, v)| (table_id.into(), *v))
+                .map(|(table_id, v)| (*table_id, *v))
                 .collect(),
             current_epoch_time: pb_compact_task.current_epoch_time,
             target_sub_level_id: pb_compact_task.target_sub_level_id,
@@ -289,14 +285,14 @@ impl From<PbCompactTask> for CompactTask {
             table_vnode_partition: pb_compact_task
                 .table_vnode_partition
                 .iter()
-                .map(|(table_id, v)| (table_id.into(), *v))
+                .map(|(table_id, v)| (*table_id, *v))
                 .collect(),
             pk_prefix_table_watermarks,
             non_pk_prefix_table_watermarks,
             table_schemas: pb_compact_task
                 .table_schemas
                 .iter()
-                .map(|(table_id, v)| (table_id.into(), v.clone()))
+                .map(|(table_id, v)| (*table_id, v.clone()))
                 .collect(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
@@ -311,7 +307,7 @@ impl From<&PbCompactTask> for CompactTask {
             .iter()
             .map(|(table_id, pb_table_watermark)| {
                 let table_watermark = TableWatermarks::from(pb_table_watermark);
-                (table_id.into(), table_watermark)
+                (*table_id, table_watermark)
             })
             .partition(|(_table_id, table_watermarke)| {
                 matches!(
@@ -347,18 +343,14 @@ impl From<&PbCompactTask> for CompactTask {
             base_level: pb_compact_task.base_level,
             task_status: TaskStatus::try_from(pb_compact_task.task_status).unwrap(),
             compaction_group_id: pb_compact_task.compaction_group_id,
-            existing_table_ids: pb_compact_task
-                .existing_table_ids
-                .iter()
-                .map(Into::into)
-                .collect(),
+            existing_table_ids: pb_compact_task.existing_table_ids.clone(),
             compression_algorithm: pb_compact_task.compression_algorithm,
             target_file_size: pb_compact_task.target_file_size,
             compaction_filter_mask: pb_compact_task.compaction_filter_mask,
             table_options: pb_compact_task
                 .table_options
                 .iter()
-                .map(|(table_id, v)| (table_id.into(), *v))
+                .map(|(table_id, v)| (*table_id, *v))
                 .collect(),
             current_epoch_time: pb_compact_task.current_epoch_time,
             target_sub_level_id: pb_compact_task.target_sub_level_id,
@@ -368,14 +360,14 @@ impl From<&PbCompactTask> for CompactTask {
             table_vnode_partition: pb_compact_task
                 .table_vnode_partition
                 .iter()
-                .map(|(table_id, v)| (table_id.into(), *v))
+                .map(|(table_id, v)| (*table_id, *v))
                 .collect(),
             pk_prefix_table_watermarks,
             non_pk_prefix_table_watermarks,
             table_schemas: pb_compact_task
                 .table_schemas
                 .iter()
-                .map(|(table_id, v)| (table_id.into(), v.clone()))
+                .map(|(table_id, v)| (*table_id, v.clone()))
                 .collect(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
@@ -412,40 +404,24 @@ impl From<CompactTask> for PbCompactTask {
             base_level: compact_task.base_level,
             task_status: compact_task.task_status.into(),
             compaction_group_id: compact_task.compaction_group_id,
-            existing_table_ids: compact_task
-                .existing_table_ids
-                .iter()
-                .map(Into::into)
-                .collect(),
+            existing_table_ids: compact_task.existing_table_ids.clone(),
             compression_algorithm: compact_task.compression_algorithm,
             target_file_size: compact_task.target_file_size,
             compaction_filter_mask: compact_task.compaction_filter_mask,
-            table_options: compact_task
-                .table_options
-                .iter()
-                .map(|(table_id, v)| (table_id.into(), *v))
-                .collect(),
+            table_options: compact_task.table_options.clone(),
             current_epoch_time: compact_task.current_epoch_time,
             target_sub_level_id: compact_task.target_sub_level_id,
             task_type: compact_task.task_type.into(),
             split_weight_by_vnode: compact_task.split_weight_by_vnode,
-            table_vnode_partition: compact_task
-                .table_vnode_partition
-                .iter()
-                .map(|(table_id, v)| (table_id.into(), *v))
-                .collect(),
+            table_vnode_partition: compact_task.table_vnode_partition.clone(),
             table_watermarks: compact_task
                 .pk_prefix_table_watermarks
                 .into_iter()
                 .chain(compact_task.non_pk_prefix_table_watermarks)
-                .map(|(table_id, table_watermark)| (table_id.as_raw_id(), table_watermark.into()))
+                .map(|(table_id, table_watermark)| (table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
-            table_schemas: compact_task
-                .table_schemas
-                .iter()
-                .map(|(table_id, v)| (table_id.into(), v.clone()))
-                .collect(),
+            table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
         }
@@ -481,40 +457,24 @@ impl From<&CompactTask> for PbCompactTask {
             base_level: compact_task.base_level,
             task_status: compact_task.task_status.into(),
             compaction_group_id: compact_task.compaction_group_id,
-            existing_table_ids: compact_task
-                .existing_table_ids
-                .iter()
-                .map(Into::into)
-                .collect(),
+            existing_table_ids: compact_task.existing_table_ids.clone(),
             compression_algorithm: compact_task.compression_algorithm,
             target_file_size: compact_task.target_file_size,
             compaction_filter_mask: compact_task.compaction_filter_mask,
-            table_options: compact_task
-                .table_options
-                .iter()
-                .map(|(table_id, v)| (table_id.into(), *v))
-                .collect(),
+            table_options: compact_task.table_options.clone(),
             current_epoch_time: compact_task.current_epoch_time,
             target_sub_level_id: compact_task.target_sub_level_id,
             task_type: compact_task.task_type.into(),
             split_weight_by_vnode: compact_task.split_weight_by_vnode,
-            table_vnode_partition: compact_task
-                .table_vnode_partition
-                .iter()
-                .map(|(table_id, v)| (table_id.into(), *v))
-                .collect(),
+            table_vnode_partition: compact_task.table_vnode_partition.clone(),
             table_watermarks: compact_task
                 .pk_prefix_table_watermarks
                 .iter()
                 .chain(compact_task.non_pk_prefix_table_watermarks.iter())
-                .map(|(table_id, table_watermark)| (table_id.as_raw_id(), table_watermark.into()))
+                .map(|(table_id, table_watermark)| (*table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
-            table_schemas: compact_task
-                .table_schemas
-                .iter()
-                .map(|(table_id, v)| (table_id.into(), v.clone()))
-                .collect(),
+            table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
         }
@@ -574,7 +534,7 @@ impl ValidationTask {
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct ReportTask {
-    pub table_stats_change: HashMap<u32, PbTableStats>,
+    pub table_stats_change: HashMap<TableId, PbTableStats>,
     pub task_id: u64,
     pub task_status: TaskStatus,
     pub sorted_output_ssts: Vec<SstableInfo>,
