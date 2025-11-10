@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
+use iceberg::table::Table;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_meta_model::ActorId;
@@ -23,9 +24,12 @@ use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
+use tokio::sync::oneshot::{Sender, channel};
+use tokio::task::JoinHandle;
 
 use crate::barrier::{BarrierScheduler, Command, SharedActorInfos};
-use crate::manager::MetadataManager;
+use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
 /// Global, per-table refresh progress tracker.
@@ -109,6 +113,129 @@ impl GlobalRefreshTableProgressTracker {
 pub struct RefreshManager {
     metadata_manager: MetadataManager,
     barrier_scheduler: BarrierScheduler,
+}
+
+pub type GlobalRefreshManagerRef = Arc<GlobalRefreshManager>;
+
+pub struct GlobalRefreshManager {
+    metadata_manager: MetadataManager,
+    barrier_scheduler: BarrierScheduler,
+
+    in_process_tracker: Mutex<HashMap<TableId, SingleTableRefreshProgressTracker>>,
+
+    timer_handle: Mutex<HashMap<TableId, JoinHandle<()>>>,
+
+    env: MetaSrvEnv,
+    metrics: Arc<MetaMetrics>,
+}
+
+impl GlobalRefreshManager {
+    pub fn new(
+        metadata_manager: MetadataManager,
+        barrier_scheduler: BarrierScheduler,
+        env: MetaSrvEnv,
+        metrics: Arc<MetaMetrics>,
+    ) -> Self {
+        Self {
+            metadata_manager,
+            barrier_scheduler,
+            in_process_tracker: Mutex::new(HashMap::new()),
+            timer_handle: Mutex::new(HashMap::new()),
+            env,
+            metrics,
+        }
+    }
+
+    pub async fn run(&self) -> (JoinHandle<()>, Sender<()>) {
+        // TODO: load legacy jobs
+
+        let (shutdown_tx, mut shutdown_rx) = channel();
+        let join_handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        break;
+                    }
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
+    }
+
+    pub async fn refresh_table(&self, request: RefreshRequest) -> MetaResult<RefreshResponse> {
+        let table_id = request.table_id;
+
+        {
+            // validate request
+            if self.in_process_tracker.lock().contains_key(&table_id) {
+                return Err(MetaError::invalid_parameter(format!(
+                    "Table '{}' is already being refreshed.",
+                    table_id
+                )));
+            }
+
+            let table = self
+                .metadata_manager
+                .catalog_controller
+                .get_table_by_id(table_id)
+                .await?;
+            if !table.refreshable {
+                return Err(MetaError::invalid_parameter(format!(
+                    "Table '{}' is not refreshable.",
+                    table_id
+                )));
+            }
+
+            if table.optional_associated_source_id
+                != Some(OptionalAssociatedSourceId::AssociatedSourceId(
+                    request.associated_source_id,
+                ))
+            {
+                return Err(MetaError::invalid_parameter(format!(
+                    "Table '{}' is not associated with source '{}'.",
+                    table_id, request.associated_source_id
+                )));
+            }
+
+            let current_state = self
+                .metadata_manager
+                .catalog_controller
+                .get_table_refresh_state(table_id)
+                .await?;
+            if matches!(
+                current_state,
+                Some(RefreshState::Refreshing) | Some(RefreshState::Finishing)
+            ) {
+                return Err(MetaError::invalid_parameter(format!(
+                    "Table '{}' is already being refreshed, current state: {:?}.",
+                    table_id, current_state
+                )));
+            }
+        }
+
+        self.trigger_refresh(table_id).await?;
+
+        Ok(RefreshResponse { status: None })
+    }
+
+    async fn trigger_refresh(&self, table_id: TableId) -> MetaResult<()> {
+        {
+            let database_id = self
+                .metadata_manager
+                .catalog_controller
+                .get_object_database_id(table_id.as_raw_id() as _)
+                .await?;
+
+            let job_fragments = self
+                .metadata_manager
+                .get_job_fragments_by_id(table_id.as_job_id())
+                .await?;
+
+            // find list and fetch actors info
+        }
+        Ok(())
+    }
 }
 
 impl RefreshManager {
