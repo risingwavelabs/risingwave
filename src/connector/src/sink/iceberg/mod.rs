@@ -1637,12 +1637,56 @@ impl IcebergSinkCommitter {
         }
         Ok(table)
     }
+
+    async fn pre_commit_inner(
+        &mut self,
+        _epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<Vec<IcebergCommitResult>> {
+        if let Some(add_columns) = add_columns {
+            return Err(anyhow!(
+                "Iceberg sink not support add columns, but got: {:?}",
+                add_columns
+            )
+            .into());
+        }
+
+        let write_results: Vec<IcebergCommitResult> = metadata
+            .iter()
+            .map(IcebergCommitResult::try_from)
+            .collect::<Result<Vec<IcebergCommitResult>>>()?;
+
+        // Skip if no data to commit
+        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
+            return Ok(vec![]);
+        }
+
+        // guarantee that all write results has same schema_id and partition_spec_id
+        if write_results
+            .iter()
+            .any(|r| r.schema_id != write_results[0].schema_id)
+            || write_results
+                .iter()
+                .any(|r| r.partition_spec_id != write_results[0].partition_spec_id)
+        {
+            return Err(SinkError::Iceberg(anyhow!(
+                "schema_id and partition_spec_id should be the same in all write results"
+            )));
+        }
+
+        Ok(write_results)
+    }
 }
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     fn strategy(&self) -> SinkCommitStrategy {
-        SinkCommitStrategy::TwoPhase
+        if self.config.is_exactly_once.unwrap_or_default() {
+            SinkCommitStrategy::TwoPhase
+        } else {
+            SinkCommitStrategy::SinglePhase
+        }
     }
 
     async fn init(&mut self) -> Result<()> {
@@ -1661,36 +1705,11 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<Vec<u8>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
-        if let Some(add_columns) = add_columns {
-            return Err(anyhow!(
-                "Iceberg sink not support add columns, but got: {:?}",
-                add_columns
-            )
-            .into());
-        }
 
-        let write_results: Vec<IcebergCommitResult> = metadata
-            .iter()
-            .map(IcebergCommitResult::try_from)
-            .collect::<Result<Vec<IcebergCommitResult>>>()?;
+        let write_results = self.pre_commit_inner(epoch, metadata, add_columns).await?;
 
-        // Skip if no data to commit
-        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
-            tracing::debug!(?epoch, "no data to commit");
+        if write_results.is_empty() {
             return Ok(vec![]);
-        }
-
-        // guarantee that all write results has same schema_id and partition_spec_id
-        if write_results
-            .iter()
-            .any(|r| r.schema_id != write_results[0].schema_id)
-            || write_results
-                .iter()
-                .any(|r| r.partition_spec_id != write_results[0].partition_spec_id)
-        {
-            return Err(SinkError::Iceberg(anyhow!(
-                "schema_id and partition_spec_id should be the same in all write results"
-            )));
         }
 
         let mut pre_commit_metadata_bytes = Vec::new();
@@ -1711,9 +1730,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             return Ok(());
         }
 
-        // Check snapshot limit before proceeding with commit
-        self.wait_for_snapshot_limit().await?;
-
         let write_results_bytes = deserialize_metadata(commit_metadata);
         let mut write_results = vec![];
 
@@ -1721,10 +1737,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             let write_result = IcebergCommitResult::try_from_serialized_bytes(each)?;
             write_results.push(write_result);
         }
-
-        assert!(
-            !write_results.is_empty() && !write_results.iter().all(|r| r.data_files.is_empty())
-        );
 
         self.commit_iceberg_inner(epoch, write_results).await?;
 
@@ -1735,6 +1747,24 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         // TODO: Files that have been written but not committed should be deleted.
         tracing::debug!("Abort not implemented yet");
     }
+
+    async fn commit_directly(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        tracing::info!("Starting iceberg direct commit in epoch {epoch}");
+
+        let write_results = self.pre_commit_inner(epoch, metadata, add_columns).await?;
+
+        if write_results.is_empty() {
+            tracing::debug!(?epoch, "no data to commit");
+            return Ok(());
+        }
+
+        self.commit_iceberg_inner(epoch, write_results).await
+    }
 }
 
 /// Methods Required to Achieve Exactly Once Semantics
@@ -1744,6 +1774,14 @@ impl IcebergSinkCommitter {
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
     ) -> Result<()> {
+        // Empty write results should be handled before calling this function.
+        assert!(
+            !write_results.is_empty() && !write_results.iter().all(|r| r.data_files.is_empty())
+        );
+
+        // Check snapshot limit before proceeding with commit
+        self.wait_for_snapshot_limit().await?;
+
         // If the provided `snapshot_id`` is not None, it indicates that this commit is a re commit
         // occurring during the recovery phase. In this case, we need to use the `snapshot_id`
         // that was previously persisted in the system table to commit.
