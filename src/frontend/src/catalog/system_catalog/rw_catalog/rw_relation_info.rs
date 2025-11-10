@@ -56,32 +56,32 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             schema_catalog
                 .iter_created_mvs_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.id.as_raw_id());
+                    table_ids.push(t.id.as_job_id());
                 });
 
             schema_catalog
                 .iter_user_table_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.id.as_raw_id());
+                    table_ids.push(t.id.as_job_id());
                 });
 
             schema_catalog
                 .iter_source_with_acl(current_user)
                 .filter(|s| s.info.is_shared())
                 .for_each(|s| {
-                    table_ids.push(s.id);
+                    table_ids.push(s.id.into());
                 });
 
             schema_catalog
                 .iter_sink_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.id.sink_id);
+                    table_ids.push(t.id.sink_id.into());
                 });
 
             schema_catalog
                 .iter_index_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.index_table().id.as_raw_id());
+                    table_ids.push(t.index_table().id.as_job_id());
                 });
         }
     }
@@ -100,7 +100,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         schema_catalog
             .iter_created_mvs_with_acl(current_user)
             .for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.as_raw_id()) {
+                if let Some(fragments) = table_fragments.get(&t.id.as_job_id()) {
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
@@ -121,7 +121,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         schema_catalog
             .iter_user_table_with_acl(current_user)
             .for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.as_raw_id()) {
+                if let Some(fragments) = table_fragments.get(&t.id.as_job_id()) {
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
@@ -142,7 +142,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         schema_catalog
             .iter_sink_with_acl(current_user)
             .for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.sink_id) {
+                if let Some(fragments) = table_fragments.get(&t.id.sink_id.into()) {
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
@@ -163,7 +163,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         schema_catalog
             .iter_index_with_acl(current_user)
             .for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.index_table().id.as_raw_id()) {
+                if let Some(fragments) = table_fragments.get(&t.index_table().id.as_job_id()) {
                     let index_table = t.index_table();
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
@@ -187,7 +187,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             .iter_source_with_acl(current_user)
             .for_each(|t| {
                 let (timezone, fragments) = if t.info.is_shared()
-                    && let Some(fragments) = table_fragments.get(&t.id)
+                    && let Some(fragments) = table_fragments.get(&t.id.into())
                 {
                     (
                         fragments.get_ctx().unwrap().get_timezone().clone(),

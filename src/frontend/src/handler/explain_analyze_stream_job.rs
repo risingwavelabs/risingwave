@@ -53,7 +53,7 @@ pub async fn handle_explain_analyze_stream_job(
     let job_id = bind::bind_relation(&target, &handler_args)?;
 
     let meta_client = handler_args.session.env().meta_client();
-    let fragments = net::get_fragments(meta_client, job_id).await?;
+    let fragments = net::get_fragments(meta_client, job_id.into()).await?;
     let fragment_parallelisms = fragments
         .iter()
         .map(|f| (f.id, f.actors.len()))
@@ -162,7 +162,9 @@ mod bind {
 mod net {
     use std::collections::HashSet;
 
+    use risingwave_common::id::FragmentId;
     use risingwave_pb::common::WorkerNode;
+    use risingwave_pb::id::JobId;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::monitor_service::GetProfileStatsRequest;
     use tokio::time::{Duration, sleep};
@@ -191,7 +193,7 @@ mod net {
     // TODO(kwannoel): Only fetch the names, actor_ids and graph of the fragments
     pub(super) async fn get_fragments(
         meta_client: &dyn FrontendMetaClient,
-        job_id: u32,
+        job_id: JobId,
     ) -> Result<Vec<FragmentInfo>> {
         let mut fragment_map = meta_client.list_table_fragments(&[job_id]).await?;
         assert_eq!(fragment_map.len(), 1, "expected only one fragment");
@@ -204,7 +206,7 @@ mod net {
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &HashSet<ExecutorId>,
-        dispatcher_fragment_ids: &HashSet<u32>,
+        dispatcher_fragment_ids: &HashSet<FragmentId>,
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
         let dispatcher_fragment_ids = dispatcher_fragment_ids.iter().copied().collect::<Vec<_>>();
@@ -593,7 +595,7 @@ mod graph {
     /// This is an internal struct used ONLY for explain analyze stream job.
     pub(super) struct StreamNode {
         operator_id: OperatorId,
-        fragment_id: u32,
+        fragment_id: FragmentId,
         identity: NodeBodyDiscriminants,
         actor_ids: HashSet<u32>,
         dependencies: Vec<u64>,
@@ -615,7 +617,7 @@ mod graph {
     }
 
     impl StreamNode {
-        fn new_for_dispatcher(fragment_id: u32) -> Self {
+        fn new_for_dispatcher(fragment_id: FragmentId) -> Self {
             StreamNode {
                 operator_id: operator_id_for_dispatch(fragment_id),
                 fragment_id,
@@ -634,7 +636,10 @@ mod graph {
         HashSet<FragmentId>,
         HashMap<OperatorId, StreamNode>,
     ) {
-        let job_fragment_ids = fragments.iter().map(|f| f.id).collect::<HashSet<_>>();
+        let job_fragment_ids = fragments
+            .iter()
+            .map(|f| f.id)
+            .collect::<HashSet<FragmentId>>();
 
         // Finds root nodes of the graph
         fn find_root_nodes(stream_nodes: &HashMap<u64, StreamNode>) -> HashSet<u64> {
@@ -650,8 +655,8 @@ mod graph {
         // Recursively extracts stream node info, and builds an adjacency list between stream nodes
         // and their dependencies
         fn extract_stream_node_info(
-            fragment_id: u32,
-            fragment_id_to_merge_operator_id: &mut HashMap<u32, OperatorId>,
+            fragment_id: FragmentId,
+            fragment_id_to_merge_operator_id: &mut HashMap<FragmentId, OperatorId>,
             operator_id_to_stream_node: &mut HashMap<OperatorId, StreamNode>,
             node: &PbStreamNode,
             actor_ids: &HashSet<u32>,
@@ -861,9 +866,10 @@ mod graph {
 mod utils {
     use risingwave_common::operator::unique_operator_id;
 
+    use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::OperatorId;
 
-    pub(super) fn operator_id_for_dispatch(fragment_id: u32) -> OperatorId {
+    pub(super) fn operator_id_for_dispatch(fragment_id: FragmentId) -> OperatorId {
         unique_operator_id(fragment_id, u32::MAX as u64)
     }
 }

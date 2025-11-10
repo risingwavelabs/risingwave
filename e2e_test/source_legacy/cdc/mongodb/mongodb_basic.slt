@@ -30,7 +30,7 @@ select count(*) from normalized_users;
 
 # historical data
 query I
-select count(*) from users where commit_ts = '1970-01-01 00:00:00+00:00';
+select count(*) from users where commit_ts > '2025-01-01 00:00:00+00:00';
 ----
 55
 

@@ -274,7 +274,6 @@ mod tests {
     use futures::TryStreamExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, EpochPair};
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
@@ -312,12 +311,12 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
+            .table_committed_epoch(table.id)
             .unwrap()
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
 
         let prepare_state = async |vnodes: &Arc<Bitmap>, chunk: &StreamChunk| {
             let serde = LogStoreRowSerde::new(&table, Some(vnodes.clone()), pk_info);

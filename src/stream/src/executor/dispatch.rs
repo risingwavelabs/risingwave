@@ -47,6 +47,7 @@ use crate::task::{DispatcherId, LocalBarrierManager, NewOutputRequest};
 
 mod output_mapping;
 pub use output_mapping::DispatchOutputMapping;
+use risingwave_common::id::FragmentId;
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -183,10 +184,11 @@ impl DispatchExecutorInner {
             }};
         }
 
+        // TODO(config): use config from actor context, instead of the global one
         let limit = self
             .local_barrier_manager
             .env
-            .config()
+            .global_config()
             .developer
             .exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
@@ -427,8 +429,8 @@ impl DispatchExecutor {
         input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<stream_plan::Dispatcher>,
-        actor_id: u32,
-        fragment_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> StreamResult<Self> {
@@ -457,8 +459,8 @@ impl DispatchExecutor {
     pub(crate) fn for_test(
         input: Executor,
         dispatchers: Vec<DispatcherImpl>,
-        actor_id: u32,
-        fragment_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> (
@@ -485,12 +487,16 @@ impl DispatchExecutor {
         mut input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<DispatcherImpl>,
-        actor_id: u32,
-        fragment_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let chunk_size = local_barrier_manager.env.config().developer.chunk_size;
+        let chunk_size = local_barrier_manager
+            .env
+            .global_config()
+            .developer
+            .chunk_size;
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
             let mut info = input.info().clone();
@@ -532,11 +538,12 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+        // TODO(config): use config from actor context, instead of the global one
         let max_barrier_count_per_batch = self
             .inner
             .local_barrier_manager
             .env
-            .config()
+            .global_config()
             .developer
             .max_barrier_batch_size;
         #[try_stream]
@@ -1353,7 +1360,7 @@ mod tests {
         let _schema = Schema { fields: vec![] };
         let (tx, rx) = channel_for_test();
         let actor_id = 233;
-        let fragment_id = 666;
+        let fragment_id = 666.into();
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
         let metrics = Arc::new(StreamingMetrics::unused());
 

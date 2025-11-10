@@ -136,9 +136,9 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         sstable_id: u64,
         writer: W,
         options: SstableBuilderOptions,
-        table_id_to_vnode: HashMap<u32, usize>,
+        table_id_to_vnode: HashMap<impl Into<TableId>, usize>,
         table_id_to_watermark_serde: HashMap<
-            u32,
+            impl Into<TableId>,
             Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
         >,
     ) -> Self {
@@ -304,7 +304,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             || table_value_len > large_value_len
             || table_key_len + table_value_len > large_key_value_len
         {
-            let table_id = full_key.user_key.table_id.as_raw_id();
+            let table_id = full_key.user_key.table_id;
             tracing::warn!(
                 "A large key/value (table_id={}, key len={}, value len={}, epoch={}, spill offset={}) is added to block",
                 table_id,
@@ -371,12 +371,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             });
         }
 
-        let table_id = full_key.user_key.table_id.as_raw_id();
+        let table_id = full_key.user_key.table_id;
         let mut extract_key = user_key(&self.raw_key);
         extract_key = self.compaction_catalog_agent_ref.extract(extract_key);
         // add bloom_filter check
         if !extract_key.is_empty() {
-            self.filter_builder.add_key(extract_key, table_id);
+            self.filter_builder
+                .add_key(extract_key, table_id.as_raw_id());
         }
         self.block_builder.add(full_key, self.raw_value.as_ref());
         self.block_metas.last_mut().unwrap().total_key_count += 1;

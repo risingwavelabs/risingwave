@@ -96,6 +96,7 @@ risedev slt './e2e_test/sink/license.slt'
 risedev slt './e2e_test/sink/rate_limit.slt'
 risedev slt './e2e_test/sink/auto_schema_change.slt'
 risedev slt './e2e_test/sink/sink_vector_columns.slt'
+risedev slt './e2e_test/sink/force_compaction_sink.slt'
 sleep 1
 
 echo "--- preparing postgresql"

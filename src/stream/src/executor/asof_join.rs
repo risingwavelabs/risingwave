@@ -936,7 +936,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                     match_table_id = %side_match.ht.table_id(),
                     join_key = ?key,
                     actor_id = ctx.id,
-                    fragment_id = ctx.fragment_id,
+                    fragment_id = %ctx.fragment_id,
                     "large rows matched for join key when AsOf join updating right side",
                 );
             }

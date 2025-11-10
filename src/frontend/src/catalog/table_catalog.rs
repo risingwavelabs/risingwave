@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
     StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
@@ -196,7 +197,7 @@ pub struct TableCatalog {
 
     pub webhook_info: Option<PbWebhookSourceInfo>,
 
-    pub job_id: Option<TableId>,
+    pub job_id: Option<JobId>,
 
     pub engine: Engine,
 
@@ -565,9 +566,9 @@ impl TableCatalog {
 
     pub fn to_prost(&self) -> PbTable {
         PbTable {
-            id: self.id.as_raw_id(),
-            schema_id: self.schema_id.as_raw_id(),
-            database_id: self.database_id.as_raw_id(),
+            id: self.id,
+            schema_id: self.schema_id,
+            database_id: self.database_id,
             name: self.name.clone(),
             // ignore `_rw_timestamp` when serializing
             columns: self
@@ -577,9 +578,9 @@ impl TableCatalog {
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key().iter().map(|x| *x as _).collect(),
-            optional_associated_source_id: self
-                .associated_source_id
-                .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+            optional_associated_source_id: self.associated_source_id.map(|source_id| {
+                OptionalAssociatedSourceId::AssociatedSourceId(source_id.as_raw_id())
+            }),
             table_type: self.table_type.to_prost() as i32,
             distribution_key: self
                 .distribution_key
@@ -619,7 +620,7 @@ impl TableCatalog {
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
             webhook_info: self.webhook_info.clone(),
-            job_id: self.job_id.map(|id| id.as_raw_id()),
+            job_id: self.job_id,
             engine: Some(self.engine.to_protobuf().into()),
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
             refreshable: self.refreshable,
@@ -807,9 +808,9 @@ impl From<PbTable> for TableCatalog {
         let engine = Engine::from_protobuf(&tb_engine);
 
         Self {
-            id: id.into(),
-            schema_id: tb.schema_id.into(),
-            database_id: tb.database_id.into(),
+            id,
+            schema_id: tb.schema_id,
+            database_id: tb.database_id,
             associated_source_id: associated_source_id.map(Into::into),
             name,
             pk,
@@ -851,7 +852,7 @@ impl From<PbTable> for TableCatalog {
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
             webhook_info: tb.webhook_info,
-            job_id: tb.job_id.map(TableId::from),
+            job_id: tb.job_id,
             engine,
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
 
@@ -893,9 +894,9 @@ mod tests {
     #[test]
     fn test_into_table_catalog() {
         let table: TableCatalog = PbTable {
-            id: 0,
-            schema_id: 0,
-            database_id: 0,
+            id: 0.into(),
+            schema_id: 0.into(),
+            database_id: 0.into(),
             name: "test".to_owned(),
             table_type: PbTableType::Table as i32,
             columns: vec![
@@ -921,7 +922,7 @@ mod tests {
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
-            fragment_id: 0,
+            fragment_id: 0.into(),
             dml_fragment_id: None,
             initialized_at_epoch: None,
             value_indices: vec![0],
@@ -998,7 +999,7 @@ mod tests {
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 retention_seconds: Some(300),
-                fragment_id: 0,
+                fragment_id: 0.into(),
                 dml_fragment_id: None,
                 vnode_col_index: None,
                 row_id_index: None,

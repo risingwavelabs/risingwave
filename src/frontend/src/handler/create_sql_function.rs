@@ -158,8 +158,8 @@ pub async fn handle_create_sql_function(
     // Create the actual function, will be stored in function catalog
     let function = PbFunction {
         id: FunctionId::placeholder().0,
-        schema_id: schema_id.into(),
-        database_id: database_id.into(),
+        schema_id,
+        database_id,
         name: function_name,
         kind: Some(kind),
         arg_names,

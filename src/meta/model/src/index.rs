@@ -73,8 +73,8 @@ impl From<PbIndex> for ActiveModel {
         Self {
             index_id: Set(pb_index.id as _),
             name: Set(pb_index.name),
-            index_table_id: Set(pb_index.index_table_id.into()),
-            primary_table_id: Set(pb_index.primary_table_id.into()),
+            index_table_id: Set(pb_index.index_table_id),
+            primary_table_id: Set(pb_index.primary_table_id),
             index_items: Set(pb_index.index_item.into()),
             index_columns_len: Set(pb_index.index_columns_len as _),
             index_column_properties: Set(Some(pb_index.index_column_properties.into())),

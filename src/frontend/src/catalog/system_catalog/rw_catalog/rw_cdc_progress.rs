@@ -34,7 +34,7 @@ async fn read_rw_cdc_progress(reader: &SysCatalogReaderImpl) -> Result<Vec<RwCdc
     Ok(progress
         .into_iter()
         .map(|(job_id, p)| RwCdcProgress {
-            job_id: job_id as _,
+            job_id: job_id.as_raw_id() as i32,
             split_total_count: p.split_total_count as _,
             split_backfilled_count: p.split_backfilled_count as _,
             split_completed_count: p.split_completed_count as _,

@@ -146,7 +146,7 @@ pub impl FragmentTypeMask {
 #[derive(Clone, Debug, FromQueryResult, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")] // for dashboard
 pub struct StreamingJobInfo {
-    pub job_id: ObjectId,
+    pub job_id: JobId,
     pub obj_type: ObjectType,
     pub name: String,
     pub job_status: JobStatus,
@@ -222,11 +222,7 @@ impl CatalogController {
             ..
         } = fragment;
 
-        let state_table_ids = pb_state_table_ids
-            .iter()
-            .map(|table_id| table_id.as_raw_id() as i32)
-            .collect_vec()
-            .into();
+        let state_table_ids = pb_state_table_ids.clone().into();
 
         assert!(!pb_actors.is_empty());
 
@@ -382,14 +378,14 @@ impl CatalogController {
             })
         }
 
-        let pb_state_table_ids = state_table_ids.into_u32_array();
+        let pb_state_table_ids = state_table_ids.0;
         let pb_distribution_type = PbFragmentDistributionType::from(distribution_type) as _;
         let pb_fragment = Fragment {
             fragment_id: fragment_id as _,
             fragment_type_mask: fragment_type_mask.into(),
             distribution_type: pb_distribution_type,
             actors: pb_actors,
-            state_table_ids: pb_state_table_ids.into_iter().map_into().collect(),
+            state_table_ids: pb_state_table_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
             nodes: stream_node,
         };
@@ -1166,12 +1162,12 @@ impl CatalogController {
             );
 
             let fragment = FragmentDistribution {
-                fragment_id: fragment_desc.fragment_id as _,
-                table_id: fragment_desc.job_id.as_raw_id(),
+                fragment_id: fragment_desc.fragment_id,
+                table_id: fragment_desc.job_id,
                 distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type)
                     as _,
-                state_table_ids: fragment_desc.state_table_ids.into_u32_array(),
-                upstream_fragment_ids: upstreams.iter().map(|id| *id as _).collect(),
+                state_table_ids: fragment_desc.state_table_ids.0,
+                upstream_fragment_ids: upstreams.clone(),
                 fragment_type_mask: fragment_desc.fragment_type_mask as _,
                 parallelism: parallelism as _,
                 vnode_count: fragment_desc.vnode_count as _,
@@ -1527,7 +1523,7 @@ impl CatalogController {
 
         let root_fragment_to_jobs: HashMap<_, _> = root_fragments
             .iter()
-            .map(|(job_id, fragment)| (fragment.fragment_id as u32, *job_id))
+            .map(|(job_id, fragment)| (fragment.fragment_id, *job_id))
             .collect();
 
         for fragment in root_fragment_to_jobs.keys() {
@@ -1607,10 +1603,8 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        let downstream_fragment_nodes: HashMap<_, _> = downstream_fragment_nodes
-            .into_iter()
-            .map(|(id, node)| (id as u32, node))
-            .collect();
+        let downstream_fragment_nodes: HashMap<_, _> =
+            downstream_fragment_nodes.into_iter().collect();
 
         let mut downstream_fragments = vec![];
 
@@ -1618,7 +1612,7 @@ impl CatalogController {
 
         let fragment_map: HashMap<_, _> = downstream_fragment_relations
             .iter()
-            .map(|model| (model.target_fragment_id as u32, model.dispatcher_type))
+            .map(|model| (model.target_fragment_id, model.dispatcher_type))
             .collect();
 
         for fragment_id in fragment_map.keys() {
@@ -1672,7 +1666,7 @@ impl CatalogController {
 
     pub async fn load_backfill_fragment_ids(
         &self,
-    ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, u32)>>> {
+    ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
         let inner = self.inner.read().await;
         let fragments: Vec<(FragmentId, StreamNode)> = FragmentModel::find()
             .select_only()
@@ -1701,9 +1695,7 @@ impl CatalogController {
         target_table: &PbTable,
         target_fragment_id: FragmentId,
     ) -> MetaResult<Vec<UpstreamSinkInfo>> {
-        let incoming_sinks = self
-            .get_table_incoming_sinks(TableId::new(target_table.id))
-            .await?;
+        let incoming_sinks = self.get_table_incoming_sinks(target_table.id).await?;
 
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -1813,10 +1805,7 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
     use risingwave_meta_model::fragment::DistributionType;
-    use risingwave_meta_model::{
-        ActorId, ConnectorSplits, ExprContext, FragmentId, I32Array, StreamNode,
-        StreamingParallelism, TableId, VnodeBitmap, fragment,
-    };
+    use risingwave_meta_model::*;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::plan_common::PbExprContext;
     use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
@@ -1832,9 +1821,9 @@ mod tests {
 
     type FragmentActorUpstreams = HashMap<crate::model::ActorId, ActorUpstreams>;
 
-    const TEST_FRAGMENT_ID: FragmentId = 1;
+    const TEST_FRAGMENT_ID: FragmentId = FragmentId::new(1);
 
-    const TEST_UPSTREAM_FRAGMENT_ID: FragmentId = 2;
+    const TEST_UPSTREAM_FRAGMENT_ID: FragmentId = FragmentId::new(2);
 
     const TEST_JOB_ID: JobId = JobId::new(1);
 
@@ -1855,10 +1844,10 @@ mod tests {
 
     fn generate_merger_stream_node(actor_upstream_actor_ids: &ActorUpstreams) -> PbStreamNode {
         let mut input = vec![];
-        for upstream_fragment_id in actor_upstream_actor_ids.keys() {
+        for &upstream_fragment_id in actor_upstream_actor_ids.keys() {
             input.push(PbStreamNode {
                 node_body: Some(PbNodeBody::Merge(Box::new(MergeNode {
-                    upstream_fragment_id: *upstream_fragment_id as _,
+                    upstream_fragment_id,
                     ..Default::default()
                 }))),
                 ..Default::default()
@@ -1986,7 +1975,7 @@ mod tests {
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&stream_node),
-            state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID.as_raw_id() as _]),
+            state_table_ids: TableIdArray(vec![TEST_STATE_TABLE_ID]),
             upstream_fragment_id: Default::default(),
             vnode_count: VirtualNode::COUNT_FOR_TEST as _,
             parallelism: None,
@@ -2088,22 +2077,14 @@ mod tests {
             nodes,
         } = pb_fragment;
 
-        assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);
+        assert_eq!(fragment_id, TEST_FRAGMENT_ID);
         assert_eq!(fragment_type_mask, fragment.fragment_type_mask.into());
         assert_eq!(
             pb_distribution_type,
             PbFragmentDistributionType::from(fragment.distribution_type)
         );
 
-        assert_eq!(
-            pb_state_table_ids,
-            fragment
-                .state_table_ids
-                .into_u32_array()
-                .into_iter()
-                .map_into()
-                .collect_vec()
-        );
+        assert_eq!(pb_state_table_ids, fragment.state_table_ids.0);
         assert_eq!(fragment.stream_node.to_protobuf(), nodes);
     }
 
@@ -2111,12 +2092,12 @@ mod tests {
     fn test_parallelism_policy_with_root_fragments() {
         #[expect(deprecated)]
         let fragment = fragment::Model {
-            fragment_id: 3,
+            fragment_id: 3.into(),
             job_id: TEST_JOB_ID,
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&PbStreamNode::default()),
-            state_table_ids: I32Array::default(),
+            state_table_ids: TableIdArray::default(),
             upstream_fragment_id: Default::default(),
             vnode_count: 0,
             parallelism: None,
@@ -2137,12 +2118,12 @@ mod tests {
     fn test_parallelism_policy_with_upstream_roots() {
         #[expect(deprecated)]
         let fragment = fragment::Model {
-            fragment_id: 5,
+            fragment_id: 5.into(),
             job_id: TEST_JOB_ID,
             fragment_type_mask: 0,
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode::from(&PbStreamNode::default()),
-            state_table_ids: I32Array::default(),
+            state_table_ids: TableIdArray::default(),
             upstream_fragment_id: Default::default(),
             vnode_count: 0,
             parallelism: None,
@@ -2151,7 +2132,7 @@ mod tests {
         let policy = super::CatalogController::format_fragment_parallelism_policy(
             &fragment,
             None,
-            &[3, 1, 2, 1],
+            &[3.into(), 1.into(), 2.into(), 1.into()],
         );
 
         assert_eq!(policy, "upstream_fragment([1, 2, 3])");

@@ -13,63 +13,116 @@
 // limitations under the License.
 
 use std::any::type_name;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Formatter;
 use std::num::TryFromIntError;
+use std::ops::{Add, AddAssign};
+use std::str::FromStr;
 
-use parse_display::Display;
 use sea_orm::sea_query::{ArrayType, ValueTypeErr};
 use sea_orm::{ColIdx, ColumnType, DbErr, QueryResult, TryGetError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use crate::catalog::OBJECT_ID_PLACEHOLDER;
+pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-#[display("{inner}")]
-pub struct TypedId<const N: usize> {
-    pub(crate) inner: u32,
+#[derive(Clone, Copy, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[repr(transparent)]
+pub struct TypedId<const N: usize>(pub(crate) u32);
+
+impl<const N: usize> std::fmt::Debug for TypedId<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <u32 as std::fmt::Debug>::fmt(&self.0, f)
+    }
+}
+
+impl<const N: usize> std::fmt::Display for TypedId<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <u32 as std::fmt::Display>::fmt(&self.0, f)
+    }
+}
+
+impl<const N: usize> PartialEq<u32> for TypedId<N> {
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
+}
+
+impl<const N: usize> FromStr for TypedId<N> {
+    type Err = <u32 as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(<u32 as FromStr>::from_str(s)?))
+    }
 }
 
 impl<const N: usize> TypedId<N> {
     pub const fn new(inner: u32) -> Self {
-        TypedId { inner }
+        TypedId(inner)
     }
 
     pub fn as_raw_id(&self) -> u32 {
-        self.inner
+        self.0
     }
 
     pub const fn placeholder() -> Self {
-        Self {
-            inner: OBJECT_ID_PLACEHOLDER,
-        }
+        Self(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn is_placeholder(&self) -> bool {
-        self.inner == OBJECT_ID_PLACEHOLDER
+        self.0 == OBJECT_ID_PLACEHOLDER
     }
 
     fn from_i32(inner: i32) -> Self {
-        Self {
-            inner: inner.try_into().unwrap_or_else(|e: TryFromIntError| {
-                if cfg!(debug_assertions) {
-                    panic!(
-                        "invalid i32 id {} for {}: {:?}",
-                        inner,
-                        type_name::<Self>(),
-                        e.as_report()
-                    );
-                } else {
-                    warn!(
-                        "invalid i32 id {} for {}: {:?}",
-                        inner,
-                        type_name::<Self>(),
-                        e.as_report()
-                    );
-                    inner as _
-                }
-            }),
-        }
+        Self(inner.try_into().unwrap_or_else(|e: TryFromIntError| {
+            if cfg!(debug_assertions) {
+                panic!(
+                    "invalid i32 id {} for {}: {:?}",
+                    inner,
+                    type_name::<Self>(),
+                    e.as_report()
+                );
+            } else {
+                warn!(
+                    "invalid i32 id {} for {}: {:?}",
+                    inner,
+                    type_name::<Self>(),
+                    e.as_report()
+                );
+                inner as _
+            }
+        }))
+    }
+
+    pub fn raw_slice(slice: &[Self]) -> &[u32] {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(slice) }
+    }
+
+    pub fn mut_raw_vec(vec: &mut Vec<Self>) -> &mut Vec<u32> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(vec) }
+    }
+
+    pub fn raw_hash_map_ref<V>(map: &HashMap<Self, V>) -> &HashMap<u32, V> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(map) }
+    }
+
+    pub fn raw_hash_map_mut_ref<V>(map: &mut HashMap<Self, V>) -> &mut HashMap<u32, V> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(map) }
+    }
+
+    pub fn raw_btree_map_ref<V>(map: &BTreeMap<Self, V>) -> &BTreeMap<u32, V> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(map) }
+    }
+
+    pub fn raw_btree_map_mut_ref<V>(map: &mut BTreeMap<Self, V>) -> &mut BTreeMap<u32, V> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(map) }
     }
 }
 
@@ -79,42 +132,24 @@ impl<const N: usize> From<u32> for TypedId<N> {
     }
 }
 
-impl<const N: usize> From<&u32> for TypedId<N> {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl<const N: usize> From<TypedId<N>> for u32 {
-    fn from(id: TypedId<N>) -> Self {
-        id.inner
-    }
-}
-
-impl<const N: usize> From<&TypedId<N>> for u32 {
-    fn from(id: &TypedId<N>) -> Self {
-        id.inner
-    }
-}
-
 impl<const N: usize> From<TypedId<N>> for sea_orm::Value {
     fn from(value: TypedId<N>) -> Self {
-        let inner: i32 = value.inner.try_into().unwrap_or_else(|e: TryFromIntError| {
+        let inner: i32 = value.0.try_into().unwrap_or_else(|e: TryFromIntError| {
             if cfg!(debug_assertions) {
                 panic!(
                     "invalid u32 id {} for {}: {:?}",
-                    value.inner,
+                    value.0,
                     type_name::<Self>(),
                     e.as_report()
                 );
             } else {
                 warn!(
                     "invalid u32 id {} for {}: {:?}",
-                    value.inner,
+                    value.0,
                     type_name::<Self>(),
                     e.as_report()
                 );
-                value.inner as _
+                value.0 as _
             }
         });
         sea_orm::Value::from(inner)
@@ -165,7 +200,7 @@ impl<const N: usize> Serialize for TypedId<N> {
     where
         S: Serializer,
     {
-        <u32 as Serialize>::serialize(&self.inner, serializer)
+        <u32 as Serialize>::serialize(&self.0, serializer)
     }
 }
 
@@ -174,9 +209,21 @@ impl<'de, const N: usize> Deserialize<'de> for TypedId<N> {
     where
         D: Deserializer<'de>,
     {
-        Ok(Self {
-            inner: <u32 as Deserialize>::deserialize(deserializer)?,
-        })
+        Ok(Self(<u32 as Deserialize>::deserialize(deserializer)?))
+    }
+}
+
+impl<const N: usize> Add<u32> for TypedId<N> {
+    type Output = Self;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        Self(self.0.checked_add(rhs).unwrap())
+    }
+}
+
+impl<const N: usize> AddAssign<u32> for TypedId<N> {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 = self.0.checked_add(rhs).unwrap()
     }
 }
 
@@ -184,20 +231,21 @@ pub type TableId = TypedId<1>;
 pub type JobId = TypedId<2>;
 pub type DatabaseId = TypedId<3>;
 pub type SchemaId = TypedId<4>;
+pub type FragmentId = TypedId<5>;
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {
-        self.inner == table_id.inner
+        self.0 == table_id.0
     }
 
     pub fn as_mv_table_id(self) -> TableId {
-        TableId::new(self.inner)
+        TableId::new(self.0)
     }
 }
 
 impl TableId {
     pub fn as_job_id(self) -> JobId {
-        JobId::new(self.inner)
+        JobId::new(self.0)
     }
 }
 
@@ -206,7 +254,7 @@ macro_rules! impl_into_object {
         $(
             impl From<$type_name> for $mod_prefix {
                 fn from(value: $type_name) -> Self {
-                    <$mod_prefix>::$type_name(value.inner)
+                    <$mod_prefix>::$type_name(value.0)
                 }
             }
         )+
@@ -214,21 +262,21 @@ macro_rules! impl_into_object {
 }
 
 impl_into_object!(
-    risingwave_pb::user::grant_privilege::Object,
+    crate::user::grant_privilege::Object,
     DatabaseId,
     TableId,
     SchemaId
 );
 
 impl_into_object!(
-    risingwave_pb::ddl_service::alter_name_request::Object,
+    crate::ddl_service::alter_name_request::Object,
     DatabaseId,
     TableId,
     SchemaId
 );
 
 impl_into_object!(
-    risingwave_pb::ddl_service::alter_owner_request::Object,
+    crate::ddl_service::alter_owner_request::Object,
     DatabaseId,
     TableId,
     SchemaId

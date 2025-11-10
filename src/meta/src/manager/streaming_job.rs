@@ -120,22 +120,11 @@ impl StreamingJob {
 
     pub fn id(&self) -> JobId {
         match self {
-            Self::MaterializedView(table) => table.id,
-            Self::Sink(sink) => sink.id,
-            Self::Table(_, table, ..) => table.id,
-            Self::Index(index, _) => index.id,
-            Self::Source(source) => source.id,
-        }
-        .into()
-    }
-
-    pub fn mv_table(&self) -> Option<u32> {
-        match self {
-            Self::MaterializedView(table) => Some(table.id),
-            Self::Sink(_) => None,
-            Self::Table(_, table, ..) => Some(table.id),
-            Self::Index(_, table) => Some(table.id),
-            Self::Source(_) => None,
+            Self::MaterializedView(table) => table.id.as_job_id(),
+            Self::Sink(sink) => sink.id.into(),
+            Self::Table(_, table, ..) => table.id.as_job_id(),
+            Self::Index(index, _) => index.id.into(),
+            Self::Source(source) => source.id.into(),
         }
     }
 
@@ -157,7 +146,6 @@ impl StreamingJob {
             Self::Index(index, _) => index.schema_id,
             Self::Source(source) => source.schema_id,
         }
-        .into()
     }
 
     pub fn database_id(&self) -> DatabaseId {
@@ -168,7 +156,6 @@ impl StreamingJob {
             Self::Index(index, _) => index.database_id,
             Self::Source(source) => source.database_id,
         }
-        .into()
     }
 
     pub fn name(&self) -> String {

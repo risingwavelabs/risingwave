@@ -18,6 +18,7 @@ use std::sync::Arc;
 use anyhow::bail;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, is_backfill_table};
+use risingwave_common::id::{FragmentId, JobId, TableId};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::aggregate::AggType;
 pub use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
@@ -123,9 +124,9 @@ impl TableFunctionToInternalBackfillProgressRule {
     }
 
     fn build_project(backfill_info: &BackfillInfo, agg: PlanRef) -> anyhow::Result<LogicalProject> {
-        let job_id_expr = Self::build_u32_expr(backfill_info.job_id);
-        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id);
-        let table_id_expr = Self::build_u32_expr(backfill_info.table_id);
+        let job_id_expr = Self::build_u32_expr(backfill_info.job_id.as_raw_id());
+        let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id.as_raw_id());
+        let table_id_expr = Self::build_u32_expr(backfill_info.table_id.as_raw_id());
 
         let current_count_per_vnode = ExprImpl::InputRef(Box::new(InputRef {
             index: 0,
@@ -172,16 +173,16 @@ impl TableFunctionToInternalBackfillProgressRule {
 }
 
 struct BackfillInfo {
-    job_id: u32,
-    fragment_id: u32,
-    table_id: u32,
+    job_id: JobId,
+    fragment_id: FragmentId,
+    table_id: TableId,
     row_count_column_index: usize,
     epoch_column_index: Option<usize>,
 }
 
 impl BackfillInfo {
     fn new(table: &TableCatalog) -> anyhow::Result<Self> {
-        let Some(job_id) = table.job_id.map(|id| id.as_raw_id()) else {
+        let Some(job_id) = table.job_id else {
             bail!("`job_id` column not found in backfill table");
         };
         let Some(row_count_column_index) = table
@@ -199,7 +200,7 @@ impl BackfillInfo {
             .iter()
             .position(|c| c.name() == StreamTableScan::EPOCH_COLUMN_NAME);
         let fragment_id = table.fragment_id;
-        let table_id = table.id.as_raw_id();
+        let table_id = table.id;
 
         Ok(Self {
             job_id,

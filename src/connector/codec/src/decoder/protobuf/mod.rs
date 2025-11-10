@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use prost_reflect::{DynamicMessage, ReflectMessage};
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::types::{DataType, DatumCow};
 use thiserror_ext::AsReport;
 
@@ -51,9 +51,9 @@ impl Access for ProtobufAccess<'_> {
             .get_field_by_name(path[0])
             .ok_or_else(|| uncategorized!("protobuf schema don't have field {}", path[0]))
             .inspect_err(|e| {
-                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                    LazyLock::new(LogSuppresser::default);
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(LogSuppressor::default);
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                     tracing::error!(suppressed_count, "{}", e.as_report());
                 }
             })?;

@@ -59,7 +59,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
                 .expect("vnodes not set for EOWC over window"),
         ));
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let exec = OverWindowExecutor::new(OverWindowExecutorArgs {
@@ -77,7 +77,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             watermark_epoch: params.watermark_epoch,
             metrics: params.executor_stats,
 
-            chunk_size: params.env.config().developer.chunk_size,
+            chunk_size: params.config.developer.chunk_size,
             cache_policy: OverWindowCachePolicy::from_protobuf(
                 node.get_cache_policy().unwrap_or_default(),
             ),

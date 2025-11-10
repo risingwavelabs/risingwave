@@ -585,12 +585,7 @@ pub struct UserKey<T: AsRef<[u8]>> {
 
 impl<T: AsRef<[u8]>> Debug for UserKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "UserKey {{ {}, {:?} }}",
-            self.table_id.as_raw_id(),
-            self.table_key
-        )
+        write!(f, "UserKey {{ {}, {:?} }}", self.table_id, self.table_key)
     }
 }
 

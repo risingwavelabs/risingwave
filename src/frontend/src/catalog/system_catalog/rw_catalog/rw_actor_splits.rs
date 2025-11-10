@@ -35,7 +35,7 @@ impl From<ActorSplit> for RwActorSplit {
             actor_id: actor_split.actor_id as _,
             split_id: actor_split.split_id,
             source_id: actor_split.source_id as _,
-            fragment_id: actor_split.fragment_id as _,
+            fragment_id: actor_split.fragment_id.as_raw_id() as _,
             fragment_type: FragmentType::try_from(actor_split.fragment_type)
                 .unwrap_or(FragmentType::Unspecified)
                 .as_str_name()

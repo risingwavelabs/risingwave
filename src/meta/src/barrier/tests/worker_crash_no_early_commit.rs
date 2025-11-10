@@ -127,14 +127,18 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
 
     async fn handle_list_finished_source_ids(
         &self,
-        _list_finished_source_ids: Vec<u32>,
+        _list_finished_source_ids: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::PbListFinishedSource,
+        >,
     ) -> MetaResult<()> {
         unimplemented!()
     }
 
     async fn handle_load_finished_source_ids(
         &self,
-        _load_finished_source_ids: Vec<u32>,
+        _load_finished_source_ids: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::PbLoadFinishedSource,
+        >,
     ) -> MetaResult<()> {
         unimplemented!()
     }
@@ -197,7 +201,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     // two actors on two singleton fragments
     let new_actor = |actor_id| StreamActor {
         actor_id,
-        fragment_id: actor_id,
+        fragment_id: actor_id.into(),
         vnode_bitmap: None,
         mview_definition: "".to_owned(),
         expr_context: None,
@@ -274,7 +278,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         background_jobs: Default::default(),
         hummock_version_stats: Default::default(),
         database_infos: vec![Database {
-            id: database_id.as_raw_id(),
+            id: database_id,
             name: "".to_owned(),
             owner: 0,
             resource_group: "test".to_owned(),
@@ -335,7 +339,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                     worker_id: worker.id as _,
                     partial_graph_id,
                     epoch: epoch.prev,
-                    database_id: database_id.as_raw_id(),
+                    database_id,
                     ..Default::default()
                 })),
             }))
@@ -370,7 +374,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 worker_id: worker1.id as _,
                 partial_graph_id,
                 epoch: epoch1.prev,
-                database_id: database_id.as_raw_id(),
+                database_id,
                 ..Default::default()
             })),
         }))

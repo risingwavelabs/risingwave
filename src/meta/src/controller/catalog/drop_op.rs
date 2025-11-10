@@ -339,7 +339,7 @@ impl CatalogController {
         self.notify_users_update(user_infos).await;
         inner
             .dropped_tables
-            .extend(dropped_tables.map(|t| (t.id.into(), t)));
+            .extend(dropped_tables.map(|t| (t.id, t)));
 
         let version = match object_type {
             ObjectType::Database => {
@@ -347,7 +347,7 @@ impl CatalogController {
                 self.notify_frontend(
                     NotificationOperation::Delete,
                     NotificationInfo::Database(PbDatabase {
-                        id: database_id.into(),
+                        id: database_id,
                         ..Default::default()
                     }),
                 )
