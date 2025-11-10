@@ -18,8 +18,7 @@ CREATE SOURCE cdc_source_mysql WITH (
     port=3306,
     database.name='rwcdc',
     username='root',
-    password='123456',
-    auto.schema.change = 'true'
+    password='123456'
 );
 
 statement ok
@@ -51,8 +50,7 @@ CREATE SOURCE cdc_source_postgres WITH (
     port=5432,
     database.name='rwcdc',
     username='postgres',
-    password='post\tgres',
-    auto.schema.change = 'true'
+    password='post\tgres'
 );
 
 statement ok
