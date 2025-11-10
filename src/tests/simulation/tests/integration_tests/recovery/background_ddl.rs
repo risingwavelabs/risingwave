@@ -86,7 +86,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
     // If the CN is killed before first barrier pass for the MV, the MV will be dropped.
     // This is because it's table fragments will NOT be committed until first barrier pass.
-    kill_cn_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&mut cluster).await;
 
     // Send some upstream updates.
     session
@@ -94,7 +94,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
         .await?;
     session.flush().await?;
 
-    kill_random_and_wait_recover(&cluster).await;
+    kill_random_and_wait_recover(&mut cluster).await;
 
     // Now just wait for it to complete.
     session.run(WAIT).await?;
@@ -143,7 +143,7 @@ async fn test_background_join_mv_recovery() -> Result<()> {
         .await?;
     sleep(Duration::from_secs(2)).await;
 
-    kill_cn_and_meta_and_wait_recover(&cluster).await;
+    kill_cn_and_meta_and_wait_recover(&mut cluster).await;
 
     // Now just wait for it to complete.
     session.run(WAIT).await?;
@@ -183,7 +183,7 @@ async fn test_ddl_cancel() -> Result<()> {
     create_mv(&mut session).await?;
 
     // Test cancel after kill cn
-    kill_cn_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&mut cluster).await;
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
     tracing::info!("tested cancel background_ddl after recovery");
@@ -193,7 +193,7 @@ async fn test_ddl_cancel() -> Result<()> {
     create_mv(&mut session).await?;
 
     // Test cancel after kill random nodes
-    kill_random_and_wait_recover(&cluster).await;
+    kill_random_and_wait_recover(&mut cluster).await;
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
     tracing::info!("tested cancel background_ddl after recovery from random node kill");
@@ -341,7 +341,7 @@ async fn test_high_barrier_latency_cancel(config: Configuration) -> Result<()> {
         });
 
         sleep(Duration::from_millis(500)).await;
-        kill_cn_and_wait_recover(&cluster).await;
+        kill_cn_and_wait_recover(&mut cluster).await;
         tracing::info!("restarted cn: cancel should take effect");
 
         handle.await.unwrap();
@@ -400,7 +400,7 @@ async fn test_foreground_ddl_no_recovery() -> Result<()> {
     sleep(Duration::from_secs(2)).await;
 
     // Kill CN should stop the job
-    kill_cn_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&mut cluster).await;
 
     // Create MV should succeed, since the previous foreground job should be cancelled.
     session.run(SET_RATE_LIMIT_2).await?;
@@ -466,7 +466,9 @@ async fn test_background_sink_create() -> Result<()> {
     // Wait for job to start
     sleep(Duration::from_secs(2)).await;
 
-    kill_cn_and_meta_and_wait_recover(&cluster).await;
+    println!("xxk 1");
+    kill_cn_and_meta_and_wait_recover(&mut cluster).await;
+    println!("xxk 2");
 
     // Sink job should still be present, and we can drop it.
     session.run("DROP SINK s;").await?;
@@ -493,7 +495,7 @@ async fn test_background_agg_mv_recovery() -> Result<()> {
         .await?;
     sleep(Duration::from_secs(2)).await;
 
-    kill_cn_and_meta_and_wait_recover(&cluster).await;
+    kill_cn_and_meta_and_wait_recover(&mut cluster).await;
 
     // Now just wait for it to complete.
     session.run(WAIT).await?;
@@ -529,7 +531,7 @@ async fn test_background_index_creation() -> Result<()> {
     session.run("CREATE INDEX idx_v1 ON t(v1);").await?;
 
     // Kill CN and recover to test background index recovery
-    kill_cn_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&mut cluster).await;
 
     // Add more data
     session

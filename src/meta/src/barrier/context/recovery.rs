@@ -102,11 +102,26 @@ impl GlobalBarrierWorkerContextImpl {
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
+        println!("xxk calling resolve graph");
         let all_actor_infos = self
             .metadata_manager
             .catalog_controller
             .load_all_actors_dynamic(database_id, worker_nodes)
             .await?;
+
+        println!("xxk ----");
+        for jobs in all_actor_infos.values() {
+            for (job_id, fragments) in jobs {
+                for (fragment_id, fragment) in fragments {
+                    println!(
+                        "xxk job {} fragment {} actors {:?}",
+                        job_id,
+                        fragment_id,
+                        fragment.actors.keys()
+                    );
+                }
+            }
+        }
 
         Ok(all_actor_infos
             .into_iter()

@@ -271,7 +271,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     );
 
     // Trigger recovery and test it again.
-    kill_cn_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&mut cluster).await;
     let prev_progress = progress;
     let progress = session
         .run("SELECT progress FROM rw_catalog.rw_ddl_progress")

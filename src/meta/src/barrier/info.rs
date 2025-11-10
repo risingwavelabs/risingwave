@@ -170,6 +170,7 @@ impl SharedActorInfos {
     }
 
     pub(super) fn remove_database(&self, database_id: DatabaseId) {
+        println!("xxk remove db");
         if let Some(database) = self.inner.write().info.remove(&database_id) {
             let mapping = database
                 .into_values()
@@ -183,6 +184,7 @@ impl SharedActorInfos {
     }
 
     pub(super) fn retain_databases(&self, database_ids: impl IntoIterator<Item = DatabaseId>) {
+        println!("xxk retain db");
         let database_ids: HashSet<_> = database_ids.into_iter().collect();
 
         let mut mapping = Vec::new();
@@ -206,6 +208,7 @@ impl SharedActorInfos {
         database_id: DatabaseId,
         fragments: impl Iterator<Item = (&InflightFragmentInfo, JobId)>,
     ) {
+        println!("xxk recover db {}", database_id);
         let mut remaining_fragments: HashMap<_, _> = fragments
             .map(|info @ (fragment, _)| (fragment.fragment_id, info))
             .collect();
@@ -246,6 +249,7 @@ impl SharedActorInfos {
         database_id: DatabaseId,
         infos: impl IntoIterator<Item = (&InflightFragmentInfo, JobId)>,
     ) {
+        println!("xxk upsert");
         let mut writer = self.start_writer(database_id);
         writer.upsert(infos);
         writer.finish();
@@ -527,6 +531,7 @@ impl InflightDatabaseInfo {
         jobs: impl Iterator<Item = InflightStreamingJobInfo>,
         shared_actor_infos: SharedActorInfos,
     ) -> Self {
+        println!("xxk recover");
         let mut info = Self::empty_inner(database_id, shared_actor_infos);
         for job in jobs {
             info.add_existing(job);
@@ -591,10 +596,44 @@ impl InflightDatabaseInfo {
         &mut self,
         fragment_changes: impl Iterator<Item = (FragmentId, CommandFragmentChanges)>,
     ) {
+        println!("xxk applying fragment changes");
         {
             let shared_infos = self.shared_actor_infos.clone();
             let mut shared_actor_writer = shared_infos.start_writer(self.database_id);
             for (fragment_id, change) in fragment_changes {
+                println!("xxk applying fragment changes {}", fragment_id);
+                match &change {
+                    CommandFragmentChanges::NewFragment { .. } => {
+                        println!("xxk applying fragment changes {}  new_frag", fragment_id);
+                    }
+                    CommandFragmentChanges::AddNodeUpstream(_) => {
+                        println!("xxk applying fragment changes {}  add_node", fragment_id);
+                    }
+                    CommandFragmentChanges::DropNodeUpstream(_) => {
+                        println!("xxk applying fragment changes {}  drop_node", fragment_id);
+                    }
+                    CommandFragmentChanges::ReplaceNodeUpstream(_) => {
+                        println!(
+                            "xxk applying fragment changes {}  replace_node",
+                            fragment_id
+                        );
+                    }
+                    CommandFragmentChanges::Reschedule { .. } => {
+                        println!("xxk applying fragment changes {}  reschedule", fragment_id);
+                    }
+                    CommandFragmentChanges::RemoveFragment => {
+                        println!(
+                            "xxk applying fragment changes {}  remove_fragment",
+                            fragment_id
+                        );
+                    }
+                    CommandFragmentChanges::SplitAssignment { .. } => {
+                        println!(
+                            "xxk applying fragment changes {}  split_assignment",
+                            fragment_id
+                        );
+                    }
+                }
                 match change {
                     CommandFragmentChanges::NewFragment {
                         job_id,
@@ -879,6 +918,7 @@ impl InflightDatabaseInfo {
         &mut self,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
     ) {
+        println!("xxk post apply");
         let inner = self.shared_actor_infos.clone();
         let mut shared_actor_writer = inner.start_writer(self.database_id);
         {
