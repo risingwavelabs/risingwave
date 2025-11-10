@@ -1481,7 +1481,7 @@ impl IcebergCommitResult {
         }
     }
 
-    fn try_from_sealized_bytes(value: Vec<u8>) -> Result<Self> {
+    fn try_from_serialized_bytes(value: Vec<u8>) -> Result<Self> {
         let mut values = if let serde_json::Value::Object(value) =
             serde_json::from_slice::<serde_json::Value>(&value)
                 .context("Can't parse iceberg sink metadata")?
@@ -1718,7 +1718,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         let mut write_results = vec![];
 
         for each in write_results_bytes {
-            let write_result = IcebergCommitResult::try_from_sealized_bytes(each)?;
+            let write_result = IcebergCommitResult::try_from_serialized_bytes(each)?;
             write_results.push(write_result);
         }
 
