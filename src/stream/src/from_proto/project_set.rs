@@ -29,6 +29,8 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
         node: &Self::Node,
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
+        let chunk_size = params.config.developer.chunk_size;
+
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let select_list: Vec<_> = node
             .get_select_list()
@@ -37,7 +39,7 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
                 ProjectSetSelectItem::from_prost(
                     proto,
                     params.eval_error_report.clone(),
-                    params.env.config().developer.chunk_size,
+                    chunk_size,
                 )
             })
             .try_collect()?;
@@ -57,7 +59,6 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
             .map(|idx| *idx as usize)
             .collect();
 
-        let chunk_size = params.env.config().developer.chunk_size;
         let exec = ProjectSetExecutor::new(
             params.actor_context,
             input,

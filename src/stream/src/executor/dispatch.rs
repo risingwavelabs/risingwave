@@ -183,10 +183,11 @@ impl DispatchExecutorInner {
             }};
         }
 
+        // TODO(config): use config from actor context, instead of the global one
         let limit = self
             .local_barrier_manager
             .env
-            .config()
+            .global_config()
             .developer
             .exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
@@ -490,7 +491,11 @@ impl DispatchExecutor {
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let chunk_size = local_barrier_manager.env.config().developer.chunk_size;
+        let chunk_size = local_barrier_manager
+            .env
+            .global_config()
+            .developer
+            .chunk_size;
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
             let mut info = input.info().clone();
@@ -532,11 +537,12 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+        // TODO(config): use config from actor context, instead of the global one
         let max_barrier_count_per_batch = self
             .inner
             .local_barrier_manager
             .env
-            .config()
+            .global_config()
             .developer
             .max_barrier_batch_size;
         #[try_stream]

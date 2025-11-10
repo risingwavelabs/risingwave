@@ -226,10 +226,7 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
-        self.actor_ctx
-            .streaming_config
-            .developer
-            .enable_auto_schema_change
+        self.actor_ctx.config.developer.enable_auto_schema_change
     }
 
     /// `source_id | source_name | actor_id | fragment_id`

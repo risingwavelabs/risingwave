@@ -21,7 +21,7 @@ use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::config::MetricLevel;
+use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -123,19 +123,17 @@ impl StreamActorManager {
         .await
     }
 
-    #[expect(clippy::too_many_arguments)]
     async fn create_snapshot_backfill_node(
         &self,
         stream_node: &StreamNode,
         node: &StreamScanNode,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-        env: StreamEnvironment,
         local_barrier_manager: &LocalBarrierManager,
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
-        let chunk_size = env.config().developer.chunk_size;
+        let chunk_size = actor_context.config.developer.chunk_size;
         let upstream = self
             .create_snapshot_backfill_input(
                 upstream_node,
@@ -169,7 +167,7 @@ impl StreamActorManager {
 
         let state_table = node.get_state_table()?;
         let state_table = StateTableBuilder::new(state_table, state_store.clone(), vnodes)
-            .enable_preload_all_rows_by_config(&actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&actor_context.config)
             .build()
             .await;
 
@@ -230,7 +228,6 @@ impl StreamActorManager {
                     stream_scan,
                     actor_context,
                     vnode_bitmap,
-                    env,
                     local_barrier_manager,
                     store,
                 )
@@ -334,17 +331,13 @@ impl StreamActorManager {
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
             local_barrier_manager: local_barrier_manager.clone(),
+            config: actor_context.config.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
 
         // Wrap the executor for debug purpose.
-        let wrapped = WrapperExecutor::new(
-            executor,
-            actor_context.clone(),
-            env.config().developer.enable_executor_row_count,
-            env.config().developer.enable_explain_analyze_stats,
-        );
+        let wrapped = WrapperExecutor::new(executor, actor_context.clone());
         let executor = (info, wrapped).into();
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
@@ -401,52 +394,49 @@ impl StreamActorManager {
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
-        {
-            let actor_id = actor.actor_id;
-            let streaming_config = self.env.config().clone();
-            let actor_context = ActorContext::create(
-                &actor,
+        let actor_id = actor.actor_id;
+        let actor_context = ActorContext::create(
+            &actor,
+            fragment_id,
+            self.env.total_mem_usage(),
+            self.streaming_metrics.clone(),
+            self.env.meta_client(),
+            self.env.global_config().clone(), // TODO(config): local config for actor
+            self.env.clone(),
+        );
+        let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
+        let expr_context = actor.expr_context.clone().unwrap();
+
+        let (executor, subtasks) = self
+            .create_nodes(
                 fragment_id,
-                self.env.total_mem_usage(),
-                self.streaming_metrics.clone(),
-                self.env.meta_client(),
-                streaming_config,
+                &node,
                 self.env.clone(),
-            );
-            let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
-            let expr_context = actor.expr_context.clone().unwrap();
-
-            let (executor, subtasks) = self
-                .create_nodes(
-                    fragment_id,
-                    &node,
-                    self.env.clone(),
-                    &actor_context,
-                    vnode_bitmap,
-                    &local_barrier_manager,
-                )
-                .await?;
-
-            let dispatcher = DispatchExecutor::new(
-                executor,
-                new_output_request_rx,
-                actor.dispatchers,
-                actor_id,
-                fragment_id,
-                local_barrier_manager.clone(),
-                self.streaming_metrics.clone(),
+                &actor_context,
+                vnode_bitmap,
+                &local_barrier_manager,
             )
             .await?;
-            let actor = Actor::new(
-                dispatcher,
-                subtasks,
-                self.streaming_metrics.clone(),
-                actor_context.clone(),
-                expr_context,
-                local_barrier_manager,
-            );
-            Ok(actor)
-        }
+
+        let dispatcher = DispatchExecutor::new(
+            executor,
+            new_output_request_rx,
+            actor.dispatchers,
+            actor_id,
+            fragment_id,
+            local_barrier_manager.clone(),
+            self.streaming_metrics.clone(),
+        )
+        .await?;
+        let actor = Actor::new(
+            dispatcher,
+            subtasks,
+            self.streaming_metrics.clone(),
+            actor_context.clone(),
+            expr_context,
+            local_barrier_manager,
+        );
+        Ok(actor)
     }
 
     pub(super) fn spawn_actor(
@@ -457,24 +447,25 @@ impl StreamActorManager {
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
-        {
-            let monitor = tokio_metrics::TaskMonitor::new();
-            let stream_actor_ref = &actor;
-            let actor_id = stream_actor_ref.actor_id;
-            let handle = {
-                let trace_span =
-                    format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
-                let barrier_manager = local_barrier_manager;
-                // wrap the future of `create_actor` with `boxed` to avoid stack overflow
-                let actor = self
-                    .clone()
-                    .create_actor(
-                        actor,
-                        fragment_id,
-                        node,
-                        barrier_manager.clone(),
-                        new_output_request_rx
-                    ).boxed().and_then(|actor| actor.run()).map(move |result| {
+        let monitor = tokio_metrics::TaskMonitor::new();
+        let stream_actor_ref = &actor;
+        let actor_id = stream_actor_ref.actor_id;
+        let handle = {
+            let trace_span = format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
+            let barrier_manager = local_barrier_manager;
+            // wrap the future of `create_actor` with `boxed` to avoid stack overflow
+            let actor = self
+                .clone()
+                .create_actor(
+                    actor,
+                    fragment_id,
+                    node,
+                    barrier_manager.clone(),
+                    new_output_request_rx,
+                )
+                .boxed()
+                .and_then(|actor| actor.run())
+                .map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
@@ -482,72 +473,74 @@ impl StreamActorManager {
                         barrier_manager.notify_failure(actor_id, err);
                     }
                 });
-                let traced = match &self.await_tree_reg {
-                    Some(m) => m
-                        .register(await_tree_key::Actor(actor_id), trace_span)
-                        .instrument(actor)
-                        .left_future(),
-                    None => actor.right_future(),
-                };
-                let instrumented = monitor.instrument(traced);
-                let with_config = crate::CONFIG.scope(self.env.config().clone(), instrumented);
-                // If hummock tracing is not enabled, it directly returns wrapped future.
-                let may_track_hummock = with_config.may_trace_hummock();
-
-                self.runtime.spawn(may_track_hummock)
+            let traced = match &self.await_tree_reg {
+                Some(m) => m
+                    .register(await_tree_key::Actor(actor_id), trace_span)
+                    .instrument(actor)
+                    .left_future(),
+                None => actor.right_future(),
             };
+            let instrumented = monitor.instrument(traced);
+            // If hummock tracing is not enabled, it directly returns wrapped future.
+            let may_track_hummock = instrumented.may_trace_hummock();
 
-            let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
-                || self.env.config().developer.enable_actor_tokio_metrics
-            {
-                tracing::info!("Tokio metrics are enabled.");
-                let streaming_metrics = self.streaming_metrics.clone();
-                let actor_monitor_task = self.runtime.spawn(async move {
-                    let metrics = streaming_metrics.new_actor_metrics(actor_id);
-                    loop {
-                        let task_metrics = monitor.cumulative();
-                        metrics
-                            .actor_execution_time
-                            .set(task_metrics.total_poll_duration.as_secs_f64());
-                        metrics
-                            .actor_fast_poll_duration
-                            .set(task_metrics.total_fast_poll_duration.as_secs_f64());
-                        metrics
-                            .actor_fast_poll_cnt
-                            .set(task_metrics.total_fast_poll_count as i64);
-                        metrics
-                            .actor_slow_poll_duration
-                            .set(task_metrics.total_slow_poll_duration.as_secs_f64());
-                        metrics
-                            .actor_slow_poll_cnt
-                            .set(task_metrics.total_slow_poll_count as i64);
-                        metrics
-                            .actor_poll_duration
-                            .set(task_metrics.total_poll_duration.as_secs_f64());
-                        metrics
-                            .actor_poll_cnt
-                            .set(task_metrics.total_poll_count as i64);
-                        metrics
-                            .actor_idle_duration
-                            .set(task_metrics.total_idle_duration.as_secs_f64());
-                        metrics
-                            .actor_idle_cnt
-                            .set(task_metrics.total_idled_count as i64);
-                        metrics
-                            .actor_scheduled_duration
-                            .set(task_metrics.total_scheduled_duration.as_secs_f64());
-                        metrics
-                            .actor_scheduled_cnt
-                            .set(task_metrics.total_scheduled_count as i64);
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                    }
-                });
-                Some(actor_monitor_task)
-            } else {
-                None
-            };
-            (handle, monitor_handle)
-        }
+            self.runtime.spawn(may_track_hummock)
+        };
+
+        let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
+            || self
+                .env
+                .global_config()
+                .developer
+                .enable_actor_tokio_metrics
+        {
+            tracing::info!("Tokio metrics are enabled.");
+            let streaming_metrics = self.streaming_metrics.clone();
+            let actor_monitor_task = self.runtime.spawn(async move {
+                let metrics = streaming_metrics.new_actor_metrics(actor_id);
+                loop {
+                    let task_metrics = monitor.cumulative();
+                    metrics
+                        .actor_execution_time
+                        .set(task_metrics.total_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_fast_poll_duration
+                        .set(task_metrics.total_fast_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_fast_poll_cnt
+                        .set(task_metrics.total_fast_poll_count as i64);
+                    metrics
+                        .actor_slow_poll_duration
+                        .set(task_metrics.total_slow_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_slow_poll_cnt
+                        .set(task_metrics.total_slow_poll_count as i64);
+                    metrics
+                        .actor_poll_duration
+                        .set(task_metrics.total_poll_duration.as_secs_f64());
+                    metrics
+                        .actor_poll_cnt
+                        .set(task_metrics.total_poll_count as i64);
+                    metrics
+                        .actor_idle_duration
+                        .set(task_metrics.total_idle_duration.as_secs_f64());
+                    metrics
+                        .actor_idle_cnt
+                        .set(task_metrics.total_idled_count as i64);
+                    metrics
+                        .actor_scheduled_duration
+                        .set(task_metrics.total_scheduled_duration.as_secs_f64());
+                    metrics
+                        .actor_scheduled_cnt
+                        .set(task_metrics.total_scheduled_count as i64);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            });
+            Some(actor_monitor_task)
+        } else {
+            None
+        };
+        (handle, monitor_handle)
     }
 }
 
@@ -592,6 +585,11 @@ pub struct ExecutorParams {
     pub watermark_epoch: AtomicU64Ref,
 
     pub local_barrier_manager: LocalBarrierManager,
+
+    /// The local streaming configuration for this specific actor. Same as `actor_context.config`.
+    ///
+    /// Compared to `stream_env.global_config`, this config can have some entries overridden by the user.
+    pub config: Arc<StreamingConfig>,
 }
 
 impl Debug for ExecutorParams {

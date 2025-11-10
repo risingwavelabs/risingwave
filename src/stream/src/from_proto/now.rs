@@ -71,7 +71,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
         };
 
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, None)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let barrier_interval_ms = params
@@ -80,7 +80,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
             .get_params()
             .load()
             .barrier_interval_ms();
-        let progress_ratio = params.env.config().developer.now_progress_ratio;
+        let progress_ratio = params.config.developer.now_progress_ratio;
         let exec = NowExecutor::new(
             params.info.schema.data_types(),
             mode,

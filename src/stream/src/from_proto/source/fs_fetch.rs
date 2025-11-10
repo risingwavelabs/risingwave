@@ -61,7 +61,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             source.row_id_index.map(|x| x as _),
             source_options_with_secret,
             source_info.clone(),
-            params.env.config().developer.connector_message_buffer_size,
+            params.config.developer.connector_message_buffer_size,
             params.info.stream_key.clone(),
         );
 
@@ -116,7 +116,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         stream_source_core,
                         upstream,
                         params.local_barrier_manager.clone(),
-                        params.env.config().clone(),
+                        params.config.clone(),
                         source.associated_table_id.map(TableId::new),
                     )
                     .boxed()
@@ -126,7 +126,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         stream_source_core,
                         upstream,
                         source.rate_limit,
-                        params.env.config().clone(),
+                        params.config.clone(),
                     )
                     .boxed()
                 }

@@ -24,12 +24,8 @@ use crate::executor::{ActorContextRef, ExecutorInfo, Message, MessageStream};
 
 /// Streams wrapped by `trace` will be traced with `tracing` spans and reported to `opentelemetry`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn trace(
-    enable_executor_row_count: bool,
-    info: Arc<ExecutorInfo>,
-    actor_ctx: ActorContextRef,
-    input: impl MessageStream,
-) {
+pub async fn trace(info: Arc<ExecutorInfo>, actor_ctx: ActorContextRef, input: impl MessageStream) {
+    let enable_executor_row_count = (actor_ctx.config.developer).enable_executor_row_count;
     let actor_id_str = actor_ctx.id.to_string();
     let fragment_id_str = actor_ctx.fragment_id.to_string();
 
