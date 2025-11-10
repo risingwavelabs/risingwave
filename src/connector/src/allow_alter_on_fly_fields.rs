@@ -183,6 +183,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "delete_files_count_threshold".to_owned(),
             "trigger_snapshot_count".to_owned(),
             "target_file_size_mb".to_owned(),
+            "compaction_type".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig

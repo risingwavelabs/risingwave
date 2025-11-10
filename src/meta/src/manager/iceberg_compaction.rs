@@ -402,55 +402,27 @@ impl IcebergCompactionManager {
         let trigger_interval_sec = iceberg_config.compaction_interval_sec();
         let trigger_snapshot_count = iceberg_config.trigger_snapshot_count();
 
-        if should_enable_iceberg_cow(
+        // For COW mode, always use Full compaction regardless of config
+        let task_type = if should_enable_iceberg_cow(
             iceberg_config.r#type.as_str(),
             iceberg_config.write_mode.as_str(),
         ) {
-            // If COW is enabled, use Full compaction
-            return Ok(CompactionTrack {
-                task_type: TaskType::Full,
-                trigger_interval_sec,
-                trigger_snapshot_count,
-                state: CompactionTrackState::Idle {
-                    next_compaction_time: Instant::now()
-                        + std::time::Duration::from_secs(trigger_interval_sec),
-                },
-            });
-        }
+            TaskType::Full
+        } else {
+            // For MORE mode, use configured compaction_type
+            match iceberg_config.compaction_type() {
+                "full" => TaskType::Full,
+                "small_files" => TaskType::SmallFiles,
+                "files_with_delete" => TaskType::FilesWithDelete,
+                unknown => {
+                    tracing::warn!("Unknown compaction_type '{}', defaulting to Full", unknown);
+                    TaskType::Full
+                }
+            }
+        };
 
-        // Check small file compaction config
-        if let Some(small_files_threshold_mb) = iceberg_config.small_files_threshold_mb
-            && small_files_threshold_mb > 0
-        {
-            return Ok(CompactionTrack {
-                task_type: TaskType::SmallFiles,
-                trigger_interval_sec,
-                trigger_snapshot_count,
-                state: CompactionTrackState::Idle {
-                    next_compaction_time: Instant::now()
-                        + std::time::Duration::from_secs(trigger_interval_sec),
-                },
-            });
-        }
-
-        // Check delete files compaction config
-        if let Some(delete_files_count_threshold) = iceberg_config.delete_files_count_threshold
-            && delete_files_count_threshold > 0
-        {
-            return Ok(CompactionTrack {
-                task_type: TaskType::FilesWithDelete,
-                trigger_interval_sec,
-                trigger_snapshot_count,
-                state: CompactionTrackState::Idle {
-                    next_compaction_time: Instant::now()
-                        + std::time::Duration::from_secs(trigger_interval_sec),
-                },
-            });
-        }
-
-        // Default to Full compaction if no specific config found
         Ok(CompactionTrack {
-            task_type: TaskType::Full,
+            task_type,
             trigger_interval_sec,
             trigger_snapshot_count,
             state: CompactionTrackState::Idle {

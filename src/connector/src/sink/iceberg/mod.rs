@@ -259,6 +259,12 @@ pub struct IcebergConfig {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub target_file_size_mb: Option<u64>,
+
+    /// Compaction type: `full`, `small_files`, or `files_with_delete`
+    /// If not set, will auto set to `full`
+    #[serde(rename = "compaction_type", default)]
+    #[with_option(allow_alter_on_fly)]
+    pub compaction_type: Option<String>,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -381,6 +387,10 @@ impl IcebergConfig {
 
     pub fn target_file_size_mb(&self) -> u64 {
         self.target_file_size_mb.unwrap_or(1024)
+    }
+
+    pub fn compaction_type(&self) -> &str {
+        self.compaction_type.as_deref().unwrap_or("full")
     }
 }
 
@@ -621,10 +631,78 @@ impl Sink for IcebergSink {
         if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
             bail!("Snowflake catalog only supports iceberg sources");
         }
+
         if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        // Validate compaction type configuration
+        let compaction_type = self.config.compaction_type();
+
+        // Check for unknown compaction types
+        if !matches!(
+            compaction_type,
+            "full" | "small_files" | "files_with_delete"
+        ) {
+            bail!(
+                "Unknown compaction type '{}', must be one of: 'full', 'small_files', 'files_with_delete'",
+                compaction_type
+            );
+        }
+
+        // Check COW mode constraints
+        if self.config.write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE && compaction_type != "full" {
+            bail!(
+                "Compaction type must be 'full' for copy-on-write mode, got: '{}'",
+                compaction_type
+            );
+        }
+
+        // Check MORE mode compaction types
+        if "small_files".eq_ignore_ascii_case(compaction_type) {
+            // 1. check license
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+            // 2. check write mode
+            if self.config.write_mode != ICEBERG_WRITE_MODE_MERGE_ON_READ {
+                bail!(
+                    "Compaction type 'small_files' only supports write mode 'merge-on-read', got: {}",
+                    self.config.write_mode
+                );
+            }
+
+            // 3. check conflicting parameters
+            if self.config.delete_files_count_threshold.is_some() {
+                bail!(
+                    "`delete_files_count_threshold` is not supported for 'small_files' compaction type"
+                );
+            }
+        }
+
+        if "files_with_delete".eq_ignore_ascii_case(compaction_type) {
+            // 1. check license
+            risingwave_common::license::Feature::IcebergCompaction
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+
+            // 2. check write mode
+            if self.config.write_mode != ICEBERG_WRITE_MODE_MERGE_ON_READ {
+                bail!(
+                    "Compaction type 'files_with_delete' only supports write mode 'merge-on-read', got: {}",
+                    self.config.write_mode
+                );
+            }
+
+            // 3. check conflicting parameters
+            if self.config.small_files_threshold_mb.is_some() {
+                bail!(
+                    "`small_files_threshold_mb` must not be set for 'files_with_delete' compaction type"
+                );
+            }
         }
 
         let _ = self.create_and_validate_table().await?;
@@ -634,20 +712,22 @@ impl Sink for IcebergSink {
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
         let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
 
+        // Validate compaction interval
         if let Some(compaction_interval) = iceberg_config.compaction_interval_sec {
             if iceberg_config.enable_compaction && compaction_interval == 0 {
                 bail!(
                     "`compaction_interval_sec` must be greater than 0 when `enable_compaction` is true"
                 );
-            } else {
-                // log compaction_interval
-                tracing::info!(
-                    "Alter config compaction_interval set to {} seconds",
-                    compaction_interval
-                );
             }
+
+            // log compaction_interval
+            tracing::info!(
+                "Alter config compaction_interval set to {} seconds",
+                compaction_interval
+            );
         }
 
+        // Validate max snapshots
         if let Some(max_snapshots) = iceberg_config.max_snapshots_num_before_compaction
             && max_snapshots < 1
         {
@@ -2578,6 +2658,7 @@ mod test {
             delete_files_count_threshold: None,
             trigger_snapshot_count: None,
             target_file_size_mb: None,
+            compaction_type: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);

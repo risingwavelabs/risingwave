@@ -675,6 +675,14 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+  - name: compaction_type
+    field_type: String
+    comments: |-
+      Compaction type: `full`, `small_files`, or `files_with_delete`
+      If not set, will auto set to `full`
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic
