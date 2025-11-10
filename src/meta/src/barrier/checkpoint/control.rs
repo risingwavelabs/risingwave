@@ -81,8 +81,6 @@ impl CheckpointControl {
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
     ) -> Self {
-        println!("xxk collected db {:?}", databases.keys().collect_vec());
-        println!("xxk failed db {:?}", failed_databases);
         env.shared_actor_infos()
             .retain_databases(databases.keys().chain(&failed_databases).cloned());
         Self {

@@ -880,12 +880,6 @@ impl CatalogController {
 
         let mut actor_map = HashMap::with_capacity(fragment_ids.len());
         for fragment_id in fragment_ids {
-            let x = guard
-                .iter_over_fragments()
-                .map(|(k, _)| k)
-                .copied()
-                .collect_vec();
-            println!("xxk fragments {:?}", x);
             let fragment_info = guard.get_fragment(*fragment_id as _).unwrap_or_else(|| panic!("fragment {} not found in shared actor info",
                 fragment_id));
 

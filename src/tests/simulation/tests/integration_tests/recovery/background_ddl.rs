@@ -466,9 +466,7 @@ async fn test_background_sink_create() -> Result<()> {
     // Wait for job to start
     sleep(Duration::from_secs(2)).await;
 
-    println!("xxk 1");
     kill_cn_and_meta_and_wait_recover(&mut cluster).await;
-    println!("xxk 2");
 
     // Sink job should still be present, and we can drop it.
     session.run("DROP SINK s;").await?;
