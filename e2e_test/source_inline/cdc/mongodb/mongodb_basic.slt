@@ -1,0 +1,66 @@
+# CDC source basic test
+control substitution on
+
+system ok
+mongosh 'mongodb://mongodb:27017' <<EOF
+db.all_types.insert({
+  _id: ObjectId('6911a33502454e0f774f8803'),
+  f01_double: Double(2.5),
+  f02_string: 'Rising',
+  f03_object: {},
+  f04_array: [],
+  f05_binData: '',
+  f08_bool: false,
+  f09_date: ISODate('2023-07-12T03:01:32Z'),
+  f10_null: null,
+  f11_regex: '',
+  f16_int: Int32(42),
+  f17_timestamp: Timestamp({'t': 4, 'i': 7}),
+  f18_long: Long(22),
+  f19_decimal: Decimal128('1.11'),
+});
+EOF
+
+
+statement ok
+CREATE TABLE all_types_extjson (_id JSONB PRIMARY KEY, payload JSONB)
+INCLUDE TIMESTAMP as commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE COLLECTION_NAME as collection_name
+WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'test.all_types'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW all_types_access AS
+SELECT
+    (payload -> 'f01_double')::float8 as f01_double,
+    payload ->> 'f02_string' as f02_string,
+    payload -> 'f09_date' as f09_date
+FROM
+    all_types_extjson;
+
+sleep 5s
+
+query I
+select * from all_types_extjson;
+----
+123
+
+# historical data
+query I
+select count(*) from users where commit_ts > '2025-01-01 00:00:00+00:00';
+----
+55
+
+query TT
+select database_name, collection_name FROM users LIMIT 2;
+----
+random_data users
+random_data users
+
+
+statement ok
+DROP TABLE users cascade

@@ -120,7 +120,7 @@ echo 'db.runCommand({ping: 1})' | mongosh mongodb://mongodb:27017
 echo '> rs config'
 echo 'rs.conf()' | mongosh mongodb://mongodb:27017
 echo '> run test..'
-risedev slt './e2e_test/source_legacy/cdc/mongodb/**/*.slt'
+risedev slt './e2e_test/source_inline/cdc/mongodb/**/*.slt'
 
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
