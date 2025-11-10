@@ -20,7 +20,6 @@ use std::task::Poll;
 
 use anyhow::anyhow;
 use fail::fail_point;
-use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;

@@ -92,16 +92,6 @@ LEFT JOIN ranked r
 ORDER BY d.name;
 "#;
 
-pub(crate) async fn query_database_recovery_state(
-    cluster: &mut Cluster,
-    database_name: &str,
-) -> Result<DatabaseRecoveryState> {
-    let statuses = query_all_database_recovery_state(cluster).await?;
-    Ok(*statuses
-        .get(database_name)
-        .unwrap_or(&DatabaseRecoveryState::Unknown))
-}
-
 pub(crate) async fn query_all_database_recovery_state(
     cluster: &mut Cluster,
 ) -> Result<HashMap<String, DatabaseRecoveryState>> {
