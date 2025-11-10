@@ -42,6 +42,10 @@ ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unix
 export PATH="/opt/mssql-tools/bin/:$PATH"
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
 
+# install mongosh
+wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb
+dpkg -i mongodb-mongosh_2.5.8_amd64.deb
+
 echo "--- Setup HashiCorp Vault for testing"
 # Set vault environment variables, used in `ci/scripts/setup-vault.sh`
 export VAULT_ADDR="http://vault-server:8200"
@@ -111,14 +115,12 @@ risedev ci-start ci-1cn-1fe-with-recovery
 
 
 echo "--- mongodb cdc test"
-# install mongosh
-wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb
-dpkg -i mongodb-mongosh_2.5.8_amd64.deb
 
 echo '> ping mongodb'
 echo 'db.runCommand({ping: 1})' | mongosh mongodb://mongodb:27017
 echo '> rs config'
 echo 'rs.conf()' | mongosh mongodb://mongodb:27017
+type mongosh
 echo '> run test..'
 risedev slt './e2e_test/source_inline/cdc/mongodb/**/*.slt'
 
