@@ -18,14 +18,12 @@ use std::time::Duration;
 
 use rand::seq::IndexedRandom;
 use risingwave_common::bail;
-use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::id::FragmentId;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::error::{BatchError, Result};
-
-pub(crate) type FragmentId = u32;
 
 /// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
 pub struct WorkerNodeManager {
@@ -223,11 +221,11 @@ impl WorkerNodeManager {
         let res = guard.streaming_fragment_vnode_mapping.remove(fragment_id);
         match &res {
             Some(_) => {}
-            None if OBJECT_ID_PLACEHOLDER == *fragment_id => {
+            None if fragment_id.is_placeholder() => {
                 // Do nothing for placeholder fragment.
             }
             None => {
-                tracing::warn!(fragment_id, "Streaming vnode mapping not found");
+                tracing::warn!(%fragment_id, "Streaming vnode mapping not found");
             }
         };
     }
@@ -361,7 +359,7 @@ impl WorkerNodeSelector {
         } else {
             let mapping = (self.manager.serving_fragment_mapping(fragment_id)).or_else(|_| {
                 tracing::warn!(
-                    fragment_id,
+                    %fragment_id,
                     "Serving fragment mapping not found, fall back to streaming one."
                 );
                 self.manager.get_streaming_fragment_mapping(&fragment_id)

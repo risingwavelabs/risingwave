@@ -17,13 +17,13 @@ use std::fmt::Debug;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_pb::id::TableId;
+use risingwave_pb::id::{FragmentId, TableId};
 
 pub const RW_INTERNAL_TABLE_FUNCTION_NAME: &str = "rw_table";
 
 pub fn generate_internal_table_name_with_type(
     job_name: &str,
-    fragment_id: u32,
+    fragment_id: FragmentId,
     table_id: TableId,
     table_type: &str,
 ) -> String {

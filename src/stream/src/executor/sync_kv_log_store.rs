@@ -102,6 +102,7 @@ use crate::executor::{
 };
 
 pub mod metrics {
+    use risingwave_common::id::FragmentId;
     use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 
     use crate::common::log_store_impl::kv_log_store::KvLogStoreReadMetrics;
@@ -145,26 +146,26 @@ pub mod metrics {
         pub(crate) fn new(
             metrics: &StreamingMetrics,
             actor_id: ActorId,
-            id: u32,
+            fragment_id: FragmentId,
             name: &str,
             target: &'static str,
         ) -> Self {
             let actor_id_str = actor_id.to_string();
-            let id_str = id.to_string();
-            let labels = &[&actor_id_str, target, &id_str, name];
+            let fragment_id_str = fragment_id.to_string();
+            let labels = &[&actor_id_str, target, &fragment_id_str, name];
 
             let unclean_state = metrics.sync_kv_log_store_state.with_guarded_label_values(&[
                 "dirty",
                 &actor_id_str,
                 target,
-                &id_str,
+                &fragment_id_str,
                 name,
             ]);
             let clean_state = metrics.sync_kv_log_store_state.with_guarded_label_values(&[
                 "clean",
                 &actor_id_str,
                 target,
-                &id_str,
+                &fragment_id_str,
                 name,
             ]);
             let wait_next_poll_ns = metrics
@@ -195,19 +196,43 @@ pub mod metrics {
                 .with_guarded_label_values(labels);
             let buffer_read_count = metrics
                 .sync_kv_log_store_read_count
-                .with_guarded_label_values(&["buffer", &actor_id_str, target, &id_str, name]);
+                .with_guarded_label_values(&[
+                    "buffer",
+                    &actor_id_str,
+                    target,
+                    &fragment_id_str,
+                    name,
+                ]);
 
             let buffer_read_size = metrics
                 .sync_kv_log_store_read_size
-                .with_guarded_label_values(&["buffer", &actor_id_str, target, &id_str, name]);
+                .with_guarded_label_values(&[
+                    "buffer",
+                    &actor_id_str,
+                    target,
+                    &fragment_id_str,
+                    name,
+                ]);
 
             let total_read_count = metrics
                 .sync_kv_log_store_read_count
-                .with_guarded_label_values(&["total", &actor_id_str, target, &id_str, name]);
+                .with_guarded_label_values(&[
+                    "total",
+                    &actor_id_str,
+                    target,
+                    &fragment_id_str,
+                    name,
+                ]);
 
             let total_read_size = metrics
                 .sync_kv_log_store_read_size
-                .with_guarded_label_values(&["total", &actor_id_str, target, &id_str, name]);
+                .with_guarded_label_values(&[
+                    "total",
+                    &actor_id_str,
+                    target,
+                    &fragment_id_str,
+                    name,
+                ]);
 
             const READ_PERSISTENT_LOG: &str = "persistent_log";
             const READ_FLUSHED_BUFFER: &str = "flushed_buffer";
@@ -218,7 +243,7 @@ pub mod metrics {
                     READ_PERSISTENT_LOG,
                     &actor_id_str,
                     target,
-                    &id_str,
+                    &fragment_id_str,
                     name,
                 ]);
 
@@ -228,7 +253,7 @@ pub mod metrics {
                     READ_PERSISTENT_LOG,
                     &actor_id_str,
                     target,
-                    &id_str,
+                    &fragment_id_str,
                     name,
                 ]);
 
@@ -238,7 +263,7 @@ pub mod metrics {
                     READ_FLUSHED_BUFFER,
                     &actor_id_str,
                     target,
-                    &id_str,
+                    &fragment_id_str,
                     name,
                 ]);
 
@@ -248,7 +273,7 @@ pub mod metrics {
                     READ_FLUSHED_BUFFER,
                     &actor_id_str,
                     target,
-                    &id_str,
+                    &fragment_id_str,
                     name,
                 ]);
 

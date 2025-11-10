@@ -15,6 +15,8 @@
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use risingwave_pb::id::FragmentId;
+
 use crate::controller::id::{
     IdCategory, IdCategoryType, IdGeneratorManager as SqlIdGeneratorManager,
 };
@@ -24,11 +26,13 @@ use crate::controller::id::{
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub(super) struct GlobalId<const TYPE: IdCategoryType>(u32);
 
-impl<const TYPE: IdCategoryType> GlobalId<TYPE> {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
+impl GlobalFragmentId {
+    pub fn new(id: FragmentId) -> Self {
+        Self(id.as_raw_id())
     }
+}
 
+impl<const TYPE: IdCategoryType> GlobalId<TYPE> {
     pub fn as_global_id<T: From<u32>>(&self) -> T {
         self.0.into()
     }

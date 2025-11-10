@@ -359,7 +359,7 @@ impl HummockManagerService for HummockServiceImpl {
             .hummock_manager
             .move_state_tables_to_dedicated_compaction_group(
                 req.group_id,
-                &req.table_ids.into_iter().map_into().collect_vec(),
+                &req.table_ids,
                 if req.partition_vnode_count > 0 {
                     Some(req.partition_vnode_count)
                 } else {

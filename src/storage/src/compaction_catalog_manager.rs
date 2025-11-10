@@ -649,7 +649,7 @@ mod tests {
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
-            fragment_id: 0,
+            fragment_id: 0.into(),
             dml_fragment_id: None,
             initialized_at_epoch: None,
             vnode_col_index: None,

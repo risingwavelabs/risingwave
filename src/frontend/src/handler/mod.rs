@@ -488,7 +488,7 @@ pub async fn handle(
             DescribeKind::Plain => describe::handle_describe(handler_args, name),
         },
         Statement::DescribeFragment { fragment_id } => {
-            describe::handle_describe_fragment(handler_args, fragment_id).await
+            describe::handle_describe_fragment(handler_args, fragment_id.into()).await
         }
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
@@ -1277,7 +1277,7 @@ pub async fn handle(
             AlterFragmentOperation::SetParallelism { parallelism } => {
                 alter_parallelism::handle_alter_fragment_parallelism(
                     handler_args,
-                    fragment_ids,
+                    fragment_ids.into_iter().map_into().collect(),
                     parallelism,
                 )
                 .await

@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
     StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
@@ -33,7 +34,6 @@ use risingwave_pb::catalog::{
     PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
 };
 use risingwave_pb::common::PbColumnOrder;
-use risingwave_pb::id::JobId;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast;
@@ -922,7 +922,7 @@ mod tests {
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
-            fragment_id: 0,
+            fragment_id: 0.into(),
             dml_fragment_id: None,
             initialized_at_epoch: None,
             value_indices: vec![0],
@@ -999,7 +999,7 @@ mod tests {
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 retention_seconds: Some(300),
-                fragment_id: 0,
+                fragment_id: 0.into(),
                 dml_fragment_id: None,
                 vnode_col_index: None,
                 row_id_index: None,

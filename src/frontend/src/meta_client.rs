@@ -46,7 +46,7 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
-use crate::catalog::{DatabaseId, SinkId, TableId};
+use crate::catalog::{DatabaseId, FragmentId, SinkId, TableId};
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
@@ -135,7 +135,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_fragment_parallelism(
         &self,
-        fragment_ids: Vec<u32>,
+        fragment_ids: Vec<FragmentId>,
         parallelism: Option<PbTableParallelism>,
     ) -> Result<()>;
 
@@ -177,9 +177,12 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
-    async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
+    async fn get_fragment_by_id(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Option<FragmentDistribution>>;
 
-    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>>;
+    async fn get_fragment_vnodes(&self, fragment_id: FragmentId) -> Result<Vec<(u32, Vec<u32>)>>;
 
     async fn get_actor_vnodes(&self, actor_id: u32) -> Result<Vec<u32>>;
 
@@ -370,7 +373,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_fragment_parallelism(
         &self,
-        fragment_ids: Vec<u32>,
+        fragment_ids: Vec<FragmentId>,
         parallelism: Option<PbTableParallelism>,
     ) -> Result<()> {
         self.0
@@ -457,11 +460,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_hosted_iceberg_tables().await
     }
 
-    async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>> {
+    async fn get_fragment_by_id(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Option<FragmentDistribution>> {
         self.0.get_fragment_by_id(fragment_id).await
     }
 
-    async fn get_fragment_vnodes(&self, fragment_id: u32) -> Result<Vec<(u32, Vec<u32>)>> {
+    async fn get_fragment_vnodes(&self, fragment_id: FragmentId) -> Result<Vec<(u32, Vec<u32>)>> {
         self.0.get_fragment_vnodes(fragment_id).await
     }
 

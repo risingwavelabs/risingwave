@@ -22,13 +22,11 @@ use anyhow::anyhow;
 use futures::future;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
 use risingwave_common::hash::ActorMapping;
 use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, fragment_relation};
 use risingwave_pb::common::{PbWorkerNode, WorkerNode, WorkerType};
-use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
-use risingwave_pb::stream_plan::{Dispatcher, PbDispatchOutputMapping, PbDispatcher, StreamNode};
+use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher};
 use sea_orm::{ActiveModelTrait, ConnectionTrait, QuerySelect};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
@@ -52,26 +50,6 @@ use crate::{MetaError, MetaResult};
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct WorkerReschedule {
     pub worker_actor_diff: BTreeMap<WorkerId, isize>,
-}
-
-pub struct CustomFragmentInfo {
-    pub job_id: u32,
-    pub fragment_id: u32,
-    pub fragment_type_mask: FragmentTypeMask,
-    pub distribution_type: PbFragmentDistributionType,
-    pub state_table_ids: Vec<u32>,
-    pub node: StreamNode,
-    pub actor_template: StreamActorWithDispatchers,
-    pub actors: Vec<CustomActorInfo>,
-}
-
-#[derive(Default, Clone)]
-pub struct CustomActorInfo {
-    pub actor_id: u32,
-    pub fragment_id: u32,
-    pub dispatcher: Vec<Dispatcher>,
-    /// `None` if singleton.
-    pub vnode_bitmap: Option<Bitmap>,
 }
 
 use risingwave_common::id::JobId;
@@ -223,7 +201,7 @@ impl ScaleController {
             .map(|(upstream_fragment, _)| {
                 (
                     *upstream_fragment,
-                    prev_fragment_info.fragment_id as DispatcherId,
+                    prev_fragment_info.fragment_id.as_raw_id() as DispatcherId,
                 )
             })
             .collect();
@@ -601,17 +579,12 @@ impl ScaleController {
         let all_related_fragment_ids: HashSet<_> = fragment_ids
             .iter()
             .copied()
-            .chain(
-                all_upstream_fragments
-                    .values()
-                    .flatten()
-                    .map(|(id, _)| *id as i32),
-            )
+            .chain(all_upstream_fragments.values().flatten().map(|(id, _)| *id))
             .chain(
                 all_downstream_fragments
                     .values()
                     .flatten()
-                    .map(|(id, _)| *id as i32),
+                    .map(|(id, _)| *id),
             )
             .collect();
 
@@ -682,7 +655,7 @@ impl ScaleController {
                     .chain(downstream_fragments.keys().copied())
                     .map(|fragment_id| {
                         all_prev_fragments
-                            .get(&(fragment_id as i32))
+                            .get(&fragment_id)
                             .map(|fragment| {
                                 (
                                     fragment_id,
@@ -709,10 +682,10 @@ impl ScaleController {
 
                 for downstream_fragment_id in downstream_fragments.keys() {
                     let target_fragment_actors =
-                        match all_rendered_fragments.get(&(*downstream_fragment_id as i32)) {
+                        match all_rendered_fragments.get(downstream_fragment_id) {
                             None => {
                                 let external_fragment = all_prev_fragments
-                                    .get(&(*downstream_fragment_id as i32))
+                                    .get(downstream_fragment_id)
                                     .ok_or_else(|| {
                                         MetaError::from(anyhow!(
                                             "fragment {} not found in previous state",

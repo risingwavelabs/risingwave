@@ -1261,7 +1261,7 @@ pub fn compose_dispatchers(
                     )
                     .to_protobuf(),
                 ),
-                dispatcher_id: target_fragment_id as _,
+                dispatcher_id: target_fragment_id.as_raw_id() as _,
                 downstream_actor_id: target_fragment_actors
                     .keys()
                     .map(|actor_id| *actor_id as _)
@@ -1278,7 +1278,7 @@ pub fn compose_dispatchers(
                 dist_key_indices,
                 output_mapping: output_mapping.into(),
                 hash_mapping: None,
-                dispatcher_id: target_fragment_id as _,
+                dispatcher_id: target_fragment_id.as_raw_id() as _,
                 downstream_actor_id: target_fragment_actors
                     .keys()
                     .map(|actor_id| *actor_id as _)
@@ -1304,7 +1304,7 @@ pub fn compose_dispatchers(
                     dist_key_indices: dist_key_indices.clone(),
                     output_mapping: output_mapping.clone().into(),
                     hash_mapping: None,
-                    dispatcher_id: target_fragment_id as _,
+                    dispatcher_id: target_fragment_id.as_raw_id() as _,
                     downstream_actor_id: vec![downstream_actor_id as _],
                 },
             )
