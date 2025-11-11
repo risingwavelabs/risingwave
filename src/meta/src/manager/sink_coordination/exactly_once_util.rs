@@ -81,7 +81,10 @@ pub async fn delete_aborted_and_outdated_records<C>(
 where
     C: ConnectionTrait,
 {
-    let reserved_min_epoch = last_committed_epoch.map(|v| v as i64).unwrap_or(i64::MAX);
+    let reserved_min_epoch = last_committed_epoch
+        .map(|v| v as Epoch)
+        .unwrap_or(Epoch::MAX);
+    let aborted_epochs: Vec<Epoch> = aborted_epochs.into_iter().map(|e| e as Epoch).collect();
     match pending_sink_state::Entity::delete_many()
         .filter(
             pending_sink_state::Column::SinkId.eq(sink_id).and(
@@ -111,23 +114,29 @@ pub async fn list_sink_states_ordered_by_epoch<C>(
 where
     C: ConnectionTrait,
 {
-    match pending_sink_state::Entity::find()
-        .select_only()
-        .columns([
-            pending_sink_state::Column::Epoch,
-            pending_sink_state::Column::SinkState,
-            pending_sink_state::Column::Metadata,
-        ])
-        .filter(pending_sink_state::Column::SinkId.eq(sink_id))
-        .order_by(pending_sink_state::Column::Epoch, Order::Asc)
-        .into_tuple()
-        .all(db)
-        .await
-    {
-        Ok(rows) => Ok(rows),
-        Err(e) => {
-            tracing::error!("Error querying pending sink states: {:?}", e.as_report());
-            Err(e.into())
-        }
-    }
+    let rows: Vec<(Epoch, pending_sink_state::SinkState, Vec<u8>)> =
+        match pending_sink_state::Entity::find()
+            .select_only()
+            .columns([
+                pending_sink_state::Column::Epoch,
+                pending_sink_state::Column::SinkState,
+                pending_sink_state::Column::Metadata,
+            ])
+            .filter(pending_sink_state::Column::SinkId.eq(sink_id))
+            .order_by(pending_sink_state::Column::Epoch, Order::Asc)
+            .into_tuple()
+            .all(db)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("Error querying pending sink states: {:?}", e.as_report());
+                return Err(e.into());
+            }
+        };
+
+    Ok(rows
+        .into_iter()
+        .map(|(epoch, state, metadata)| (epoch as u64, state, metadata))
+        .collect())
 }

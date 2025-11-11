@@ -74,7 +74,7 @@ impl Sink for TestSink {
         &self,
         iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
     ) -> crate::sink::Result<SinkCommitCoordinator> {
-        Ok(build_box_coordinator(
+        Ok(build_sink_coordinator(
             self.param.clone(),
             iceberg_compact_stat_sender,
         ))
@@ -138,7 +138,7 @@ pub fn register_build_sink(
     })
 }
 
-fn build_box_coordinator(
+fn build_sink_coordinator(
     sink_param: SinkParam,
     iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
 ) -> SinkCommitCoordinator {

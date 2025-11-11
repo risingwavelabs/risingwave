@@ -40,7 +40,7 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::{RefreshState, TableType};
 use risingwave_meta_model::{
-    ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
+    ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, Epoch, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
     connection, database, fragment, function, index, object, object_dependency, pending_sink_state,
@@ -820,11 +820,11 @@ impl CatalogController {
                 .filter(object::Column::DatabaseId.eq(db_id));
         }
 
-        let rows: Vec<(SinkId, u64)> = query.into_tuple().all(&inner.db).await?;
+        let rows: Vec<(SinkId, Epoch)> = query.into_tuple().all(&inner.db).await?;
 
         let mut result: HashMap<SinkId, Vec<u64>> = HashMap::new();
         for (sink_id, epoch) in rows {
-            result.entry(sink_id).or_default().push(epoch);
+            result.entry(sink_id).or_default().push(epoch as u64);
         }
 
         Ok(result)
@@ -838,6 +838,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         for (sink_id, epochs) in to_abort_epochs {
+            let epochs: Vec<Epoch> = epochs.into_iter().map(|e| e as _).collect();
             pending_sink_state::Entity::update_many()
                 .col_expr(
                     pending_sink_state::Column::SinkState,
