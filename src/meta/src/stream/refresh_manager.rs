@@ -13,159 +13,266 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
+use chrono::{Duration as ChronoDuration, NaiveDateTime, Utc};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_meta_model::ActorId;
+use risingwave_meta_model::refresh_job::{self, RefreshJobStatus};
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
+use tokio::sync::{Notify, oneshot};
+use tokio::task::JoinHandle;
 
 use crate::barrier::{BarrierScheduler, Command, SharedActorInfos};
 use crate::manager::MetadataManager;
 use crate::{MetaError, MetaResult};
 
-/// Global, per-table refresh progress tracker.
-///
-/// Lifecycle for each entry (keyed by `TableId`):
-/// - Created at refresh start in `RefreshManager::refresh_table` before any `await`,
-///   populated with the expected source/fetch actor sets for that table.
-/// - Updated on each barrier in checkpoint control when executors report
-///   list/load progress; see `CheckpointControl::handle_refresh_table_info`.
-/// - Removed when the table is reported as refresh-finished by compute on a
-///   barrier (`refresh_finished_table_ids`).
-///
-/// Failure/retry notes:
-/// - If scheduling the refresh fails, the table state is reset to `Idle`
-pub static REFRESH_TABLE_PROGRESS_TRACKER: LazyLock<Mutex<GlobalRefreshTableProgressTracker>> =
-    LazyLock::new(|| Mutex::new(GlobalRefreshTableProgressTracker::default()));
+const REFRESH_SCHEDULER_INTERVAL: Duration = Duration::from_secs(60);
 
-#[derive(Default, Debug)]
-pub struct GlobalRefreshTableProgressTracker {
-    pub inner: HashMap<TableId, SingleTableRefreshProgressTracker>,
-    pub table_id_by_database_id: HashMap<DatabaseId, HashSet<TableId>>,
-}
+pub type GlobalRefreshManagerRef = Arc<GlobalRefreshManager>;
 
-impl GlobalRefreshTableProgressTracker {
-    pub fn remove_tracker_by_database_id(&mut self, database_id: DatabaseId) {
-        let table_ids = self
-            .table_id_by_database_id
-            .remove(&database_id)
-            .unwrap_or_default();
-        for table_id in table_ids {
-            self.inner.remove(&table_id);
-        }
-    }
-}
-
-/// # High level design for refresh table
-///
-/// - Three tables:
-///
-/// - Main table: serves queries.
-/// - Staging table: receives refreshed content during `Refreshing`.
-/// - Progress table: per-VNode progress state for resumable refresh.
-///
-/// - Phased execution:
-///
-/// - Normal → Refreshing → Merging → Cleanup → Normal.
-/// - Refreshing: load and write to staging.
-/// - Merging: chunked sort-merge integrates staging into main; per-VNode progress persists checkpoints.
-/// - Cleanup: purge staging and reset progress.
-///
-/// - Barrier-first responsiveness:
-///
-/// - Executor uses left-priority `select_with_strategy`, always handling upstream messages/barriers before background merge.
-/// - On barriers, the executor persists progress so restarts resume exactly.
-///
-/// - Meta-managed state:
-///
-/// - `refresh_state` on each table enforces no concurrent refresh and enables recovery after failures.
-/// - Startup recovery resets lingering `Refreshing` tables to `Idle` and lets executors resume `Finishing` safely.
-///
-/// ## Progress Table (Conceptual)
-/// Tracks, per VNode:
-/// - last processed position (e.g., last PK),
-/// - completion flag,
-/// - processed row count,
-/// - last checkpoint epoch.
-///
-/// The executor initializes entries on `RefreshStart`, updates them during merge, and loads them at startup to resume from the last checkpoint.
-///
-/// ## Barrier Coordination and Completion
-/// - Compute reports:
-///
-/// - `refresh_finished_table_ids`: indicates a materialized view finished refreshing.
-/// - `truncate_tables`: staging tables to be cleaned up.
-// - Checkpoint control aggregates these across barrier types; completion handlers in meta:
-/// - update `refresh_state` to `Idle`,
-/// - schedule/handle `LoadFinish`,
-/// - drive cleanup work reliably after the storage version commit.
-///
-/// Manager responsible for handling refresh operations on refreshable tables
-pub struct RefreshManager {
+pub struct GlobalRefreshManager {
     metadata_manager: MetadataManager,
     barrier_scheduler: BarrierScheduler,
+    shared_actor_infos: SharedActorInfos,
+    progress_trackers: Mutex<GlobalRefreshTableProgressTracker>,
+    scheduler_notify: Notify,
 }
 
-impl RefreshManager {
-    /// Create a new `RefreshManager` instance
-    pub fn new(metadata_manager: MetadataManager, barrier_scheduler: BarrierScheduler) -> Self {
-        Self {
-            metadata_manager,
+impl GlobalRefreshManager {
+    pub async fn start(
+        metadata_manager: MetadataManager,
+        barrier_scheduler: BarrierScheduler,
+        shared_actor_infos: SharedActorInfos,
+    ) -> MetaResult<(GlobalRefreshManagerRef, JoinHandle<()>, oneshot::Sender<()>)> {
+        let manager = Arc::new(Self {
+            metadata_manager: metadata_manager.clone(),
             barrier_scheduler,
-        }
+            shared_actor_infos,
+            progress_trackers: Mutex::new(GlobalRefreshTableProgressTracker::default()),
+            scheduler_notify: Notify::new(),
+        });
+
+        manager
+            .metadata_manager
+            .reset_all_refresh_jobs_to_idle()
+            .await?;
+        manager.sync_refreshable_jobs().await?;
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let join_handle = Self::spawn_scheduler(manager.clone(), shutdown_rx);
+
+        Ok((manager, join_handle, shutdown_tx))
     }
 
-    /// Execute a refresh operation for the specified table
-    ///
-    /// This method:
-    /// 1. Validates that the table exists and is refreshable
-    /// 2. Checks current refresh state and ensures no concurrent refresh
-    /// 3. Atomically sets the table state to REFRESHING
-    /// 4. Sends a refresh command through the barrier system
-    /// 5. Returns the result of the refresh operation
-    pub async fn refresh_table(
-        &self,
+    fn spawn_scheduler(
+        manager: GlobalRefreshManagerRef,
+        mut shutdown_rx: oneshot::Receiver<()>,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(REFRESH_SCHEDULER_INTERVAL);
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(err) = manager.handle_scheduler_tick().await {
+                            tracing::warn!(error = %err.as_report(), "refresh scheduler tick failed");
+                        }
+                    }
+                    _ = manager.scheduler_notify.notified() => {
+                        if let Err(err) = manager.handle_scheduler_tick().await {
+                            tracing::warn!(error = %err.as_report(), "refresh scheduler tick failed");
+                        }
+                    }
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("refresh scheduler shutting down");
+                        break;
+                    }
+                }
+            }
+        })
+    }
+
+    pub async fn trigger_manual_refresh(
+        self: &Arc<Self>,
         request: RefreshRequest,
         shared_actor_infos: &SharedActorInfos,
     ) -> MetaResult<RefreshResponse> {
         let table_id = request.table_id;
         let associated_source_id = TableId::new(request.associated_source_id);
+        tracing::info!(%table_id, %associated_source_id, "trigger manual refresh");
 
-        // Validate that the table exists and is refreshable
-        self.validate_refreshable_table(table_id, associated_source_id)
+        self.ensure_refreshable(table_id, associated_source_id)
             .await?;
+        self.execute_refresh(
+            table_id,
+            associated_source_id,
+            shared_actor_infos,
+            Utc::now().naive_utc(),
+        )
+        .await?;
 
-        tracing::info!("Starting refresh operation for table {}", table_id);
+        Ok(RefreshResponse { status: None })
+    }
 
-        // Get database_id for the table
+    pub async fn mark_refresh_complete(&self, table_id: TableId) -> MetaResult<()> {
+        self.metadata_manager
+            .update_refresh_job_status(
+                table_id,
+                RefreshJobStatus::Idle,
+                Some(Utc::now().naive_utc()),
+            )
+            .await?;
+        self.remove_progress_tracker(table_id);
+        Ok(())
+    }
+
+    pub fn mark_list_stage_finished(
+        &self,
+        table_id: TableId,
+        actors: &HashSet<ActorId>,
+    ) -> MetaResult<bool> {
+        let mut guard = self.progress_trackers.lock();
+        let tracker = guard.inner.get_mut(&table_id).ok_or_else(|| {
+            MetaError::from(anyhow!("Table tracker not found for table {}", table_id))
+        })?;
+        tracker.report_list_finished(actors.iter().copied());
+        tracker.is_list_finished()
+    }
+
+    pub fn mark_load_stage_finished(
+        &self,
+        table_id: TableId,
+        actors: &HashSet<ActorId>,
+    ) -> MetaResult<bool> {
+        let mut guard = self.progress_trackers.lock();
+        let tracker = guard.inner.get_mut(&table_id).ok_or_else(|| {
+            MetaError::from(anyhow!("Table tracker not found for table {}", table_id))
+        })?;
+        tracker.report_load_finished(actors.iter().copied());
+        tracker.is_load_finished()
+    }
+
+    pub fn remove_trackers_by_database(&self, database_id: DatabaseId) {
+        let mut guard = self.progress_trackers.lock();
+        guard.remove_tracker_by_database_id(database_id);
+    }
+
+    pub fn notify_scheduler(&self) {
+        self.scheduler_notify.notify_one();
+    }
+
+    async fn handle_scheduler_tick(self: &Arc<Self>) -> MetaResult<()> {
+        self.sync_refreshable_jobs().await?;
+        let jobs = self.metadata_manager.list_refresh_jobs().await?;
+        for job in jobs {
+            if let Err(err) = self.try_trigger_scheduled_refresh(&job).await {
+                tracing::warn!(
+                    table_id = %job.table_id,
+                    error = %err.as_report(),
+                    "failed to trigger scheduled refresh"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn sync_refreshable_jobs(&self) -> MetaResult<()> {
+        let table_ids = self.metadata_manager.list_refreshable_table_ids().await?;
+        for table_id in table_ids {
+            self.metadata_manager
+                .ensure_refresh_job(table_id, None)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn try_trigger_scheduled_refresh(
+        self: &Arc<Self>,
+        job: &refresh_job::Model,
+    ) -> MetaResult<()> {
+        if job.current_status != RefreshJobStatus::Idle {
+            return Ok(());
+        }
+        let Some(interval_secs) = job.trigger_interval_secs else {
+            return Ok(());
+        };
+        if interval_secs <= 0 {
+            return Ok(());
+        }
+
+        let interval = ChronoDuration::seconds(interval_secs);
+        let last_run = job.last_trigger_time.unwrap_or(job.job_create_time);
+        let now = Utc::now().naive_utc();
+        if now.signed_duration_since(last_run) < interval {
+            return Ok(());
+        }
+
+        let table = self
+            .metadata_manager
+            .catalog_controller
+            .get_table_by_id(job.table_id)
+            .await?;
+        if !table.refreshable {
+            return Ok(());
+        }
+
+        let Some(OptionalAssociatedSourceId::AssociatedSourceId(src_id)) =
+            table.optional_associated_source_id
+        else {
+            tracing::warn!(
+                table_id = %job.table_id,
+                "skip scheduled refresh: missing associated source id"
+            );
+            return Ok(());
+        };
+        let associated_source_id = TableId::new(src_id);
+
+        self.ensure_refreshable(job.table_id, associated_source_id)
+            .await?;
+        self.execute_refresh(
+            job.table_id,
+            associated_source_id,
+            &self.shared_actor_infos,
+            now,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn execute_refresh(
+        self: &Arc<Self>,
+        table_id: TableId,
+        associated_source_id: TableId,
+        shared_actor_infos: &SharedActorInfos,
+        trigger_time: NaiveDateTime,
+    ) -> MetaResult<()> {
         let database_id = self
             .metadata_manager
             .catalog_controller
             .get_object_database_id(table_id.as_raw_id() as _)
             .await?;
 
-        // load actor info for refresh
         let job_fragments = self
             .metadata_manager
             .get_job_fragments_by_id(table_id.as_job_id())
             .await?;
 
+        let mut tracker = SingleTableRefreshProgressTracker::default();
         {
-            let fragment_to_actor_mapping = shared_actor_infos.read_guard();
-            let mut tracker = SingleTableRefreshProgressTracker::default();
+            let fragment_info_guard = shared_actor_infos.read_guard();
             for (fragment_id, fragment) in &job_fragments.fragments {
                 if fragment
                     .fragment_type_mask
                     .contains(FragmentTypeFlag::Source)
-                    // should exclude dml fragments to avoid selecting the DML sql
                     && !fragment.fragment_type_mask.contains(FragmentTypeFlag::Dml)
                 {
-                    let fragment_info = fragment_to_actor_mapping
+                    let fragment_info = fragment_info_guard
                         .get_fragment(*fragment_id)
                         .ok_or_else(|| MetaError::fragment_not_found(*fragment_id))?;
                     tracker.expected_list_actors.extend(
@@ -175,11 +282,11 @@ impl RefreshManager {
                             .map(|actor_id| *actor_id as ActorId),
                     );
                 }
+
                 if fragment
                     .fragment_type_mask
                     .contains(FragmentTypeFlag::FsFetch)
-                    && let Some(fragment_info) =
-                        fragment_to_actor_mapping.get_fragment(*fragment_id)
+                    && let Some(fragment_info) = fragment_info_guard.get_fragment(*fragment_id)
                 {
                     tracker.expected_fetch_actors.extend(
                         fragment_info
@@ -189,87 +296,60 @@ impl RefreshManager {
                     );
                 }
             }
+        }
 
-            {
-                // Store tracker in global tracker before guard is dropped
-                let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-                lock_handle.inner.insert(table_id, tracker);
-                lock_handle
-                    .table_id_by_database_id
-                    .entry(database_id)
-                    .or_default()
-                    .insert(table_id);
-            }
+        self.register_progress_tracker(table_id, database_id, tracker);
 
-            Ok::<_, MetaError>(())
-        }?;
+        self.metadata_manager
+            .update_refresh_job_status(table_id, RefreshJobStatus::Running, Some(trigger_time))
+            .await?;
 
-        // Create refresh command
         let refresh_command = Command::Refresh {
             table_id,
             associated_source_id,
         };
 
-        // Send refresh command through barrier system
-        match self
+        if let Err(err) = self
             .barrier_scheduler
             .run_command(database_id, refresh_command)
             .await
         {
-            Ok(_) => {
-                tracing::info!(
-                    table_id = %table_id,
-                    "Refresh command completed successfully"
-                );
-
-                Ok(RefreshResponse { status: None })
-            }
-            Err(e) => {
-                tracing::error!(
-                    error = %e.as_report(),
-                    table_id = %table_id,
-                    "Failed to execute refresh command, resetting refresh state to Idle"
-                );
-
-                self.metadata_manager
-                    .catalog_controller
-                    .set_table_refresh_state(table_id, RefreshState::Idle)
-                    .await?;
-
-                {
-                    let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-                    lock_handle.inner.remove(&table_id);
-                    if let Some(table_ids) =
-                        lock_handle.table_id_by_database_id.get_mut(&database_id)
-                    {
-                        table_ids.remove(&table_id);
-                    }
-                }
-
-                Err(anyhow!(e)
-                    .context(format!("Failed to refresh table {}", table_id))
-                    .into())
-            }
+            tracing::error!(
+                error = %err.as_report(),
+                table_id = %table_id,
+                "failed to execute refresh command"
+            );
+            self.metadata_manager
+                .update_refresh_job_status(table_id, RefreshJobStatus::Idle, Some(trigger_time))
+                .await?;
+            self.remove_progress_tracker(table_id);
+            self.metadata_manager
+                .catalog_controller
+                .set_table_refresh_state(table_id, RefreshState::Idle)
+                .await?;
+            Err(anyhow!(err)
+                .context(format!("Failed to refresh table {}", table_id))
+                .into())
+        } else {
+            tracing::info!(table_id = %table_id, "refresh command scheduled");
+            Ok(())
         }
     }
 
-    /// Validate that the specified table exists and supports refresh operations
-    async fn validate_refreshable_table(
+    async fn ensure_refreshable(
         &self,
         table_id: TableId,
         associated_source_id: TableId,
     ) -> MetaResult<()> {
-        // Check if table exists in catalog
         let table = self
             .metadata_manager
             .catalog_controller
             .get_table_by_id(table_id)
             .await?;
 
-        // Check if table is refreshable
         if !table.refreshable {
             return Err(MetaError::invalid_parameter(format!(
-                "Table '{}' is not refreshable. Only tables created with REFRESHABLE flag support manual refresh.",
+                "Table '{}' is not refreshable. Only tables created with REFRESHABLE flag support refresh.",
                 table.name
             )));
         }
@@ -290,26 +370,53 @@ impl RefreshManager {
             .catalog_controller
             .get_table_refresh_state(table_id)
             .await?;
-        match current_state {
-            Some(RefreshState::Idle) | None => {
-                // the table is not refreshing. issue a refresh
-            }
-            state @ (Some(RefreshState::Finishing) | Some(RefreshState::Refreshing)) => {
-                return Err(MetaError::invalid_parameter(format!(
-                    "Table '{}' is currently in state {:?}. Cannot start a new refresh operation.",
-                    table.name,
-                    state.unwrap()
-                )));
-            }
+        if let Some(state @ (RefreshState::Finishing | RefreshState::Refreshing)) = current_state {
+            return Err(MetaError::invalid_parameter(format!(
+                "Table '{}' is currently in state {:?}. Cannot start a new refresh operation.",
+                table.name, state
+            )));
         }
 
-        tracing::debug!(
-            table_id = %table_id,
-            table_name = %table.name,
-            "Table validation passed for refresh operation"
-        );
-
         Ok(())
+    }
+
+    fn register_progress_tracker(
+        &self,
+        table_id: TableId,
+        database_id: DatabaseId,
+        tracker: SingleTableRefreshProgressTracker,
+    ) {
+        let mut guard = self.progress_trackers.lock();
+        guard.inner.insert(table_id, tracker);
+        guard
+            .table_id_by_database_id
+            .entry(database_id)
+            .or_default()
+            .insert(table_id);
+    }
+
+    pub fn remove_progress_tracker(&self, table_id: TableId) {
+        let mut guard = self.progress_trackers.lock();
+        guard.inner.remove(&table_id);
+        guard.table_id_by_database_id.values_mut().for_each(|set| {
+            set.remove(&table_id);
+        });
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct GlobalRefreshTableProgressTracker {
+    pub inner: HashMap<TableId, SingleTableRefreshProgressTracker>,
+    pub table_id_by_database_id: HashMap<DatabaseId, HashSet<TableId>>,
+}
+
+impl GlobalRefreshTableProgressTracker {
+    pub fn remove_tracker_by_database_id(&mut self, database_id: DatabaseId) {
+        if let Some(table_ids) = self.table_id_by_database_id.remove(&database_id) {
+            for table_id in table_ids {
+                self.inner.remove(&table_id);
+            }
+        }
     }
 }
 

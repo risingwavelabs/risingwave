@@ -35,7 +35,7 @@ use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
-use risingwave_meta::stream::ScaleController;
+use risingwave_meta::stream::{GlobalRefreshManager, ScaleController};
 use risingwave_meta_service::AddressInfo;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
@@ -506,6 +506,14 @@ pub async fn start_service_as_election_leader(
         env.opts.iceberg_gc_interval_sec,
     ));
 
+    let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
+        metadata_manager.clone(),
+        barrier_scheduler.clone(),
+        env.shared_actor_infos().clone(),
+    )
+    .await?;
+    sub_tasks.push((refresh_handle, refresh_shutdown));
+
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
         source_manager.clone(),
@@ -521,6 +529,7 @@ pub async fn start_service_as_election_leader(
         sink_manager.clone(),
         scale_controller.clone(),
         barrier_scheduler.clone(),
+        refresh_manager.clone(),
     )
     .await;
     tracing::info!("GlobalBarrierManager started");
@@ -579,6 +588,7 @@ pub async fn start_service_as_election_leader(
         barrier_manager.clone(),
         stream_manager.clone(),
         metadata_manager.clone(),
+        refresh_manager.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(

@@ -14,8 +14,12 @@
 
 use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::system_param::{OverrideValidate, Validate};
+use risingwave_meta_model::refresh_job::{self, RefreshJobStatus};
 use risingwave_meta_model::table::RefreshState;
-use sea_orm::DatabaseTransaction;
+use sea_orm::ActiveValue::{NotSet, Set};
+use sea_orm::prelude::DateTime;
+use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 use thiserror_ext::AsReport;
 
 use super::*;
@@ -931,7 +935,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // It is okay to update refresh state unconditionally because the check is done in `validate_refreshable_table` inside `RefreshManager`.
+        // It is okay to update refresh state unconditionally because the check is done in `ensure_refreshable` inside `GlobalRefreshManager`.
         let active_model = table::ActiveModel {
             table_id: Set(table_id),
             refresh_state: Set(Some(new_state)),
@@ -955,5 +959,76 @@ impl CatalogController {
         );
 
         Ok(true)
+    }
+
+    pub async fn ensure_refresh_job(
+        &self,
+        table_id: TableId,
+        trigger_interval_secs: Option<i64>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            job_create_time: NotSet,
+            last_trigger_time: Set(None),
+            trigger_interval_secs: Set(trigger_interval_secs),
+            current_status: Set(RefreshJobStatus::Idle),
+        };
+        RefreshJob::insert(active)
+            .on_conflict(
+                OnConflict::column(refresh_job::Column::TableId)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec(&inner.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_refresh_job_status(
+        &self,
+        table_id: TableId,
+        status: RefreshJobStatus,
+        last_trigger_time: Option<DateTime>,
+    ) -> MetaResult<()> {
+        self.ensure_refresh_job(table_id, None).await?;
+        let inner = self.inner.read().await;
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            current_status: Set(status),
+            last_trigger_time: Set(last_trigger_time),
+            ..Default::default()
+        };
+        active.update(&inner.db).await?;
+        Ok(())
+    }
+
+    pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        RefreshJob::update_many()
+            .col_expr(
+                refresh_job::Column::CurrentStatus,
+                Expr::value(RefreshJobStatus::Idle),
+            )
+            .exec(&inner.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_refresh_job_interval(
+        &self,
+        table_id: TableId,
+        trigger_interval_secs: Option<i64>,
+    ) -> MetaResult<()> {
+        self.ensure_refresh_job(table_id, trigger_interval_secs)
+            .await?;
+        let inner = self.inner.read().await;
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            trigger_interval_secs: Set(trigger_interval_secs),
+            ..Default::default()
+        };
+        active.update(&inner.db).await?;
+        Ok(())
     }
 }

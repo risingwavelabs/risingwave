@@ -25,7 +25,7 @@ use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::ActorId;
-use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
+use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta::{MetaError, model};
 use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
@@ -55,6 +55,7 @@ pub struct StreamServiceImpl {
     barrier_manager: BarrierManagerRef,
     stream_manager: GlobalStreamManagerRef,
     metadata_manager: MetadataManager,
+    refresh_manager: GlobalRefreshManagerRef,
 }
 
 impl StreamServiceImpl {
@@ -64,6 +65,7 @@ impl StreamServiceImpl {
         barrier_manager: BarrierManagerRef,
         stream_manager: GlobalStreamManagerRef,
         metadata_manager: MetadataManager,
+        refresh_manager: GlobalRefreshManagerRef,
     ) -> Self {
         StreamServiceImpl {
             env,
@@ -71,6 +73,7 @@ impl StreamServiceImpl {
             barrier_manager,
             stream_manager,
             metadata_manager,
+            refresh_manager,
         }
     }
 }
@@ -486,7 +489,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .chain(source_fragments.values().flatten().copied())
                 .collect();
 
-            let guard = self.env.shared_actor_info.read_guard();
+            let guard = self.env.shared_actor_infos().read_guard();
             guard
                 .iter_over_fragments()
                 .filter(|(frag_id, _)| all_fragment_ids.contains(frag_id))
@@ -588,14 +591,9 @@ impl StreamManagerService for StreamServiceImpl {
 
         tracing::info!("Refreshing table with id: {}", req.table_id);
 
-        // Create refresh manager and execute refresh
-        let refresh_manager = risingwave_meta::stream::RefreshManager::new(
-            self.metadata_manager.clone(),
-            self.barrier_scheduler.clone(),
-        );
-
-        let response = refresh_manager
-            .refresh_table(req, self.env.shared_actor_infos())
+        let response = self
+            .refresh_manager
+            .trigger_manual_refresh(req, self.env.shared_actor_infos())
             .await?;
 
         Ok(Response::new(response))
