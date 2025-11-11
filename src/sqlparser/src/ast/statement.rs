@@ -13,12 +13,9 @@
 // limitations under the License.
 
 use std::fmt;
-use std::fmt::Formatter;
-use std::fmt::Write;
+use std::fmt::{Formatter, Write};
 
 use itertools::Itertools;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use winnow::ModalResult;
 
 use super::ddl::SourceWatermark;
@@ -80,7 +77,6 @@ macro_rules! impl_fmt_display {
 //     [Keyword::WATERMARK, Keyword::FOR] column [Keyword::AS] <expr>
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateSourceStatement {
     pub temporary: bool,
     pub if_not_exists: bool,
@@ -99,7 +95,6 @@ pub struct CreateSourceStatement {
 ///
 /// Check `CONNECTORS_COMPATIBLE_FORMATS` for what `FORMAT ... ENCODE ...` combinations are allowed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Format {
     /// The format is the same with RisingWave's internal representation.
     /// Used internally for schema change
@@ -160,7 +155,6 @@ impl Format {
 
 /// Check `CONNECTORS_COMPATIBLE_FORMATS` for what `FORMAT ... ENCODE ...` combinations are allowed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Encode {
     Avro,     // Keyword::Avro
     Csv,      // Keyword::CSV
@@ -221,7 +215,6 @@ impl Encode {
 
 /// `FORMAT ... ENCODE ... [(a=b, ...)] [KEY ENCODE ...]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FormatEncodeOptions {
     pub format: Format,
     pub row_encode: Encode,
@@ -491,7 +484,6 @@ impl fmt::Display for CreateSourceStatement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateSink {
     From(ObjectName),
     AsQuery(Box<Query>),
@@ -513,7 +505,6 @@ impl fmt::Display for CreateSink {
 //     with_properties: AstOption<WithProperties>,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateSinkStatement {
     pub if_not_exists: bool,
     pub sink_name: ObjectName,
@@ -614,7 +605,6 @@ impl fmt::Display for CreateSinkStatement {
 //     with_properties: AstOption<WithProperties>,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateSubscriptionStatement {
     pub if_not_exists: bool,
     pub subscription_name: ObjectName,
@@ -669,7 +659,6 @@ impl fmt::Display for CreateSubscriptionStatement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DeclareCursor {
     Query(Box<Query>),
     Subscription(ObjectName, Since),
@@ -699,7 +688,6 @@ impl fmt::Display for DeclareCursor {
 //     rw_timestamp: Ident,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DeclareCursorStatement {
     pub cursor_name: Ident,
     pub declare_cursor: DeclareCursor,
@@ -749,7 +737,6 @@ impl fmt::Display for DeclareCursorStatement {
 //     cursor_name: Ident,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FetchCursorStatement {
     pub cursor_name: Ident,
     pub count: u32,
@@ -793,7 +780,6 @@ impl fmt::Display for FetchCursorStatement {
 //     cursor_name: Ident,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CloseCursorStatement {
     pub cursor_name: Option<Ident>,
 }
@@ -828,7 +814,6 @@ impl fmt::Display for CloseCursorStatement {
 //     with_properties: AstOption<WithProperties>,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateConnectionStatement {
     pub if_not_exists: bool,
     pub connection_name: ObjectName,
@@ -863,7 +848,6 @@ impl fmt::Display for CreateConnectionStatement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateSecretStatement {
     pub if_not_exists: bool,
     pub secret_name: ObjectName,
@@ -904,7 +888,6 @@ impl fmt::Display for CreateSecretStatement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WithProperties(pub Vec<SqlOption>);
 
 impl ParseTo for WithProperties {
@@ -926,7 +909,6 @@ impl fmt::Display for WithProperties {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Since {
     TimestampMsNum(u64),
     ProcessTime,
@@ -947,7 +929,6 @@ impl fmt::Display for Since {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RowSchemaLocation {
     pub value: AstString,
 }
@@ -972,7 +953,6 @@ impl fmt::Display for RowSchemaLocation {
 /// String literal. The difference with String is that it is displayed with
 /// single-quotes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AstString(pub String);
 
 impl ParseTo for AstString {
@@ -990,7 +970,6 @@ impl fmt::Display for AstString {
 /// This trait is used to replace `Option` because `fmt::Display` can not be implemented for
 /// `Option<T>`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AstOption<T> {
     /// No value
     None,
@@ -1026,28 +1005,24 @@ impl<T> From<AstOption<T>> for Option<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateUserStatement {
     pub user_name: ObjectName,
     pub with_options: UserOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AlterUserStatement {
     pub user_name: ObjectName,
     pub mode: AlterUserMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterUserMode {
     Options(UserOptions),
     Rename(ObjectName),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum UserOption {
     SuperUser,
     NoSuperUser,
@@ -1088,7 +1063,6 @@ impl fmt::Display for UserOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct UserOptions(pub Vec<UserOption>);
 
 #[derive(Default)]
@@ -1267,7 +1241,6 @@ impl ParseTo for AlterUserMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DropStatement {
     /// The type of the object to drop: TABLE, VIEW, etc.
     pub object_type: ObjectType,
@@ -1313,7 +1286,6 @@ impl fmt::Display for DropStatement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DropMode {
     Cascade,
     Restrict,

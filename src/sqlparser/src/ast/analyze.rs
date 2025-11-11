@@ -1,12 +1,8 @@
 use std::fmt::Display;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use crate::ast::ObjectName;
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AnalyzeTarget {
     Id(u32),
     Table(ObjectName),

@@ -12,14 +12,10 @@
 
 use std::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 use super::Ident;
 
 /// Unary operators
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum UnaryOperator {
     Plus,
     Minus,
@@ -46,7 +42,6 @@ impl fmt::Display for UnaryOperator {
 
 /// Binary operators
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BinaryOperator {
     Plus,
     Minus,
@@ -97,7 +92,6 @@ impl fmt::Display for BinaryOperator {
 /// Qualified custom operator
 /// <https://www.postgresql.org/docs/15/sql-expressions.html#SQL-EXPRESSIONS-OPERATOR-CALLS>
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct QualifiedOperator {
     pub schema: Option<Ident>,
     pub name: String,

@@ -19,7 +19,6 @@ path = "src/lib.rs"
 
 [dependencies]
 itertools = { workspace = true }
-serde = { workspace = true, optional = true }
 task-local = "0.1"
 thiserror = { workspace = true }
 tracing = "0.1"

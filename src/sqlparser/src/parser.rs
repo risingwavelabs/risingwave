@@ -103,7 +103,6 @@ use crate::ast::ddl::AlterFragmentOperation;
 
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Eq, Clone, Debug, PartialEq, Hash)]
 pub struct IncludeOptionItem {
     pub column_type: Ident,
