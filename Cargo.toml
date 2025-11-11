@@ -185,7 +185,7 @@ jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
 #madsim = "0.2.34"
-madsim = { git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38" }
+madsim = { git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = ["native-tls-tls", "rust_decimal"] }
 opendal = "0.53"
@@ -203,7 +203,7 @@ pin-project-lite = "0.2"
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38", features = [
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872", features = [
     "cmake-build",
 ] }
 redis = { version = "0.32" }
@@ -408,13 +408,13 @@ opt-level = 2
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
-madsim = { git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38" }
-madsim-aws-sdk-s3 = { git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38", package = "madsim-aws-sdk-s3" }
-madsim-macros = { git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38", package = "madsim-macros" }
-madsim-rdkafka = { git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38", package = "madsim-rdkafka" }
-madsim-tokio = { git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38", package = "madsim-tokio" }
-madsim-tonic = { git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38", package = "madsim-tonic" }
-madsim-tonic-build = { git = "https://github.com/shanicky/madsim", rev = "82ea4af6ecf418cea40c1fb6738185bae7fd5f38", package = "madsim-tonic-build" }
+madsim = { git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872" }
+madsim-aws-sdk-s3 = { git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872", package = "madsim-aws-sdk-s3" }
+madsim-macros = { git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872", package = "madsim-macros" }
+madsim-rdkafka = { git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872", package = "madsim-rdkafka" }
+madsim-tokio = { git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872", package = "madsim-tokio" }
+madsim-tonic = { git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872", package = "madsim-tonic" }
+madsim-tonic-build = { git = "https://github.com/shanicky/madsim", rev = "748713733f51fb63d84739ec5e1a9028b3ea9872", package = "madsim-tonic-build" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
 # Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.
 # tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }

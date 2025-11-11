@@ -123,6 +123,8 @@ async fn get_split_metadata<F: KafkaMetaFetcher + ?Sized>(
     splits: &[KafkaSplit],
     sync_call_timeout: Duration,
 ) -> Result<(TopicPartitionList, HashMap<SplitId, BackfillInfo>)> {
+    println!("calling get split meta {:#?}", splits);
+
     let mut tpl = TopicPartitionList::with_capacity(splits.len());
     let mut backfill_info = HashMap::new();
 

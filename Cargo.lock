@@ -7887,7 +7887,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.32"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7917,7 +7917,7 @@ dependencies = [
 [[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.5.0+1"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http 0.60.12",
@@ -7934,7 +7934,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7945,7 +7945,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -7968,7 +7968,7 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -7978,7 +7978,7 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.5.1+0.12.0"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "async-stream",
  "chrono",
@@ -7993,7 +7993,7 @@ dependencies = [
 [[package]]
 name = "madsim-tonic-build"
 version = "0.5.1+0.12.3"
-source = "git+https://github.com/shanicky/madsim?rev=82ea4af6ecf418cea40c1fb6738185bae7fd5f38#82ea4af6ecf418cea40c1fb6738185bae7fd5f38"
+source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
