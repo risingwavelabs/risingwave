@@ -866,6 +866,12 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER TABLE SET CONFIG")
+            }
+            AlterTableOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER TABLE RESET CONFIG")
+            }
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
@@ -914,6 +920,12 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterIndexOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER INDEX SET CONFIG")
+            }
+            AlterIndexOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER INDEX RESET CONFIG")
             }
         },
         Statement::AlterView {
@@ -1084,6 +1096,12 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSinkOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER SINK SET CONFIG")
+            }
+            AlterSinkOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER SINK RESET CONFIG")
+            }
             AlterSinkOperation::SwapRenameSink { target_sink } => {
                 alter_swap_rename::handle_swap_rename(
                     handler_args,
@@ -1218,6 +1236,12 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterSourceOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER SOURCE SET CONFIG")
+            }
+            AlterSourceOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER SOURCE RESET CONFIG")
             }
         },
         Statement::AlterFunction {
