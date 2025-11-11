@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
+use risingwave_common::id::WorkerId;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -103,7 +104,7 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<HashMap<TableId, Table>>;
 
     /// Returns vector of (`worker_id`, `min_pinned_version_id`)
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -189,7 +190,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_actor_vnodes(&self, actor_id: ActorId) -> Result<Vec<u32>>;
 
-    fn worker_id(&self) -> u32;
+    fn worker_id(&self) -> WorkerId;
 
     async fn set_sync_log_store_aligned(&self, job_id: JobId, aligned: bool) -> Result<()>;
 
@@ -297,7 +298,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(tables)
     }
 
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>> {
         let pinned_versions = self
             .0
             .risectl_get_pinned_versions_summary()
@@ -481,7 +482,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_actor_vnodes(actor_id).await
     }
 
-    fn worker_id(&self) -> u32 {
+    fn worker_id(&self) -> WorkerId {
         self.0.worker_id()
     }
 

@@ -139,7 +139,7 @@ where
         .filter(|worker| worker.is_streaming_schedulable())
         .map(|worker| {
             (
-                worker.id as i32,
+                worker.id,
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                     resource_group: worker.resource_group(),
@@ -1221,7 +1221,7 @@ mod tests {
         let job_map = HashMap::from([(job_id, job_model)]);
 
         let worker_map = BTreeMap::from([(
-            1,
+            1.into(),
             WorkerInfo {
                 parallelism: NonZeroUsize::new(1).unwrap(),
                 resource_group: Some("rg-a".into()),
@@ -1317,14 +1317,14 @@ mod tests {
 
         let worker_map = BTreeMap::from([
             (
-                1,
+                1.into(),
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-hash".into()),
                 },
             ),
             (
-                2,
+                2.into(),
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-hash".into()),
@@ -1437,14 +1437,14 @@ mod tests {
 
         let worker_map = BTreeMap::from([
             (
-                1,
+                1.into(),
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-source".into()),
                 },
             ),
             (
-                2,
+                2.into(),
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-source".into()),

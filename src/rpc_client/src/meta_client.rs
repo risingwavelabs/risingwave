@@ -34,7 +34,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
-use risingwave_common::id::{DatabaseId, JobId, SchemaId};
+use risingwave_common::id::{DatabaseId, JobId, SchemaId, WorkerId};
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
@@ -137,7 +137,7 @@ type ConnectionId = u32;
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
 pub struct MetaClient {
-    worker_id: u32,
+    worker_id: WorkerId,
     worker_type: WorkerType,
     host_addr: HostAddr,
     inner: GrpcMetaClient,
@@ -147,7 +147,7 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
-    pub fn worker_id(&self) -> u32 {
+    pub fn worker_id(&self) -> WorkerId {
         self.worker_id
     }
 
@@ -381,7 +381,7 @@ impl MetaClient {
     }
 
     /// Send heartbeat signal to meta service.
-    pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
+    pub async fn send_heartbeat(&self, node_id: WorkerId) -> Result<()> {
         let request = HeartbeatRequest { node_id };
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status
@@ -1003,14 +1003,14 @@ impl MetaClient {
         match self.unregister().await {
             Ok(_) => {
                 tracing::info!(
-                    worker_id = self.worker_id(),
+                    worker_id = %self.worker_id(),
                     "successfully unregistered from meta service",
                 )
             }
             Err(e) => {
                 tracing::warn!(
                     error = %e.as_report(),
-                    worker_id = self.worker_id(),
+                    worker_id = %self.worker_id(),
                     "failed to unregister from meta service",
                 );
             }
@@ -1019,7 +1019,7 @@ impl MetaClient {
 
     pub async fn update_schedulability(
         &self,
-        worker_ids: &[u32],
+        worker_ids: &[WorkerId],
         schedulability: Schedulability,
     ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
         let request = UpdateWorkerNodeSchedulabilityRequest {

@@ -16,14 +16,13 @@ use std::sync::Arc;
 
 use hytra::TrAdder;
 use risingwave_common::config::StreamingConfig;
+pub(crate) use risingwave_common::id::WorkerId as WorkerNodeId;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::{ComputeClientPoolRef, MetaClient};
 use risingwave_storage::StateStoreImpl;
-
-pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.

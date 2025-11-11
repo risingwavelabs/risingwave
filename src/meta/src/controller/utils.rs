@@ -1418,9 +1418,7 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
             let actor_locations = fragment
                 .actors
                 .iter()
-                .map(|(actor_id, actor_info)| {
-                    (*actor_id as hash::ActorId, actor_info.worker_id as u32)
-                })
+                .map(|(actor_id, actor_info)| (*actor_id as hash::ActorId, actor_info.worker_id))
                 .collect();
 
             actor_mapping.to_worker_slot(&actor_locations)
@@ -1770,7 +1768,7 @@ where
 }
 
 pub fn filter_workers_by_resource_group(
-    workers: &HashMap<u32, WorkerNode>,
+    workers: &HashMap<WorkerId, WorkerNode>,
     resource_group: &str,
 ) -> BTreeSet<WorkerId> {
     workers
@@ -1781,7 +1779,7 @@ pub fn filter_workers_by_resource_group(
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })
-        .map(|(id, _)| *id as WorkerId)
+        .map(|(id, _)| *id)
         .collect()
 }
 

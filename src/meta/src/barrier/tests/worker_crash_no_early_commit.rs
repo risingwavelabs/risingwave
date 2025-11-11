@@ -183,8 +183,8 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     };
     let database_id = DatabaseId::new(233);
     let job_id = JobId::new(234);
-    let worker_node = |id| WorkerNode {
-        id,
+    let worker_node = |id: u32| WorkerNode {
+        id: id.into(),
         r#type: PbWorkerType::ComputeNode as i32,
         host: Some(HostAddress {
             host: format!("host{}", id),
@@ -214,8 +214,8 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
 
     tx.send(BarrierWorkerRuntimeInfoSnapshot {
         active_streaming_nodes: ActiveStreamingWorkerNodes::for_test(HashMap::from_iter([
-            (worker1.id as _, worker1.clone()),
-            (worker2.id as _, worker2.clone()),
+            (worker1.id, worker1.clone()),
+            (worker2.id, worker2.clone()),
         ])),
         database_job_infos: HashMap::from_iter([(
             database_id,
@@ -233,7 +233,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             actors: HashMap::from_iter([(
                                 actor1.actor_id as _,
                                 InflightActorInfo {
-                                    worker_id: worker1.id as _,
+                                    worker_id: worker1.id,
                                     vnode_bitmap: None,
                                     splits: vec![],
                                 },
@@ -252,7 +252,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                             actors: HashMap::from_iter([(
                                 actor2.actor_id as _,
                                 InflightActorInfo {
-                                    worker_id: worker2.id as _,
+                                    worker_id: worker2.id,
                                     vnode_bitmap: None,
                                     splits: vec![],
                                 },

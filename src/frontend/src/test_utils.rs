@@ -31,7 +31,7 @@ use risingwave_common::catalog::{
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -1117,7 +1117,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::new())
     }
 
-    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, u64)>> {
         unimplemented!()
     }
 
@@ -1260,8 +1260,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    fn worker_id(&self) -> u32 {
-        0
+    fn worker_id(&self) -> WorkerId {
+        0.into()
     }
 
     async fn set_sync_log_store_aligned(&self, _job_id: JobId, _aligned: bool) -> RpcResult<()> {

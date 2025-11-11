@@ -30,6 +30,7 @@ use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
 use risingwave_pb::frontend_service::GetRunningSqlsRequest;
+use risingwave_pb::id::WorkerId;
 use risingwave_rpc_client::FrontendClientPoolRef;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter, display_comma_separated,
@@ -709,7 +710,7 @@ pub async fn handle_show_object(
                 let addr: HostAddr = worker.host.as_ref().unwrap().into();
                 let property = worker.property.as_ref();
                 ShowClusterRow {
-                    id: worker.id as _,
+                    id: worker.id.as_raw_id() as i32,
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_owned(),
@@ -965,7 +966,7 @@ async fn show_process_list_impl(
     worker_node_manager: WorkerNodeManagerRef,
 ) -> Vec<ShowProcessListRow> {
     // Create a placeholder row for the worker in case of any errors while fetching its running SQLs.
-    fn on_error(worker_id: u32, err_msg: String) -> Vec<ShowProcessListRow> {
+    fn on_error(worker_id: WorkerId, err_msg: String) -> Vec<ShowProcessListRow> {
         vec![ShowProcessListRow {
             worker_id: format!("{}", worker_id),
             id: "".to_owned(),
