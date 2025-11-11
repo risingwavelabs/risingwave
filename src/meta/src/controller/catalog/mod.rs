@@ -441,7 +441,7 @@ impl CatalogController {
             filter_condition
         };
 
-        let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
+        let mut dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .columns([
@@ -455,6 +455,13 @@ impl CatalogController {
             .into_partial_model()
             .all(&txn)
             .await?;
+
+        // Check if there are any pending iceberg table jobs.
+        let (dirty_iceberg_jobs, dirty_iceberg_sources) =
+            find_dirty_iceberg_table_jobs(&txn, database_id).await?;
+        if !dirty_iceberg_jobs.is_empty() {
+            dirty_job_objs.extend(dirty_iceberg_jobs);
+        }
 
         Self::clean_dirty_sink_downstreams(&txn).await?;
 
@@ -523,6 +530,11 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
+        let dirty_source_ids = dirty_associated_source_ids
+            .into_iter()
+            .chain(dirty_iceberg_sources)
+            .collect_vec();
+
         let dirty_state_table_ids: Vec<TableId> = Table::find()
             .select_only()
             .column(table::Column::TableId)
@@ -553,7 +565,7 @@ impl CatalogController {
                     .into_iter()
                     .map(|table_id| table_id.as_raw_id() as _),
             )
-            .chain(dirty_associated_source_ids.clone().into_iter())
+            .chain(dirty_source_ids.clone().into_iter())
             .collect();
 
         let res = Object::delete_many()
@@ -575,7 +587,7 @@ impl CatalogController {
             .notify_frontend(NotificationOperation::Delete, object_group)
             .await;
 
-        Ok(dirty_associated_source_ids)
+        Ok(dirty_source_ids)
     }
 
     /// On recovery, reset refreshable table's `refresh_state` to a reasonable state.

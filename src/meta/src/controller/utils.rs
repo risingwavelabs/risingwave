@@ -30,11 +30,11 @@ use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
-    ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, JobStatus,
-    ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo, TableId,
-    TableIdArray, UserId, WorkerId, connection, database, fragment, fragment_relation, function,
-    index, object, object_dependency, schema, secret, sink, source, streaming_job, subscription,
-    table, user, user_default_privilege, user_privilege, view,
+    ActorId, ColumnCatalogArray, CreateType, DataTypeArray, DatabaseId, DispatcherType, FragmentId,
+    JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
+    TableId, TableIdArray, UserId, WorkerId, connection, database, fragment, fragment_relation,
+    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
+    subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -2065,9 +2065,10 @@ where
                 .into_tuple::<table::Engine>()
                 .one(txn)
                 .await?
-            && table_engine == table::Engine::Iceberg {
-                return Ok(Some(TableId::new(table_id as _)));
-            }
+            && table_engine == table::Engine::Iceberg
+        {
+            return Ok(Some(TableId::new(table_id as _)));
+        }
     }
     Ok(None)
 }
@@ -2097,6 +2098,95 @@ where
         return Ok(true);
     }
     Ok(false)
+}
+
+pub async fn find_dirty_iceberg_table_jobs<C>(
+    txn: &C,
+    database_id: Option<DatabaseId>,
+) -> MetaResult<(Vec<PartialObject>, Vec<SourceId>)>
+where
+    C: ConnectionTrait,
+{
+    let mut filter_condition = streaming_job::Column::JobStatus
+        .ne(JobStatus::Created)
+        .and(object::Column::ObjType.is_in([ObjectType::Table, ObjectType::Sink]))
+        .and(streaming_job::Column::CreateType.eq(CreateType::Background));
+    if let Some(database_id) = database_id {
+        filter_condition = filter_condition.and(object::Column::DatabaseId.eq(database_id));
+    }
+    let creating_table_sink_jobs: Vec<PartialObject> = StreamingJob::find()
+        .select_only()
+        .columns([
+            object::Column::Oid,
+            object::Column::ObjType,
+            object::Column::SchemaId,
+            object::Column::DatabaseId,
+        ])
+        .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+        .filter(filter_condition)
+        .into_partial_model()
+        .all(txn)
+        .await?;
+
+    let mut dirty_iceberg_table_jobs = vec![];
+    let mut dirty_iceberg_source_ids = vec![];
+
+    for job in creating_table_sink_jobs {
+        match job.obj_type {
+            ObjectType::Table => {
+                let table_name = Table::find_by_id(TableId::new(job.oid as _))
+                    .select_only()
+                    .column(table::Column::Name)
+                    .filter(table::Column::Engine.eq(table::Engine::Iceberg))
+                    .into_tuple::<String>()
+                    .one(txn)
+                    .await?;
+                if let Some(table_name) = table_name {
+                    tracing::info!(
+                        "Found dirty iceberg table job with table name: {}",
+                        table_name
+                    );
+                    let source_id = Source::find()
+                        .select_only()
+                        .column(source::Column::SourceId)
+                        .join(JoinType::InnerJoin, source::Relation::Object.def())
+                        .filter(
+                            object::Column::DatabaseId
+                                .eq(job.database_id)
+                                .and(object::Column::SchemaId.eq(job.schema_id))
+                                .and(source::Column::Name.like("__iceberg_source_%")),
+                        )
+                        .into_tuple::<SourceId>()
+                        .one(txn)
+                        .await?;
+                    if let Some(source_id) = source_id {
+                        dirty_iceberg_source_ids.push(source_id);
+                    }
+                    dirty_iceberg_table_jobs.push(job);
+                }
+            }
+            ObjectType::Sink => {
+                let sink_name = Sink::find_by_id(job.oid)
+                    .select_only()
+                    .column(sink::Column::Name)
+                    .into_tuple::<String>()
+                    .one(txn)
+                    .await?;
+                if let Some(sink_name) = sink_name {
+                    if sink_name.starts_with("__iceberg_sink_") {
+                        tracing::info!(
+                            "Found dirty iceberg sink job with sink name: {}",
+                            sink_name
+                        );
+                        dirty_iceberg_table_jobs.push(job);
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    Ok((dirty_iceberg_table_jobs, dirty_iceberg_source_ids))
 }
 
 pub fn build_select_node_list(

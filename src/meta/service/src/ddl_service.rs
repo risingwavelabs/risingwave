@@ -1564,7 +1564,7 @@ impl DdlService for DdlServiceImpl {
                 let job_id = JobId::new(sink_catalog.id as _);
                 self.metadata_manager
                     .catalog_controller
-                    .finish_streaming_job(job_id, true)
+                    .finish_streaming_job(job_id, false)
                     .await?;
                 tracing::debug!(
                     "Successfully created iceberg table {}, sink and source",
