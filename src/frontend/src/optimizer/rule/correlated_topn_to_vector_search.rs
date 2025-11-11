@@ -18,6 +18,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use crate::expr::{ExprImpl, ExprType};
 use crate::handler::create_index::IndexColumnExprValidator;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     Logical, LogicalPlanNodeType, LogicalVectorSearchLookupJoin, PlanTreeNodeBinary,
     PlanTreeNodeUnary,
@@ -27,11 +28,13 @@ use crate::optimizer::rule::{
     BoxedRule, PbAggKind, ProjectMergeRule, Rule, TopNToVectorSearchRule,
 };
 
-pub struct CorrelatedTopNToVectorSearchRule;
+pub struct CorrelatedTopNToVectorSearchRule {
+    for_batch: bool,
+}
 
 impl CorrelatedTopNToVectorSearchRule {
-    pub fn create() -> BoxedRule<Logical> {
-        Box::new(CorrelatedTopNToVectorSearchRule)
+    pub fn create(for_batch: bool) -> BoxedRule<Logical> {
+        Box::new(CorrelatedTopNToVectorSearchRule { for_batch })
     }
 }
 
@@ -180,18 +183,22 @@ impl Rule<Logical> for CorrelatedTopNToVectorSearchRule {
             }
         }
 
-        Some(
-            LogicalVectorSearchLookupJoin::new(
-                top_n,
-                distance_type,
-                input,
-                input_vector_idx,
-                lookup_input,
-                lookup_expr,
-                row_input_indices,
-                include_distance,
-            )
-            .into(),
-        )
+        let vector_search = LogicalVectorSearchLookupJoin::new(
+            top_n,
+            distance_type,
+            input,
+            input_vector_idx,
+            lookup_input,
+            lookup_expr,
+            row_input_indices,
+            include_distance,
+        );
+
+        if self.for_batch && vector_search.as_index_lookup().is_none() {
+            vector_search.base.ctx().session_ctx().notice_to_user("Vector search lookup join identified, but no suitable vector index found. Fall back to original plan");
+            None
+        } else {
+            Some(vector_search.into())
+        }
     }
 }

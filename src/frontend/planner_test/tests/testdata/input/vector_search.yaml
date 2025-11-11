@@ -202,9 +202,9 @@
     - batch_plan
 - id: create_correlated_tables_with_column_value_index
   sql: |
-    create table items (id int primary key, name string, embedding vector(3)) append only;
+    create table items (id int primary key, name string, unindexed timestamptz, embedding vector(3)) append only;
     create table events (event_id int primary key, time timestamp, embedding vector(3));
-    create index i on items using flat (embedding) with (distance_type = 'l2');
+    create index i on items using flat (embedding) include (name) with (distance_type = 'l2');
   expected_outputs: []
 - before:
     - create_correlated_tables_with_column_value_index

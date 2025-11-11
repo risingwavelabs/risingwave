@@ -524,13 +524,14 @@ static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
-static CORRELATED_TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
-    OptimizationStage::new(
-        "Correlated TopN to Vector Search",
-        vec![CorrelatedTopNToVectorSearchRule::create()],
-        ApplyOrder::BottomUp,
-    )
-});
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(true)],
+            ApplyOrder::BottomUp,
+        )
+    });
 
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
@@ -792,7 +793,7 @@ impl LogicalOptimizer {
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
-        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH)?;
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH)?;
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
