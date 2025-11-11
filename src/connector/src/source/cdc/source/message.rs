@@ -69,33 +69,63 @@ impl DebeziumCdcMeta {
         ))
     }
 
+    /// Calculate the prefix length to skip when extracting table name from `full_table_name`.
+    ///
+    /// # Background
+    ///
+    /// Debezium sends `full_table_name` in different formats depending on the CDC source type:
+    ///
+    /// - **MySQL**: `"database.table"` (1 dot, 2 parts)
+    ///   - Example: `"risedev.orders"`
+    ///   - User provides: `"risedev.orders"` (same format)
+    ///   - Result: Keep entire string → `prefix_len` = 0
+    ///
+    /// - **Postgres**: `"database.schema.table"` (2 dots, 3 parts)
+    ///   - Example: `"mydb.public.users"`
+    ///   - User provides: `"public.users"` (database already in source config)
+    ///   - Result: Skip "mydb." → `prefix_len` = 5
+    ///
+    /// - **SQL Server**: `"database.schema.table"` (2 dots, 3 parts)
+    ///   - Example: `"mydb.dbo.orders"`
+    ///   - User provides: `"dbo.orders"` (database already in source config)
+    ///   - Result: Skip "mydb." → `prefix_len` = 5
+    ///
+    /// # Why the difference?
+    ///
+    /// - **MySQL** has no schema concept, so the "table name" IS `database.table`
+    /// - **Postgres/SQL Server** have schemas, and the database is specified in the source,
+    ///   so the "table name" is just `schema.table`
+    ///
+    /// # Returns
+    ///
+    /// The number of characters to skip from the start of `full_table_name` when calling
+    /// `extract_table_name()`. This value is used to strip the database prefix for
+    /// Postgres/SQL Server while keeping the full name for MySQL.
+    fn extract_db_name_prefix_len_from_full_table_name(full_table_name: &str) -> usize {
+        if let Some(first_dot) = full_table_name.find('.') {
+            // Check if there's a second dot after the first one
+            if full_table_name[first_dot + 1..].find('.').is_some() {
+                // Found 2 dots (3 parts): Postgres/SQL Server format "database.schema.table"
+                // Return position after first dot to skip "database." part
+                first_dot + 1
+            } else {
+                // Found 1 dot (2 parts): MySQL format "database.table"
+                // Return 0 to keep the entire string (no prefix to skip)
+                0
+            }
+        } else {
+            // No dot found (should not happen in practice for valid CDC messages)
+            0
+        }
+    }
+
     pub fn new(
         full_table_name: String,
         source_ts_ms: i64,
         msg_type: cdc_message::CdcMessageType,
     ) -> Self {
-        // full_table_name format:
-        // - MySQL: "database.table" (1 dot, 2 parts)
-        // - Postgres/SQL Server: "database.schema.table" (2 dots, 3 parts)
-        //
-        // For extract_table_name():
-        // - MySQL: need full "database.table" → db_name_prefix_len = 0
-        // - Postgres/SQL Server: need "schema.table" → db_name_prefix_len = first_dot + 1
-        let db_name_prefix_len = if let Some(first_dot) = full_table_name.find('.') {
-            // Check if there's a second dot
-            if full_table_name[first_dot + 1..].find('.').is_some() {
-                // 2 dots (3 parts): Postgres/SQL Server "database.schema.table"
-                // Skip "database." part, keep "schema.table"
-                first_dot + 1
-            } else {
-                // 1 dot (2 parts): MySQL "database.table"
-                // Keep entire string
-                0
-            }
-        } else {
-            // No dot (should not happen in practice)
-            0
-        };
+        let db_name_prefix_len =
+            Self::extract_db_name_prefix_len_from_full_table_name(&full_table_name);
         Self {
             db_name_prefix_len,
             full_table_name,
