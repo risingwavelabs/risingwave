@@ -1,3 +1,17 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::str::FromStr as _;
 
 use anyhow::Context as _;
@@ -48,7 +62,7 @@ pub fn merge_config<C: Serialize + DeserializeOwned + Clone>(
             match base_table.entry(k) {
                 Entry::Vacant(entry) => {
                     // Unrecognized entry might be tolerated.
-                    // So we simply keep it and postpone the error (if any) to final deserialization.
+                    // So we simply keep it and defer the error (if any) until final deserialization.
                     entry.insert(v);
                 }
                 Entry::Occupied(mut entry) => {
@@ -65,6 +79,7 @@ pub fn merge_config<C: Serialize + DeserializeOwned + Clone>(
         {
             merge_table(base_table, partial_table);
         } else {
+            // We don't validate the type, but defer until final deserialization.
             *base = partial;
         }
     }
@@ -128,11 +143,24 @@ mod tests {
     }
 
     #[test]
-    fn test_nothing_to_override() {
+    fn test_not_relevant() {
         let base = StreamingConfig::default();
         let partial = r#"
             [batch.developer]
             batch_chunk_size = 114514
+        "#;
+        let merged = merge_config(&base, partial, ["streaming"]).unwrap();
+        assert!(
+            merged.is_none(),
+            "nothing to override, but got: {merged:#?}"
+        );
+    }
+
+    #[test]
+    fn test_nothing_to_override() {
+        let base = StreamingConfig::default();
+        let partial = r#"
+            [streaming]
         "#;
         let merged = merge_config(&base, partial, ["streaming"]).unwrap();
         assert!(
