@@ -126,18 +126,12 @@ pub fn set_byte(bytes: &[u8], n: i32, value: i32, writer: &mut impl std::io::Wri
             reason: format!("index {} out of valid range, 0..{}", n, max_sz - 1).into(),
         });
     }
-    let Ok(value) = TryInto::<u8>::try_into(value) else {
-        return Err(ExprError::InvalidParam {
-            name: "set_byte",
-            reason: format!("value {} out of valid byte range 0..255", value).into(),
-        });
-    };
 
     let index = n as usize;
     if index > 0 {
         writer.write_all(&bytes[..index]).unwrap();
     }
-    writer.write_all(&[value]).unwrap();
+    writer.write_all(&[value as u8]).unwrap();
     if index + 1 < bytes.len() {
         writer.write_all(&bytes[index + 1..]).unwrap();
     }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use thiserror_ext::AsReport;
 
 use crate::types::{Timestamp, Timestamptz};
 
@@ -146,7 +147,7 @@ pub fn parse_bytes_hex(s: &str, writer: &mut impl std::io::Write) -> Result<()> 
                 let v2 = get_hex(c)?;
                 writer
                     .write_all(&[(v1 << 4) | v2])
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| e.to_report_string())?;
             }
             None => return Err("invalid hexadecimal data: odd number of digits".to_owned()),
         }
@@ -161,16 +162,18 @@ pub fn parse_bytes_traditional(s: &str, writer: &mut impl std::io::Write) -> Res
 
     while let Some(b) = bytes.next() {
         if b != b'\\' {
-            writer.write_all(&[b]).map_err(|e| e.to_string())?;
+            writer.write_all(&[b]).map_err(|e| e.to_report_string())?;
         } else {
             match bytes.next() {
                 Some(b'\\') => {
-                    writer.write_all(b"\\").map_err(|e| e.to_string())?;
+                    writer.write_all(b"\\").map_err(|e| e.to_report_string())?;
                 }
                 Some(b1 @ b'0'..=b'3') => match bytes.next_tuple() {
                     Some((b2 @ b'0'..=b'7', b3 @ b'0'..=b'7')) => {
                         let byte = (b1 - b'0') << 6 | (b2 - b'0') << 3 | (b3 - b'0');
-                        writer.write_all(&[byte]).map_err(|e| e.to_string())?;
+                        writer
+                            .write_all(&[byte])
+                            .map_err(|e| e.to_report_string())?;
                     }
                     _ => {
                         // one backslash, not followed by another or ### valid octal
