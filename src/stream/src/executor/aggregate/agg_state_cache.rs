@@ -28,7 +28,7 @@ use crate::common::state_cache::{StateCache, StateCacheFiller};
 /// Cache key type.
 type CacheKey = MemcmpEncoded;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CacheValue(SmallVec<[Datum; 2]>);
 
 /// Trait that defines the interface of state table cache for stateful streaming agg.

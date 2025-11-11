@@ -32,7 +32,7 @@ use risingwave_storage::store::PrefetchOptions;
 use super::agg_group::{AggStateCacheStats, GroupKey};
 use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
 use crate::common::StateTableColumnMapping;
-use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
+use crate::common::state_cache::{OrderedStateCache, PercentileStateCache, TopNStateCache, PercentileMode};
 use crate::common::table::state_table::StateTable;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
@@ -123,6 +123,11 @@ impl MaterializedInputState {
             .map(|i| input_schema[*i].data_type())
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
+        
+        let percentile_fraction: f64 = match agg_call.direct_args.get(0).and_then(|lit| lit.literal()) {
+            Some(datum) => datum.as_float64().0,
+            None => 0.0,
+        };
 
         let cache: Box<dyn AggStateCache + Send + Sync> = match agg_call.agg_type {
             AggType::Builtin(
@@ -136,12 +141,18 @@ impl MaterializedInputState {
                 | PbAggKind::ArrayAgg
                 | PbAggKind::JsonbAgg
                 | PbAggKind::JsonbObjectAgg
-                | PbAggKind::PercentileCont
-                | PbAggKind::PercentileDisc
                 | PbAggKind::Mode,
             )
             | AggType::WrapScalar(_) => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
+                agg_call.args.arg_types(),
+            )),
+            AggType::Builtin(PbAggKind::PercentileDisc) => Box::new(GenericAggStateCache::new(
+                PercentileStateCache::new(percentile_fraction, PercentileMode::Disc),
+                agg_call.args.arg_types(),
+            )),
+            AggType::Builtin(PbAggKind::PercentileCont) => Box::new(GenericAggStateCache::new(
+                PercentileStateCache::new(percentile_fraction, PercentileMode::Cont),
                 agg_call.args.arg_types(),
             )),
             _ => panic!(
@@ -152,7 +163,7 @@ impl MaterializedInputState {
         let output_first_value = matches!(
             agg_call.agg_type,
             AggType::Builtin(
-                PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue
+                PbAggKind::Min | PbAggKind::Max | PbAggKind::FirstValue | PbAggKind::LastValue | PbAggKind::PercentileCont | PbAggKind::PercentileDisc
             )
         );
 
