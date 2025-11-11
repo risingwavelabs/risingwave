@@ -508,6 +508,13 @@ impl CatalogController {
         // Add streaming job objects to notification
         if need_notify {
             match creating_streaming_job.unwrap() {
+                StreamingJob::Table(source, ..) => {
+                    if let Some(source) = source {
+                        objects_to_notify.push(PbObject {
+                            object_info: Some(PbObjectInfo::Source(source.clone())),
+                        });
+                    }
+                }
                 StreamingJob::Sink(sink) => {
                     objects_to_notify.push(PbObject {
                         object_info: Some(PbObjectInfo::Sink(sink.clone())),
@@ -943,17 +950,12 @@ impl CatalogController {
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
-    /// If `ignore_for_iceberg_table` is true and the job is for iceberg table, it will be ignored.
-    pub async fn finish_streaming_job(
-        &self,
-        job_id: JobId,
-        ignore_for_iceberg_table: bool,
-    ) -> MetaResult<()> {
+    pub async fn finish_streaming_job(&self, job_id: JobId) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         // Check if the job belongs to iceberg table.
-        if ignore_for_iceberg_table && check_if_belongs_to_iceberg_table(&txn, job_id).await? {
+        if check_if_belongs_to_iceberg_table(&txn, job_id).await? {
             tracing::info!(
                 "streaming job {} is for iceberg table, wait for manual finish operation",
                 job_id
@@ -961,34 +963,10 @@ impl CatalogController {
             return Ok(());
         }
 
-        // If the job is iceberg sink, we should finish the iceberg table with it.
-        let iceberg_table_id =
-            try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_raw_id() as _).await?;
-        let (table_notification_op, table_objects, table_updated_user_info) =
-            if let Some(table_id) = iceberg_table_id {
-                Self::finish_streaming_job_inner(&txn, table_id.as_job_id()).await?
-            } else {
-                (Operation::Update, vec![], vec![])
-            };
-
         let (notification_op, objects, updated_user_info) =
             Self::finish_streaming_job_inner(&txn, job_id).await?;
 
         txn.commit().await?;
-
-        // notify frontend about the iceberg table first
-        if !table_objects.is_empty() {
-            self.notify_frontend(
-                table_notification_op,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: table_objects,
-                }),
-            )
-            .await;
-            if !table_updated_user_info.is_empty() {
-                self.notify_users_update(table_updated_user_info).await;
-            }
-        }
 
         let mut version = self
             .notify_frontend(
@@ -1000,19 +978,6 @@ impl CatalogController {
         // notify users about the default privileges
         if !updated_user_info.is_empty() {
             version = self.notify_users_update(updated_user_info).await;
-        }
-
-        if let Some(iceberg_table_id) = iceberg_table_id {
-            inner
-                .creating_table_finish_notifier
-                .values_mut()
-                .for_each(|creating_tables| {
-                    if let Some(txs) = creating_tables.remove(&iceberg_table_id.as_job_id()) {
-                        for tx in txs {
-                            let _ = tx.send(Ok(version));
-                        }
-                    }
-                });
         }
 
         inner

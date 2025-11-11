@@ -329,7 +329,7 @@ impl TrackingJob {
     ) -> MetaResult<()> {
         metadata_manager
             .catalog_controller
-            .finish_streaming_job(self.job_id, true)
+            .finish_streaming_job(self.job_id)
             .await?;
         if let Some(source_change) = self.source_change {
             source_manager.apply_source_change(source_change).await;

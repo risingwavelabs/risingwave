@@ -2095,7 +2095,7 @@ where
 pub async fn find_dirty_iceberg_table_jobs<C>(
     txn: &C,
     database_id: Option<DatabaseId>,
-) -> MetaResult<(Vec<PartialObject>, Vec<SourceId>)>
+) -> MetaResult<Vec<PartialObject>>
 where
     C: ConnectionTrait,
 {
@@ -2121,64 +2121,15 @@ where
         .await?;
 
     let mut dirty_iceberg_table_jobs = vec![];
-    let mut dirty_iceberg_source_ids = vec![];
-
     for job in creating_table_sink_jobs {
-        match job.obj_type {
-            ObjectType::Table => {
-                let table_name = Table::find_by_id(TableId::new(job.oid as _))
-                    .select_only()
-                    .column(table::Column::Name)
-                    .filter(table::Column::Engine.eq(table::Engine::Iceberg))
-                    .into_tuple::<String>()
-                    .one(txn)
-                    .await?;
-                if let Some(table_name) = table_name {
-                    tracing::info!(
-                        "Found dirty iceberg table job with table name: {}",
-                        table_name
-                    );
-                    let source_id = Source::find()
-                        .select_only()
-                        .column(source::Column::SourceId)
-                        .join(JoinType::InnerJoin, source::Relation::Object.def())
-                        .filter(
-                            object::Column::DatabaseId
-                                .eq(job.database_id)
-                                .and(object::Column::SchemaId.eq(job.schema_id))
-                                .and(source::Column::Name.like("__iceberg_source_%")),
-                        )
-                        .into_tuple::<SourceId>()
-                        .one(txn)
-                        .await?;
-                    if let Some(source_id) = source_id {
-                        dirty_iceberg_source_ids.push(source_id);
-                    }
-                    dirty_iceberg_table_jobs.push(job);
-                }
-            }
-            ObjectType::Sink => {
-                let sink_name = Sink::find_by_id(job.oid)
-                    .select_only()
-                    .column(sink::Column::Name)
-                    .into_tuple::<String>()
-                    .one(txn)
-                    .await?;
-                if let Some(sink_name) = sink_name {
-                    if sink_name.starts_with("__iceberg_sink_") {
-                        tracing::info!(
-                            "Found dirty iceberg sink job with sink name: {}",
-                            sink_name
-                        );
-                        dirty_iceberg_table_jobs.push(job);
-                    }
-                }
-            }
-            _ => unreachable!(),
+        if check_if_belongs_to_iceberg_table(txn, JobId::new(job.oid as _)).await? {
+            tracing::info!("Found dirty iceberg job with id: {}", job.oid);
+            dirty_iceberg_table_jobs.push(job);
+            continue;
         }
     }
 
-    Ok((dirty_iceberg_table_jobs, dirty_iceberg_source_ids))
+    Ok(dirty_iceberg_table_jobs)
 }
 
 pub fn build_select_node_list(

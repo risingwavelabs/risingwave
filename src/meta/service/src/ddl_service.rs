@@ -26,13 +26,17 @@ use risingwave_common::id::TableId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_meta::barrier::{BarrierScheduler, Command};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
+use risingwave_meta::stream::{
+    ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy, ThrottleConfig,
+};
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::{ObjectId, StreamingParallelism};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
@@ -42,7 +46,6 @@ use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
-use risingwave_pb::id::JobId;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -69,6 +72,7 @@ pub struct DdlServiceImpl {
     ddl_controller: DdlController,
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
+    barrier_scheduler: BarrierScheduler,
 }
 
 impl DdlServiceImpl {
@@ -82,6 +86,7 @@ impl DdlServiceImpl {
         sink_manager: SinkCoordinatorManager,
         meta_metrics: Arc<MetaMetrics>,
         iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
+        barrier_scheduler: BarrierScheduler,
     ) -> Self {
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -98,6 +103,7 @@ impl DdlServiceImpl {
             ddl_controller,
             meta_metrics,
             iceberg_compaction_manager,
+            barrier_scheduler,
         }
     }
 
@@ -1437,6 +1443,7 @@ impl DdlService for DdlServiceImpl {
             job_type,
         } = table_info.unwrap();
         let mut table = table.unwrap();
+        let mut fragment_graph = fragment_graph.unwrap();
         let database_id = table.get_database_id();
         let schema_id = table.get_schema_id();
         let table_name = table.get_name().to_owned();
@@ -1444,13 +1451,30 @@ impl DdlService for DdlServiceImpl {
         // Mark table as background creation, so that it won't block sink creation.
         table.create_type = PbCreateType::Background as _;
 
+        // Set the source rate limit to 0 and reset it back after the iceberg sink is backfilling.
+        let source_rate_limit = if let Some(source) = &source {
+            for fragment in fragment_graph.fragments.values_mut() {
+                stream_graph_visitor::visit_fragment_mut(fragment, |node| match node {
+                    NodeBody::Source(source_node) => {
+                        if let Some(inner) = &mut source_node.source_inner {
+                            inner.rate_limit = Some(0);
+                        }
+                    }
+                    _ => {}
+                });
+            }
+            Some(source.rate_limit)
+        } else {
+            None
+        };
+
         let stream_job =
             StreamingJob::Table(source, table, PbTableJobType::try_from(job_type).unwrap());
         let _ = self
             .ddl_controller
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
-                fragment_graph: fragment_graph.unwrap(),
+                fragment_graph,
                 dependencies: HashSet::new(),
                 specific_resource_group: None,
                 if_not_exists,
@@ -1470,7 +1494,6 @@ impl DdlService for DdlServiceImpl {
             fragment_graph,
         } = sink_info.unwrap();
         let mut sink = sink.unwrap();
-        let sink_name = sink.get_name().to_owned();
 
         // Mark sink as background creation, so that it won't block source creation.
         sink.create_type = PbCreateType::Background as _;
@@ -1546,12 +1569,33 @@ impl DdlService for DdlServiceImpl {
             res?;
         }
 
-        let sink_catalog = self
-            .metadata_manager
-            .catalog_controller
-            .get_sink_catalog_by_name(database_id, schema_id, &sink_name)
-            .await?
-            .ok_or(Status::not_found("Internal error: sink not found"))?;
+        // 3. reset source rate limit back to normal after sink creation
+        if let Some(source_rate_limit) = source_rate_limit
+            && source_rate_limit != Some(0)
+        {
+            let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
+                table_catalog.optional_associated_source_id.unwrap();
+            let actors_to_apply = self
+                .metadata_manager
+                .update_source_rate_limit_by_source_id(source_id as _, source_rate_limit)
+                .await?;
+            let mutation: ThrottleConfig = actors_to_apply
+                .into_iter()
+                .map(|(fragment_id, actors)| {
+                    (
+                        fragment_id,
+                        actors
+                            .into_iter()
+                            .map(|actor_id| (actor_id, source_rate_limit))
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+                .collect();
+            let _ = self
+                .barrier_scheduler
+                .run_command(database_id, Command::Throttle(mutation))
+                .await?;
+        }
 
         // 3. create iceberg source
         let iceberg_source = iceberg_source.unwrap();
@@ -1559,48 +1603,26 @@ impl DdlService for DdlServiceImpl {
             .ddl_controller
             .run_command(DdlCommand::CreateNonSharedSource(iceberg_source))
             .await;
-        match res {
-            Ok(version) => {
-                let job_id = JobId::new(sink_catalog.id as _);
-                self.metadata_manager
-                    .catalog_controller
-                    .finish_streaming_job(job_id, false)
-                    .await?;
-                tracing::debug!(
-                    "Successfully created iceberg table {}, sink and source",
-                    table_name
-                );
-
-                let catalog_version = self
-                    .metadata_manager
-                    .wait_streaming_job_finished(database_id, job_id)
-                    .await?;
-
-                Ok(Response::new(CreateIcebergTableResponse {
-                    status: None,
-                    version: Some(WaitVersion {
-                        catalog_version,
-                        hummock_version_id: version.unwrap().hummock_version_id,
-                    }),
-                }))
-            }
-            Err(err) => {
-                let _ = self
-                    .ddl_controller
-                    .run_command(DdlCommand::DropStreamingJob {
-                        job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
-                        drop_mode: DropMode::Cascade,
-                    })
-                    .await
-                    .inspect_err(|err| {
-                        tracing::error!(
-                            error = %err.as_report(),
-                            "Failed to clean up table after iceberg source creation failure",
-                        );
-                    });
-                Err(err.into())
-            }
+        if res.is_err() {
+            let _ = self
+                .ddl_controller
+                .run_command(DdlCommand::DropStreamingJob {
+                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
+                    drop_mode: DropMode::Cascade,
+                })
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(
+                        error = %err.as_report(),
+                        "Failed to clean up table after iceberg source creation failure",
+                    );
+                });
         }
+
+        Ok(Response::new(CreateIcebergTableResponse {
+            status: None,
+            version: res?,
+        }))
     }
 }
 
