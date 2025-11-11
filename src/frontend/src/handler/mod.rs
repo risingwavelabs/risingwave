@@ -1030,6 +1030,18 @@ pub async fn handle(
                     }
                     alter_mv::handle_alter_mv(handler_args, name, query).await
                 }
+                AlterViewOperation::SetConfig { .. } => {
+                    if !materialized {
+                        bail!("SET CONFIG is only supported for materialized views");
+                    }
+                    bail_not_implemented!("ALTER MATERIALIZED VIEW SET CONFIG")
+                }
+                AlterViewOperation::ResetConfig { .. } => {
+                    if !materialized {
+                        bail!("RESET CONFIG is only supported for materialized views");
+                    }
+                    bail_not_implemented!("ALTER MATERIALIZED VIEW RESET CONFIG")
+                }
             }
         }
 

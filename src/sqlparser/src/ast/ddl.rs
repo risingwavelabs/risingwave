@@ -171,6 +171,14 @@ pub enum AlterViewOperation {
     AsQuery {
         query: Box<Query>,
     },
+    /// `SET CONFIG ( streaming.some_config_key = some_config_value, .. )`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG ( streaming.some_config_key, .. )`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -462,6 +470,12 @@ impl fmt::Display for AlterViewOperation {
             }
             AlterViewOperation::AsQuery { query } => {
                 write!(f, "AS {}", query)
+            }
+            AlterViewOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterViewOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
             }
         }
     }

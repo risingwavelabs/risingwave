@@ -3507,8 +3507,11 @@ impl Parser<'_> {
                 && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
             {
                 AlterViewOperation::SetBackfillRateLimit { rate_limit }
+            } else if self.parse_keyword(Keyword::CONFIG) && materialized {
+                let entries = self.parse_options()?;
+                AlterViewOperation::SetConfig { entries }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET");
+                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET");
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
@@ -3518,8 +3521,11 @@ impl Parser<'_> {
                     resource_group: None,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CONFIG) && materialized {
+                let keys = self.parse_parenthesized_object_name_list()?;
+                AlterViewOperation::ResetConfig { keys }
             } else {
-                return self.expected("RESOURCE_GROUP after RESET");
+                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
             }
         } else {
             return self.expected(&format!(
@@ -4194,6 +4200,17 @@ impl Parser<'_> {
             }
         }
         Ok(ObjectName(idents))
+    }
+
+    /// Parse a parenthesized comma-separated list of object names
+    pub fn parse_parenthesized_object_name_list(&mut self) -> ModalResult<Vec<ObjectName>> {
+        if self.consume_token(&Token::LParen) {
+            let names = self.parse_comma_separated(Parser::parse_object_name)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(names)
+        } else {
+            self.expected("a list of object names in parentheses")
+        }
     }
 
     /// Parse identifiers strictly i.e. don't parse keywords
