@@ -1563,7 +1563,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Sink => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Sink(PbSink {
-                    id: obj.oid as _,
+                    id: (obj.oid as u32).into(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1709,7 +1709,7 @@ pub async fn rename_relation(
             rename_relation!(Table, table, table_id, TableId::new(object_id as _))
         }
         ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
-        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
+        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, SinkId::new(object_id as _)),
         ObjectType::Subscription => {
             rename_relation!(Subscription, subscription, subscription_id, object_id)
         }
@@ -1844,7 +1844,7 @@ pub async fn rename_relation_refer(
             .await?;
 
         objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
-            oid: id,
+            oid: id.as_raw_id() as _,
             obj_type: ObjectType::Sink,
             schema_id: None,
             database_id: None,
@@ -1856,7 +1856,9 @@ pub async fn rename_relation_refer(
             ObjectType::Table => {
                 rename_relation_ref!(Table, table, table_id, TableId::new(obj.oid as _))
             }
-            ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
+            ObjectType::Sink => {
+                rename_relation_ref!(Sink, sink, sink_id, SinkId::new(obj.oid as _))
+            }
             ObjectType::Subscription => {
                 rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
             }
@@ -2079,7 +2081,7 @@ where
     {
         return Ok(true);
     }
-    if let Some(sink_name) = Sink::find_by_id(job_id.as_raw_id() as ObjectId)
+    if let Some(sink_name) = Sink::find_by_id(job_id.as_sink_id())
         .select_only()
         .column(sink::Column::Name)
         .into_tuple::<String>()

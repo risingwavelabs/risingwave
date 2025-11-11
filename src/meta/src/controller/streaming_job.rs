@@ -236,7 +236,7 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                sink.id = job_id.as_raw_id() as _;
+                sink.id = job_id.as_sink_id();
                 let sink_model: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink_model).exec(&txn).await?;
             }
@@ -648,7 +648,7 @@ impl CatalogController {
         }
 
         let iceberg_table_id =
-            try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_raw_id() as _).await?;
+            try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_sink_id()).await?;
         if let Some(iceberg_table_id) = iceberg_table_id {
             // If the job is iceberg sink, we need to clean the iceberg table as well.
             // Here we will drop the sink objects directly.
@@ -732,7 +732,7 @@ impl CatalogController {
 
         // Check if the job is creating sink into table.
         if table_obj.is_none()
-            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_raw_id() as ObjectId)
+            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_sink_id())
                 .select_only()
                 .column(sink::Column::TargetTable)
                 .into_tuple::<Option<TableId>>()
@@ -1086,7 +1086,7 @@ impl CatalogController {
                 });
             }
             ObjectType::Sink => {
-                let (sink, obj) = Sink::find_by_id(job_id.as_raw_id() as ObjectId)
+                let (sink, obj) = Sink::find_by_id(job_id.as_sink_id())
                     .find_also_related(Object)
                     .one(txn)
                     .await?
@@ -1464,8 +1464,8 @@ impl CatalogController {
             for finish_sink_context in sinks {
                 finish_fragments(
                     txn,
-                    finish_sink_context.tmp_sink_id,
-                    JobId::new(finish_sink_context.original_sink_id as _),
+                    finish_sink_context.tmp_sink_id.as_job_id(),
+                    finish_sink_context.original_sink_id.as_job_id(),
                     Default::default(),
                 )
                 .await?;
@@ -1889,7 +1889,7 @@ impl CatalogController {
             };
 
         self.mutate_fragments_by_job_id(
-            JobId::new(sink_id as _),
+            sink_id.as_job_id(),
             update_sink_rate_limit,
             "sink node not found",
         )
@@ -2232,7 +2232,7 @@ impl CatalogController {
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
-    ) -> MetaResult<(HashMap<String, String>, u32)> {
+    ) -> MetaResult<(HashMap<String, String>, SinkId)> {
         let risingwave_pb::meta::alter_connector_props_request::PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) = alter_iceberg_table_props.
             ok_or_else(|| MetaError::invalid_parameter("alter_iceberg_table_props is required"))?;
         let inner = self.inner.read().await;
@@ -2336,7 +2336,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok((props.into_iter().collect(), sink_id as u32))
+        Ok((props.into_iter().collect(), sink_id))
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(
@@ -2538,7 +2538,7 @@ async fn update_sink_fragment_props(
             visit_stream_node_mut(&mut stream_node, |node| {
                 if let PbNodeBody::Sink(node) = node
                     && let Some(sink_desc) = &mut node.sink_desc
-                    && sink_desc.id == sink_id as u32
+                    && sink_desc.id == sink_id
                 {
                     sink_desc.properties.extend(props.clone());
                     found = true;
@@ -2570,8 +2570,8 @@ pub struct SinkIntoTableContext {
 }
 
 pub struct FinishAutoRefreshSchemaSinkContext {
-    pub tmp_sink_id: JobId,
-    pub original_sink_id: ObjectId,
+    pub tmp_sink_id: SinkId,
+    pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
     pub new_log_store_table: Option<(TableId, Vec<PbColumnCatalog>)>,
 }

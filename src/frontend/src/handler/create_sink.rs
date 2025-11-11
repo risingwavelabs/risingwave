@@ -642,7 +642,7 @@ pub fn fetch_incoming_sinks(
     for sink_id in incoming_sinks {
         sinks.push(
             schema
-                .get_sink_by_id(sink_id)
+                .get_sink_by_id(*sink_id)
                 .expect("should exist")
                 .clone(),
         );

@@ -295,7 +295,7 @@ impl SinkParam {
 
     pub fn to_proto(&self) -> PbSinkParam {
         PbSinkParam {
-            sink_id: self.sink_id.sink_id,
+            sink_id: self.sink_id,
             sink_name: self.sink_name.clone(),
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
@@ -637,7 +637,7 @@ impl SinkMetaClient {
 
     pub async fn add_sink_fail_evet_log(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         sink_name: String,
         connector: String,
         error: String,
@@ -650,7 +650,7 @@ impl SinkMetaClient {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Failed to add sink fail event to event log.");
+                        tracing::warn!(error = %e.as_report(), %sink_id, "Failed to add sink fail event to event log.");
                     }
                 }
             }

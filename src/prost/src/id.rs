@@ -234,6 +234,7 @@ pub type SchemaId = TypedId<4>;
 pub type FragmentId = TypedId<5>;
 pub type ActorId = TypedId<6>;
 pub type WorkerId = TypedId<7>;
+pub type SinkId = TypedId<8>;
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {
@@ -243,9 +244,19 @@ impl JobId {
     pub fn as_mv_table_id(self) -> TableId {
         TableId::new(self.0)
     }
+
+    pub fn as_sink_id(self) -> SinkId {
+        SinkId::new(self.0)
+    }
 }
 
 impl TableId {
+    pub fn as_job_id(self) -> JobId {
+        JobId::new(self.0)
+    }
+}
+
+impl SinkId {
     pub fn as_job_id(self) -> JobId {
         JobId::new(self.0)
     }
@@ -267,19 +278,22 @@ impl_into_object!(
     crate::user::grant_privilege::Object,
     DatabaseId,
     TableId,
-    SchemaId
+    SchemaId,
+    SinkId
 );
 
 impl_into_object!(
     crate::ddl_service::alter_name_request::Object,
     DatabaseId,
     TableId,
-    SchemaId
+    SchemaId,
+    SinkId
 );
 
 impl_into_object!(
     crate::ddl_service::alter_owner_request::Object,
     DatabaseId,
     TableId,
-    SchemaId
+    SchemaId,
+    SinkId
 );

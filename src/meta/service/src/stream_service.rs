@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
@@ -27,7 +26,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{FragmentId, ObjectId, SourceId, StreamingParallelism};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
@@ -135,7 +134,7 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Sink => {
                 self.metadata_manager
-                    .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)
+                    .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
                     .await?
             }
             ThrottleTarget::Fragment => {
@@ -612,20 +611,22 @@ impl StreamManagerService for StreamServiceImpl {
                 Ok(AlterConnectorPropsObject::Sink) => (
                     self.metadata_manager
                         .update_sink_props_by_sink_id(
-                            request.object_id as i32,
+                            request.object_id.into(),
                             request.changed_props.clone().into_iter().collect(),
                         )
                         .await?,
                     request.object_id,
                 ),
                 Ok(AlterConnectorPropsObject::IcebergTable) => {
-                    self.metadata_manager
+                    let (prop, sink_id) = self
+                        .metadata_manager
                         .update_iceberg_table_props_by_table_id(
-                            TableId::from(request.object_id),
+                            request.object_id.into(),
                             request.changed_props.clone().into_iter().collect(),
                             request.extra_options,
                         )
-                        .await?
+                        .await?;
+                    (prop, sink_id.as_raw_id())
                 }
 
                 Ok(AlterConnectorPropsObject::Source) => {

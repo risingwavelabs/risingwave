@@ -162,7 +162,7 @@ fn make_prost_privilege(
 
                 let (sink, _) =
                     reader.get_created_sink_by_name(db_name, schema_path, &sink_name)?;
-                grant_objs.push(PbObject::SinkId(sink.id.sink_id));
+                grant_objs.push(sink.id.into());
             }
         }
         GrantObjects::Views(views) => {
@@ -297,7 +297,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_sink().for_each(|sink| {
-                    grant_objs.push(PbObject::SinkId(sink.id.sink_id));
+                    grant_objs.push(sink.id.into());
                 });
             }
         }

@@ -233,37 +233,13 @@ impl CatalogController {
         Ok(Some(refresh_state.unwrap_or(RefreshState::Idle)))
     }
 
-    pub async fn get_sink_catalog_by_name(
-        &self,
-        database_id: DatabaseId,
-        schema_id: SchemaId,
-        name: &str,
-    ) -> MetaResult<Option<PbSink>> {
+    pub async fn get_sink_by_id(&self, sink_id: SinkId) -> MetaResult<Option<PbSink>> {
         let inner = self.inner.read().await;
-        let sink_obj = Sink::find()
+        let sink_objs = Sink::find_by_id(sink_id)
             .find_also_related(Object)
-            .filter(
-                sink::Column::Name
-                    .eq(name)
-                    .and(object::Column::DatabaseId.eq(database_id))
-                    .and(object::Column::SchemaId.eq(schema_id)),
-            )
             .one(&inner.db)
             .await?;
-        Ok(sink_obj.map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into()))
-    }
-
-    pub async fn get_sink_by_ids(&self, sink_ids: Vec<SinkId>) -> MetaResult<Vec<PbSink>> {
-        let inner = self.inner.read().await;
-        let sink_objs = Sink::find()
-            .find_also_related(Object)
-            .filter(sink::Column::SinkId.is_in(sink_ids))
-            .all(&inner.db)
-            .await?;
-        Ok(sink_objs
-            .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
-            .collect())
+        Ok(sink_objs.map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into()))
     }
 
     pub async fn get_sink_auto_refresh_schema_from(

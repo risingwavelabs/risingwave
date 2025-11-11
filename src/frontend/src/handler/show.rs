@@ -656,7 +656,7 @@ pub async fn handle_show_object(
                         .get_sink_ids_by_connection(c.id)
                         .unwrap_or_default()
                         .into_iter()
-                        .filter_map(|sid| schema.get_sink_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .filter_map(|sid| schema.get_sink_by_id(sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let properties = match &c.info {
                         connection::Info::PrivateLinkService(i) => {
@@ -898,7 +898,7 @@ pub fn handle_show_create_object(
         ShowCreateType::Sink => {
             let (sink, schema) =
                 catalog_reader.get_any_sink_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(current_user, sink.id.sink_id, sink.owner.user_id) {
+            if !has_access_to_object(current_user, sink.id.as_raw_id(), sink.owner.user_id) {
                 return Err(CatalogError::NotFound("sink", name.to_string()).into());
             }
             (sink.create_sql(), schema)

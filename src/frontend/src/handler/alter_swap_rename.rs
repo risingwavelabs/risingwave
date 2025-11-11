@@ -146,8 +146,8 @@ pub async fn handle_swap_rename(
             )?;
 
             alter_swap_rename_request::Object::Sink(ObjectNameSwapPair {
-                src_object_id: src_sink.id.sink_id,
-                dst_object_id: target_sink.id.sink_id,
+                src_object_id: src_sink.id.as_raw_id(),
+                dst_object_id: target_sink.id.as_raw_id(),
             })
         }
         StatementType::ALTER_SUBSCRIPTION => {

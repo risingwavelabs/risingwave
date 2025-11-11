@@ -121,7 +121,7 @@ impl StreamingJob {
     pub fn id(&self) -> JobId {
         match self {
             Self::MaterializedView(table) => table.id.as_job_id(),
-            Self::Sink(sink) => sink.id.into(),
+            Self::Sink(sink) => sink.id.as_job_id(),
             Self::Table(_, table, ..) => table.id.as_job_id(),
             Self::Index(index, _) => index.id.into(),
             Self::Source(source) => source.id.into(),

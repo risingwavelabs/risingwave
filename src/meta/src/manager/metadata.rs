@@ -594,7 +594,7 @@ impl MetadataManager {
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
-    ) -> MetaResult<(HashMap<String, String>, u32)> {
+    ) -> MetaResult<(HashMap<String, String>, SinkId)> {
         let (new_props, sink_id) = self
             .catalog_controller
             .update_iceberg_table_props_by_table_id(table_id, props, alter_iceberg_table_props)

@@ -255,7 +255,7 @@ impl CatalogController {
                 .one(&txn)
                 .await?
                 .ok_or(MetaError::from(anyhow!("sink {} not found", sink_name)))?;
-            let sink_job_id = JobId::new(sink_id as _);
+            let sink_job_id = sink_id.as_job_id();
             let sink_notifications = Self::finish_streaming_job_inner(&txn, sink_job_id).await?;
             job_notifications.push((sink_job_id, sink_notifications));
         }

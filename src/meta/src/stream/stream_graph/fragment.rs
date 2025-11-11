@@ -160,7 +160,7 @@ impl BuildingFragment {
                 has_job = true;
             }
             NodeBody::Sink(sink_node) => {
-                sink_node.sink_desc.as_mut().unwrap().id = job_id.as_raw_id();
+                sink_node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
 
                 has_job = true;
             }
