@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -47,17 +46,16 @@ pub(crate) async fn kill_random_and_wait_recover(cluster: &mut Cluster) {
 pub enum DatabaseRecoveryState {
     Running,
     Recovering,
-    Failed,
     Unknown,
 }
 
 impl DatabaseRecoveryState {
-    fn from_event(event: &str) -> Self {
-        match event.trim() {
-            "DATABASE_RECOVERY_SUCCESS" => Self::Running,
-            "DATABASE_RECOVERY_START" => Self::Recovering,
-            "DATABASE_RECOVERY_FAILURE" => Self::Failed,
-            _ => Self::Unknown,
+    fn from_str(state: &str) -> Self {
+        match state.trim() {
+            "RUNNING" => Self::Running,
+            "RECOVERING" => Self::Recovering,
+            "UNKNOWN" => Self::Unknown,
+            other => panic!("Unexpected recovery state: {other}"),
         }
     }
 
@@ -66,126 +64,80 @@ impl DatabaseRecoveryState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DatabaseRecoveryEvent {
+    Success,
+    Start,
+    Failure,
+    Unknown,
+}
+
+impl DatabaseRecoveryEvent {
+    fn from_str(event: &str) -> Self {
+        match event.trim() {
+            "SUCCESS" => Self::Success,
+            "START" => Self::Start,
+            "FAILURE" => Self::Failure,
+            "UNKNOWN" => Self::Unknown,
+            other => panic!("Unexpected last database event: {other}"),
+        }
+    }
+
+    fn is_success(self) -> bool {
+        matches!(self, Self::Success)
+    }
+}
+
 #[derive(Debug)]
 struct DatabaseRecoveryInfo {
     id: u32,
     name: String,
+    last_database_event: DatabaseRecoveryEvent,
+    last_global_event: GlobalRecoveryEvent,
+    in_global_running: bool,
+    in_global_recovering: bool,
     state: DatabaseRecoveryState,
 }
 
 #[derive(Deserialize)]
 struct DatabaseRecoveryRow {
-    id: u32,
-    name: String,
-    #[serde(rename = "event_type")]
-    event_type: String,
+    #[serde(rename = "database_id")]
+    database_id: u32,
+    #[serde(rename = "database_name")]
+    database_name: String,
+    #[serde(rename = "last_database_event")]
+    last_database_event: String,
+    #[serde(rename = "last_global_event")]
+    last_global_event: String,
+    #[serde(rename = "recovery_state")]
+    recovery_state: String,
+    #[serde(rename = "in_global_running")]
+    in_global_running: bool,
+    #[serde(rename = "in_global_recovering")]
+    in_global_recovering: bool,
 }
 
-#[derive(Debug)]
-struct GlobalRecoveryInfo {
-    running_ids: HashSet<u32>,
-    recovering_ids: HashSet<u32>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GlobalRecoveryEvent {
+    Running,
+    Recovering,
+    Unknown,
 }
 
-#[derive(Deserialize)]
-struct GlobalRecoveryRow {
-    has_event: bool,
-    #[serde(default)]
-    running_ids: Vec<u32>,
-    #[serde(default)]
-    recovering_ids: Vec<u32>,
-}
-
-impl GlobalRecoveryInfo {
-    fn new(running_ids: Vec<u32>, recovering_ids: Vec<u32>) -> Self {
-        let running_ids: HashSet<u32> = running_ids.into_iter().collect();
-        let recovering_ids: HashSet<u32> = recovering_ids.into_iter().collect();
-        if let Some(duplicated) = running_ids
-            .iter()
-            .find(|id| recovering_ids.contains(id))
-            .copied()
-        {
-            panic!(
-                "Database {duplicated} appears in both running and recovering sets of global recovery event"
-            );
-        }
-        Self {
-            running_ids,
-            recovering_ids,
+impl GlobalRecoveryEvent {
+    fn from_str(event: &str) -> Self {
+        match event.trim() {
+            "RUNNING" => Self::Running,
+            "RECOVERING" => Self::Recovering,
+            "UNKNOWN" => Self::Unknown,
+            other => panic!("Unexpected global recovery event: {other}"),
         }
     }
 }
 
 const ALL_DATABASE_RECOVERY_STATUS_SQL: &str = r#"
-WITH events AS (
-    SELECT event_type,
-           timestamp,
-           COALESCE(
-               info -> 'recovery' -> 'databaseStart'   ->> 'databaseId',
-               info -> 'recovery' -> 'databaseSuccess' ->> 'databaseId',
-               info -> 'recovery' -> 'databaseFailure' ->> 'databaseId'
-           ) AS database_id
-    FROM rw_catalog.rw_event_logs
-    WHERE event_type LIKE 'DATABASE_RECOVERY_%'
-),
-ranked AS (
-    SELECT event_type,
-           database_id::integer AS database_id,
-           row_number() OVER (PARTITION BY database_id ORDER BY timestamp DESC) AS rn
-    FROM events
-    WHERE database_id IS NOT NULL
-)
 SELECT row_to_json(row) AS json_line
-FROM (
-    SELECT d.id,
-           d.name,
-           COALESCE(r.event_type, 'DATABASE_RECOVERY_UNKNOWN') AS event_type
-    FROM rw_catalog.rw_databases d
-    LEFT JOIN ranked r
-           ON d.id = r.database_id AND r.rn = 1
-    ORDER BY d.name
-) AS row;
-"#;
-
-const LATEST_GLOBAL_RECOVERY_STATUS_SQL: &str = r#"
-WITH last_global_success AS (
-    SELECT info
-    FROM rw_catalog.rw_event_logs
-    WHERE event_type = 'GLOBAL_RECOVERY_SUCCESS'
-    ORDER BY timestamp DESC
-    LIMIT 1
-),
-running_ids AS (
-    SELECT jsonb_array_elements_text(
-               info -> 'recovery' -> 'globalSuccess' -> 'runningDatabaseIds'
-           )::integer AS database_id
-    FROM last_global_success
-),
-recovering_ids AS (
-    SELECT jsonb_array_elements_text(
-               info -> 'recovery' -> 'globalSuccess' -> 'recoveringDatabaseIds'
-           )::integer AS database_id
-    FROM last_global_success
-)
-SELECT row_to_json(row) AS json_line
-FROM (
-    SELECT
-        EXISTS (SELECT 1 FROM last_global_success) AS has_event,
-        COALESCE(
-            (
-                SELECT array_agg(database_id ORDER BY database_id)
-                FROM running_ids
-            ),
-            ARRAY[]::integer[]
-        ) AS running_ids,
-        COALESCE(
-            (
-                SELECT array_agg(database_id ORDER BY database_id)
-                FROM recovering_ids
-            ),
-            ARRAY[]::integer[]
-        ) AS recovering_ids
-) AS row;
+FROM rw_catalog.rw_recovery_info AS row;
 "#;
 
 pub(crate) async fn query_all_database_recovery_state(
@@ -199,72 +151,82 @@ pub(crate) async fn query_all_database_recovery_state(
     for line in output.lines().filter(|line| !line.trim().is_empty()) {
         let row: DatabaseRecoveryRow = serde_json::from_str(line)?;
         result.push(DatabaseRecoveryInfo {
-            id: row.id,
-            name: row.name,
-            state: DatabaseRecoveryState::from_event(&row.event_type),
+            id: row.database_id,
+            name: row.database_name,
+            last_database_event: DatabaseRecoveryEvent::from_str(&row.last_database_event),
+            last_global_event: GlobalRecoveryEvent::from_str(&row.last_global_event),
+            in_global_running: row.in_global_running,
+            in_global_recovering: row.in_global_recovering,
+            state: DatabaseRecoveryState::from_str(&row.recovery_state),
         });
     }
     Ok(result)
 }
 
-async fn query_latest_global_recovery_state(
-    cluster: &mut Cluster,
-) -> Result<Option<GlobalRecoveryInfo>> {
-    let mut session = cluster.start_session();
-    let output = session.run(LATEST_GLOBAL_RECOVERY_STATUS_SQL).await?;
-    drop(session);
-
-    let line = output.lines().find(|line| !line.trim().is_empty());
-    let Some(line) = line else {
-        return Ok(None);
-    };
-
-    let row: GlobalRecoveryRow = serde_json::from_str(line)?;
-    if !row.has_event {
-        return Ok(None);
-    }
-
-    Ok(Some(GlobalRecoveryInfo::new(
-        row.running_ids,
-        row.recovering_ids,
-    )))
-}
-
-fn validate_global_consistency(databases: &[DatabaseRecoveryInfo], global: &GlobalRecoveryInfo) {
-    let db_map: HashMap<u32, &DatabaseRecoveryInfo> =
-        databases.iter().map(|info| (info.id, info)).collect();
-
-    for &running_id in &global.running_ids {
-        let info = db_map.get(&running_id).unwrap_or_else(|| {
-            panic!("Global recovery lists unknown running database id {running_id}")
-        });
-        if !info.state.is_running() {
-            panic!(
-                "Global recovery marks database {}({}) running but latest database event is {:?}",
-                info.name, info.id, info.state
-            );
-        }
-    }
-
-    for &recovering_id in &global.recovering_ids {
-        let info = db_map.get(&recovering_id).unwrap_or_else(|| {
-            panic!("Global recovery lists unknown recovering database id {recovering_id}")
-        });
-        if info.state.is_running() {
-            panic!(
-                "Global recovery marks database {}({}) recovering but latest database event is {:?}",
-                info.name, info.id, info.state
-            );
-        }
-    }
-
+fn validate_global_consistency(databases: &[DatabaseRecoveryInfo]) {
     for info in databases {
-        if !info.state.is_running() && !global.recovering_ids.contains(&info.id) {
+        let expected = derive_state(
+            info.last_database_event,
+            info.last_global_event,
+            info.in_global_running,
+            info.in_global_recovering,
+        );
+        if info.state != expected {
             panic!(
-                "Database {}({}) is not running but absent from global recovering ids",
+                "Derived recovery state mismatch for database {}({}): expected {:?}, got {:?}",
+                info.name, info.id, expected, info.state
+            );
+        }
+
+        if info.in_global_running && info.in_global_recovering {
+            panic!(
+                "Database {}({}) marked as both running and recovering in global event",
                 info.name, info.id
             );
         }
+
+        if info.in_global_running && !info.last_database_event.is_success() {
+            panic!(
+                "Global recovery marks database {}({}) running but latest database event is {:?}",
+                info.name, info.id, info.last_database_event
+            );
+        }
+
+        if info.in_global_recovering && info.last_database_event.is_success() {
+            panic!(
+                "Global recovery marks database {}({}) recovering but latest database event is SUCCESS",
+                info.name, info.id
+            );
+        }
+
+        if info.last_global_event == GlobalRecoveryEvent::Running
+            && !info.in_global_running
+            && !info.in_global_recovering
+        {
+            panic!(
+                "Global recovery event indicates RUNNING but database {}({}) absent from both running and recovering ids",
+                info.name, info.id
+            );
+        }
+    }
+}
+
+fn derive_state(
+    database_event: DatabaseRecoveryEvent,
+    global_event: GlobalRecoveryEvent,
+    in_global_running: bool,
+    in_global_recovering: bool,
+) -> DatabaseRecoveryState {
+    if database_event.is_success() {
+        DatabaseRecoveryState::Running
+    } else if matches!(global_event, GlobalRecoveryEvent::Running) && in_global_running {
+        DatabaseRecoveryState::Running
+    } else if matches!(global_event, GlobalRecoveryEvent::Running) && in_global_recovering {
+        DatabaseRecoveryState::Recovering
+    } else if matches!(database_event, DatabaseRecoveryEvent::Start) {
+        DatabaseRecoveryState::Recovering
+    } else {
+        DatabaseRecoveryState::Unknown
     }
 }
 
@@ -278,21 +240,9 @@ pub(crate) async fn cluster_fully_running(cluster: &mut Cluster) -> Result<bool>
         return Ok(false);
     }
 
-    let global_status = match query_latest_global_recovery_state(cluster).await {
-        Ok(status) => status,
-        Err(_) => return Ok(false),
-    };
+    validate_global_consistency(&db_statuses);
 
-    if let Some(global) = &global_status {
-        validate_global_consistency(&db_statuses, global);
-    }
-
-    let fully_running = db_statuses.iter().all(|info| {
-        info.state.is_running()
-            || global_status
-                .as_ref()
-                .map_or(false, |global| global.running_ids.contains(&info.id))
-    });
+    let fully_running = db_statuses.iter().all(|info| info.state.is_running());
 
     Ok(fully_running)
 }
