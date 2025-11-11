@@ -50,6 +50,11 @@ use crate::task::{
     StreamEnvironment, await_tree_key,
 };
 
+/// Default capacity for `ConfigOverrideCache`.
+/// Since we only support per-job config override right now, 256 jobs should be sufficient on a single node.
+pub const CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY: u64 = 256;
+pub type ConfigOverrideCache = moka::sync::Cache<String, Arc<StreamingConfig>>;
+
 /// [Spawning actors](`Self::spawn_actor`), called by [`crate::task::barrier_worker::managed_state::DatabaseManagedBarrierState`].
 ///
 /// See [`crate::task`] for architecture overview.
@@ -65,6 +70,12 @@ pub(crate) struct StreamActorManager {
 
     /// Runtime for the streaming actors.
     pub(super) runtime: BackgroundShutdownRuntime,
+
+    /// Cache for overridden configuration: `config_override` -> `StreamingConfig`.
+    ///
+    /// Since the override is based on `env.global_config`, which won't change after creation,
+    /// we can use the `config_override` as the only key.
+    pub(super) config_override_cache: ConfigOverrideCache,
 }
 
 impl StreamActorManager {
@@ -386,6 +397,32 @@ impl StreamActorManager {
         Ok((executor, subtasks))
     }
 
+    /// Get the overridden configuration for the given `config_override`.
+    fn get_overridden_config(&self, config_override: &str, actor_id: u32) -> Arc<StreamingConfig> {
+        self.config_override_cache
+            .get_with_by_ref(config_override, || {
+                let global = self.env.global_config();
+                match merge_config(global.as_ref(), config_override, ["streaming"]) {
+                    Ok(Some(config)) => {
+                        tracing::info!(actor_id, "applied configuration override");
+                        Arc::new(config)
+                    }
+                    Ok(None) => global.clone(), // nothing to override
+                    Err(e) => {
+                        // We should have validated the config override when user specified it for the job.
+                        // However, we still tolerate invalid config override here in case there's
+                        // any compatibility issue.
+                        tracing::error!(
+                            error = %e.as_report(),
+                            actor_id,
+                            "failed to apply configuration override, use global config instead",
+                        );
+                        global.clone()
+                    }
+                }
+            })
+    }
+
     async fn create_actor(
         self: Arc<Self>,
         actor: BuildActorInfo,
@@ -396,23 +433,8 @@ impl StreamActorManager {
     ) -> StreamResult<Actor<DispatchExecutor>> {
         let actor_id = actor.actor_id;
 
-        let config = match merge_config(
-            self.env.global_config().as_ref(),
-            "[streaming.developer.stream_compute_client_config]
-connect_timeout_secs = 5",
-            ["streaming"],
-        ) {
-            Ok(Some(config)) => Arc::new(config),
-            Ok(None) => self.env.global_config().clone(),
-            Err(e) => {
-                tracing::error!(
-                    error = %e.as_report(),
-                    actor_id,
-                    "failed to apply configuration override",
-                );
-                self.env.global_config().clone()
-            }
-        };
+        // TODO: use user specified real config override value.
+        let actor_config = self.get_overridden_config("", actor_id);
 
         let actor_context = ActorContext::create(
             &actor,
@@ -420,7 +442,7 @@ connect_timeout_secs = 5",
             self.env.total_mem_usage(),
             self.streaming_metrics.clone(),
             self.env.meta_client(),
-            config,
+            actor_config,
             self.env.clone(),
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
