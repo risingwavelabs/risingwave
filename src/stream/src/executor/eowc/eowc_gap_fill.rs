@@ -23,7 +23,6 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{CheckedAdd, ToOwnedDatum};
 use risingwave_expr::ExprError;
 use risingwave_expr::expr::NonStrictExpression;
-use tracing::warn;
 
 use super::sort_buffer::SortBuffer;
 use crate::executor::prelude::*;
@@ -81,61 +80,66 @@ impl<S: StateStore> ExecutorInner<S> {
         metrics: &'a GapFillMetrics,
         chunk_builder: &'a mut StreamChunkBuilder,
     ) {
-        let Some((prev_time_scalar, curr_time_scalar)) = (|| {
-            Some((
-                prev_row.datum_at(time_column_index)?,
-                curr_row.datum_at(time_column_index)?,
-            ))
-        })() else {
-            return Ok(());
+        let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
+            prev_row.datum_at(time_column_index),
+            curr_row.datum_at(time_column_index),
+        ) else {
+            return Err(ExprError::InvalidParam {
+                name: "time_column",
+                reason: "Time column contains NULL values".into(),
+            });
         };
 
         let prev_time = match prev_time_scalar {
             ScalarRefImpl::Timestamp(ts) => ts,
-            ScalarRefImpl::Timestamptz(ts) => {
-                match risingwave_common::types::Timestamp::with_micros(ts.timestamp_micros()) {
-                    Ok(timestamp) => timestamp,
-                    Err(_) => {
-                        warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(());
-                    }
-                }
-            }
+            ScalarRefImpl::Timestamptz(ts) => risingwave_common::types::Timestamp::with_micros(
+                ts.timestamp_micros(),
+            )
+            .map_err(|_| ExprError::InvalidParam {
+                name: "time_column",
+                reason: format!("Failed to convert timestamptz to timestamp: {:?}", ts).into(),
+            })?,
             _ => {
-                warn!(
-                    "Failed to convert time column to timestamp, got {:?}. Skipping gap fill.",
-                    prev_time_scalar
-                );
-                return Ok(());
+                return Err(ExprError::InvalidParam {
+                    name: "time_column",
+                    reason: format!(
+                        "Time column must be Timestamp or Timestamptz, got {:?}",
+                        prev_time_scalar
+                    )
+                    .into(),
+                });
             }
         };
 
         let curr_time = match curr_time_scalar {
             ScalarRefImpl::Timestamp(ts) => ts,
-            ScalarRefImpl::Timestamptz(ts) => {
-                match risingwave_common::types::Timestamp::with_micros(ts.timestamp_micros()) {
-                    Ok(timestamp) => timestamp,
-                    Err(_) => {
-                        warn!("Failed to convert timestamptz to timestamp: {:?}", ts);
-                        return Ok(());
-                    }
-                }
-            }
+            ScalarRefImpl::Timestamptz(ts) => risingwave_common::types::Timestamp::with_micros(
+                ts.timestamp_micros(),
+            )
+            .map_err(|_| ExprError::InvalidParam {
+                name: "time_column",
+                reason: format!("Failed to convert timestamptz to timestamp: {:?}", ts).into(),
+            })?,
             _ => {
-                warn!(
-                    "Failed to convert time column to timestamp, got {:?}. Skipping gap fill.",
-                    curr_time_scalar
-                );
-                return Ok(());
+                return Err(ExprError::InvalidParam {
+                    name: "time_column",
+                    reason: format!(
+                        "Time column must be Timestamp or Timestamptz, got {:?}",
+                        curr_time_scalar
+                    )
+                    .into(),
+                });
             }
         };
-        if prev_time >= curr_time {
-            return Ok(());
-        }
 
         let mut fill_time = match prev_time.checked_add(interval) {
             Some(t) => t,
             None => {
+                warn!(
+                    "Gap fill interval is too large, causing timestamp overflow. \
+                     No gap filling will be performed between {:?} and {:?}.",
+                    prev_time, curr_time
+                );
                 return Ok(());
             }
         };
