@@ -1415,12 +1415,6 @@ impl SinkWriter for IcebergSinkWriter {
             None => Err(SinkError::Iceberg(anyhow!("No writer to close"))),
         }
     }
-
-    /// Clean up
-    async fn abort(&mut self) -> Result<()> {
-        // TODO: abort should clean up all the data written in this epoch.
-        Ok(())
-    }
 }
 
 const SCHEMA_ID: &str = "schema_id";

@@ -43,7 +43,9 @@ use risingwave_connector::sink::test_sink::{
 use risingwave_connector::sink::writer::{
     AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, SinkWriter,
 };
-use risingwave_connector::sink::{SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError};
+use risingwave_connector::sink::{
+    SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError,
+};
 use risingwave_connector::source::test_source::{
     BoxSource, TestSourceRegistryGuard, TestSourceSplit, register_test_source,
 };
@@ -476,11 +478,12 @@ impl SimulationTestSink {
                         let store = store.clone();
                         let staging_store = staging_store.clone();
                         move |_, _| {
-                            Box::new(TestCoordinator {
+                            let coordinator = TestCoordinator {
                                 err_rate: err_rate.clone(),
                                 store: store.clone(),
                                 staging_store: staging_store.clone(),
-                            })
+                            };
+                            SinkCommitCoordinator::SinglePhase(Box::new(coordinator))
                         }
                     },
                 )
