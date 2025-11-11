@@ -3,21 +3,31 @@ control substitution on
 
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF
-db.all_types.insert({
+db.all_types.insertOne({
   _id: ObjectId('6911a33502454e0f774f8803'),
-  f01_double: Double(2.5),
-  f02_string: 'Rising',
-  f03_object: {},
-  f04_array: [],
-  f05_binData: '',
-  f08_bool: false,
-  f09_date: ISODate('2023-07-12T03:01:32Z'),
-  f10_null: null,
-  f11_regex: '',
-  f16_int: Int32(42),
-  f17_timestamp: Timestamp({'t': 4, 'i': 7}),
-  f18_long: Long(22),
-  f19_decimal: Decimal128('1.11'),
+  f01a_double   : Double(2.5),
+  // f01b_double   : Double('-Infinity'), // #21414
+  f02_string    : 'Rising',
+  f03_object    : {foo: true, bar: false},
+  f04_array     : ['e0', 'e1'],
+  f05a_binData  : Binary.createFromHexString('deadbeef'),
+  f05b_binData  : UUID('00112233-4455-6677-8899-aabbccddeeff'),
+  f05c_binData  : Binary.fromFloat32Array(new Float32Array([2, 3])),
+  // f06_undefined           // deprecated
+  // f07_objectId            // see _id
+  f08_bool      : false,
+  f09a_date     : ISODate(1),
+  f09b_date     : ISODate('1965-08-09T02:00:00Z'),
+  f10_null      : null,
+  f11_regex     : /ab+c/i,
+  // f12_dbPointer           // deprecated
+  f13_javascript: Code("function() {}"),
+  // f14_symbol              // deprecated
+  // f15_javascriptWithScope // deprecated
+  f16_int       : Int32(42),
+  f17_timestamp : Timestamp({'t': 4, 'i': 7}),
+  f18_long      : Long('9007199254740993'),
+  f19_decimal   : Decimal128('0.12345678901234567'),
 });
 EOF
 
