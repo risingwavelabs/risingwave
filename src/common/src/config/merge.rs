@@ -15,7 +15,6 @@ def_anyhow_newtype! { pub ConfigMergeError }
 ///
 /// Returns an error if any of the input is invalid, or the merged config cannot be parsed.
 /// Returns `None` if there's nothing to override.
-#[must_use]
 pub fn merge_config<C: Serialize + DeserializeOwned + Clone>(
     base: &C,
     partial: &str,
