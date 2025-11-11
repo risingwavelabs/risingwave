@@ -139,6 +139,9 @@ pub struct ReleaseContext {
 
     /// Removed sink fragment by target fragment.
     pub(crate) removed_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
+
+    /// Dropped iceberg table sinks
+    pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 }
 
 impl CatalogController {

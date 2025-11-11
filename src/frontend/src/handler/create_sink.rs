@@ -55,7 +55,7 @@ use super::create_mv::get_column_names;
 use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::util::gen_query_from_table_name;
 use crate::binder::{Binder, Relation};
-use crate::catalog::table_catalog::TableType;
+use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, TableType};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
@@ -575,6 +575,13 @@ pub async fn handle_create_sink(
         if_not_exists,
     )? {
         return Ok(resp);
+    }
+
+    if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+            "Sink name cannot start with reserved prefix '{}'",
+            ICEBERG_SINK_PREFIX
+        ))));
     }
 
     let (mut sink, graph, target_table_catalog, dependencies) = {

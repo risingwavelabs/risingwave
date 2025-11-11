@@ -201,6 +201,19 @@ impl CatalogController {
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
             .map(|obj| TableId::new(obj.oid as _));
 
+        let removed_iceberg_table_sinks: Vec<PbSink> = Sink::find()
+            .find_also_related(Object)
+            .filter(
+                sink::Column::SinkId
+                    .is_in(removed_object_ids.clone())
+                    .and(sink::Column::Name.like("__iceberg_sink_%")),
+            )
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect();
+
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -415,6 +428,7 @@ impl CatalogController {
                 removed_actors,
                 removed_fragments,
                 removed_sink_fragment_by_targets,
+                removed_iceberg_table_sinks,
             },
             version,
         ))

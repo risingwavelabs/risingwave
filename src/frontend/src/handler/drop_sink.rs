@@ -59,7 +59,7 @@ pub async fn handle_drop_sink(
 
     if sink_name.starts_with(ICEBERG_SINK_PREFIX) {
         return Err(crate::error::ErrorCode::NotSupported(
-            "Dropping Iceberg sinks is not supported".to_string(),
+            "Dropping Iceberg sinks is not supported".to_owned(),
             "Please use DROP TABLE command.".to_owned(),
         )
         .into());

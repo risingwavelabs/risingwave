@@ -70,11 +70,11 @@ use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
-    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
-    fetch_target_fragments, get_internal_tables_by_id, get_table_columns,
-    grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
-    try_get_iceberg_table_by_downstream_sink,
+    PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
+    check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
+    ensure_object_id, ensure_user_id, fetch_target_fragments, get_internal_tables_by_id,
+    get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
+    list_user_info_by_ids, try_get_iceberg_table_by_downstream_sink,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -625,11 +625,10 @@ impl CatalogController {
                 && streaming_job.job_status == JobStatus::Creating
             {
                 if obj.obj_type == ObjectType::Table
-                    && let Some(table) =
-                        Table::find_by_id(job_id.as_mv_table_id()).one(&txn).await?
-                    && matches!(table.engine, Some(table::Engine::Iceberg))
+                    || obj.obj_type == ObjectType::Sink
+                        && check_if_belongs_to_iceberg_table(&txn, job_id).await?
                 {
-                    // If the job is an iceberg table, we still need to clean it.
+                    // If the job belongs an iceberg table, we still need to clean it.
                 } else {
                     // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
                     tracing::warn!(
@@ -944,19 +943,22 @@ impl CatalogController {
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
-    pub async fn finish_streaming_job(&self, job_id: JobId) -> MetaResult<()> {
+    /// If `ignore_for_iceberg_table` is true and the job is for iceberg table, it will be ignored.
+    pub async fn finish_streaming_job(
+        &self,
+        job_id: JobId,
+        ignore_for_iceberg_table: bool,
+    ) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        if let Some(table) = Table::find_by_id(job_id.as_mv_table_id()).one(&txn).await? {
-            if matches!(table.engine, Some(table::Engine::Iceberg)) {
-                // Ignore it and let it be handled in iceberg sink.
-                tracing::info!(
-                    "streaming job {} is for iceberg table, wait for iceberg sink to finish it",
-                    job_id
-                );
-                return Ok(());
-            }
+        // Check if the job belongs to iceberg table.
+        if ignore_for_iceberg_table && check_if_belongs_to_iceberg_table(&txn, job_id).await? {
+            tracing::info!(
+                "streaming job {} is for iceberg table, wait for manual finish operation",
+                job_id
+            );
+            return Ok(());
         }
 
         // If the job is iceberg sink, we should finish the iceberg table with it.

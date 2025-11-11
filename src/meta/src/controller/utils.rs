@@ -2065,13 +2065,38 @@ where
                 .into_tuple::<table::Engine>()
                 .one(txn)
                 .await?
-        {
-            if table_engine == table::Engine::Iceberg {
+            && table_engine == table::Engine::Iceberg {
                 return Ok(Some(TableId::new(table_id as _)));
             }
-        }
     }
     Ok(None)
+}
+
+pub async fn check_if_belongs_to_iceberg_table<C>(txn: &C, job_id: JobId) -> MetaResult<bool>
+where
+    C: ConnectionTrait,
+{
+    if let Some(engine) = Table::find_by_id(job_id.as_mv_table_id())
+        .select_only()
+        .column(table::Column::Engine)
+        .into_tuple::<table::Engine>()
+        .one(txn)
+        .await?
+        && engine == table::Engine::Iceberg
+    {
+        return Ok(true);
+    }
+    if let Some(sink_name) = Sink::find_by_id(job_id.as_raw_id() as ObjectId)
+        .select_only()
+        .column(sink::Column::Name)
+        .into_tuple::<String>()
+        .one(txn)
+        .await?
+        && sink_name.starts_with("__iceberg_sink_")
+    {
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 pub fn build_select_node_list(

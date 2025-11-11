@@ -61,8 +61,8 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
+use super::RwPgResponse;
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use super::{RwPgResponse, alter_streaming_rate_limit};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -99,7 +99,6 @@ use risingwave_connector::sink::iceberg::{
     SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
-use risingwave_pb::meta::PbThrottleTarget;
 
 use crate::handler::create_sink::{SinkPlanContext, gen_sink_plan};
 
@@ -1394,7 +1393,7 @@ fn bind_cdc_table_schema(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
-    mut handler_args: HandlerArgs,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
@@ -1422,21 +1421,6 @@ pub async fn handle_create_table(
         risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
-    if engine == Engine::Iceberg && handler_args.with_options.get_connector().is_some() {
-        // HACK: since we don't have atomic DDL, table with connector may lose data.
-        // FIXME: remove this after https://github.com/risingwavelabs/risingwave/issues/21863
-        if let Some(_rate_limit) = handler_args.with_options.insert(
-            OverwriteOptions::SOURCE_RATE_LIMIT_KEY.to_owned(),
-            "0".to_owned(),
-        ) {
-            // prevent user specified rate limit
-            return Err(ErrorCode::NotSupported(
-                "source_rate_limit for iceberg table engine during table creation".to_owned(),
-                "Please remove source_rate_limit from WITH options.".to_owned(),
-            )
-            .into());
-        }
-    }
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
@@ -2100,8 +2084,6 @@ pub async fn create_iceberg_engine_table(
     )
     .await?;
 
-    let has_connector = source.is_some();
-
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
     let _ = Jvm::get_or_init()?;
@@ -2135,17 +2117,6 @@ pub async fn create_iceberg_engine_table(
                 );
             });
         res?
-    }
-
-    // TODO: remove it together with rate limit rewrite after we support atomic DDL in meta side.
-    if has_connector {
-        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-            handler_args,
-            PbThrottleTarget::TableWithSource,
-            table_name,
-            -1,
-        )
-        .await?;
     }
 
     Ok(())

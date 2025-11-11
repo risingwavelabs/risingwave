@@ -404,16 +404,14 @@ impl SourceManager {
         &self,
         source_id: SourceId,
         handle: ConnectorSourceWorkerHandle,
-    ) -> MetaResult<()> {
+    ) {
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source_id) {
             tracing::warn!("source {} already registered", source_id);
-            return Ok(());
+            return;
         }
 
         core.managed_sources.insert(source_id, handle);
-
-        Ok(())
     }
 
     pub async fn get_running_info(&self) -> SourceManagerRunningInfo {

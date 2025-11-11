@@ -117,6 +117,7 @@ mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
 
+use crate::catalog::table_catalog::ICEBERG_SINK_PREFIX;
 use crate::stream_fragmenter::GraphJobType;
 
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
@@ -1070,6 +1071,17 @@ pub async fn handle_create_source(
         stmt.if_not_exists,
     )? {
         return Ok(resp);
+    }
+
+    if stmt
+        .source_name
+        .base_name()
+        .starts_with(ICEBERG_SINK_PREFIX)
+    {
+        return Err(RwError::from(InvalidInputSyntax(format!(
+            "source name cannot start with reserved prefix '{}'",
+            ICEBERG_SINK_PREFIX
+        ))));
     }
 
     if handler_args.with_options.is_empty() {
