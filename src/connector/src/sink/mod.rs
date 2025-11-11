@@ -817,10 +817,10 @@ pub enum SinkCommitCoordinator {
 
 #[async_trait]
 pub trait SinglePhaseCommitCoordinator {
-    /// Initialize the sink committer coordinator, return the log store rewind start offset.
+    /// Initialize the sink committer coordinator.
     async fn init(&mut self) -> Result<()>;
 
-    /// Commit directly without two-phase commit.
+    /// Commit directly using single-phase strategy.
     async fn commit_directly(
         &mut self,
         _epoch: u64,
@@ -831,7 +831,7 @@ pub trait SinglePhaseCommitCoordinator {
 
 #[async_trait]
 pub trait TwoPhaseCommitCoordinator {
-    /// Initialize the sink committer coordinator, return the log store rewind start offset.
+    /// Initialize the sink committer coordinator.
     async fn init(&mut self) -> Result<()>;
 
     /// Return serialized commit metadata to be passed to `commit`.
