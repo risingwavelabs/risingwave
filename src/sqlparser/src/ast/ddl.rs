@@ -171,7 +171,7 @@ pub enum AlterViewOperation {
     AsQuery {
         query: Box<Query>,
     },
-    /// `SET CONFIG ( streaming.some_config_key = some_config_value, .. )`
+    /// `SET CONFIG ( streaming.some_config_key = <some_config_value>, .. )`
     SetConfig {
         entries: Vec<SqlOption>,
     },
