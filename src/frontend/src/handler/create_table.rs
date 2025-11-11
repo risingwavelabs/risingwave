@@ -1001,48 +1001,61 @@ fn derive_with_options_for_cdc_table(
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
             SQL_SERVER_CDC_CONNECTOR => {
-                // SQL Server external table name can be in different formats:
-                // 1. 'databaseName.schemaName.tableName' (full format)
-                // 2. 'schemaName.tableName' (schema and table only)
-                // 3. 'tableName' (table only, will use default schema 'dbo')
-                // We will auto-fill missing parts from source configuration
+                // SQL Server external table name must be in one of two formats:
+                // 1. 'schemaName.tableName' (2 parts) - database is already specified in source
+                // 2. 'databaseName.schemaName.tableName' (3 parts) - for explicit verification
+                //
+                // We do NOT allow single table name (e.g., 't') because:
+                // - Unlike database name (already in source), schema name is NOT pre-specified
+                // - User must explicitly provide schema (even if it's 'dbo')
                 let parts: Vec<&str> = external_table_name.split('.').collect();
-                let (_, schema_name, table_name) = match parts.len() {
+                let (schema_name, table_name) = match parts.len() {
                     3 => {
-                        // Full format: database.schema.table
+                        // Format: database.schema.table
+                        // Verify that the database name matches the one in source definition
                         let db_name = parts[0];
                         let schema_name = parts[1];
                         let table_name = parts[2];
 
-                        // Verify database name matches source configuration
                         if db_name != source_database_name {
                             return Err(anyhow!(
-                                "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
+                                "The database name '{}' in FROM clause does not match the database name '{}' specified in source definition. \
+                                 You can either use 'schema.table' format (recommended) or ensure the database name matches.",
                                 db_name,
                                 source_database_name
                             ).into());
                         }
-                        (db_name, schema_name, table_name)
+                        (schema_name, table_name)
                     }
                     2 => {
-                        // Schema and table only: schema.table
+                        // Format: schema.table (recommended)
+                        // Database name is taken from source definition
                         let schema_name = parts[0];
                         let table_name = parts[1];
-                        (source_database_name, schema_name, table_name)
+                        (schema_name, table_name)
                     }
                     1 => {
-                        // Table only: table (use default schema 'dbo')
-                        let table_name = parts[0];
-                        (source_database_name, "dbo", table_name)
+                        // Format: table only
+                        // Reject with clear error message
+                        return Err(anyhow!(
+                            "Invalid table name format '{}'. For SQL Server CDC, you must specify the schema name. \
+                             Use 'schema.table' format (e.g., 'dbo.{}') or 'database.schema.table' format (e.g., '{}.dbo.{}').",
+                            external_table_name,
+                            external_table_name,
+                            source_database_name,
+                            external_table_name
+                        ).into());
                     }
                     _ => {
+                        // Invalid format (4+ parts or empty)
                         return Err(anyhow!(
-                            "The upstream table name must be in one of these formats: 'database.schema.table', 'schema.table', or 'table'"
+                            "Invalid table name format '{}'. Expected 'schema.table' or 'database.schema.table'.",
+                            external_table_name
                         ).into());
                     }
                 };
 
-                // insert 'schema.name' into connect properties
+                // Insert schema and table names into connector properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
             }
@@ -1177,7 +1190,7 @@ pub(super) async fn handle_create_table_plan(
                 )?;
                 source.clone()
             };
-            let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
+            let cdc_with_options = derive_with_options_for_cdc_table(
                 &source.with_properties,
                 cdc_table.external_table_name.clone(),
             )?;
