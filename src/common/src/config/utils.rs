@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
-
 use super::*;
 
 /// Unrecognized fields in a config section. Generic over the config section type to provide better
@@ -103,47 +101,4 @@ pub struct NoOverride;
 
 impl OverrideConfig for NoOverride {
     fn r#override(&self, _config: &mut RwConfig) {}
-}
-
-def_anyhow_newtype! { pub ConfigMergeError }
-
-/// Merge the `partial` config into the `base` config to override entries.
-///
-/// Tables will be merged recursively, while other fields (including arrays) will be replaced by
-/// the `partial` config, if exists.
-///
-/// Returns an error if any of the input is invalid, or the merged config cannot be parsed.
-#[must_use]
-pub fn merge_config<C: Serialize + serde::de::DeserializeOwned>(
-    base: &C,
-    partial: &str,
-) -> Result<C, ConfigMergeError> {
-    use toml::Value;
-
-    let mut base_value = Value::try_from(base).context("failed to serialize base config")?;
-    let partial_value = Value::from_str(partial).context("failed to parse partial config")?;
-
-    fn merge(base: &mut Value, partial: Value) {
-        if let Value::Table(base_table) = base
-            && let Value::Table(partial_table) = partial
-        {
-            for (k, v) in partial_table {
-                let base_v = base_table
-                    .get_mut(&k)
-                    .with_context(|| format!("no such key in configuration: {k}"))
-                    .unwrap();
-                merge(base_v, v);
-            }
-        } else {
-            *base = partial;
-        }
-    }
-
-    merge(&mut base_value, partial_value);
-
-    let merged = base_value
-        .try_into()
-        .context("failed to deserialize merged config")?;
-
-    Ok(merged)
 }

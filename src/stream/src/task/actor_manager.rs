@@ -21,7 +21,7 @@ use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::config::{MetricLevel, StreamingConfig};
+use risingwave_common::config::{MetricLevel, StreamingConfig, merge_config};
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -395,13 +395,32 @@ impl StreamActorManager {
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         let actor_id = actor.actor_id;
+
+        let config = match merge_config(
+            self.env.global_config().as_ref(),
+            "[streaming.developer.stream_compute_client_config]
+connect_timeout_secs = 5",
+            ["streaming"],
+        ) {
+            Ok(Some(config)) => Arc::new(config),
+            Ok(None) => self.env.global_config().clone(),
+            Err(e) => {
+                tracing::error!(
+                    error = %e.as_report(),
+                    actor_id,
+                    "failed to apply configuration override",
+                );
+                self.env.global_config().clone()
+            }
+        };
+
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
             self.env.total_mem_usage(),
             self.streaming_metrics.clone(),
             self.env.meta_client(),
-            self.env.global_config().clone(), // TODO(config): local config for actor
+            config,
             self.env.clone(),
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
