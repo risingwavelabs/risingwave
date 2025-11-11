@@ -94,6 +94,7 @@ pub fn merge_config<C: Serialize + DeserializeOwned + Clone>(
 }
 
 #[cfg(test)]
+#[allow(clippy::bool_assert_comparison)]
 mod tests {
     use thiserror_ext::AsReport;
 
