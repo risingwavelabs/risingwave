@@ -74,19 +74,26 @@ impl DebeziumCdcMeta {
         source_ts_ms: i64,
         msg_type: cdc_message::CdcMessageType,
     ) -> Self {
-        // full_table_name is in the format of `database_name.table_name` for MySQL,
-        // or `database_name.schema_name.table_name` for SQL Server.
-        // For SQL Server, we need to skip the database part and keep `schema_name.table_name`
+        // full_table_name format:
+        // - MySQL: "database.table" (1 dot, 2 parts)
+        // - Postgres/SQL Server: "database.schema.table" (2 dots, 3 parts)
+        //
+        // For extract_table_name():
+        // - MySQL: need full "database.table" → db_name_prefix_len = 0
+        // - Postgres/SQL Server: need "schema.table" → db_name_prefix_len = first_dot + 1
         let db_name_prefix_len = if let Some(first_dot) = full_table_name.find('.') {
-            // Check if there's a second dot (SQL Server: database.schema.table)
+            // Check if there's a second dot
             if full_table_name[first_dot + 1..].find('.').is_some() {
-                // For SQL Server, skip "database." part, return index after first dot
+                // 2 dots (3 parts): Postgres/SQL Server "database.schema.table"
+                // Skip "database." part, keep "schema.table"
                 first_dot + 1
             } else {
-                // For MySQL/Postgres: keep "database." part as is
-                first_dot
+                // 1 dot (2 parts): MySQL "database.table"
+                // Keep entire string
+                0
             }
         } else {
+            // No dot (should not happen in practice)
             0
         };
         Self {
