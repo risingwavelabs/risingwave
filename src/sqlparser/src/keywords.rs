@@ -25,7 +25,7 @@
 //! 3. a `RESERVED_FOR_TABLE_ALIAS` array with keywords reserved in a
 //!    "table alias" context.
 
-use core::fmt;
+use std::fmt;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -142,6 +142,7 @@ define_keywords!(
     COMMITTED,
     CONCURRENTLY,
     CONDITION,
+    CONFIG,
     CONFLICT,
     CONFLUENT,
     CONNECT,

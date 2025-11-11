@@ -16,18 +16,10 @@
 //!
 //! The tokens then form the input for the parser, which outputs an Abstract Syntax Tree (AST).
 
-#[cfg(not(feature = "std"))]
-use alloc::{
-    borrow::ToOwned,
-    format,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
-use core::fmt;
-use core::fmt::Debug;
-use core::iter::Peekable;
-use core::str::Chars;
+use std::fmt;
+use std::fmt::Debug;
+use std::iter::Peekable;
+use std::str::Chars;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -321,7 +313,6 @@ impl fmt::Display for TokenizerError {
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for TokenizerError {}
 
 /// SQL Tokenizer
@@ -1062,17 +1053,16 @@ mod tests {
 
     #[test]
     fn tokenizer_error_impl() {
+        use std::error::Error;
+
         let err = TokenizerError {
             message: "test".into(),
             line: 1,
             col: 1,
             context: "LINE 1:".to_owned(),
         };
-        #[cfg(feature = "std")]
-        {
-            use std::error::Error;
-            assert!(err.source().is_none());
-        }
+
+        assert!(err.source().is_none());
         assert_eq!(err.to_string(), "test at line 1, column 1\nLINE 1:");
     }
 

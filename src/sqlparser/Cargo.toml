@@ -17,10 +17,6 @@ disable-publish = true
 [lib]
 path = "src/lib.rs"
 
-[features]
-default = ["std"]
-std = []
-
 [dependencies]
 itertools = { workspace = true }
 serde = { workspace = true, optional = true }

@@ -12,15 +12,7 @@
 
 //! SQL Parser
 
-#[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    format,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
-use core::fmt;
+use std::fmt;
 
 use ddl::WebhookSourceInfo;
 use itertools::Itertools;
@@ -168,7 +160,6 @@ impl fmt::Display for ParserError {
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for ParserError {}
 
 type ColumnsDefTuple = (

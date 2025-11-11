@@ -20,14 +20,8 @@ mod query;
 mod statement;
 mod value;
 
-#[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    vec::Vec,
-};
-use core::fmt;
-use core::fmt::Display;
+use std::fmt;
+use std::fmt::Display;
 use std::collections::HashSet;
 use std::sync::Arc;
 

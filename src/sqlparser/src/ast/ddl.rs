@@ -13,9 +13,7 @@
 //! AST types specific to CREATE/ALTER variants of [`crate::ast::Statement`]
 //! (commonly referred to as Data Definition Language, or DDL)
 
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::ToString, vec::Vec};
-use core::fmt;
+use std::fmt;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
