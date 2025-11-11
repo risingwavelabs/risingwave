@@ -605,8 +605,16 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool>
 
     fn reset_value_idx(&mut self) {
         debug_assert!(self.is_valid_entry_idx());
-        self.current_value_idx = self.inner.entries[self.current_entry_idx].value_offset;
         self.value_end_offset = self.get_value_end_offset();
+
+        match D::direction() {
+            DirectionEnum::Forward => {
+                self.current_value_idx = self.inner.entries[self.current_entry_idx].value_offset;
+            }
+            DirectionEnum::Backward => {
+                self.current_value_idx = self.value_end_offset - 1;
+            }
+        }
     }
 
     fn get_value_end_offset(&self) -> usize {
@@ -636,9 +644,27 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool>
     fn advance_to_next_value(&mut self) {
         self.assert_valid_idx();
 
-        if self.current_value_idx + 1 < self.value_end_offset {
-            self.current_value_idx += 1;
-        } else {
+        let curren_entry_ended = match D::direction() {
+            DirectionEnum::Forward => {
+                if self.current_value_idx + 1 < self.value_end_offset {
+                    self.current_value_idx += 1;
+                    false
+                } else {
+                    true
+                }
+            }
+            DirectionEnum::Backward => {
+                if self.current_value_idx > self.inner.entries[self.current_entry_idx].value_offset
+                {
+                    self.current_value_idx -= 1;
+                    false
+                } else {
+                    true
+                }
+            }
+        };
+
+        if curren_entry_ended {
             self.advance_to_next_entry();
             if self.is_valid_entry_idx() {
                 self.reset_value_idx();
@@ -1496,7 +1522,7 @@ mod tests {
             }
             let mut expected = vec![];
             for key_idx in (0..=2).rev() {
-                for epoch in (1..=3).rev() {
+                for epoch in 1..=3 {
                     let item = batch_items[epoch - 1][key_idx].clone();
                     expected.push(item);
                 }
@@ -1684,7 +1710,7 @@ mod tests {
             }
             let mut expected = vec![];
             for key_idx in (0..=2).rev() {
-                for epoch in (1..=3).rev() {
+                for epoch in 1..=3 {
                     let item = batch_items[epoch - 1][key_idx].clone();
                     expected.push(item);
                 }

@@ -317,16 +317,22 @@ mod tests {
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::*;
-    use crate::hummock::iterator::MergeIterator;
+    use crate::hummock::compactor::merge_imms_in_memory;
     use crate::hummock::iterator::test_utils::{
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
         iterator_test_bytes_key_of, iterator_test_bytes_key_of_epoch,
-        iterator_test_bytes_user_key_of, iterator_test_user_key_of, iterator_test_value_of,
-        mock_sstable_store,
+        iterator_test_bytes_user_key_of, iterator_test_table_key_of, iterator_test_user_key_of,
+        iterator_test_value_of, mock_sstable_store, transform_shared_buffer,
+    };
+    use crate::hummock::iterator::{IteratorFactory, MergeIterator};
+    use crate::hummock::shared_buffer::shared_buffer_batch::{
+        SharedBufferBatch, SharedBufferValue,
     };
     use crate::hummock::test_utils::gen_test_sstable;
-    use crate::hummock::{BackwardSstableIterator, SstableStoreRef, TableHolder};
+    use crate::hummock::{
+        BackwardIteratorFactory, BackwardSstableIterator, SstableStoreRef, TableHolder,
+    };
 
     #[tokio::test]
     async fn test_backward_user_basic() {
@@ -378,6 +384,185 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_backward_user_basic_2() {
+        let shared_buffer_items1: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                SharedBufferValue::Insert(Bytes::from("value1_1")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                SharedBufferValue::Insert(Bytes::from("value2_1")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                SharedBufferValue::Insert(Bytes::from("value3_1")),
+            ),
+        ];
+        let epoch = test_epoch(1);
+        let imm1 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items1.clone()),
+            epoch,
+            TableId::default(),
+        );
+
+        let shared_buffer_items2: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                SharedBufferValue::Insert(Bytes::from("value1_2")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                SharedBufferValue::Insert(Bytes::from("value2_2")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                SharedBufferValue::Insert(Bytes::from("value3_2")),
+            ),
+        ];
+        let epoch = test_epoch(2);
+        let imm2 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items2.clone()),
+            epoch,
+            TableId::default(),
+        );
+
+        let shared_buffer_items3: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                SharedBufferValue::Insert(Bytes::from("value1_3")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                SharedBufferValue::Insert(Bytes::from("value2_3")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                SharedBufferValue::Insert(Bytes::from("value3_3")),
+            ),
+        ];
+        let epoch = test_epoch(3);
+        let imm3 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items3.clone()),
+            epoch,
+            TableId::default(),
+        );
+
+        // newer data comes first
+        let imms = vec![imm3, imm2, imm1];
+        let merged_imm = merge_imms_in_memory(TableId::default(), imms.clone(), None).await;
+
+        let (key10_3, v10_3) = (
+            FullKey {
+                user_key: iterator_test_user_key_of(10),
+                epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(3)),
+            },
+            HummockValue::put(Bytes::from("value10_3")),
+        );
+
+        let (key10_2, v10_2) = (
+            FullKey {
+                user_key: iterator_test_user_key_of(10),
+                epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(2)),
+            },
+            HummockValue::put(Bytes::from("value10_2")),
+        );
+
+        let (key10_1, v10_1) = (
+            FullKey {
+                user_key: iterator_test_user_key_of(10),
+                epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+            },
+            HummockValue::put(Bytes::from("value10_1")),
+        );
+
+        let (key20_3, v20_3) = (
+            FullKey {
+                user_key: iterator_test_user_key_of(20),
+                epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(3)),
+            },
+            HummockValue::put(Bytes::from("value20_3")),
+        );
+
+        let (key20_2, v20_2) = (
+            FullKey {
+                user_key: iterator_test_user_key_of(20),
+                epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(2)),
+            },
+            HummockValue::put(Bytes::from("value20_2")),
+        );
+
+        let (key20_1, v20_1) = (
+            FullKey {
+                user_key: iterator_test_user_key_of(20),
+                epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+            },
+            HummockValue::put(Bytes::from("value20_1")),
+        );
+
+        let sstable_store = mock_sstable_store().await;
+        let (table, sstable_info) = gen_test_sstable(
+            default_builder_opt_for_test(),
+            0,
+            vec![
+                (key10_3.to_ref(), v10_3.as_slice()),
+                (key10_2.to_ref(), v10_2.as_slice()),
+                (key10_1.to_ref(), v10_1.as_slice()),
+                (key20_3.to_ref(), v20_3.as_slice()),
+                (key20_2.to_ref(), v20_2.as_slice()),
+                (key20_1.to_ref(), v20_1.as_slice()),
+            ]
+            .into_iter(),
+            sstable_store.clone(),
+        )
+        .await;
+
+        let mut factory = BackwardIteratorFactory::default();
+        factory.add_batch_iter(merged_imm);
+        factory.add_staging_sst_iter(BackwardSstableIterator::new(
+            table,
+            sstable_store,
+            &sstable_info,
+        ));
+        let mi = factory.build(None);
+
+        let mut ui = BackwardUserIterator::for_test(mi, (Unbounded, Unbounded));
+        ui.rewind().await.unwrap();
+        let mut output = vec![];
+        while ui.is_valid() {
+            let key = ui.key();
+            let val = ui.value().to_vec();
+            output.push((key.user_key.table_key.to_vec(), Bytes::from(val)));
+            ui.next().await.unwrap();
+        }
+
+        let expect = vec![
+            (
+                iterator_test_user_key_of(20).table_key.to_vec(),
+                Bytes::from("value20_3"),
+            ),
+            (
+                iterator_test_user_key_of(10).table_key.to_vec(),
+                Bytes::from("value10_3"),
+            ),
+            (
+                iterator_test_user_key_of(3).table_key.to_vec(),
+                Bytes::from("value3_3"),
+            ),
+            (
+                iterator_test_user_key_of(2).table_key.to_vec(),
+                Bytes::from("value2_3"),
+            ),
+            (
+                iterator_test_user_key_of(1).table_key.to_vec(),
+                Bytes::from("value1_3"),
+            ),
+        ];
+
+        assert_eq!(output, expect);
     }
 
     #[tokio::test]
