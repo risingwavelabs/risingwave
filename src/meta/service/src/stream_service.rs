@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
@@ -27,7 +26,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{FragmentId, ObjectId, SourceId, StreamingParallelism};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
@@ -135,12 +134,12 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Sink => {
                 self.metadata_manager
-                    .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)
+                    .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
                     .await?
             }
             ThrottleTarget::Fragment => {
                 self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id as _, request.rate)
+                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
                     .await?
             }
             ThrottleTarget::Unspecified => {
@@ -151,7 +150,7 @@ impl StreamManagerService for StreamServiceImpl {
         let request_id = if request.kind() == ThrottleTarget::Fragment {
             self.metadata_manager
                 .catalog_controller
-                .get_fragment_streaming_job_id(request.id as _)
+                .get_fragment_streaming_job_id(request.id.into())
                 .await?
         } else {
             request.id as _
@@ -359,7 +358,7 @@ impl StreamManagerService for StreamServiceImpl {
         let fragment_desc = self
             .metadata_manager
             .catalog_controller
-            .get_fragment_desc_by_id(req.fragment_id as i32)
+            .get_fragment_desc_by_id(req.fragment_id)
             .await?;
         let distribution =
             fragment_desc.map(|(desc, upstreams)| fragment_desc_to_distribution(desc, upstreams));
@@ -436,9 +435,9 @@ impl StreamManagerService for StreamServiceImpl {
         let states = actor_locations
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {
-                actor_id: actor_location.actor_id as _,
-                fragment_id: actor_location.fragment_id as _,
-                worker_id: actor_location.worker_id as _,
+                actor_id: actor_location.actor_id,
+                fragment_id: actor_location.fragment_id,
+                worker_id: actor_location.worker_id,
             })
             .collect_vec();
 
@@ -555,9 +554,9 @@ impl StreamManagerService for StreamServiceImpl {
                     .unwrap_or_default()
                     .into_iter()
                     .map(move |split| list_actor_splits_response::ActorSplit {
-                        actor_id: actor_id as _,
+                        actor_id,
                         source_id: source_id as _,
-                        fragment_id: fragment_id as _,
+                        fragment_id,
                         split_id: split.id().to_string(),
                         fragment_type: fragment_type.into(),
                     })
@@ -612,20 +611,22 @@ impl StreamManagerService for StreamServiceImpl {
                 Ok(AlterConnectorPropsObject::Sink) => (
                     self.metadata_manager
                         .update_sink_props_by_sink_id(
-                            request.object_id as i32,
+                            request.object_id.into(),
                             request.changed_props.clone().into_iter().collect(),
                         )
                         .await?,
                     request.object_id,
                 ),
                 Ok(AlterConnectorPropsObject::IcebergTable) => {
-                    self.metadata_manager
+                    let (prop, sink_id) = self
+                        .metadata_manager
                         .update_iceberg_table_props_by_table_id(
-                            TableId::from(request.object_id),
+                            request.object_id.into(),
                             request.changed_props.clone().into_iter().collect(),
                             request.extra_options,
                         )
-                        .await?
+                        .await?;
+                    (prop, sink_id.as_raw_id())
                 }
 
                 Ok(AlterConnectorPropsObject::Source) => {
@@ -765,11 +766,11 @@ fn fragment_desc_to_distribution(
     upstreams: Vec<FragmentId>,
 ) -> FragmentDistribution {
     FragmentDistribution {
-        fragment_id: fragment_desc.fragment_id as _,
+        fragment_id: fragment_desc.fragment_id,
         table_id: fragment_desc.job_id,
         distribution_type: PbFragmentDistributionType::from(fragment_desc.distribution_type) as _,
         state_table_ids: fragment_desc.state_table_ids.0,
-        upstream_fragment_ids: upstreams.into_iter().map(|id| id as _).collect(),
+        upstream_fragment_ids: upstreams,
         fragment_type_mask: fragment_desc.fragment_type_mask as _,
         parallelism: fragment_desc.parallelism as _,
         vnode_count: fragment_desc.vnode_count as _,

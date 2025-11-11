@@ -263,7 +263,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)
-            .enable_preload_all_rows_by_config(&actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&actor_context.config)
             .build()
             .await;
 
@@ -1098,7 +1098,8 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         )
         .await;
 
-        let metrics = StreamingMetrics::unused().new_materialize_metrics(table_id, 1, 2);
+        let metrics =
+            StreamingMetrics::unused().new_materialize_metrics(table_id, 1.into(), 2.into());
 
         Self {
             input,

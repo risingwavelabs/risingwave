@@ -91,8 +91,8 @@ pub(crate) fn to_fragment_worker_slot_mapping(
 ) -> Vec<FragmentWorkerSlotMapping> {
     mappings
         .iter()
-        .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
-            fragment_id: *fragment_id,
+        .map(|(&fragment_id, mapping)| FragmentWorkerSlotMapping {
+            fragment_id,
             mapping: Some(mapping.to_protobuf()),
         })
         .collect()
@@ -103,8 +103,8 @@ pub(crate) fn to_deleted_fragment_worker_slot_mapping(
 ) -> Vec<FragmentWorkerSlotMapping> {
     fragment_ids
         .iter()
-        .map(|fragment_id| FragmentWorkerSlotMapping {
-            fragment_id: *fragment_id,
+        .map(|&fragment_id| FragmentWorkerSlotMapping {
+            fragment_id,
             mapping: None,
         })
         .collect()
@@ -229,7 +229,7 @@ pub fn start_serving_vnode_mapping_worker(
                                         match streaming_parallelisms.get(frag_id) {
                                             Some(info) => Some((*frag_id, info.clone())),
                                             None => {
-                                                tracing::warn!(fragment_id = *frag_id, "streaming parallelism not found");
+                                                tracing::warn!(fragment_id = %frag_id, "streaming parallelism not found");
                                                 None
                                             }
                                         }

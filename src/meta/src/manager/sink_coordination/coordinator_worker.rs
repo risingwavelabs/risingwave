@@ -544,7 +544,7 @@ impl CoordinatorWorker {
                             || {
                                 warn!(
                                     elapsed = ?start_time.elapsed(),
-                                    sink_id = sink_id.sink_id,
+                                    %sink_id,
                                     "committing"
                                 );
                             },
@@ -560,7 +560,7 @@ impl CoordinatorWorker {
                             .await?;
                         persist_pre_commit_metadata(
                             &db,
-                            sink_id.sink_id as _,
+                            sink_id as _,
                             epoch,
                             commit_metadata.clone(),
                         )
@@ -594,7 +594,7 @@ impl CoordinatorWorker {
                             || {
                                 warn!(
                                     elapsed = ?start_time.elapsed(),
-                                    sink_id = sink_id.sink_id,
+                                    %sink_id,
                                     "committing"
                                 );
                             },
@@ -602,7 +602,7 @@ impl CoordinatorWorker {
                         .await
                         .map_err(|e| anyhow!(e))?;
 
-                        mark_record_committed(&db, sink_id.sink_id as _, epoch).await?;
+                        mark_record_committed(&db, sink_id as _, epoch).await?;
                     }
                 }
                 prev_commit_epoch = Some(epoch);
@@ -623,8 +623,7 @@ impl CoordinatorWorker {
                 Ok(None)
             }
             SinkCommitCoordinator::TwoPhase(coordinator) => {
-                let ordered_metadata =
-                    list_sink_states_ordered_by_epoch(db, sink_id.sink_id as _).await?;
+                let ordered_metadata = list_sink_states_ordered_by_epoch(db, sink_id as _).await?;
 
                 if ordered_metadata.is_empty() {
                     Ok(None)
@@ -654,15 +653,14 @@ impl CoordinatorWorker {
                     // Records for all aborted epochs and previously committed epochs are no longer needed.
                     delete_aborted_and_outdated_records(
                         &txn,
-                        sink_id.sink_id as _,
+                        sink_id,
                         aborted_epochs,
                         last_committed_epoch,
                     )
                     .await?;
 
                     if let Some(last_committed_epoch) = last_committed_epoch {
-                        mark_record_committed(&txn, sink_id.sink_id as _, last_committed_epoch)
-                            .await?;
+                        mark_record_committed(&txn, sink_id, last_committed_epoch).await?;
                     }
                     txn.commit().await?;
 

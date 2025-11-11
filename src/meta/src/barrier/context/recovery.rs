@@ -803,7 +803,7 @@ impl GlobalBarrierWorkerContextImpl {
                         *actor_id,
                         StreamActor {
                             actor_id: *actor_id as _,
-                            fragment_id: *fragment_id as _,
+                            fragment_id: *fragment_id,
                             vnode_bitmap: vnode_bitmap.clone(),
                             mview_definition: job_definition.clone(),
                             expr_context: expr_context.clone(),

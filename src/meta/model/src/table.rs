@@ -355,11 +355,11 @@ impl From<PbTable> for ActiveModel {
         let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
         } else {
-            Set(Some(pb_table.fragment_id as FragmentId))
+            Set(Some(pb_table.fragment_id))
         };
         let dml_fragment_id = pb_table
             .dml_fragment_id
-            .map(|x| Set(Some(x as FragmentId)))
+            .map(|x| Set(Some(x)))
             .unwrap_or_default();
         let optional_associated_source_id =
             if let Some(OptionalAssociatedSourceId::AssociatedSourceId(src_id)) =

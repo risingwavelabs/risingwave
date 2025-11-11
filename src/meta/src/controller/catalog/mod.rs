@@ -782,7 +782,7 @@ impl CatalogController {
             .into_iter()
             .map(|(job_id, table_id_array)| {
                 (
-                    job_id.as_raw_id() as _,
+                    job_id.as_sink_id(),
                     table_id_array
                         .into_inner()
                         .into_iter()

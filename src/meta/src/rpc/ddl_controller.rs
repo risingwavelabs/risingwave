@@ -44,7 +44,6 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
-    WorkerId,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
@@ -133,11 +132,9 @@ impl std::fmt::Display for StreamingJobId {
 impl StreamingJobId {
     fn id(&self) -> JobId {
         match self {
-            StreamingJobId::MaterializedView(id) | StreamingJobId::Table(_, id) => {
-                id.as_raw_id().into()
-            }
+            StreamingJobId::MaterializedView(id) | StreamingJobId::Table(_, id) => id.as_job_id(),
             StreamingJobId::Index(id) => (*id as u32).into(),
-            StreamingJobId::Sink(id) => (*id as u32).into(),
+            StreamingJobId::Sink(id) => id.as_job_id(),
         }
     }
 }
@@ -1207,15 +1204,7 @@ impl DdlController {
 
         // unregister fragments and actors from source manager.
         // FIXME: need also unregister source backfill fragments.
-        let dropped_source_fragments = removed_source_fragments
-            .into_iter()
-            .map(|(source_id, fragments)| {
-                (
-                    source_id,
-                    fragments.into_iter().map(|id| id as u32).collect(),
-                )
-            })
-            .collect();
+        let dropped_source_fragments = removed_source_fragments;
         self.source_manager
             .apply_source_change(SourceChange::DropMv {
                 dropped_source_fragments,
@@ -1301,7 +1290,7 @@ impl DdlController {
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
                         .metadata_manager
-                        .get_job_fragments_by_id(sink.id.into())
+                        .get_job_fragments_by_id(sink.id.as_job_id())
                         .await?;
                     if sink_job_fragments.fragments.len() != 1 {
                         return Err(anyhow!(
@@ -1350,7 +1339,8 @@ impl DdlController {
                         .metadata_manager
                         .catalog_controller
                         .create_job_catalog_for_replace(&streaming_job, None, None, None)
-                        .await?;
+                        .await?
+                        .as_sink_id();
                     let StreamingJob::Sink(sink) = streaming_job else {
                         unreachable!()
                     };
@@ -1416,7 +1406,7 @@ impl DdlController {
                         .iter()
                         .map(|sink| FinishAutoRefreshSchemaSinkContext {
                             tmp_sink_id: sink.tmp_sink_id,
-                            original_sink_id: sink.original_sink.id as _,
+                            original_sink_id: sink.original_sink.id,
                             columns: sink.new_schema.clone(),
                             new_log_store_table: sink
                                 .new_log_store_table
@@ -1456,7 +1446,7 @@ impl DdlController {
                     self.metadata_manager
                         .catalog_controller
                         .prepare_streaming_job(
-                            sink.tmp_sink_id,
+                            sink.tmp_sink_id.as_job_id(),
                             || [&sink.new_fragment].into_iter(),
                             &empty_downstreams,
                             true,
@@ -1526,7 +1516,7 @@ impl DdlController {
 
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id.as_raw_id() as _, ObjectType::Table),
-            StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
+            StreamingJobId::Sink(id) => (id.as_raw_id() as _, ObjectType::Sink),
             StreamingJobId::Table(_, id) => (id.as_raw_id() as _, ObjectType::Table),
             StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
         };
@@ -1951,10 +1941,8 @@ impl DdlController {
                         downstream_actor_location.remove(actor_id);
                     }
                     for (actor_id, status) in &sink.actor_status {
-                        downstream_actor_location.insert(
-                            *actor_id,
-                            status.location.as_ref().unwrap().worker_node_id as WorkerId,
-                        );
+                        downstream_actor_location
+                            .insert(*actor_id, status.location.as_ref().unwrap().worker_node_id);
                     }
 
                     *downstream_fragment = (&sink.new_fragment_info(), stream_job.id()).into();
@@ -2248,7 +2236,7 @@ fn report_create_object(
     );
 }
 
-async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> MetaResult<()> {
+async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: SinkId) -> MetaResult<()> {
     match Entity::delete_many()
         .filter(Column::SinkId.eq(sink_id))
         .exec(db)
@@ -2336,7 +2324,7 @@ pub fn build_upstream_sink_info(
     let current_target_columns = target_table.get_columns();
     let project_exprs = build_select_node_list(&sink_columns, current_target_columns)?;
     Ok(UpstreamSinkInfo {
-        sink_id: sink.id as _,
+        sink_id: sink.id,
         sink_fragment_id: sink_fragment_id as _,
         sink_output_fields,
         sink_original_target_columns: sink.get_original_target_columns().clone(),

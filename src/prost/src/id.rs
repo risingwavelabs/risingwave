@@ -16,6 +16,7 @@ use std::any::type_name;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Formatter;
 use std::num::TryFromIntError;
+use std::ops::{Add, AddAssign};
 use std::str::FromStr;
 
 use sea_orm::sea_query::{ArrayType, ValueTypeErr};
@@ -212,10 +213,28 @@ impl<'de, const N: usize> Deserialize<'de> for TypedId<N> {
     }
 }
 
+impl<const N: usize> Add<u32> for TypedId<N> {
+    type Output = Self;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        Self(self.0.checked_add(rhs).unwrap())
+    }
+}
+
+impl<const N: usize> AddAssign<u32> for TypedId<N> {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 = self.0.checked_add(rhs).unwrap()
+    }
+}
+
 pub type TableId = TypedId<1>;
 pub type JobId = TypedId<2>;
 pub type DatabaseId = TypedId<3>;
 pub type SchemaId = TypedId<4>;
+pub type FragmentId = TypedId<5>;
+pub type ActorId = TypedId<6>;
+pub type WorkerId = TypedId<7>;
+pub type SinkId = TypedId<8>;
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {
@@ -225,9 +244,19 @@ impl JobId {
     pub fn as_mv_table_id(self) -> TableId {
         TableId::new(self.0)
     }
+
+    pub fn as_sink_id(self) -> SinkId {
+        SinkId::new(self.0)
+    }
 }
 
 impl TableId {
+    pub fn as_job_id(self) -> JobId {
+        JobId::new(self.0)
+    }
+}
+
+impl SinkId {
     pub fn as_job_id(self) -> JobId {
         JobId::new(self.0)
     }
@@ -249,19 +278,22 @@ impl_into_object!(
     crate::user::grant_privilege::Object,
     DatabaseId,
     TableId,
-    SchemaId
+    SchemaId,
+    SinkId
 );
 
 impl_into_object!(
     crate::ddl_service::alter_name_request::Object,
     DatabaseId,
     TableId,
-    SchemaId
+    SchemaId,
+    SinkId
 );
 
 impl_into_object!(
     crate::ddl_service::alter_owner_request::Object,
     DatabaseId,
     TableId,
-    SchemaId
+    SchemaId,
+    SinkId
 );

@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
@@ -316,7 +315,7 @@ impl HummockSnapshotManager {
         let deleted_table_ids: HashSet<_> = deltas
             .version_deltas
             .iter()
-            .flat_map(|version_deltas| version_deltas.removed_table_ids.iter().copied().map_into())
+            .flat_map(|version_deltas| version_deltas.removed_table_ids.iter().copied())
             .collect();
         self.table_change_log_notification_sender
             .send(TableChangeLogNotificationMsg {

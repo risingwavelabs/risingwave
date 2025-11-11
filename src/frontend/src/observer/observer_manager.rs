@@ -504,7 +504,11 @@ impl FrontendObserverNode {
                     .upsert_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
             }
             Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
-                &mappings.into_iter().map(|m| m.fragment_id).collect_vec(),
+                mappings
+                    .into_iter()
+                    .map(|m| m.fragment_id)
+                    .collect_vec()
+                    .as_slice(),
             ),
             Operation::Snapshot => {
                 self.worker_node_manager

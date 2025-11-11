@@ -133,7 +133,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                             } if associated_source_id == &core.source_id => {
                                                 tracing::info!(
                                                     ?barrier.epoch,
-                                                    actor_id = self.actor_ctx.id,
+                                                    actor_id = %self.actor_ctx.id,
                                                     source_id = %core.source_id,
                                                     table_id = %self.associated_table_id,
                                                     "RefreshStart:"
@@ -153,7 +153,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                             } if associated_source_id == &core.source_id => {
                                                 tracing::info!(
                                                     ?barrier.epoch,
-                                                    actor_id = self.actor_ctx.id,
+                                                    actor_id = %self.actor_ctx.id,
                                                     source_id = %core.source_id,
                                                     table_id = %self.associated_table_id,
                                                     "ListFinish:"
@@ -174,7 +174,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,
-                                            actor_id = self.actor_ctx.id,
+                                            actor_id = %self.actor_ctx.id,
                                             source_id = %core.source_id,
                                             table_id = %self.associated_table_id,
                                             "Reporting load finished"

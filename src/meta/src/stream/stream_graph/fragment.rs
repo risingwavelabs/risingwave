@@ -160,7 +160,7 @@ impl BuildingFragment {
                 has_job = true;
             }
             NodeBody::Sink(sink_node) => {
-                sink_node.sink_desc.as_mut().unwrap().id = job_id.as_raw_id();
+                sink_node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
 
                 has_job = true;
             }
@@ -387,7 +387,7 @@ fn clone_fragment(
             .iter()
             .enumerate()
             .map(|(i, actor)| StreamActor {
-                actor_id: actor_id_gen.to_global_id(i as _).as_global_id() as _,
+                actor_id: actor_id_gen.to_global_id(i as _).as_global_id(),
                 fragment_id,
                 vnode_bitmap: actor.vnode_bitmap.clone(),
                 mview_definition: actor.mview_definition.clone(),
@@ -693,7 +693,7 @@ impl StreamFragmentGraph {
             .fragments
             .into_iter()
             .map(|(id, fragment)| {
-                let id = fragment_id_gen.to_global_id(id);
+                let id = fragment_id_gen.to_global_id(id.as_raw_id());
                 let fragment = BuildingFragment::new(id, fragment, job, table_id_gen);
                 (id, fragment)
             })
@@ -712,8 +712,8 @@ impl StreamFragmentGraph {
         let mut upstreams = HashMap::new();
 
         for edge in proto.edges {
-            let upstream_id = fragment_id_gen.to_global_id(edge.upstream_id);
-            let downstream_id = fragment_id_gen.to_global_id(edge.downstream_id);
+            let upstream_id = fragment_id_gen.to_global_id(edge.upstream_id.as_raw_id());
+            let downstream_id = fragment_id_gen.to_global_id(edge.downstream_id.as_raw_id());
             let edge = StreamFragmentEdge::from_protobuf(&edge);
 
             upstreams
@@ -1040,7 +1040,7 @@ impl StreamFragmentGraph {
     /// a fragment <-> actor mapping
     pub fn create_fragment_backfill_ordering(&self) -> FragmentBackfillOrder {
         let mapping = self.collect_backfill_mapping();
-        let mut fragment_ordering: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut fragment_ordering: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
 
         // 1. Add backfill dependencies
         for (rel_id, downstream_rel_ids) in &self.backfill_order.order {
@@ -1069,18 +1069,19 @@ impl StreamFragmentGraph {
         // 2. Add dependencies: all backfill fragments should run before LocalityProvider fragments
         let locality_provider_dependencies = self.find_locality_provider_dependencies();
 
-        let backfill_fragments: HashSet<u32> = mapping.values().flatten().copied().collect();
+        let backfill_fragments: HashSet<FragmentId> = mapping.values().flatten().copied().collect();
 
         // Calculate LocalityProvider root fragments (zero indegree)
         // Root fragments are those that appear as keys but never appear as downstream dependencies
-        let all_locality_provider_fragments: HashSet<u32> =
+        let all_locality_provider_fragments: HashSet<FragmentId> =
             locality_provider_dependencies.keys().copied().collect();
-        let downstream_locality_provider_fragments: HashSet<u32> = locality_provider_dependencies
-            .values()
-            .flatten()
-            .copied()
-            .collect();
-        let locality_provider_root_fragments: Vec<u32> = all_locality_provider_fragments
+        let downstream_locality_provider_fragments: HashSet<FragmentId> =
+            locality_provider_dependencies
+                .values()
+                .flatten()
+                .copied()
+                .collect();
+        let locality_provider_root_fragments: Vec<FragmentId> = all_locality_provider_fragments
             .difference(&downstream_locality_provider_fragments)
             .copied()
             .collect();

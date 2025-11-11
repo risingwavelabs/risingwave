@@ -203,7 +203,7 @@ impl FragmentEdgeBuilder {
                 } else if cfg!(debug_assertions) {
                     panic!("cannot find new upstreams for actor {} in fragment {} to new_upstream {}. Current upstreams {:?}", actor_id, fragment_id, new_upstream_fragment_id, actor_upstreams);
                 } else {
-                    warn!(actor_id, fragment_id, new_upstream_fragment_id, ?actor_upstreams, "cannot find new upstreams for actor");
+                    warn!(%actor_id, %fragment_id, %new_upstream_fragment_id, ?actor_upstreams, "cannot find new upstreams for actor");
                 }
                 !actor_upstreams.is_empty()
             })
@@ -216,7 +216,7 @@ impl FragmentEdgeBuilder {
                 self.result.upstreams
             );
         } else {
-            warn!(fragment_id, new_upstream_fragment_id, original_upstream_fragment_id, upstreams = ?self.result.upstreams, "cannot find new upstreams to replace");
+            warn!(%fragment_id, %new_upstream_fragment_id, %original_upstream_fragment_id, upstreams = ?self.result.upstreams, "cannot find new upstreams to replace");
         }
     }
 

@@ -15,7 +15,7 @@
 //! This module contains parsers for data types. To handle the anbiguity of `>>` and `> >` in struct definition,
 //! we need to use a stateful parser here. See [`with_state`] for more information.
 
-use core::cell::RefCell;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use winnow::combinator::{

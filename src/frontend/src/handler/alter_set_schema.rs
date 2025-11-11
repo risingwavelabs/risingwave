@@ -106,7 +106,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &sink.name,
                 )?;
-                Object::SinkId(sink.id.sink_id)
+                Object::SinkId(sink.id.as_raw_id())
             }
             StatementType::ALTER_SUBSCRIPTION => {
                 let (subscription, old_schema_name) = catalog_reader.get_subscription_by_name(

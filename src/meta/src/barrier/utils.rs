@@ -33,14 +33,14 @@ use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 pub(super) fn collect_resp_info(
     resps: Vec<BarrierCompleteResponse>,
 ) -> (
-    HashMap<HummockSstableObjectId, u32>,
+    HashMap<HummockSstableObjectId, WorkerId>,
     Vec<LocalSstableInfo>,
     HashMap<TableId, TableWatermarks>,
     Vec<SstableInfo>,
     HashMap<TableId, Vec<VectorIndexAdd>>,
     HashSet<TableId>,
 ) {
-    let mut sst_to_worker: HashMap<HummockSstableObjectId, u32> = HashMap::new();
+    let mut sst_to_worker: HashMap<HummockSstableObjectId, _> = HashMap::new();
     let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
     let mut table_watermarks = Vec::with_capacity(resps.len());
     let mut old_value_ssts = Vec::with_capacity(resps.len());

@@ -660,7 +660,7 @@ impl Sink for IcebergSink {
             catalog,
             table,
             last_commit_epoch: 0,
-            sink_id: self.param.sink_id.sink_id(),
+            sink_id: self.param.sink_id,
             config: self.config.clone(),
             param: self.param.clone(),
             commit_retry_num: self.config.commit_retry_num,
@@ -1602,7 +1602,7 @@ pub struct IcebergSinkCommitter {
     catalog: Arc<dyn Catalog>,
     table: Table,
     pub last_commit_epoch: u64,
-    pub(crate) sink_id: u32,
+    pub(crate) sink_id: SinkId,
     pub(crate) config: IcebergConfig,
     pub(crate) param: SinkParam,
     commit_retry_num: u32,
@@ -1645,7 +1645,7 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         tracing::info!(
             "Sink id = {}: iceberg sink coordinator initing.",
-            self.param.sink_id.sink_id
+            self.param.sink_id
         );
 
         Ok(())
@@ -1678,7 +1678,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         tracing::info!(
             "Sink id = {}: iceberg sink coordinator initing.",
-            self.param.sink_id.sink_id
+            self.param.sink_id
         );
 
         Ok(())
@@ -1921,7 +1921,7 @@ impl IcebergSinkCommitter {
             && self.config.enable_compaction
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
-                    sink_id: SinkId::new(self.sink_id),
+                    sink_id: self.sink_id,
                     compaction_interval: self.config.compaction_interval_sec(),
                     force_compaction: false,
                 })
@@ -2004,7 +2004,7 @@ impl IcebergSinkCommitter {
                 if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
                     && iceberg_compact_stat_sender
                         .send(IcebergSinkCompactionUpdate {
-                            sink_id: SinkId::new(self.sink_id),
+                            sink_id: self.sink_id,
                             compaction_interval: self.config.compaction_interval_sec(),
                             force_compaction: true,
                         })

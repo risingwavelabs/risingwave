@@ -23,8 +23,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay,
-    OBJECT_ID_PLACEHOLDER, Schema, StreamJobStatus,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
+    StreamJobStatus,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
@@ -43,7 +43,7 @@ use risingwave_sqlparser::ast::AsOf;
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
 use super::{BatchPlanRef, StreamPlanRef, pretty_config};
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::{ColumnId, TableCatalog, TableId};
+use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
 use crate::optimizer::StreamScanType;
@@ -184,7 +184,7 @@ impl TableCatalogBuilder {
             table_type: TableType::Internal,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            fragment_id: OBJECT_ID_PLACEHOLDER,
+            fragment_id: FragmentId::placeholder(),
             dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
             row_id_index: None,

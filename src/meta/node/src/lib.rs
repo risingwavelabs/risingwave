@@ -546,6 +546,8 @@ pub fn start(
                 cdc_table_split_init_insert_batch_size: config
                     .meta
                     .cdc_table_split_init_insert_batch_size,
+
+                enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
             },
             config.system.into_init_system_params(),
             Default::default(),

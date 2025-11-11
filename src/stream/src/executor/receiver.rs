@@ -75,10 +75,11 @@ impl ReceiverExecutor {
 
     #[cfg(test)]
     pub fn for_test(
-        actor_id: ActorId,
+        actor_id: impl Into<ActorId>,
         input: super::exchange::permit::Receiver,
         local_barrier_manager: crate::task::LocalBarrierManager,
     ) -> Self {
+        let actor_id = actor_id.into();
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::ActorInput;
 
@@ -86,9 +87,9 @@ impl ReceiverExecutor {
 
         Self::new(
             ActorContext::for_test(actor_id),
-            514,
-            1919,
-            LocalInput::new(input, 0).boxed_input(),
+            514.into(),
+            1919.into(),
+            LocalInput::new(input, 0.into()).boxed_input(),
             local_barrier_manager,
             StreamingMetrics::unused().into(),
             barrier_rx,
@@ -132,7 +133,7 @@ impl Execute for ReceiverExecutor {
                     DispatcherMessage::Barrier(barrier) => {
                         tracing::debug!(
                             target: "events::stream::barrier::path",
-                            actor_id = actor_id,
+                            actor_id = %actor_id,
                             "receiver receives barrier from path: {:?}",
                             barrier.passed_actors
                         );
@@ -212,8 +213,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let actor_id = 233;
-        let (old, new) = (114, 514); // old and new upstream actor id
+        let actor_id = 233.into();
+        let (old, new) = (114.into(), 514.into()); // old and new upstream actor id
 
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
 
@@ -224,7 +225,7 @@ mod tests {
         // old -> actor_id
         // new -> actor_id
 
-        let (upstream_fragment_id, fragment_id) = (10, 18);
+        let (upstream_fragment_id, fragment_id) = (10.into(), 18.into());
 
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
@@ -319,11 +320,11 @@ mod tests {
             ($actors:expr) => {
                 for upstream_id in $actors {
                     let mut output_requests = barrier_test_env
-                        .take_pending_new_output_requests(upstream_id)
+                        .take_pending_new_output_requests(upstream_id.into())
                         .await;
                     assert_eq!(output_requests.len(), 1);
                     let (downstream_actor_id, request) = output_requests.pop().unwrap();
-                    assert_eq!(actor_id, downstream_actor_id);
+                    assert_eq!(downstream_actor_id, actor_id);
                     let NewOutputRequest::Local(tx) = request else {
                         unreachable!()
                     };

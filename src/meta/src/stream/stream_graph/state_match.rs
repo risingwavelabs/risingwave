@@ -20,6 +20,7 @@ use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::StreamNode;
@@ -71,7 +72,7 @@ pub(crate) enum Error {
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Fragment id.
-type Id = u32;
+type Id = FragmentId;
 
 /// Node for a fragment in the [`Graph`].
 struct Fragment {
@@ -502,10 +503,11 @@ impl Graph {
             .fragments
             .iter()
             .map(|(&id, f)| {
+                let id = id.as_global_id();
                 (
-                    id.as_global_id(),
+                    id,
                     Fragment {
-                        id: id.as_global_id(),
+                        id,
                         root: f.node.clone().unwrap(),
                     },
                 )

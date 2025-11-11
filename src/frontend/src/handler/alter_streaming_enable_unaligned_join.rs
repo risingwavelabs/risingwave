@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
+use risingwave_common::id::JobId;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -37,7 +38,7 @@ pub async fn handle_alter_streaming_enable_unaligned_join(
                 match relation {
                     Relation::Source(s) => {
                         if s.is_shared() {
-                            s.catalog.id.into()
+                            JobId::new(s.catalog.id)
                         } else {
                             bail!(ErrorCode::NotSupported(
                                 "source has no unaligned_join".to_owned(),
@@ -64,7 +65,7 @@ pub async fn handle_alter_streaming_enable_unaligned_join(
                     }
                 }
             } else if let Ok(sink) = binder.bind_sink_by_name(name.clone()) {
-                sink.sink_catalog.id.sink_id.into()
+                sink.sink_catalog.id.as_job_id()
             } else {
                 return Err(not_found_err.into());
             }

@@ -24,9 +24,9 @@ use thiserror_ext::AsReport;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
-use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::{CatalogError, FragmentId};
 use crate::error::{ErrorCode, Result};
 
 pub async fn handle_alter_parallelism(
@@ -95,7 +95,7 @@ pub async fn handle_alter_parallelism(
                     reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
 
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-                sink.id.sink_id().into()
+                sink.id.as_job_id()
             }
             // TODO: support alter parallelism for shared source
             _ => bail!(
@@ -123,7 +123,7 @@ pub async fn handle_alter_parallelism(
 
 pub async fn handle_alter_fragment_parallelism(
     handler_args: HandlerArgs,
-    fragment_ids: Vec<u32>,
+    fragment_ids: Vec<FragmentId>,
     parallelism: SetVariableValue,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
