@@ -363,7 +363,7 @@ impl CatalogController {
             pb_actor_status.insert(
                 actor_id as _,
                 PbActorStatus {
-                    location: PbActorLocation::from_worker(worker_id as u32),
+                    location: PbActorLocation::from_worker(worker_id),
                 },
             );
 
@@ -1829,10 +1829,10 @@ mod tests {
 
     const TEST_STATE_TABLE_ID: TableId = TableId::new(1000);
 
-    fn generate_upstream_actor_ids_for_actor(actor_id: u32) -> ActorUpstreams {
+    fn generate_upstream_actor_ids_for_actor(actor_id: ActorId) -> ActorUpstreams {
         let mut upstream_actor_ids = BTreeMap::new();
         upstream_actor_ids.insert(
-            TEST_UPSTREAM_FRAGMENT_ID as crate::model::FragmentId,
+            TEST_UPSTREAM_FRAGMENT_ID,
             HashSet::from_iter([(actor_id + 100)]),
         );
         upstream_actor_ids.insert(
@@ -1867,14 +1867,14 @@ mod tests {
         let upstream_actor_ids: FragmentActorUpstreams = (0..actor_count)
             .map(|actor_id| {
                 (
-                    actor_id as _,
-                    generate_upstream_actor_ids_for_actor(actor_id),
+                    actor_id.into(),
+                    generate_upstream_actor_ids_for_actor(actor_id.into()),
                 )
             })
             .collect();
 
         let actor_bitmaps = ActorMapping::new_uniform(
-            (0..actor_count).map(|i| i as _),
+            (0..actor_count).map(|i| i.into()),
             VirtualNode::COUNT_FOR_TEST,
         )
         .to_bitmaps();
@@ -1883,9 +1883,9 @@ mod tests {
 
         let pb_actors = (0..actor_count)
             .map(|actor_id| StreamActor {
-                actor_id: actor_id as _,
+                actor_id: actor_id.into(),
                 fragment_id: TEST_FRAGMENT_ID as _,
-                vnode_bitmap: actor_bitmaps.get(&actor_id).cloned(),
+                vnode_bitmap: actor_bitmaps.get(&actor_id.into()).cloned(),
                 mview_definition: "".to_owned(),
                 expr_context: Some(PbExprContext {
                     time_zone: String::from("America/New_York"),
@@ -1919,14 +1919,14 @@ mod tests {
         let upstream_actor_ids: FragmentActorUpstreams = (0..actor_count)
             .map(|actor_id| {
                 (
-                    actor_id as _,
-                    generate_upstream_actor_ids_for_actor(actor_id),
+                    actor_id.into(),
+                    generate_upstream_actor_ids_for_actor(actor_id.into()),
                 )
             })
             .collect();
 
         let mut actor_bitmaps = ActorMapping::new_uniform(
-            (0..actor_count).map(|i| i as _),
+            (0..actor_count).map(|i| i.into()),
             VirtualNode::COUNT_FOR_TEST,
         )
         .to_bitmaps();
@@ -1941,12 +1941,12 @@ mod tests {
                 });
 
                 ActorInfo {
-                    actor_id: actor_id as ActorId,
+                    actor_id: actor_id.into(),
                     fragment_id: TEST_FRAGMENT_ID,
                     splits: actor_splits,
-                    worker_id: 0,
+                    worker_id: 0.into(),
                     vnode_bitmap: actor_bitmaps
-                        .remove(&actor_id)
+                        .remove(&actor_id.into())
                         .map(|bitmap| bitmap.to_protobuf())
                         .as_ref()
                         .map(VnodeBitmap::from),
@@ -2010,7 +2010,7 @@ mod tests {
         actors: Vec<ActorInfo>,
         actor_upstreams: &FragmentActorUpstreams,
         pb_actors: Vec<StreamActor>,
-        pb_actor_splits: HashMap<u32, PbConnectorSplits>,
+        pb_actor_splits: HashMap<ActorId, PbConnectorSplits>,
         stream_node: &PbStreamNode,
     ) {
         for (

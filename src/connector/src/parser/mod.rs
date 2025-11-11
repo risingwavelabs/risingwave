@@ -222,8 +222,9 @@ impl<P: ByteStreamSourceParser> P {
         // The stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
         let source_ctrl_opts = self.source_ctx().source_ctrl_opts;
-        parse_message_stream(self, msg_stream, source_ctrl_opts)
-            .instrument_with(move || tracing::info_span!("source_parse_chunk", actor_id, source_id))
+        parse_message_stream(self, msg_stream, source_ctrl_opts).instrument_with(
+            move || tracing::info_span!("source_parse_chunk", %actor_id, source_id),
+        )
     }
 }
 

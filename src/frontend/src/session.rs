@@ -52,6 +52,7 @@ use risingwave_common::config::{
     AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
     StreamingConfig, UdfConfig, load_config,
 };
+use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
@@ -1942,12 +1943,12 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
 }
 
 pub struct WorkerProcessId {
-    pub worker_id: u32,
+    pub worker_id: WorkerId,
     pub process_id: i32,
 }
 
 impl WorkerProcessId {
-    pub fn new(worker_id: u32, process_id: i32) -> Self {
+    pub fn new(worker_id: WorkerId, process_id: i32) -> Self {
         Self {
             worker_id,
             process_id,
@@ -1976,7 +1977,7 @@ impl TryFrom<String> for WorkerProcessId {
         let Ok(process_id) = splits[1].parse::<i32>() else {
             return Err(INVALID.to_owned());
         };
-        Ok(WorkerProcessId::new(worker_id, process_id))
+        Ok(WorkerProcessId::new(worker_id.into(), process_id))
     }
 }
 

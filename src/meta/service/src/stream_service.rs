@@ -436,9 +436,9 @@ impl StreamManagerService for StreamServiceImpl {
         let states = actor_locations
             .into_iter()
             .map(|actor_location| list_actor_states_response::ActorState {
-                actor_id: actor_location.actor_id as _,
+                actor_id: actor_location.actor_id,
                 fragment_id: actor_location.fragment_id,
-                worker_id: actor_location.worker_id as _,
+                worker_id: actor_location.worker_id,
             })
             .collect_vec();
 
@@ -555,7 +555,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .unwrap_or_default()
                     .into_iter()
                     .map(move |split| list_actor_splits_response::ActorSplit {
-                        actor_id: actor_id as _,
+                        actor_id,
                         source_id: source_id as _,
                         fragment_id,
                         split_id: split.id().to_string(),

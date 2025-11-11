@@ -1276,10 +1276,7 @@ pub fn compose_dispatchers(
                     .to_protobuf(),
                 ),
                 dispatcher_id: target_fragment_id.as_raw_id() as _,
-                downstream_actor_id: target_fragment_actors
-                    .keys()
-                    .map(|actor_id| *actor_id as _)
-                    .collect(),
+                downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
             source_fragment_actors
                 .keys()
@@ -1293,10 +1290,7 @@ pub fn compose_dispatchers(
                 output_mapping: output_mapping.into(),
                 hash_mapping: None,
                 dispatcher_id: target_fragment_id.as_raw_id() as _,
-                downstream_actor_id: target_fragment_actors
-                    .keys()
-                    .map(|actor_id| *actor_id as _)
-                    .collect(),
+                downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
             source_fragment_actors
                 .keys()
@@ -1319,7 +1313,7 @@ pub fn compose_dispatchers(
                     output_mapping: output_mapping.clone().into(),
                     hash_mapping: None,
                     dispatcher_id: target_fragment_id.as_raw_id() as _,
-                    downstream_actor_id: vec![downstream_actor_id as _],
+                    downstream_actor_id: vec![downstream_actor_id],
                 },
             )
         })
@@ -1438,9 +1432,7 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
             let actor_locations = fragment
                 .actors
                 .iter()
-                .map(|(actor_id, actor_info)| {
-                    (*actor_id as hash::ActorId, actor_info.worker_id as u32)
-                })
+                .map(|(actor_id, actor_info)| (*actor_id as hash::ActorId, actor_info.worker_id))
                 .collect();
 
             actor_mapping.to_worker_slot(&actor_locations)
@@ -1790,7 +1782,7 @@ where
 }
 
 pub fn filter_workers_by_resource_group(
-    workers: &HashMap<u32, WorkerNode>,
+    workers: &HashMap<WorkerId, WorkerNode>,
     resource_group: &str,
 ) -> BTreeSet<WorkerId> {
     workers
@@ -1801,7 +1793,7 @@ pub fn filter_workers_by_resource_group(
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })
-        .map(|(id, _)| *id as WorkerId)
+        .map(|(id, _)| *id)
         .collect()
 }
 

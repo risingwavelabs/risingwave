@@ -232,6 +232,8 @@ pub type JobId = TypedId<2>;
 pub type DatabaseId = TypedId<3>;
 pub type SchemaId = TypedId<4>;
 pub type FragmentId = TypedId<5>;
+pub type ActorId = TypedId<6>;
+pub type WorkerId = TypedId<7>;
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {

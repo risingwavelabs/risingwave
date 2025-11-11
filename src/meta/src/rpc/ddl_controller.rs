@@ -46,7 +46,6 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
-    WorkerId,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
@@ -1971,10 +1970,8 @@ impl DdlController {
                         downstream_actor_location.remove(actor_id);
                     }
                     for (actor_id, status) in &sink.actor_status {
-                        downstream_actor_location.insert(
-                            *actor_id,
-                            status.location.as_ref().unwrap().worker_node_id as WorkerId,
-                        );
+                        downstream_actor_location
+                            .insert(*actor_id, status.location.as_ref().unwrap().worker_node_id);
                     }
 
                     *downstream_fragment = (&sink.new_fragment_info(), stream_job.id()).into();

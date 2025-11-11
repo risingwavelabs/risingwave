@@ -162,13 +162,14 @@ impl MergeExecutor {
 
     #[cfg(test)]
     pub fn for_test(
-        actor_id: ActorId,
+        actor_id: impl Into<ActorId>,
         inputs: Vec<super::exchange::permit::Receiver>,
         local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
         chunk_size: usize,
         barrier_rx: Option<mpsc::UnboundedReceiver<Barrier>>,
     ) -> Self {
+        let actor_id = actor_id.into();
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::ActorInput;
 
@@ -181,7 +182,7 @@ impl MergeExecutor {
             inputs
                 .into_iter()
                 .enumerate()
-                .map(|(idx, input)| LocalInput::new(input, idx as ActorId).boxed_input())
+                .map(|(idx, input)| LocalInput::new(input, ActorId::new(idx as u32)).boxed_input())
                 .collect(),
             &metrics,
             &actor_ctx,
@@ -262,7 +263,7 @@ impl MergeExecutor {
                 DispatcherMessage::Barrier(barrier) => {
                     tracing::debug!(
                         target: "events::stream::barrier::path",
-                        actor_id = actor_id,
+                        actor_id = %actor_id,
                         "receiver receives barrier from path: {:?}",
                         barrier.passed_actors
                     );
@@ -460,7 +461,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let (tx, rx) = channel_for_test();
-        let input = LocalInput::new(rx, 1).boxed_input();
+        let input = LocalInput::new(rx, 1.into()).boxed_input();
         let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]));
 
         // Send a chunk
@@ -523,7 +524,7 @@ mod tests {
 
         // Send a barrier.
         let barrier = Barrier::new_test_barrier(test_epoch(1));
-        test_env.inject_barrier(&barrier, [2]);
+        test_env.inject_barrier(&barrier, [2.into()]);
         tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
@@ -539,7 +540,7 @@ mod tests {
             .await
             .unwrap();
         let barrier = Barrier::new_test_barrier(test_epoch(2));
-        test_env.inject_barrier(&barrier, [2]);
+        test_env.inject_barrier(&barrier, [2.into()]);
         tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
@@ -562,7 +563,7 @@ mod tests {
             rxs.push(rx);
         }
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let actor_id = 233;
+        let actor_id = 233.into();
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64)
@@ -666,8 +667,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let actor_id = 233;
-        let (untouched, old, new) = (234, 235, 238); // upstream actors
+        let actor_id = 233.into();
+        let (untouched, old, new) = (234.into(), 235.into(), 238.into()); // upstream actors
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
         let metrics = Arc::new(StreamingMetrics::unused());
 
@@ -767,7 +768,7 @@ mod tests {
                         .await;
                     assert_eq!(output_requests.len(), 1);
                     let (downstream_actor_id, request) = output_requests.pop().unwrap();
-                    assert_eq!(actor_id, downstream_actor_id);
+                    assert_eq!(downstream_actor_id, actor_id);
                     let NewOutputRequest::Local(tx) = request else {
                         unreachable!()
                     };
@@ -896,7 +897,7 @@ mod tests {
             RemoteInput::new(
                 &test_env.local_barrier_manager,
                 addr.into(),
-                (0, 0),
+                (0.into(), 0.into()),
                 (0.into(), 0.into()),
                 Arc::new(StreamingMetrics::unused()),
             )

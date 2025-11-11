@@ -32,6 +32,7 @@ pub use event_log::EventLogManagerRef;
 pub use idle::*;
 pub use metadata::*;
 pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
+use risingwave_common::id::WorkerId;
 pub use risingwave_meta_model::prelude;
 use risingwave_pb::catalog::{PbSink, PbSource};
 use risingwave_pb::common::PbHostAddress;
@@ -58,7 +59,7 @@ impl Hash for WorkerKey {
 }
 
 /// The id preserved for the meta node. Note that there's no such entry in cluster manager.
-pub const META_NODE_ID: u32 = 0;
+pub const META_NODE_ID: WorkerId = WorkerId::new(0);
 
 pub fn get_referred_secret_ids_from_source(source: &PbSource) -> MetaResult<HashSet<u32>> {
     let mut secret_ids = HashSet::new();

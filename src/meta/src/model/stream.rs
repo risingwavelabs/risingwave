@@ -327,7 +327,11 @@ impl StreamJobFragments {
                     )
                 })
                 .collect(),
-            actor_status: self.actor_status.clone().into_iter().collect(),
+            actor_status: self
+                .actor_status
+                .iter()
+                .map(|(actor_id, status)| (*actor_id, *status))
+                .collect(),
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),
@@ -419,11 +423,10 @@ impl StreamJobFragments {
     }
 
     /// Returns actor ids associated with this table.
-    pub fn actor_ids(&self) -> Vec<ActorId> {
+    pub fn actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.fragments
             .values()
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-            .collect()
     }
 
     pub fn actor_fragment_mapping(&self) -> HashMap<ActorId, FragmentId> {
@@ -652,7 +655,7 @@ impl StreamJobFragments {
     pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.worker_id() as WorkerId;
+            let node_id = actor_status.worker_id();
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
@@ -672,11 +675,11 @@ impl StreamJobFragments {
                 fragment.fragment_id,
                 &fragment.nodes,
                 fragment.actors.iter().map(move |actor| {
-                    let worker_id = self
+                    let worker_id: WorkerId = self
                         .actor_status
                         .get(&actor.actor_id)
                         .expect("should exist")
-                        .worker_id() as WorkerId;
+                        .worker_id();
                     (actor, worker_id)
                 }),
             )

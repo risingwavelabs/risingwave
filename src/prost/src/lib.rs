@@ -36,7 +36,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
-use crate::id::FragmentId;
+use crate::id::{FragmentId, WorkerId};
 use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
 
@@ -305,7 +305,7 @@ impl stream_plan::SourceNode {
 }
 
 impl meta::table_fragments::ActorStatus {
-    pub fn worker_id(&self) -> u32 {
+    pub fn worker_id(&self) -> WorkerId {
         self.location
             .as_ref()
             .expect("actor location should be exist")
@@ -321,7 +321,7 @@ impl common::WorkerNode {
 }
 
 impl common::ActorLocation {
-    pub fn from_worker(worker_node_id: u32) -> Option<Self> {
+    pub fn from_worker(worker_node_id: WorkerId) -> Option<Self> {
         Some(Self { worker_node_id })
     }
 }

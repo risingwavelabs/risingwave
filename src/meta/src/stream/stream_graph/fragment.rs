@@ -387,7 +387,7 @@ fn clone_fragment(
             .iter()
             .enumerate()
             .map(|(i, actor)| StreamActor {
-                actor_id: actor_id_gen.to_global_id(i as _).as_global_id() as _,
+                actor_id: actor_id_gen.to_global_id(i as _).as_global_id(),
                 fragment_id,
                 vnode_bitmap: actor.vnode_bitmap.clone(),
                 mview_definition: actor.mview_definition.clone(),

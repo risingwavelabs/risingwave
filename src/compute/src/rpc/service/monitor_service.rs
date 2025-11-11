@@ -84,7 +84,7 @@ impl MonitorService for MonitorServiceImpl {
                 .into_iter()
                 .map(|(k, v)| {
                     (
-                        k.0,
+                        k.0.as_raw_id(),
                         if req.actor_traces_format == ActorTracesFormat::Text as i32 {
                             v.to_string()
                         } else {

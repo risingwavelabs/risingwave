@@ -582,7 +582,7 @@ impl CatalogController {
 
         Ok(Command::DropStreamingJobs {
             streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
-            actors: table_fragments.actor_ids(),
+            actors: table_fragments.actor_ids().collect(),
             unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
             unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
             dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
@@ -1732,7 +1732,7 @@ impl CatalogController {
             fragment_actors
                 .entry(fragment_id as _)
                 .or_default()
-                .extend(actors.keys().map(|actor| *actor as i32));
+                .extend(actors.keys().copied());
         }
 
         fragment_actors

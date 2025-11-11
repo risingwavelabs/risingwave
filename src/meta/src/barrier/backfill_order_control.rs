@@ -15,12 +15,9 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+pub use risingwave_common::id::ActorId;
 
 use crate::model::{FragmentId, StreamJobFragments};
-
-/// This is the "global" `fragment_id`.
-/// The local `fragment_id` is namespaced by the `fragment_id`.
-pub type ActorId = u32;
 
 #[derive(Clone, Debug, Default)]
 pub struct BackfillNode {
@@ -125,7 +122,7 @@ impl BackfillOrderState {
 impl BackfillOrderState {
     pub fn finish_actor(&mut self, actor_id: ActorId) -> Vec<FragmentId> {
         let Some(fragment_id) = self.actor_to_fragment_id.get(&actor_id) else {
-            tracing::error!(actor_id, "fragment not found for actor");
+            tracing::error!(%actor_id, "fragment not found for actor");
             return vec![];
         };
         // NOTE(kwannoel):
@@ -144,7 +141,7 @@ impl BackfillOrderState {
                 let Some(node) = self.remaining_backfill_nodes.get_mut(fragment_id) else {
                     tracing::error!(
                         %fragment_id,
-                        actor_id,
+                        %actor_id,
                         "fragment not found in current_backfill_nodes or remaining_backfill_nodes"
                     );
                     return vec![];
@@ -155,7 +152,7 @@ impl BackfillOrderState {
 
         assert!(node.remaining_actors.remove(&actor_id), "missing actor");
         tracing::debug!(
-            actor_id,
+            %actor_id,
             remaining_actors = node.remaining_actors.len(),
             %fragment_id,
             "finish_backfilling_actor"

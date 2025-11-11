@@ -260,8 +260,7 @@ impl StreamJobFragments {
                                         .actor_status
                                         .get(&actor.actor_id)
                                         .expect("should exist")
-                                        .worker_id()
-                                        as WorkerId,
+                                        .worker_id(),
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
                                     splits: fragment_splits
                                         .remove(&actor.actor_id)
@@ -935,7 +934,7 @@ impl Command {
                 ..
             } => {
                 let edges = edges.as_mut().expect("should exist");
-                let added_actors = table_fragments.actor_ids();
+                let added_actors = table_fragments.actor_ids().collect();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
@@ -1070,7 +1069,7 @@ impl Command {
                         )
                     };
                 Self::generate_update_mutation_for_replace_table(
-                    old_fragments.actor_ids().into_iter().chain(
+                    old_fragments.actor_ids().chain(
                         auto_refresh_schema_sinks
                             .as_ref()
                             .into_iter()
@@ -1190,8 +1189,8 @@ impl Command {
                                             .flat_map(|(worker_id, actors)| {
                                                 let host =
                                                     control_stream_manager.host_addr(*worker_id);
-                                                actors.iter().map(move |actor_id| PbActorInfo {
-                                                    actor_id: *actor_id,
+                                                actors.iter().map(move |&actor_id| PbActorInfo {
+                                                    actor_id,
                                                     host: Some(host.clone()),
                                                 })
                                             })
@@ -1229,7 +1228,7 @@ impl Command {
                 for reschedule in reschedules.values() {
                     for (actor_id, splits) in &reschedule.actor_splits {
                         actor_splits.insert(
-                            *actor_id as ActorId,
+                            *actor_id,
                             ConnectorSplits {
                                 splits: splits.iter().map(ConnectorSplit::from).collect(),
                             },
@@ -1444,7 +1443,7 @@ impl Command {
                                         .location
                                         .as_ref()
                                         .unwrap()
-                                        .worker_node_id as _,
+                                        .worker_node_id,
                                 )
                             }),
                             graph_info.job_subscribers(sink.original_sink.id.into()),

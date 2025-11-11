@@ -19,6 +19,7 @@ use std::sync::atomic::AtomicBool;
 use anyhow::{Context as _, anyhow};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::id::ActorId;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use rumqttc::v5::ConnectionError;
@@ -29,7 +30,7 @@ use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use super::SinkWriterParam;
-use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc, SinkId};
 use super::encoder::{
     DateHandlingMode, JsonEncoder, JsonbHandlingMode, ProtoEncoder, ProtoHeader, RowEncoder, SerTo,
     TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
@@ -195,7 +196,7 @@ impl Sink for MqttSink {
             )));
         }
 
-        let _client = (self.config.common.build_client(0, 0))
+        let _client = (self.config.common.build_client(0.into(), 0))
             .context("validate mqtt sink error")
             .map_err(SinkError::Mqtt)?;
 
@@ -208,7 +209,8 @@ impl Sink for MqttSink {
             self.schema.clone(),
             &self.format_desc,
             &self.name,
-            writer_param.executor_id,
+            writer_param.sink_id,
+            writer_param.actor_id,
         )
         .await?
         .into_log_sinker(usize::MAX))
@@ -221,7 +223,8 @@ impl MqttSinkWriter {
         schema: Schema,
         format_desc: &SinkFormatDesc,
         name: &str,
-        id: u64,
+        sink_id: SinkId,
+        actor_id: ActorId,
     ) -> Result<Self> {
         let mut topic_index_path = vec![];
         if let Some(field) = &config.topic_field {
@@ -277,7 +280,7 @@ impl MqttSinkWriter {
 
         let (client, mut eventloop) = config
             .common
-            .build_client(0, id)
+            .build_client(actor_id, sink_id.sink_id)
             .map_err(|e| SinkError::Mqtt(anyhow!(e)))?;
 
         let stopped = Arc::new(AtomicBool::new(false));

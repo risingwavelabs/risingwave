@@ -218,7 +218,7 @@ impl AutoRefreshSchemaSinkContext {
                                 .location
                                 .as_ref()
                                 .unwrap()
-                                .worker_node_id as _,
+                                .worker_node_id,
                             vnode_bitmap: actor.vnode_bitmap.clone(),
                             splits: vec![],
                         },
@@ -741,7 +741,7 @@ impl GlobalStreamManager {
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
-        let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+        let workers = worker_nodes.into_iter().map(|x| (x.id, x)).collect();
 
         let commands = self
             .scale_controller
@@ -787,7 +787,7 @@ impl GlobalStreamManager {
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
-        let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+        let workers = worker_nodes.into_iter().map(|x| (x.id, x)).collect();
 
         let cdc_fragment_id = {
             let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -858,7 +858,7 @@ impl GlobalStreamManager {
             .await?
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
-            .map(|worker| (worker.id as i32, worker))
+            .map(|worker| (worker.id, worker))
             .collect();
 
         let fragment_policy = fragment_targets

@@ -178,11 +178,12 @@ impl LocalStreamManager {
 
 #[cfg(test)]
 pub mod test_utils {
+    use risingwave_common::id::ActorId;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
 
-    pub fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+    pub fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
         ActorInfo {
             actor_id,
             host: Some(HostAddress {

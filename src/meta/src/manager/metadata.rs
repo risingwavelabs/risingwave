@@ -96,7 +96,7 @@ impl ActiveStreamingWorkerNodes {
             .subscribe_active_streaming_compute_nodes()
             .await?;
         Ok(Self {
-            worker_nodes: nodes.into_iter().map(|node| (node.id as _, node)).collect(),
+            worker_nodes: nodes.into_iter().map(|node| (node.id, node)).collect(),
             rx,
             meta_manager: Some(meta_manager),
         })
@@ -117,7 +117,7 @@ impl ActiveStreamingWorkerNodes {
                 LocalNotification::WorkerNodeDeleted(worker) => {
                     let is_streaming_compute_node = worker.r#type == WorkerType::ComputeNode as i32
                         && worker.property.as_ref().unwrap().is_streaming;
-                    let Some(prev_worker) = self.worker_nodes.remove(&(worker.id as _)) else {
+                    let Some(prev_worker) = self.worker_nodes.remove(&worker.id) else {
                         if is_streaming_compute_node {
                             warn!(
                                 ?worker,
@@ -135,7 +135,7 @@ impl ActiveStreamingWorkerNodes {
                     }
                     if worker.state == State::Starting as i32 {
                         warn!(
-                            id = worker.id,
+                            id = %worker.id,
                             host = ?worker.host,
                             state = worker.state,
                             "a starting streaming worker is deleted"
@@ -147,7 +147,7 @@ impl ActiveStreamingWorkerNodes {
                     if worker.r#type != WorkerType::ComputeNode as i32
                         || !worker.property.as_ref().unwrap().is_streaming
                     {
-                        if let Some(prev_worker) = self.worker_nodes.remove(&(worker.id as _)) {
+                        if let Some(prev_worker) = self.worker_nodes.remove(&worker.id) {
                             warn!(
                                 ?worker,
                                 ?prev_worker,
@@ -164,9 +164,7 @@ impl ActiveStreamingWorkerNodes {
                         "not started worker added: {:?}",
                         worker
                     );
-                    if let Some(prev_worker) =
-                        self.worker_nodes.insert(worker.id as _, worker.clone())
-                    {
+                    if let Some(prev_worker) = self.worker_nodes.insert(worker.id, worker.clone()) {
                         assert_eq!(prev_worker.host, worker.host);
                         assert_eq!(prev_worker.r#type, worker.r#type);
                         warn!(
@@ -388,11 +386,6 @@ impl MetadataManager {
             .get_root_fragments(upstream_table_ids.iter().map(|id| id.as_job_id()).collect())
             .await?;
 
-        let actors = actors
-            .into_iter()
-            .map(|(actor, worker)| (actor as u32, worker))
-            .collect();
-
         Ok((upstream_root_fragments, actors))
     }
 
@@ -461,11 +454,6 @@ impl MetadataManager {
             .catalog_controller
             .get_downstream_fragments(job_id)
             .await?;
-
-        let actors = actors
-            .into_iter()
-            .map(|(actor, worker)| (actor as u32, worker))
-            .collect();
 
         Ok((fragments, actors))
     }

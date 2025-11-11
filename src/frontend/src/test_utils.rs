@@ -31,7 +31,7 @@ use risingwave_common::catalog::{
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -55,6 +55,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
+use risingwave_pb::id::ActorId;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -1116,7 +1117,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::new())
     }
 
-    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, u64)>> {
         unimplemented!()
     }
 
@@ -1251,16 +1252,16 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn get_fragment_vnodes(
         &self,
         _fragment_id: FragmentId,
-    ) -> RpcResult<Vec<(u32, Vec<u32>)>> {
+    ) -> RpcResult<Vec<(ActorId, Vec<u32>)>> {
         unimplemented!()
     }
 
-    async fn get_actor_vnodes(&self, _actor_id: u32) -> RpcResult<Vec<u32>> {
+    async fn get_actor_vnodes(&self, _actor_id: ActorId) -> RpcResult<Vec<u32>> {
         unimplemented!()
     }
 
-    fn worker_id(&self) -> u32 {
-        0
+    fn worker_id(&self) -> WorkerId {
+        0.into()
     }
 
     async fn set_sync_log_store_aligned(&self, _job_id: JobId, _aligned: bool) -> RpcResult<()> {

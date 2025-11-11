@@ -32,7 +32,7 @@ struct RwActorSplit {
 impl From<ActorSplit> for RwActorSplit {
     fn from(actor_split: ActorSplit) -> Self {
         Self {
-            actor_id: actor_split.actor_id as _,
+            actor_id: actor_split.actor_id.as_raw_id() as i32,
             split_id: actor_split.split_id,
             source_id: actor_split.source_id as _,
             fragment_id: actor_split.fragment_id.as_raw_id() as _,

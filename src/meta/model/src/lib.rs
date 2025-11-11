@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-pub use risingwave_common::id::{DatabaseId, FragmentId, SchemaId, TableId};
+pub use risingwave_common::id::{ActorId, DatabaseId, FragmentId, SchemaId, TableId, WorkerId};
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
@@ -70,8 +70,6 @@ pub mod view;
 pub mod worker;
 pub mod worker_property;
 
-pub type WorkerId = i32;
-
 pub type TransactionId = i32;
 
 type RawObjectId = i32;
@@ -93,8 +91,6 @@ pub type Epoch = i64;
 pub type CompactionGroupId = i64;
 pub type CompactionTaskId = i64;
 pub type HummockSstableObjectId = i64;
-
-pub type ActorId = i32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]

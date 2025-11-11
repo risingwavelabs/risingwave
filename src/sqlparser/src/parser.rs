@@ -12,15 +12,7 @@
 
 //! SQL Parser
 
-#[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    format,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
-use core::fmt;
+use std::fmt;
 
 use ddl::WebhookSourceInfo;
 use itertools::Itertools;
@@ -111,7 +103,6 @@ use crate::ast::ddl::AlterFragmentOperation;
 
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Eq, Clone, Debug, PartialEq, Hash)]
 pub struct IncludeOptionItem {
     pub column_type: Ident,
@@ -168,7 +159,6 @@ impl fmt::Display for ParserError {
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for ParserError {}
 
 type ColumnsDefTuple = (

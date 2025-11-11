@@ -629,9 +629,13 @@ impl Barrier {
                 },
                 _,
             )) => backfill_nodes_to_pause.contains(&backfill_fragment_id),
+            Some(Mutation::Update(_)) => false,
             _ => {
-                tracing::warn!("expected an AddMutation on Startup, instead got {:?}", self);
-                true
+                tracing::warn!(
+                    "expected an AddMutation or UpdateMutation on Startup, instead got {:?}",
+                    self
+                );
+                false
             }
         }
     }
@@ -808,7 +812,7 @@ impl Mutation {
                     .iter()
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
                     .collect(),
-                dropped_actors: dropped_actors.iter().cloned().collect(),
+                dropped_actors: dropped_actors.iter().copied().collect(),
                 actor_splits: actor_splits_to_protobuf(actor_splits),
                 actor_new_dispatchers: actor_new_dispatchers
                     .iter()
@@ -991,7 +995,7 @@ impl Mutation {
                     .iter()
                     .map(|(&actor_id, bitmap)| (actor_id, Arc::new(bitmap.into())))
                     .collect(),
-                dropped_actors: update.dropped_actors.iter().cloned().collect(),
+                dropped_actors: update.dropped_actors.iter().copied().collect(),
                 actor_splits: update
                     .actor_splits
                     .iter()
@@ -1116,9 +1120,9 @@ impl Mutation {
                     alter_connector_props
                         .connector_props_infos
                         .iter()
-                        .map(|(actor_id, options)| {
+                        .map(|(connector_id, options)| {
                             (
-                                *actor_id,
+                                *connector_id,
                                 options
                                     .connector_props_info
                                     .iter()

@@ -22,6 +22,7 @@ use parking_lot::RwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use prost::Message;
 use risingwave_pb::catalog::PbSecret;
+use risingwave_pb::id::WorkerId;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::RefAsType;
 use thiserror_ext::AsReport;
@@ -45,7 +46,7 @@ impl LocalSecretManager {
     /// Initialize the secret manager with the given temp file path, cluster id, and encryption key.
     /// # Panics
     /// Panics if fail to create the secret file directory.
-    pub fn init(temp_file_dir: String, cluster_id: String, worker_id: u32) {
+    pub fn init(temp_file_dir: String, cluster_id: String, worker_id: WorkerId) {
         // use `get_or_init` to handle concurrent initialization in single node mode.
         INSTANCE.get_or_init(|| {
             let secret_file_dir = PathBuf::from(temp_file_dir)
@@ -71,7 +72,7 @@ impl LocalSecretManager {
     pub fn global() -> &'static LocalSecretManager {
         // Initialize the secret manager for unit tests.
         #[cfg(debug_assertions)]
-        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0);
+        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0.into());
 
         INSTANCE.get().unwrap()
     }
