@@ -957,10 +957,17 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     Ok((materialize.into(), table))
 }
 
+/// Derive connector properties and normalize `external_table_name` for CDC tables.
+///
+/// Returns (`connector_properties`, `normalized_external_table_name`) where:
+/// - For SQL Server: Normalizes 'db.schema.table' (3 parts) to 'schema.table' (2 parts),
+///   because users can optionally include database name for verification, but it needs to be
+///   stripped to match the format returned by Debezium's `extract_table_name()`.
+/// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
 fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
-) -> Result<WithOptionsSecResolved> {
+) -> Result<(WithOptionsSecResolved, String)> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     let source_database_name: &str = source_with_properties
@@ -990,6 +997,8 @@ fn derive_with_options_for_cdc_table(
                 }
                 with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                // Return original external_table_name unchanged for MySQL
+                return Ok((with_options, external_table_name));
             }
             POSTGRES_CDC_CONNECTOR => {
                 let (schema_name, table_name) = external_table_name
@@ -999,6 +1008,8 @@ fn derive_with_options_for_cdc_table(
                 // insert 'schema.name' into connect properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                // Return original external_table_name unchanged for Postgres
+                return Ok((with_options, external_table_name));
             }
             SQL_SERVER_CDC_CONNECTOR => {
                 // SQL Server external table name must be in one of two formats:
@@ -1058,6 +1069,11 @@ fn derive_with_options_for_cdc_table(
                 // Insert schema and table names into connector properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+
+                // Normalize external_table_name to 'schema.table' format
+                // This ensures consistency with extract_table_name() in message.rs
+                let normalized_external_table_name = format!("{}.{}", schema_name, table_name);
+                return Ok((with_options, normalized_external_table_name));
             }
             _ => {
                 return Err(RwError::from(anyhow!(
@@ -1067,7 +1083,7 @@ fn derive_with_options_for_cdc_table(
             }
         };
     }
-    Ok(with_options)
+    unreachable!("All valid CDC connectors should have returned by now")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1190,10 +1206,11 @@ pub(super) async fn handle_create_table_plan(
                 )?;
                 source.clone()
             };
-            let cdc_with_options = derive_with_options_for_cdc_table(
-                &source.with_properties,
-                cdc_table.external_table_name.clone(),
-            )?;
+            let (cdc_with_options, normalized_external_table_name) =
+                derive_with_options_for_cdc_table(
+                    &source.with_properties,
+                    cdc_table.external_table_name.clone(),
+                )?;
 
             let (columns, pk_names) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
@@ -1229,7 +1246,7 @@ pub(super) async fn handle_create_table_plan(
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                cdc_table.external_table_name.clone(),
+                normalized_external_table_name,
                 column_defs,
                 columns,
                 pk_names,
@@ -2450,10 +2467,11 @@ pub async fn generate_stream_graph_for_replace_table(
             let (source, resolved_table_name) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
 
-            let cdc_with_options = derive_with_options_for_cdc_table(
-                &source.with_properties,
-                cdc_table.external_table_name.clone(),
-            )?;
+            let (cdc_with_options, normalized_external_table_name) =
+                derive_with_options_for_cdc_table(
+                    &source.with_properties,
+                    cdc_table.external_table_name.clone(),
+                )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
 
@@ -2462,7 +2480,7 @@ pub async fn generate_stream_graph_for_replace_table(
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                cdc_table.external_table_name.clone(),
+                normalized_external_table_name,
                 columns,
                 column_catalogs,
                 pk_names,
