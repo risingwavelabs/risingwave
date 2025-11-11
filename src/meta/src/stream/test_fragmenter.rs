@@ -19,6 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::WorkerId;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::worker_node::Property;
@@ -219,7 +220,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         ..Default::default()
     };
     fragments.push(StreamFragment {
-        fragment_id: 2,
+        fragment_id: 2.into(),
         node: Some(source_node),
         fragment_type_mask: FragmentTypeFlag::Source as u32,
         requires_singleton: false,
@@ -287,7 +288,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     };
 
     fragments.push(StreamFragment {
-        fragment_id: 1,
+        fragment_id: 1.into(),
         node: Some(simple_agg_node),
         fragment_type_mask: 0,
         requires_singleton: false,
@@ -373,7 +374,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     };
 
     fragments.push(StreamFragment {
-        fragment_id: 0,
+        fragment_id: 0.into(),
         node: Some(mview_node),
         fragment_type_mask: FragmentTypeFlag::Mview as u32,
         requires_singleton: true,
@@ -391,8 +392,8 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 4,
-            upstream_id: 1,
-            downstream_id: 0,
+            upstream_id: 1.into(),
+            downstream_id: 0.into(),
         },
         StreamFragmentEdge {
             dispatch_strategy: Some(DispatchStrategy {
@@ -401,8 +402,8 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 1,
-            upstream_id: 2,
-            downstream_id: 1,
+            upstream_id: 2.into(),
+            downstream_id: 1.into(),
         },
     ]
 }
@@ -422,10 +423,10 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes: HashMap<u32, WorkerNode> = std::iter::once((
-        0,
+    let worker_nodes: HashMap<WorkerId, WorkerNode> = std::iter::once((
+        0.into(),
         WorkerNode {
-            id: 0,
+            id: 0.into(),
             property: Some(Property {
                 parallelism: 8,
                 resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),

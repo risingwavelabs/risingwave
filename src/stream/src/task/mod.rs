@@ -95,11 +95,10 @@ pub use actor_manager::*;
 pub use barrier_manager::*;
 pub use barrier_worker::*;
 pub use env::*;
+pub use risingwave_common::id::{ActorId, FragmentId};
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
-pub type ActorId = u32;
-pub type FragmentId = u32;
 pub type DispatcherId = u64;
 /// (`upstream_actor_id`, `downstream_actor_id`)
 pub type UpDownActorIds = (ActorId, ActorId);

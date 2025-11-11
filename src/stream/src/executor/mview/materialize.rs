@@ -1098,7 +1098,8 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         )
         .await;
 
-        let metrics = StreamingMetrics::unused().new_materialize_metrics(table_id, 1, 2);
+        let metrics =
+            StreamingMetrics::unused().new_materialize_metrics(table_id, 1.into(), 2.into());
 
         Self {
             input,

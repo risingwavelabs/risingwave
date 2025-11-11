@@ -66,7 +66,7 @@ pub async fn handle_vacuum(
                         ))
                     })?;
 
-                sink.id.sink_id()
+                sink.id
             } else {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "VACUUM can only be used on Iceberg engine tables or Iceberg sinks, but table '{}' uses {:?} engine",
@@ -80,7 +80,7 @@ pub async fn handle_vacuum(
         {
             if let Some(connector_type) = sink.properties.get(CONNECTOR_TYPE_KEY) {
                 if connector_type == "iceberg" {
-                    sink.id.sink_id()
+                    sink.id
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "VACUUM can only be used on Iceberg sinks, but sink '{}' is of type '{}'",

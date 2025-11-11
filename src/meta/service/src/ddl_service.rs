@@ -441,7 +441,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
         let command = DdlCommand::DropStreamingJob {
-            job_id: StreamingJobId::Sink(sink_id as _),
+            job_id: StreamingJobId::Sink(sink_id),
             drop_mode,
         };
 
@@ -1063,12 +1063,7 @@ impl DdlService for DdlServiceImpl {
 
         let fragment_targets = fragment_ids
             .into_iter()
-            .map(|fragment_id| {
-                (
-                    fragment_id as risingwave_meta_model::FragmentId,
-                    parallelism.clone(),
-                )
-            })
+            .map(|fragment_id| (fragment_id, parallelism.clone()))
             .collect();
 
         self.ddl_controller
@@ -1384,7 +1379,7 @@ impl DdlService for DdlServiceImpl {
         request: Request<CompactIcebergTableRequest>,
     ) -> Result<Response<CompactIcebergTableResponse>, Status> {
         let req = request.into_inner();
-        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+        let sink_id = req.sink_id;
 
         // Trigger manual compaction directly using the sink ID
         let task_id = self
@@ -1406,11 +1401,11 @@ impl DdlService for DdlServiceImpl {
         request: Request<ExpireIcebergTableSnapshotsRequest>,
     ) -> Result<Response<ExpireIcebergTableSnapshotsResponse>, Status> {
         let req = request.into_inner();
-        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+        let sink_id = req.sink_id;
 
         // Trigger manual snapshot expiration directly using the sink ID
         self.iceberg_compaction_manager
-            .check_and_expire_snapshots(&sink_id)
+            .check_and_expire_snapshots(sink_id)
             .await
             .map_err(|e| {
                 Status::internal(format!("Failed to expire snapshots: {}", e.as_report()))
@@ -1585,7 +1580,7 @@ fn add_auto_schema_change_fail_event_log(
         .with_guarded_label_values(&[&table_id.to_string(), &table_name])
         .inc();
     let event = event_log::EventAutoSchemaChangeFail {
-        table_id: table_id.as_raw_id(),
+        table_id,
         table_name,
         cdc_table_id,
         upstream_ddl,

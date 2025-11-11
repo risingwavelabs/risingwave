@@ -673,7 +673,7 @@ impl DatabaseCheckpointControl {
         let worker_id = resp.worker_id;
         let prev_epoch = resp.epoch;
         tracing::trace!(
-            worker_id,
+            %worker_id,
             prev_epoch,
             partial_graph_id = resp.partial_graph_id,
             "barrier collected"
@@ -682,12 +682,7 @@ impl DatabaseCheckpointControl {
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
-                    assert!(
-                        node.state
-                            .node_to_collect
-                            .remove(&(worker_id as _))
-                            .is_some()
-                    );
+                    assert!(node.state.node_to_collect.remove(&worker_id).is_some());
                     node.state.resps.push(resp);
                 } else {
                     panic!(

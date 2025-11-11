@@ -47,7 +47,7 @@ use crate::task::{ActorId, FragmentId, LocalBarrierManager, StreamEnvironment};
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
-    pub fragment_id: u32,
+    pub fragment_id: FragmentId,
     pub vnode_count: usize,
     pub mview_definition: String,
 
@@ -78,10 +78,10 @@ pub struct ActorContext {
 pub type ActorContextRef = Arc<ActorContext>;
 
 impl ActorContext {
-    pub fn for_test(id: ActorId) -> ActorContextRef {
+    pub fn for_test(id: impl Into<ActorId>) -> ActorContextRef {
         Arc::new(Self {
-            id,
-            fragment_id: 0,
+            id: id.into(),
+            fragment_id: 0.into(),
             vnode_count: VirtualNode::COUNT_FOR_TEST,
             mview_definition: "".to_owned(),
             cur_mem_val: Arc::new(0.into()),
@@ -238,7 +238,7 @@ where
                 parent: None,
                 "actor",
                 "otel.name" = span_name,
-                actor_id = id,
+                actor_id = %id,
                 prev_epoch = epoch.map(|e| e.prev),
                 curr_epoch = epoch.map(|e| e.curr),
             )
@@ -288,7 +288,7 @@ where
 
             // Then stop this actor if asked
             if barrier.is_stop(id) {
-                debug!(actor_id = id, epoch = ?barrier.epoch, "stop at barrier");
+                debug!(actor_id = %id, epoch = ?barrier.epoch, "stop at barrier");
                 break Ok(barrier);
             }
 
@@ -309,7 +309,7 @@ where
             self.barrier_manager.collect(id, &stop_barrier);
         });
 
-        tracing::debug!(actor_id = id, ok = result.is_ok(), "actor exit");
+        tracing::debug!(actor_id = %id, ok = result.is_ok(), "actor exit");
         result
     }
 }

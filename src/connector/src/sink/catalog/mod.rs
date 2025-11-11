@@ -20,9 +20,10 @@ use std::fmt::{Display, Formatter};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, OBJECT_ID_PLACEHOLDER, Schema,
-    SchemaId, StreamJobStatus, TableId, UserId,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId, StreamJobStatus,
+    TableId, UserId,
 };
+pub use risingwave_common::id::SinkId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{
@@ -35,45 +36,6 @@ use super::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT, SinkError,
 };
-
-#[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
-pub struct SinkId {
-    pub sink_id: u32,
-}
-
-impl SinkId {
-    pub const fn new(sink_id: u32) -> Self {
-        SinkId { sink_id }
-    }
-
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        SinkId {
-            sink_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn sink_id(&self) -> u32 {
-        self.sink_id
-    }
-}
-
-impl std::fmt::Display for SinkId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.sink_id)
-    }
-}
-
-impl From<u32> for SinkId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-impl From<SinkId> for u32 {
-    fn from(id: SinkId) -> Self {
-        id.sink_id
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SinkType {
@@ -404,7 +366,7 @@ pub struct SinkCatalog {
 impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
         PbSink {
-            id: self.id.into(),
+            id: self.id,
             schema_id: self.schema_id,
             database_id: self.database_id,
             name: self.name.clone(),
@@ -501,7 +463,7 @@ impl From<PbSink> for SinkCatalog {
             }
         };
         SinkCatalog {
-            id: pb.id.into(),
+            id: pb.id,
             name: pb.name,
             schema_id: pb.schema_id,
             database_id: pb.database_id,

@@ -38,6 +38,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::rewrite::build_delta_join_without_arrange;
+use crate::catalog::FragmentId;
 use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -51,7 +52,7 @@ pub struct BuildFragmentGraphState {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
     /// local fragment id
-    next_local_fragment_id: u32,
+    next_local_fragment_id: FragmentId,
 
     /// Next local table id to be allocated. It equals to total table ids cnt when finish stream
     /// node traversing.

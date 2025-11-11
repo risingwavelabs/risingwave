@@ -311,18 +311,7 @@ impl SourceManager {
         let backfill_fragments = metadata_manager
             .catalog_controller
             .load_backfill_fragment_ids()
-            .await?
-            .into_iter()
-            .map(|(source_id, fragment_ids)| {
-                (
-                    source_id as SourceId,
-                    fragment_ids
-                        .into_iter()
-                        .map(|(id, up_id)| (id as _, up_id as _))
-                        .collect(),
-                )
-            })
-            .collect();
+            .await?;
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,
@@ -521,7 +510,7 @@ pub enum SourceChange {
 
 pub fn build_actor_connector_splits(
     splits: &HashMap<ActorId, Vec<SplitImpl>>,
-) -> HashMap<u32, ConnectorSplits> {
+) -> HashMap<ActorId, ConnectorSplits> {
     splits
         .iter()
         .map(|(&actor_id, splits)| {
@@ -536,7 +525,7 @@ pub fn build_actor_connector_splits(
 }
 
 pub fn build_actor_split_impls(
-    actor_splits: &HashMap<u32, ConnectorSplits>,
+    actor_splits: &HashMap<ActorId, ConnectorSplits>,
 ) -> HashMap<ActorId, Vec<SplitImpl>> {
     actor_splits
         .iter()

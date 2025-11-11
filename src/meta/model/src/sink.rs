@@ -121,7 +121,7 @@ impl From<PbSink> for ActiveModel {
         let sink_type = pb_sink.sink_type();
 
         Self {
-            sink_id: Set(pb_sink.id as _),
+            sink_id: Set(pb_sink.id),
             name: Set(pb_sink.name),
             columns: Set(pb_sink.columns.into()),
             plan_pk: Set(pb_sink.plan_pk.into()),

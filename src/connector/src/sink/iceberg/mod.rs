@@ -808,7 +808,7 @@ impl Sink for IcebergSink {
             table,
             is_exactly_once: self.config.is_exactly_once.unwrap_or_default(),
             last_commit_epoch: 0,
-            sink_id: self.param.sink_id.sink_id(),
+            sink_id: self.param.sink_id,
             config: self.config.clone(),
             param: self.param.clone(),
             db,
@@ -1754,7 +1754,7 @@ pub struct IcebergSinkCommitter {
     table: Table,
     pub last_commit_epoch: u64,
     pub(crate) is_exactly_once: bool,
-    pub(crate) sink_id: u32,
+    pub(crate) sink_id: SinkId,
     pub(crate) config: IcebergConfig,
     pub(crate) param: SinkParam,
     pub(crate) db: DatabaseConnection,
@@ -1801,11 +1801,11 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             self.committed_epoch_subscriber = Some(subscriber);
             tracing::info!(
                 "Sink id = {}: iceberg sink coordinator initing.",
-                self.param.sink_id.sink_id()
+                self.param.sink_id
             );
-            if iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id()).await? {
+            if iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id).await? {
                 let ordered_metadata_list_by_end_epoch =
-                    get_pre_commit_info_by_sink_id(&self.db, self.param.sink_id.sink_id()).await?;
+                    get_pre_commit_info_by_sink_id(&self.db, self.param.sink_id).await?;
 
                 let mut last_recommit_epoch = 0;
                 for (end_epoch, sealized_bytes, snapshot_id, committed) in
@@ -1827,14 +1827,14 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                         (true, _) => {
                             tracing::info!(
                                 "Sink id = {}: all data in log store has been written into external sink, do nothing when recovery.",
-                                self.param.sink_id.sink_id()
+                                self.param.sink_id
                             );
                         }
                         (false, true) => {
                             // skip
                             tracing::info!(
                                 "Sink id = {}: all pre-commit files have been successfully committed into iceberg and do not need to be committed again, mark it as committed.",
-                                self.param.sink_id.sink_id()
+                                self.param.sink_id
                             );
                             mark_row_is_committed_by_sink_id_and_end_epoch(
                                 &self.db,
@@ -1846,7 +1846,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                         (false, false) => {
                             tracing::info!(
                                 "Sink id = {}: there are files that were not successfully committed; re-commit these files.",
-                                self.param.sink_id.sink_id()
+                                self.param.sink_id
                             );
                             self.re_commit(end_epoch, write_results, snapshot_id)
                                 .await?;
@@ -1857,13 +1857,13 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 }
                 tracing::info!(
                     "Sink id = {}: iceberg commit coordinator inited.",
-                    self.param.sink_id.sink_id()
+                    self.param.sink_id
                 );
                 return Ok(Some(last_recommit_epoch));
             } else {
                 tracing::info!(
                     "Sink id = {}: init iceberg coodinator, and system table is empty.",
-                    self.param.sink_id.sink_id()
+                    self.param.sink_id
                 );
                 return Ok(None);
             }
@@ -2127,7 +2127,7 @@ impl IcebergSinkCommitter {
             && self.config.enable_compaction
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
-                    sink_id: SinkId::new(self.sink_id),
+                    sink_id: self.sink_id,
                     compaction_interval: self.config.compaction_interval_sec(),
                     force_compaction: false,
                 })
@@ -2210,7 +2210,7 @@ impl IcebergSinkCommitter {
                 if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
                     && iceberg_compact_stat_sender
                         .send(IcebergSinkCompactionUpdate {
-                            sink_id: SinkId::new(self.sink_id),
+                            sink_id: self.sink_id,
                             compaction_interval: self.config.compaction_interval_sec(),
                             force_compaction: true,
                         })

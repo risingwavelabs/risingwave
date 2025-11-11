@@ -30,13 +30,13 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
     let manager = &test_env.local_barrier_manager;
 
-    let register_sender = |actor_id: u32| {
+    let register_sender = |actor_id: ActorId| {
         let barrier_rx = test_env.local_barrier_manager.subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 
     // Register actors
-    let actor_ids = vec![233, 234, 235];
+    let actor_ids = vec![233.into(), 234.into(), 235.into()];
 
     // Send a barrier to all actors
     let curr_epoch = test_epoch(2);
@@ -48,11 +48,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     test_env.flush_all_events().await;
 
     let count = actor_ids.len();
-    let mut rxs = actor_ids
-        .clone()
-        .into_iter()
-        .map(register_sender)
-        .collect_vec();
+    let mut rxs = actor_ids.iter().copied().map(register_sender).collect_vec();
 
     // Collect barriers from actors
     let collected_barriers = join_all(rxs.iter_mut().map(|(actor_id, rx)| async move {
@@ -89,13 +85,13 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
 
     let manager = &test_env.local_barrier_manager;
 
-    let register_sender = |actor_id: u32| {
+    let register_sender = |actor_id: ActorId| {
         let barrier_rx = test_env.local_barrier_manager.subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 
-    let actor_ids_to_send = vec![233, 234, 235];
-    let extra_actor_id = 666;
+    let actor_ids_to_send = vec![233.into(), 234.into(), 235.into()];
+    let extra_actor_id = 666.into();
     let actor_ids_to_collect = actor_ids_to_send
         .iter()
         .cloned()
@@ -168,13 +164,13 @@ async fn test_late_register_barrier_sender() -> StreamResult<()> {
 
     let manager = &test_env.local_barrier_manager;
 
-    let register_sender = |actor_id: u32| {
+    let register_sender = |actor_id: ActorId| {
         let barrier_rx = test_env.local_barrier_manager.subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 
-    let actor_ids_to_send = vec![233, 234, 235];
-    let extra_actor_id = 666;
+    let actor_ids_to_send = vec![233.into(), 234.into(), 235.into()];
+    let extra_actor_id = 666.into();
     let actor_ids_to_collect = actor_ids_to_send
         .iter()
         .cloned()

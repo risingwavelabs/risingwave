@@ -322,7 +322,7 @@ pub struct SingleTableRefreshProgressTracker {
 }
 
 impl SingleTableRefreshProgressTracker {
-    pub fn report_list_finished(&mut self, actor_ids: Vec<ActorId>) {
+    pub fn report_list_finished(&mut self, actor_ids: impl Iterator<Item = ActorId>) {
         self.list_finished_actors.extend(actor_ids);
     }
 
@@ -342,7 +342,7 @@ impl SingleTableRefreshProgressTracker {
         }
     }
 
-    pub fn report_load_finished(&mut self, actor_ids: Vec<ActorId>) {
+    pub fn report_load_finished(&mut self, actor_ids: impl Iterator<Item = ActorId>) {
         self.fetch_finished_actors.extend(actor_ids);
     }
 

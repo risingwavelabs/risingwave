@@ -21,12 +21,11 @@ use iceberg::spec::Operation;
 use iceberg::transaction::Transaction;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::bail;
+use risingwave_common::id::WorkerId;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{IcebergConfig, should_enable_iceberg_cow};
 use risingwave_connector::sink::{SinkError, SinkParam};
-use risingwave_pb::catalog::PbSink;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::{
     IcebergCompactionTask, SubscribeIcebergCompactionEventRequest,
@@ -48,10 +47,11 @@ use crate::rpc::metrics::MetaMetrics;
 
 pub type IcebergCompactionManagerRef = std::sync::Arc<IcebergCompactionManager>;
 
-type CompactorChangeTx = UnboundedSender<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
+type CompactorChangeTx =
+    UnboundedSender<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
 type CompactorChangeRx =
-    UnboundedReceiver<(u32, Streaming<SubscribeIcebergCompactionEventRequest>)>;
+    UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
 /// Snapshot for restoring track state on failure
 #[derive(Debug, Clone)]
@@ -191,17 +191,16 @@ impl IcebergCompactionHandle {
         task_id: u64,
     ) -> MetaResult<()> {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
-        let mut sinks = self
+        let Some(prost_sink_catalog) = self
             .metadata_manager
             .catalog_controller
-            .get_sink_by_ids(vec![self.sink_id.sink_id as i32])
-            .await?;
-        if sinks.is_empty() {
+            .get_sink_by_id(self.sink_id)
+            .await?
+        else {
             // The sink may be deleted, just return Ok.
-            tracing::warn!("Sink not found: {}", self.sink_id.sink_id);
+            tracing::warn!("Sink not found: {}", self.sink_id);
             return Ok(());
-        }
-        let prost_sink_catalog: PbSink = sinks.remove(0);
+        };
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
 
@@ -320,7 +319,7 @@ impl IcebergCompactionManager {
         // Create track if it doesn't exist
         if !track_exists {
             // Load config first (async operation outside of lock)
-            let iceberg_config = self.load_iceberg_config(&sink_id).await;
+            let iceberg_config = self.load_iceberg_config(sink_id).await;
 
             let new_track = match iceberg_config {
                 Ok(config) => {
@@ -331,7 +330,7 @@ impl IcebergCompactionManager {
                             tracing::error!(
                                 error = ?e.as_report(),
                                 "Failed to create compaction track from config for sink {}, using default Full track",
-                                sink_id.sink_id
+                                sink_id
                             );
                             // Fallback to default Full track
                             CompactionTrack {
@@ -350,7 +349,7 @@ impl IcebergCompactionManager {
                     tracing::error!(
                         error = ?e.as_report(),
                         "Failed to load iceberg config for sink {}, using default Full track",
-                        sink_id.sink_id
+                        sink_id
                     );
                     // Fallback to default Full track
                     CompactionTrack {
@@ -388,7 +387,7 @@ impl IcebergCompactionManager {
         } else {
             tracing::error!(
                 "Failed to find compaction track for sink {} during update; configuration changes not applied.",
-                sink_id.sink_id
+                sink_id
             );
         }
     }
@@ -451,7 +450,7 @@ impl IcebergCompactionManager {
         let snapshot_count_futures = sink_ids
             .iter()
             .map(|sink_id| async move {
-                let count = self.get_snapshot_count(sink_id).await?;
+                let count = self.get_snapshot_count(*sink_id).await?;
                 Some((*sink_id, count))
             })
             .collect::<Vec<_>>();
@@ -511,22 +510,19 @@ impl IcebergCompactionManager {
         guard.sink_schedules.remove(&sink_id);
     }
 
-    pub async fn get_sink_param(&self, sink_id: &SinkId) -> MetaResult<SinkParam> {
-        let mut sinks = self
+    pub async fn get_sink_param(&self, sink_id: SinkId) -> MetaResult<SinkParam> {
+        let prost_sink_catalog = self
             .metadata_manager
             .catalog_controller
-            .get_sink_by_ids(vec![sink_id.sink_id as i32])
-            .await?;
-        if sinks.is_empty() {
-            bail!("Sink not found: {}", sink_id.sink_id);
-        }
-        let prost_sink_catalog: PbSink = sinks.remove(0);
+            .get_sink_by_id(sink_id)
+            .await?
+            .ok_or_else(|| anyhow!("Sink not found: {}", sink_id))?;
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
         Ok(param)
     }
 
-    pub async fn load_iceberg_config(&self, sink_id: &SinkId) -> MetaResult<IcebergConfig> {
+    pub async fn load_iceberg_config(&self, sink_id: SinkId) -> MetaResult<IcebergConfig> {
         let sink_param = self.get_sink_param(sink_id).await?;
         let iceberg_config = IcebergConfig::from_btreemap(sink_param.properties)?;
         Ok(iceberg_config)
@@ -534,7 +530,7 @@ impl IcebergCompactionManager {
 
     pub fn add_compactor_stream(
         &self,
-        context_id: u32,
+        context_id: WorkerId,
         req_stream: Streaming<SubscribeIcebergCompactionEventRequest>,
     ) {
         self.compactor_streams_change_tx
@@ -545,7 +541,7 @@ impl IcebergCompactionManager {
     pub fn iceberg_compaction_event_loop(
         iceberg_compaction_manager: Arc<Self>,
         compactor_streams_change_rx: UnboundedReceiver<(
-            u32,
+            WorkerId,
             Streaming<SubscribeIcebergCompactionEventRequest>,
         )>,
     ) -> Vec<(JoinHandle<()>, Sender<()>)> {
@@ -609,7 +605,7 @@ impl IcebergCompactionManager {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 
         // Load the initial table state to get the current snapshot
-        let iceberg_config = self.load_iceberg_config(&sink_id).await?;
+        let iceberg_config = self.load_iceberg_config(sink_id).await?;
         let initial_table = iceberg_config.load_table().await?;
         let initial_snapshot_id = initial_table
             .metadata()
@@ -631,7 +627,7 @@ impl IcebergCompactionManager {
             .next_interval("compaction_task", 1)
             .await?;
 
-        let sink_param = self.get_sink_param(&sink_id).await?;
+        let sink_param = self.get_sink_param(sink_id).await?;
 
         compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
             task_id,
@@ -641,7 +637,7 @@ impl IcebergCompactionManager {
 
         tracing::info!(
             "Manual compaction triggered for sink {} with task ID {}, waiting for completion...",
-            sink_id.sink_id,
+            sink_id,
             task_id
         );
 
@@ -715,7 +711,7 @@ impl IcebergCompactionManager {
         Err(anyhow!(
             "Compaction did not complete within {} seconds for sink {} (task_id={})",
             MAX_WAIT_TIME_SECS,
-            sink_id.sink_id,
+            sink_id,
             task_id
         )
         .into())
@@ -730,8 +726,8 @@ impl IcebergCompactionManager {
         tracing::info!("Starting GC operations for {} tables", sink_ids.len());
 
         for sink_id in sink_ids {
-            if let Err(e) = self.check_and_expire_snapshots(&sink_id).await {
-                tracing::error!(error = ?e.as_report(), "Failed to perform GC for sink {}", sink_id.sink_id);
+            if let Err(e) = self.check_and_expire_snapshots(sink_id).await {
+                tracing::error!(error = ?e.as_report(), "Failed to perform GC for sink {}", sink_id);
             }
         }
 
@@ -741,7 +737,7 @@ impl IcebergCompactionManager {
 
     /// Get the snapshot count for a sink's Iceberg table
     /// Returns None if the table cannot be loaded
-    async fn get_snapshot_count(&self, sink_id: &SinkId) -> Option<usize> {
+    async fn get_snapshot_count(&self, sink_id: SinkId) -> Option<usize> {
         let iceberg_config = self.load_iceberg_config(sink_id).await.ok()?;
         let catalog = iceberg_config.create_catalog().await.ok()?;
         let table_name = iceberg_config.full_table_name().ok()?;
@@ -771,7 +767,7 @@ impl IcebergCompactionManager {
         Some(snapshot_count)
     }
 
-    pub async fn check_and_expire_snapshots(&self, sink_id: &SinkId) -> MetaResult<()> {
+    pub async fn check_and_expire_snapshots(&self, sink_id: SinkId) -> MetaResult<()> {
         const MAX_SNAPSHOT_AGE_MS_DEFAULT: i64 = 24 * 60 * 60 * 1000; // 24 hours
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -808,7 +804,7 @@ impl IcebergCompactionManager {
         tracing::info!(
             catalog_name = iceberg_config.catalog_name(),
             table_name = iceberg_config.full_table_name()?.to_string(),
-            sink_id = sink_id.sink_id,
+            %sink_id,
             snapshots_len = snapshots.len(),
             snapshot_expiration_timestamp_ms = snapshot_expiration_timestamp_ms,
             snapshot_expiration_retain_last = ?iceberg_config.snapshot_expiration_retain_last,
@@ -845,7 +841,7 @@ impl IcebergCompactionManager {
         tracing::info!(
             catalog_name = iceberg_config.catalog_name(),
             table_name = iceberg_config.full_table_name()?.to_string(),
-            sink_id = sink_id.sink_id,
+            %sink_id,
             "Expired snapshots for iceberg table",
         );
 

@@ -20,10 +20,9 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorAlignmentId, IsSingleton, VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{ActorId, JobId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
-use risingwave_meta_model::WorkerId;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -721,7 +720,7 @@ impl ActorGraphBuilder {
             .cluster_info
             .worker_nodes
             .iter()
-            .map(|(id, node)| (*id as WorkerId, node.clone()))
+            .map(|(id, node)| (*id, node.clone()))
             .collect();
 
         Locations {
@@ -884,7 +883,7 @@ impl ActorGraphBuilder {
                                         .or_default();
                                     no_shuffle_actors.extend(
                                         upstream_new_no_shuffle.into_iter().map(
-                                            |(upstream_actor_id, actor_id)| {
+                                            |(upstream_actor_id, actor_id)| -> (ActorId, ActorId) {
                                                 (
                                                     upstream_actor_id.as_global_id(),
                                                     actor_id.as_global_id(),
@@ -979,7 +978,7 @@ impl ActorGraphBuilder {
                     let actor_id = GlobalActorId::new(*actor_id);
                     let alignment_id = match &distribution {
                         Distribution::Singleton(worker_id) => {
-                            ActorAlignmentId::new_single(*worker_id as u32)
+                            ActorAlignmentId::new_single(*worker_id)
                         }
                         Distribution::Hash(mapping) => mapping
                             .get_matched(actor_info.vnode_bitmap.as_ref().unwrap())

@@ -36,7 +36,7 @@ pub(super) async fn handle_cancel(
             let database_catalog = catalog_reader.get_database_by_name(&session.database())?;
             let sink_catalog = database_catalog
                 .iter_schemas()
-                .find_map(|schema| schema.get_sink_by_id(&job_id));
+                .find_map(|schema| schema.get_sink_by_id(job_id.into()));
             if let Some(sink_catalog) = sink_catalog {
                 if sink_catalog.is_created() {
                     continue; // Skip already created sinks
