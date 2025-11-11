@@ -1638,7 +1638,7 @@ impl IcebergSinkCommitter {
         Ok(table)
     }
 
-    async fn pre_commit_inner(
+    fn pre_commit_inner(
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,
@@ -1706,7 +1706,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
     ) -> Result<Vec<u8>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
 
-        let write_results = self.pre_commit_inner(epoch, metadata, add_columns).await?;
+        let write_results = self.pre_commit_inner(epoch, metadata, add_columns)?;
 
         if write_results.is_empty() {
             return Ok(vec![]);
@@ -1756,7 +1756,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
     ) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
 
-        let write_results = self.pre_commit_inner(epoch, metadata, add_columns).await?;
+        let write_results = self.pre_commit_inner(epoch, metadata, add_columns)?;
 
         if write_results.is_empty() {
             tracing::debug!(?epoch, "no data to commit");
