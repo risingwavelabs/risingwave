@@ -672,7 +672,7 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| {
                 (
-                    s.id,
+                    s.id.as_raw_id(),
                     (s.name, s.schema_id, s.definition, s.created_at_epoch),
                 )
             })

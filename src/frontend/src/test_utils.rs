@@ -519,7 +519,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),
@@ -527,7 +527,7 @@ impl CatalogWriter for MockCatalogWriter {
             )
             .into());
         }
-        let (database_id, schema_id) = self.drop_table_or_sink_id(sink_id);
+        let (database_id, schema_id) = self.drop_table_or_sink_id(sink_id.as_raw_id());
         self.catalog
             .write()
             .drop_sink(database_id, schema_id, sink_id);
@@ -879,7 +879,7 @@ impl MockCatalogWriter {
         sink.id = self.gen_id();
         sink.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_sink(&sink);
-        self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
+        self.add_table_or_sink_id(sink.id.as_raw_id(), sink.schema_id, sink.database_id);
         Ok(())
     }
 
@@ -1208,7 +1208,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn alter_sink_props(
         &self,
-        _sink_id: u32,
+        _sink_id: SinkId,
         _changed_props: BTreeMap<String, String>,
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<u32>,
@@ -1218,8 +1218,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn alter_iceberg_table_props(
         &self,
-        _table_id: u32,
-        _sink_id: u32,
+        _table_id: TableId,
+        _sink_id: SinkId,
         _source_id: u32,
         _changed_props: BTreeMap<String, String>,
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,

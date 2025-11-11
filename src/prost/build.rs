@@ -105,6 +105,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
         }
         Sink {
+            id: SinkId,
             schema_id: SchemaId,
             database_id: DatabaseId,
             target_table: TableId,
@@ -144,6 +145,11 @@ for_all_wrapped_id_fields! (
             id: WorkerId,
         }
     }
+    connector_service {
+        SinkParam {
+            sink_id: SinkId,
+        }
+    }
     ddl_service {
         AlterCdcTableBackfillParallelismRequest {
             table_id: JobId,
@@ -167,6 +173,9 @@ for_all_wrapped_id_fields! (
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
         }
+        CompactIcebergTableRequest {
+            sink_id: SinkId,
+        }
         CreateConnectionRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
@@ -184,8 +193,14 @@ for_all_wrapped_id_fields! (
         DropSchemaRequest {
             schema_id: SchemaId,
         }
+        DropSinkRequest {
+            sink_id: SinkId,
+        }
         DropTableRequest {
             table_id: TableId,
+        }
+        ExpireIcebergTableSnapshotsRequest {
+            sink_id: SinkId,
         }
         GetTablesRequest {
             table_ids: TableId,
@@ -297,6 +312,9 @@ for_all_wrapped_id_fields! (
         AddWorkerNodeResponse {
             node_id: WorkerId,
         }
+        AlterConnectorPropsRequest.AlterIcebergTableIds {
+            sink_id: SinkId,
+        }
         CancelCreatingJobsRequest.CreatingJobIds {
             job_ids: JobId,
         }
@@ -321,6 +339,9 @@ for_all_wrapped_id_fields! (
         }
         EventLog.EventDirtyStreamJobClear {
             id: JobId,
+        }
+        EventLog.EventSinkFail {
+            sink_id: SinkId,
         }
         EventLog.EventWorkerNodePanic {
             worker_id: WorkerId,
@@ -504,6 +525,9 @@ for_all_wrapped_id_fields! (
         RefreshStartMutation {
             table_id: TableId,
         }
+        SinkDesc {
+            id: SinkId,
+        }
         SourceChangeSplitMutation {
             actor_splits: ActorId,
         }
@@ -546,6 +570,7 @@ for_all_wrapped_id_fields! (
             actor_splits: ActorId,
             actor_vnode_bitmap_update: ActorId,
             actor_new_dispatchers: ActorId,
+            sink_add_columns: SinkId,
         }
         UpdateMutation.DispatcherUpdate {
             actor_id: ActorId,

@@ -41,7 +41,7 @@ struct RwRelationInfo {
 
 #[system_catalog(table, "rw_catalog.rw_relation_info")]
 async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelationInfo>> {
-    let mut table_ids = Vec::new();
+    let mut job_ids = Vec::new();
     {
         let catalog_reader = reader.catalog_reader.read_guard();
         let schemas = catalog_reader.get_all_schema_names(&reader.auth_context.database)?;
@@ -56,37 +56,37 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             schema_catalog
                 .iter_created_mvs_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.id.as_job_id());
+                    job_ids.push(t.id.as_job_id());
                 });
 
             schema_catalog
                 .iter_user_table_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.id.as_job_id());
+                    job_ids.push(t.id.as_job_id());
                 });
 
             schema_catalog
                 .iter_source_with_acl(current_user)
                 .filter(|s| s.info.is_shared())
                 .for_each(|s| {
-                    table_ids.push(s.id.into());
+                    job_ids.push(s.id.into());
                 });
 
             schema_catalog
                 .iter_sink_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.id.sink_id.into());
+                    job_ids.push(t.id.as_job_id());
                 });
 
             schema_catalog
                 .iter_index_with_acl(current_user)
                 .for_each(|t| {
-                    table_ids.push(t.index_table().id.as_job_id());
+                    job_ids.push(t.index_table().id.as_job_id());
                 });
         }
     }
 
-    let table_fragments = reader.meta_client.list_table_fragments(&table_ids).await?;
+    let table_fragments = reader.meta_client.list_table_fragments(&job_ids).await?;
     let mut rows = Vec::new();
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.get_all_schema_names(&reader.auth_context.database)?;
@@ -142,14 +142,14 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         schema_catalog
             .iter_sink_with_acl(current_user)
             .for_each(|t| {
-                if let Some(fragments) = table_fragments.get(&t.id.sink_id.into()) {
+                if let Some(fragments) = table_fragments.get(&t.id.as_job_id()) {
                     rows.push(RwRelationInfo {
                         schemaname: schema.clone(),
                         relationname: t.name.clone(),
                         relationowner: t.owner.user_id as i32,
                         definition: t.definition.clone(),
                         relationtype: "SINK".into(),
-                        relationid: t.id.sink_id as i32,
+                        relationid: t.id.as_raw_id() as i32,
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),

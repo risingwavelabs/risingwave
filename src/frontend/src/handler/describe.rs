@@ -292,7 +292,7 @@ pub async fn handle_describe_fragments(
                 }
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
-            sink.sink_catalog.id.sink_id.into()
+            sink.sink_catalog.id.as_job_id()
         } else {
             return Err(not_found_err.into());
         }

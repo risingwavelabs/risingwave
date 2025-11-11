@@ -175,7 +175,7 @@ impl ReplaceStreamJobPlan {
         if let Some(sinks) = &self.auto_refresh_schema_sinks {
             for sink in sinks {
                 let fragment_change = CommandFragmentChanges::NewFragment {
-                    job_id: JobId::new(sink.original_sink.id as _),
+                    job_id: sink.original_sink.id.as_job_id(),
                     info: sink.new_fragment_info(),
                     is_existing: false,
                 };
@@ -1446,7 +1446,7 @@ impl Command {
                                         .worker_node_id,
                                 )
                             }),
-                            graph_info.job_subscribers(sink.original_sink.id.into()),
+                            graph_info.job_subscribers(sink.original_sink.id.as_job_id()),
                         )
                     }));
                     for (worker_id, fragment_actors) in sink_actors {

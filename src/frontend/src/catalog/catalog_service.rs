@@ -41,7 +41,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, SecretId, TableId};
+use super::{DatabaseId, SecretId, SinkId, TableId};
 use crate::error::Result;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::current::notice_to_user;
@@ -183,7 +183,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()>;
+    async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()>;
 
     async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
 
@@ -530,7 +530,7 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_sink(sink_id, cascade).await?;
         self.wait_version(version).await
     }
