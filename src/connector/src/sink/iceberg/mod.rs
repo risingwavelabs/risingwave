@@ -259,27 +259,27 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
-    #[serde(rename = "max_snapshots_num_before_compaction", default)]
+    #[serde(rename = "compaction.max_snapshots_num", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub max_snapshots_num_before_compaction: Option<usize>,
 
-    #[serde(rename = "small_files_threshold_mb", default)]
+    #[serde(rename = "compaction.small_files_threshold_mb", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub small_files_threshold_mb: Option<u64>,
 
-    #[serde(rename = "delete_files_count_threshold", default)]
+    #[serde(rename = "compaction.delete_files_count_threshold", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub delete_files_count_threshold: Option<usize>,
 
-    #[serde(rename = "trigger_snapshot_count", default)]
+    #[serde(rename = "compaction.trigger_snapshot_count", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub trigger_snapshot_count: Option<usize>,
 
-    #[serde(rename = "target_file_size_mb", default)]
+    #[serde(rename = "compaction.target_file_size_mb", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub target_file_size_mb: Option<u64>,
@@ -287,7 +287,7 @@ pub struct IcebergConfig {
     /// Compaction type: `full`, `small-files`, or `files-with-delete`
     /// If not set, will auto set to `full`
     #[serde(
-        rename = "compaction_type",
+        rename = "compaction.type",
         default,
         deserialize_with = "deserialize_and_normalize_optional_string"
     )]
@@ -761,7 +761,7 @@ impl Sink for IcebergSink {
             && max_snapshots < 1
         {
             bail!(
-                "`max_snapshots_num_before_compaction` must be greater than 0, got: {}",
+                "`compaction.max_snapshots_num` must be greater than 0, got: {}",
                 max_snapshots
             );
         }
@@ -2701,9 +2701,7 @@ mod test {
     async fn test_create_catalog(configs: BTreeMap<String, String>) {
         let iceberg_config = IcebergConfig::from_btreemap(configs).unwrap();
 
-        let table = iceberg_config.load_table().await.unwrap();
-
-        println!("{:?}", table.identifier());
+        let _table = iceberg_config.load_table().await.unwrap();
     }
 
     #[tokio::test]
@@ -2836,5 +2834,48 @@ mod test {
             "snapshot_expiration_clear_expired_meta_data"
         );
         assert_eq!(MAX_SNAPSHOTS_NUM, "max_snapshots_num_before_compaction");
+    }
+
+    #[test]
+    fn test_parse_iceberg_compaction_config() {
+        // Test parsing with new compaction.* prefix config names
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "upsert"),
+            ("primary_key", "id"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("enable_compaction", "true"),
+            ("compaction.max_snapshots_num", "100"),
+            ("compaction.small_files_threshold_mb", "512"),
+            ("compaction.delete_files_count_threshold", "50"),
+            ("compaction.trigger_snapshot_count", "10"),
+            ("compaction.target_file_size_mb", "256"),
+            ("compaction.type", "full"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify all compaction config fields are parsed correctly
+        assert!(iceberg_config.enable_compaction);
+        assert_eq!(
+            iceberg_config.max_snapshots_num_before_compaction,
+            Some(100)
+        );
+        assert_eq!(iceberg_config.small_files_threshold_mb, Some(512));
+        assert_eq!(iceberg_config.delete_files_count_threshold, Some(50));
+        assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
+        assert_eq!(iceberg_config.target_file_size_mb, Some(256));
+        assert_eq!(iceberg_config.compaction_type, Some("full".to_owned()));
     }
 }

@@ -647,7 +647,7 @@ IcebergConfig:
     required: false
     default: 'true'
     allow_alter_on_fly: true
-  - name: max_snapshots_num_before_compaction
+  - name: compaction.max_snapshots_num
     field_type: usize
     comments: |-
       The maximum number of snapshots allowed since the last rewrite operation
@@ -655,27 +655,27 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
-  - name: small_files_threshold_mb
+  - name: compaction.small_files_threshold_mb
     field_type: u64
     required: false
     default: Default::default
     allow_alter_on_fly: true
-  - name: delete_files_count_threshold
+  - name: compaction.delete_files_count_threshold
     field_type: usize
     required: false
     default: Default::default
     allow_alter_on_fly: true
-  - name: trigger_snapshot_count
+  - name: compaction.trigger_snapshot_count
     field_type: usize
     required: false
     default: Default::default
     allow_alter_on_fly: true
-  - name: target_file_size_mb
+  - name: compaction.target_file_size_mb
     field_type: u64
     required: false
     default: Default::default
     allow_alter_on_fly: true
-  - name: compaction_type
+  - name: compaction.type
     field_type: String
     comments: |-
       Compaction type: `full`, `small-files`, or `files-with-delete`

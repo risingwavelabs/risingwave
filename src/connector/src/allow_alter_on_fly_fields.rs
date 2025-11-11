@@ -178,12 +178,12 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "snapshot_expiration_retain_last".to_owned(),
             "snapshot_expiration_clear_expired_files".to_owned(),
             "snapshot_expiration_clear_expired_meta_data".to_owned(),
-            "max_snapshots_num_before_compaction".to_owned(),
-            "small_files_threshold_mb".to_owned(),
-            "delete_files_count_threshold".to_owned(),
-            "trigger_snapshot_count".to_owned(),
-            "target_file_size_mb".to_owned(),
-            "compaction_type".to_owned(),
+            "compaction.max_snapshots_num".to_owned(),
+            "compaction.small_files_threshold_mb".to_owned(),
+            "compaction.delete_files_count_threshold".to_owned(),
+            "compaction.trigger_snapshot_count".to_owned(),
+            "compaction.target_file_size_mb".to_owned(),
+            "compaction.type".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig
