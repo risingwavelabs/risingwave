@@ -38,8 +38,9 @@ use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::snowflake_redshift::{AugmentedChunk, SnowflakeRedshiftSinkS3Writer};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkCommitCoordinator,
-    SinkCommitStrategy, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
+    SinkWriterMetrics, SinkWriterParam,
 };
 
 pub const SNOWFLAKE_SINK_V2: &str = "snowflake_v2";
@@ -427,7 +428,6 @@ impl TryFrom<SinkParam> for SnowflakeV2Sink {
 }
 
 impl Sink for SnowflakeV2Sink {
-    type Coordinator = SnowflakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<SnowflakeSinkWriter>;
 
     const SINK_NAME: &'static str = SNOWFLAKE_SINK_V2;
@@ -492,14 +492,14 @@ impl Sink for SnowflakeV2Sink {
     async fn new_coordinator(
         &self,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
+    ) -> Result<SinkCommitCoordinator> {
         let coordinator = SnowflakeSinkCommitter::new(
             self.config.clone(),
             &self.schema,
             &self.pk_indices,
             self.is_append_only,
         )?;
-        Ok(coordinator)
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -738,11 +738,7 @@ impl SnowflakeSinkCommitter {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for SnowflakeSinkCommitter {
-    fn strategy(&self) -> SinkCommitStrategy {
-        SinkCommitStrategy::SinglePhase
-    }
-
+impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         if let Some(client) = &self.client {
             // Todo: move this to validate

@@ -46,7 +46,7 @@ use crate::sink::snowflake_redshift::{
 };
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    Result, Sink, SinkCommitCoordinator, SinkCommitStrategy, SinkError, SinkParam,
+    Result, SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
     SinkWriterMetrics,
 };
 
@@ -178,7 +178,6 @@ impl TryFrom<SinkParam> for RedshiftSink {
 }
 
 impl Sink for RedshiftSink {
-    type Coordinator = RedshiftSinkCommitter;
     type LogSinker = CoordinatedLogSinker<RedShiftSinkWriter>;
 
     const SINK_NAME: &'static str = REDSHIFT_SINK;
@@ -243,7 +242,7 @@ impl Sink for RedshiftSink {
     async fn new_coordinator(
         &self,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
+    ) -> Result<SinkCommitCoordinator> {
         let pk_column_names: Vec<_> = self
             .schema
             .fields
@@ -269,7 +268,7 @@ impl Sink for RedshiftSink {
             &pk_column_names,
             &all_column_names,
         )?;
-        Ok(coordinator)
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -568,11 +567,7 @@ impl Drop for RedshiftSinkCommitter {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for RedshiftSinkCommitter {
-    fn strategy(&self) -> SinkCommitStrategy {
-        SinkCommitStrategy::SinglePhase
-    }
-
+impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         Ok(())
     }

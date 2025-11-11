@@ -103,6 +103,7 @@ use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEn
 use crate::WithPropertiesExt;
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::sink::boxed::{BoxSinglePhaseCoordinator, BoxTwoPhaseCoordinator};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
@@ -685,8 +686,6 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
 
     type LogSinker: LogSinker;
-    #[expect(deprecated)]
-    type Coordinator: SinkCommitCoordinator = NoSinkCommitCoordinator;
 
     fn set_default_commit_checkpoint_interval(
         desc: &mut SinkDesc,
@@ -758,7 +757,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     async fn new_coordinator(
         &self,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
+    ) -> Result<SinkCommitCoordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
@@ -811,19 +810,27 @@ pub type SinkCommittedEpochSubscriber = Arc<
         + 'static,
 >;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum SinkCommitStrategy {
-    /// for at-least-once semantics
-    SinglePhase,
-    /// for exactly-once semantics
-    TwoPhase,
+pub enum SinkCommitCoordinator {
+    SinglePhase(BoxSinglePhaseCoordinator),
+    TwoPhase(BoxTwoPhaseCoordinator),
 }
 
 #[async_trait]
-pub trait SinkCommitCoordinator: Send {
-    /// Based on the sink type, return the commit strategy.
-    fn strategy(&self) -> SinkCommitStrategy;
+pub trait SinglePhaseCommitCoordinator {
+    /// Initialize the sink committer coordinator, return the log store rewind start offset.
+    async fn init(&mut self) -> Result<()>;
 
+    /// Commit directly without two-phase commit.
+    async fn commit_directly(
+        &mut self,
+        _epoch: u64,
+        _metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
+    ) -> Result<()>;
+}
+
+#[async_trait]
+pub trait TwoPhaseCommitCoordinator {
     /// Initialize the sink committer coordinator, return the log store rewind start offset.
     async fn init(&mut self) -> Result<()>;
 
@@ -833,57 +840,13 @@ pub trait SinkCommitCoordinator: Send {
         _epoch: u64,
         _metadata: Vec<SinkMetadata>,
         _add_columns: Option<Vec<Field>>,
-    ) -> Result<Vec<u8>> {
-        unimplemented!()
-    }
+    ) -> Result<Vec<u8>>;
 
     /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
-    async fn commit(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) -> Result<()> {
-        unimplemented!()
-    }
+    async fn commit(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) -> Result<()>;
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
-    async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {
-        unimplemented!()
-    }
-
-    /// Commit directly without two-phase commit.
-    async fn commit_directly(
-        &mut self,
-        _epoch: u64,
-        _metadata: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
-    ) -> Result<()> {
-        unimplemented!()
-    }
-}
-
-#[deprecated]
-/// A place holder struct of `SinkCommitCoordinator` for sink without coordinator.
-///
-/// It can never be constructed because it holds a never type, and therefore it's safe to
-/// mark all its methods as unreachable.
-///
-/// Explicitly mark this struct as `deprecated` so that when developers accidentally declare it explicitly as
-/// the associated type `Coordinator` when implementing `Sink` trait, they can be warned, and remove the explicit
-/// declaration.
-///
-/// Note:
-///     When we implement a sink without coordinator, don't explicitly write `type Coordinator = NoSinkCommitCoordinator`.
-///     Just remove the explicit declaration and use the default associated type, and besides, don't explicitly implement
-///     `fn new_coordinator(...)` and use the default implementation.
-pub struct NoSinkCommitCoordinator(!);
-
-#[expect(deprecated)]
-#[async_trait]
-impl SinkCommitCoordinator for NoSinkCommitCoordinator {
-    fn strategy(&self) -> SinkCommitStrategy {
-        unimplemented!()
-    }
-
-    async fn init(&mut self) -> Result<()> {
-        unimplemented!()
-    }
+    async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>);
 }
 
 impl SinkImpl {

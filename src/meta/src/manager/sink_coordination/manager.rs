@@ -413,7 +413,9 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::hash::VirtualNode;
     use risingwave_connector::sink::catalog::{SinkId, SinkType};
-    use risingwave_connector::sink::{SinkCommitCoordinator, SinkError, SinkParam};
+    use risingwave_connector::sink::{
+        SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkError, SinkParam,
+    };
     use risingwave_pb::connector_service::SinkMetadata;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_rpc_client::CoordinatorStreamHandle;
@@ -430,20 +432,20 @@ mod tests {
         f: F,
     }
 
-    impl<C, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError>> MockCoordinator<C, F> {
-        fn new(context: C, f: F) -> Self {
-            MockCoordinator { context, f }
+    impl<
+        C: Send + 'static,
+        F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send + 'static,
+    > MockCoordinator<C, F>
+    {
+        fn new_coordinator(context: C, f: F) -> SinkCommitCoordinator {
+            SinkCommitCoordinator::SinglePhase(Box::new(MockCoordinator { context, f }))
         }
     }
 
     #[async_trait]
     impl<C: Send, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send>
-        SinkCommitCoordinator for MockCoordinator<C, F>
+        SinglePhaseCommitCoordinator for MockCoordinator<C, F>
     {
-        fn strategy(&self) -> risingwave_connector::sink::SinkCommitStrategy {
-            risingwave_connector::sink::SinkCommitStrategy::SinglePhase
-        }
-
         async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
             Ok(())
         }
@@ -515,9 +517,9 @@ mod tests {
                                 DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
-                                MockCoordinator::new(
+                                MockCoordinator::new_coordinator(
                                     0,
-                                    |epoch, metadata_list, count: &mut usize| {
+                                    move |epoch, metadata_list, count: &mut usize| {
                                         *count += 1;
                                         let mut metadata_list =
                                             metadata_list
@@ -708,9 +710,9 @@ mod tests {
                                 DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
-                                MockCoordinator::new(
+                                MockCoordinator::new_coordinator(
                                     0,
-                                    |epoch, metadata_list, count: &mut usize| {
+                                    move |epoch, metadata_list, count: &mut usize| {
                                         *count += 1;
                                         let mut metadata_list =
                                             metadata_list
@@ -845,7 +847,7 @@ mod tests {
                                 DatabaseConnection::Disconnected,
                                 param,
                                 new_writer_rx,
-                                MockCoordinator::new((), |_, _, _| unreachable!()),
+                                MockCoordinator::new_coordinator((), |_, _, _| unreachable!()),
                                 subscriber.clone(),
                             )
                             .await;
@@ -938,7 +940,7 @@ mod tests {
                                     DatabaseConnection::Disconnected,
                                     param,
                                     new_writer_rx,
-                                    MockCoordinator::new((), |_, _, _| {
+                                    MockCoordinator::new_coordinator((), |_, _, _| {
                                         Err(SinkError::Coordinator(anyhow!("failed to commit")))
                                     }),
                                     subscriber.clone(),
@@ -1063,9 +1065,9 @@ mod tests {
                                 DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
-                                MockCoordinator::new(
+                                MockCoordinator::new_coordinator(
                                     0,
-                                    |epoch, metadata_list, count: &mut usize| {
+                                    move |epoch, metadata_list, count: &mut usize| {
                                         *count += 1;
                                         let mut metadata_list =
                                             metadata_list

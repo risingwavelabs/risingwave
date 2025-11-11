@@ -379,14 +379,10 @@ async fn consume_log_stream<S: Sink>(
     sink: S,
     mut log_reader: MockRangeLogReader,
     mut sink_writer_param: SinkWriterParam,
-) -> Result<(), String>
-where
-    <S as risingwave_connector::sink::Sink>::Coordinator: std::marker::Send,
-    <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
-{
+) -> Result<(), String> {
     if let Ok(coordinator) = sink.new_coordinator(None).await {
         sink_writer_param.meta_client = Some(SinkMetaClient::MockMetaClient(MockMetaClient::new(
-            Box::new(coordinator),
+            coordinator,
         )));
         sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
     }

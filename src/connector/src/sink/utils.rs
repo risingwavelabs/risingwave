@@ -46,7 +46,9 @@ pub(crate) mod dummy {
     use crate::enforce_secret::EnforceSecret;
     use crate::error::ConnectorResult;
     use crate::sink::prelude::*;
-    use crate::sink::{LogSinker, SinkCommitCoordinator, SinkCommitStrategy, SinkLogReader};
+    use crate::sink::{
+        LogSinker, SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkLogReader,
+    };
 
     #[allow(dead_code)]
     pub fn err_feature_not_enabled(sink_name: &'static str) -> SinkError {
@@ -65,11 +67,9 @@ pub(crate) mod dummy {
     #[allow(dead_code)]
     pub struct FeatureNotEnabledCoordinator<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
-    impl<S: FeatureNotEnabledSinkMarker> SinkCommitCoordinator for FeatureNotEnabledCoordinator<S> {
-        fn strategy(&self) -> SinkCommitStrategy {
-            SinkCommitStrategy::SinglePhase
-        }
-
+    impl<S: FeatureNotEnabledSinkMarker> SinglePhaseCommitCoordinator
+        for FeatureNotEnabledCoordinator<S>
+    {
         async fn init(&mut self) -> Result<()> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
@@ -125,7 +125,6 @@ pub(crate) mod dummy {
     }
 
     impl<S: FeatureNotEnabledSinkMarker> Sink for FeatureNotEnabledSink<S> {
-        type Coordinator = FeatureNotEnabledCoordinator<S>;
         type LogSinker = FeatureNotEnabledLogSinker<S>;
 
         const SINK_NAME: &'static str = S::SINK_NAME;
@@ -149,7 +148,7 @@ pub(crate) mod dummy {
         async fn new_coordinator(
             &self,
             _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-        ) -> Result<Self::Coordinator> {
+        ) -> Result<SinkCommitCoordinator> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
     }

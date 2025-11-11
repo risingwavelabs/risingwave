@@ -30,8 +30,7 @@ use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{
-    Sink, SinkCommitCoordinator, SinkCommitStrategy, SinkCommittedEpochSubscriber, SinkParam,
-    build_sink,
+    Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkParam, build_sink,
 };
 use risingwave_meta_model::pending_sink_state::SinkState;
 use risingwave_pb::connector_service::{SinkMetadata, coordinate_request};
@@ -420,7 +419,7 @@ impl CoordinatorWorker {
         db: DatabaseConnection,
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
-        coordinator: impl SinkCommitCoordinator,
+        coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
     ) {
         let mut worker = CoordinatorWorker {
@@ -445,7 +444,7 @@ impl CoordinatorWorker {
     async fn run_coordination(
         &mut self,
         db: DatabaseConnection,
-        mut coordinator: impl SinkCommitCoordinator,
+        mut coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
     ) -> anyhow::Result<()> {
         let sink_id = self.handle_manager.param.sink_id;
@@ -454,7 +453,6 @@ impl CoordinatorWorker {
             .init_state_from_store(&db, sink_id, &mut coordinator)
             .await?;
 
-        coordinator.init().await?;
         let mut running_handles = self
             .handle_manager
             .wait_init_handles(initial_log_store_rewind_start_epoch)
@@ -537,8 +535,8 @@ impl CoordinatorWorker {
                     metadatas.push(metadata);
                 }
 
-                match coordinator.strategy() {
-                    SinkCommitStrategy::SinglePhase => {
+                match &mut coordinator {
+                    SinkCommitCoordinator::SinglePhase(coordinator) => {
                         let start_time = Instant::now();
                         run_future_with_periodic_fn(
                             coordinator.commit_directly(epoch, metadatas, first_add_columns),
@@ -556,7 +554,7 @@ impl CoordinatorWorker {
                         self.handle_manager
                             .ack_commit(epoch, commit_requests.handle_ids)?;
                     }
-                    SinkCommitStrategy::TwoPhase => {
+                    SinkCommitCoordinator::TwoPhase(coordinator) => {
                         let commit_metadata = coordinator
                             .pre_commit(epoch, metadatas, first_add_columns)
                             .await?;
@@ -617,11 +615,14 @@ impl CoordinatorWorker {
         &mut self,
         db: &DatabaseConnection,
         sink_id: SinkId,
-        coordinator: &mut impl SinkCommitCoordinator,
+        coordinator: &mut SinkCommitCoordinator,
     ) -> anyhow::Result<Option<u64>> {
-        match coordinator.strategy() {
-            SinkCommitStrategy::SinglePhase => Ok(None),
-            SinkCommitStrategy::TwoPhase => {
+        match coordinator {
+            SinkCommitCoordinator::SinglePhase(coordinator) => {
+                coordinator.init().await?;
+                Ok(None)
+            }
+            SinkCommitCoordinator::TwoPhase(coordinator) => {
                 let ordered_metadata =
                     list_sink_states_ordered_by_epoch(db, sink_id.sink_id as _).await?;
 
@@ -664,6 +665,8 @@ impl CoordinatorWorker {
                             .await?;
                     }
                     txn.commit().await?;
+
+                    coordinator.init().await?;
 
                     Ok(last_committed_epoch)
                 }

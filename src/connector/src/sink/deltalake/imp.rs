@@ -48,8 +48,9 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
-    SinkCommitStrategy, SinkError, SinkParam, SinkWriterParam,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
+    SinkWriterParam,
 };
 
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -324,7 +325,6 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
 }
 
 impl Sink for DeltaLakeSink {
-    type Coordinator = DeltaLakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
     const SINK_NAME: &'static str = super::DELTALAKE_SINK;
@@ -413,10 +413,11 @@ impl Sink for DeltaLakeSink {
     async fn new_coordinator(
         &self,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
-        Ok(DeltaLakeSinkCommitter {
+    ) -> Result<SinkCommitCoordinator> {
+        let coordinator = DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
-        })
+        };
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -527,11 +528,7 @@ pub struct DeltaLakeSinkCommitter {
 }
 
 #[async_trait::async_trait]
-impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    fn strategy(&self) -> SinkCommitStrategy {
-        SinkCommitStrategy::SinglePhase
-    }
-
+impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         tracing::info!("DeltaLake commit coordinator inited.");
         Ok(())
@@ -632,7 +629,7 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::{DeltaLakeConfig, DeltaLakeSinkCommitter, DeltaLakeSinkWriter};
-    use crate::sink::SinkCommitCoordinator;
+    use crate::sink::SinglePhaseCommitCoordinator;
     use crate::sink::writer::SinkWriter;
 
     #[tokio::test]

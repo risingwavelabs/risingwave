@@ -89,7 +89,10 @@ use crate::enforce_secret::EnforceSecret;
 use crate::sink::catalog::SinkId;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::writer::SinkWriter;
-use crate::sink::{Result, SinkCommitCoordinator, SinkCommitStrategy, SinkParam};
+use crate::sink::{
+    Result, SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkParam,
+    TwoPhaseCommitCoordinator,
+};
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -573,7 +576,6 @@ impl IcebergSink {
 }
 
 impl Sink for IcebergSink {
-    type Coordinator = IcebergSinkCommitter;
     type LogSinker = CoordinatedLogSinker<IcebergSinkWriter>;
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
@@ -651,10 +653,10 @@ impl Sink for IcebergSink {
     async fn new_coordinator(
         &self,
         iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
+    ) -> Result<SinkCommitCoordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
-        Ok(IcebergSinkCommitter {
+        let coordinator = IcebergSinkCommitter {
             catalog,
             table,
             last_commit_epoch: 0,
@@ -663,7 +665,12 @@ impl Sink for IcebergSink {
             param: self.param.clone(),
             commit_retry_num: self.config.commit_retry_num,
             iceberg_compact_stat_sender,
-        })
+        };
+        if self.config.is_exactly_once.unwrap_or_default() {
+            Ok(SinkCommitCoordinator::TwoPhase(Box::new(coordinator)))
+        } else {
+            Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
+        }
     }
 }
 
@@ -1639,16 +1646,41 @@ impl IcebergSinkCommitter {
     }
 }
 
-#[async_trait::async_trait]
-impl SinkCommitCoordinator for IcebergSinkCommitter {
-    fn strategy(&self) -> SinkCommitStrategy {
-        if self.config.is_exactly_once.unwrap_or_default() {
-            SinkCommitStrategy::TwoPhase
-        } else {
-            SinkCommitStrategy::SinglePhase
-        }
+#[async_trait]
+impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!(
+            "Sink id = {}: iceberg sink coordinator initing.",
+            self.param.sink_id.sink_id
+        );
+
+        Ok(())
     }
 
+    async fn commit_directly(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        tracing::info!("Starting iceberg direct commit in epoch {epoch}");
+
+        let (write_results, snapshot_id) =
+            match self.pre_commit_inner(epoch, metadata, add_columns).await? {
+                Some((write_results, snapshot_id)) => (write_results, snapshot_id),
+                None => {
+                    tracing::debug!(?epoch, "no data to commit");
+                    return Ok(());
+                }
+            };
+
+        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
+            .await
+    }
+}
+
+#[async_trait]
+impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         tracing::info!(
             "Sink id = {}: iceberg sink coordinator initing.",
@@ -1731,27 +1763,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {
         // TODO: Files that have been written but not committed should be deleted.
         tracing::debug!("Abort not implemented yet");
-    }
-
-    async fn commit_directly(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
-    ) -> Result<()> {
-        tracing::info!("Starting iceberg direct commit in epoch {epoch}");
-
-        let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns).await? {
-                Some((write_results, snapshot_id)) => (write_results, snapshot_id),
-                None => {
-                    tracing::debug!(?epoch, "no data to commit");
-                    return Ok(());
-                }
-            };
-
-        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
-            .await
     }
 }
 

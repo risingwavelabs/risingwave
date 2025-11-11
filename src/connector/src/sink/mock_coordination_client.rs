@@ -25,8 +25,8 @@ use tokio::sync::mpsc::{self, Receiver};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 
-use super::boxed::BoxCoordinator;
 use super::{BOUNDED_CHANNEL_SIZE, SinkParam};
+use crate::sink::{SinkCommitCoordinator, SinkError};
 
 #[derive(Clone)]
 pub enum SinkCoordinationRpcClientEnum {
@@ -66,10 +66,10 @@ impl SinkCoordinationRpcClientEnum {
 
 #[derive(Clone)]
 pub struct MockMetaClient {
-    mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<BoxCoordinator>>,
+    mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<SinkCommitCoordinator>>,
 }
 impl MockMetaClient {
-    pub fn new(mock_coordinator_committer: BoxCoordinator) -> Self {
+    pub fn new(mock_coordinator_committer: SinkCommitCoordinator) -> Self {
         Self {
             mock_coordinator_committer: std::sync::Arc::new(tokio::sync::Mutex::new(
                 mock_coordinator_committer,
@@ -84,12 +84,12 @@ impl MockMetaClient {
 
 #[derive(Clone)]
 pub struct MockSinkCoordinationRpcClient {
-    mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<BoxCoordinator>>,
+    mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<SinkCommitCoordinator>>,
 }
 
 impl MockSinkCoordinationRpcClient {
     pub fn new(
-        mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<BoxCoordinator>>,
+        mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<SinkCommitCoordinator>>,
     ) -> Self {
         Self {
             mock_coordinator_committer,
@@ -161,13 +161,25 @@ impl MockSinkCoordinationRpcClient {
                                 },
                             )),
                     }) => {
-                        mock_coordinator_committer
-                            .clone()
-                            .lock()
-                            .await
-                            .commit_directly(epoch, vec![metadata.unwrap()], None)
-                            .await
-                            .map_err(|e| Status::from_error(Box::new(e)))?;
+                        let result: Result<(), SinkError> = try {
+                            let mut guard = mock_coordinator_committer.lock().await;
+                            match &mut *guard {
+                                SinkCommitCoordinator::SinglePhase(coordinator) => {
+                                    coordinator.init().await?;
+                                    coordinator
+                                        .commit_directly(epoch, vec![metadata.unwrap()], None)
+                                        .await?;
+                                }
+                                SinkCommitCoordinator::TwoPhase(coordinator) => {
+                                    coordinator.init().await?;
+                                    let metadata = coordinator
+                                        .pre_commit(epoch, vec![metadata.unwrap()], None)
+                                        .await?;
+                                    coordinator.commit(epoch, metadata).await?;
+                                }
+                            }
+                        };
+                        result.map_err(|e| Status::from_error(Box::new(e)))?;
                         response_tx_clone
                             .clone()
                             .send(Ok(CoordinateResponse {

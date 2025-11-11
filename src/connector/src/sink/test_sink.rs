@@ -21,18 +21,18 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
-use crate::sink::boxed::{BoxCoordinator, BoxLogSinker};
-use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
+use crate::sink::boxed::BoxLogSinker;
+use crate::sink::{Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterParam};
 
 pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFuture<'static, crate::sink::Result<BoxLogSinker>>
     + Send
     + 'static;
-pub trait BuildBoxCoordinatorTrait = FnMut(SinkParam, Option<UnboundedSender<IcebergSinkCompactionUpdate>>) -> BoxCoordinator
+pub trait BuildSinkCoordinatorTrait = FnMut(SinkParam, Option<UnboundedSender<IcebergSinkCompactionUpdate>>) -> SinkCommitCoordinator
     + Send
     + 'static;
 
 type BuildBoxLogSinker = Box<dyn BuildBoxLogSinkerTrait>;
-type BuildBoxCoordinator = Box<dyn BuildBoxCoordinatorTrait>;
+type BuildSinkCoordinator = Box<dyn BuildSinkCoordinatorTrait>;
 pub const TEST_SINK_NAME: &str = "test";
 
 #[derive(Debug)]
@@ -55,7 +55,6 @@ impl TryFrom<SinkParam> for TestSink {
 }
 
 impl Sink for TestSink {
-    type Coordinator = BoxCoordinator;
     type LogSinker = BoxLogSinker;
 
     const SINK_NAME: &'static str = "test";
@@ -74,7 +73,7 @@ impl Sink for TestSink {
     async fn new_coordinator(
         &self,
         iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> crate::sink::Result<Self::Coordinator> {
+    ) -> crate::sink::Result<SinkCommitCoordinator> {
         Ok(build_box_coordinator(
             self.param.clone(),
             iceberg_compact_stat_sender,
@@ -83,7 +82,7 @@ impl Sink for TestSink {
 }
 
 struct TestSinkRegistry {
-    build_box_sink: Arc<Mutex<Option<(BuildBoxLogSinker, BuildBoxCoordinator)>>>,
+    build_box_sink: Arc<Mutex<Option<(BuildBoxLogSinker, BuildSinkCoordinator)>>>,
 }
 
 impl TestSinkRegistry {
@@ -109,7 +108,7 @@ impl Drop for TestSinkRegistryGuard {
 
 fn register_build_sink_inner(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
-    build_box_coordinator: impl BuildBoxCoordinatorTrait,
+    build_box_coordinator: impl BuildSinkCoordinatorTrait,
 ) -> TestSinkRegistryGuard {
     assert!(
         get_registry()
@@ -126,7 +125,7 @@ fn register_build_sink_inner(
 
 pub fn register_build_coordinated_sink(
     build_box_log_sinker: impl BuildBoxLogSinkerTrait,
-    build_box_coordinator: impl BuildBoxCoordinatorTrait,
+    build_box_coordinator: impl BuildSinkCoordinatorTrait,
 ) -> TestSinkRegistryGuard {
     register_build_sink_inner(build_box_log_sinker, build_box_coordinator)
 }
@@ -142,7 +141,7 @@ pub fn register_build_sink(
 fn build_box_coordinator(
     sink_param: SinkParam,
     iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-) -> BoxCoordinator {
+) -> SinkCommitCoordinator {
     (get_registry()
         .build_box_sink
         .lock()

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -22,9 +22,12 @@ use risingwave_common::catalog::Field;
 use risingwave_pb::connector_service::SinkMetadata;
 
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
-use crate::sink::{LogSinker, SinkCommitCoordinator, SinkCommitStrategy, SinkLogReader};
+use crate::sink::{
+    LogSinker, SinglePhaseCommitCoordinator, SinkLogReader, TwoPhaseCommitCoordinator,
+};
 
-pub type BoxCoordinator = Box<dyn SinkCommitCoordinator + Send + 'static>;
+pub type BoxSinglePhaseCoordinator = Box<dyn SinglePhaseCommitCoordinator + Send + 'static>;
+pub type BoxTwoPhaseCoordinator = Box<dyn TwoPhaseCommitCoordinator + Send + 'static>;
 
 pub type BoxLogSinker = Box<
     dyn for<'a> FnOnce(&'a mut dyn DynLogReader) -> BoxFuture<'a, crate::sink::Result<!>>
@@ -99,11 +102,25 @@ impl LogSinker for BoxLogSinker {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for BoxCoordinator {
-    fn strategy(&self) -> SinkCommitStrategy {
-        self.deref().strategy()
+impl SinglePhaseCommitCoordinator for BoxSinglePhaseCoordinator {
+    async fn init(&mut self) -> crate::sink::Result<()> {
+        self.deref_mut().init().await
     }
 
+    async fn commit_directly(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut()
+            .commit_directly(epoch, metadata, add_columns)
+            .await
+    }
+}
+
+#[async_trait]
+impl TwoPhaseCommitCoordinator for BoxTwoPhaseCoordinator {
     async fn init(&mut self) -> crate::sink::Result<()> {
         self.deref_mut().init().await
     }
@@ -125,16 +142,5 @@ impl SinkCommitCoordinator for BoxCoordinator {
 
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>) {
         self.deref_mut().abort(epoch, commit_metadata).await;
-    }
-
-    async fn commit_directly(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
-    ) -> crate::sink::Result<()> {
-        self.deref_mut()
-            .commit_directly(epoch, metadata, add_columns)
-            .await
     }
 }
