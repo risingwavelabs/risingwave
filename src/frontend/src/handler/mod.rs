@@ -54,6 +54,7 @@ mod alter_sink_props;
 mod alter_source_column;
 mod alter_source_props;
 mod alter_source_with_sr;
+mod alter_streaming_config;
 mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
 mod alter_swap_rename;

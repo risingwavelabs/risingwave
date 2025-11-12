@@ -289,6 +289,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
     "fs",
 ] }
 tokio-util = "0.7"
+toml = "0.9"
 tonic = { package = "madsim-tonic", version = "0.5.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 tracing-opentelemetry = "0.30"
