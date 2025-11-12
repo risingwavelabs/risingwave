@@ -541,7 +541,6 @@ impl StreamActorManager {
             let actor_monitor_task = self.runtime.spawn(async move {
                 let metrics = streaming_metrics.new_actor_metrics(actor_id, fragment_id);
                 for task_metrics in monitor.intervals() {
-                    // Always collect actor execution duration.
                     metrics
                         .actor_execution_duration
                         .inc_by(task_metrics.total_poll_duration.as_nanos() as u64);
@@ -573,7 +572,7 @@ impl StreamActorManager {
                     metrics
                         .actor_scheduled_cnt
                         .inc_by(task_metrics.total_scheduled_count);
-                    tokio::time::sleep(Duration::from_secs(15)).await;
+                    tokio::time::sleep(Duration::from_secs(15)).await; // Our scraping interval is at 15s.
                 }
             });
             Some(actor_monitor_task)

@@ -387,7 +387,7 @@ impl StreamingMetrics {
         let actor_fast_poll_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_fast_poll_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -396,7 +396,7 @@ impl StreamingMetrics {
         let actor_fast_poll_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_fast_poll_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -405,7 +405,7 @@ impl StreamingMetrics {
         let actor_slow_poll_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_slow_poll_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -414,7 +414,7 @@ impl StreamingMetrics {
         let actor_slow_poll_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_slow_poll_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -423,7 +423,7 @@ impl StreamingMetrics {
         let actor_poll_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_poll_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -432,7 +432,7 @@ impl StreamingMetrics {
         let actor_poll_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_poll_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -441,7 +441,7 @@ impl StreamingMetrics {
         let actor_scheduled_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_scheduled_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -450,7 +450,7 @@ impl StreamingMetrics {
         let actor_scheduled_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_scheduled_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -459,7 +459,7 @@ impl StreamingMetrics {
         let actor_idle_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_idle_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
@@ -468,7 +468,7 @@ impl StreamingMetrics {
         let actor_idle_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_idle_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap()
