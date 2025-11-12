@@ -241,7 +241,7 @@ impl GlobalRefreshManager {
             );
             return Ok(());
         };
-        let associated_source_id = TableId::new(src_id);
+        let associated_source_id = SourceId::new(src_id);
 
         self.ensure_refreshable(job.table_id, associated_source_id)
             .await?;
@@ -253,7 +253,7 @@ impl GlobalRefreshManager {
     async fn execute_refresh(
         self: &Arc<Self>,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
         shared_actor_infos: &SharedActorInfos,
     ) -> MetaResult<()> {
         let trigger_time = Utc::now().naive_utc();

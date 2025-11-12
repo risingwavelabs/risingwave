@@ -19,10 +19,9 @@ use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_meta_model::ActorId;
-use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::{ActorId, SourceId};
+use risingwave_pb::id::SourceId;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
