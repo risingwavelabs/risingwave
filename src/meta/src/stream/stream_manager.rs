@@ -652,6 +652,13 @@ impl GlobalStreamManager {
         let futures = background_job_ids.into_iter().map(|id| async move {
             let fragment = self.metadata_manager.get_job_fragments_by_id(id).await?;
             if fragment.is_created() {
+                tracing::warn!(
+                    "streaming job {} is already created, ignore cancel request",
+                    id
+                );
+                return Ok(None);
+            }
+            if fragment.is_created() {
                 Err(MetaError::invalid_parameter(format!(
                     "streaming job {} is already created",
                     id
@@ -677,14 +684,14 @@ impl GlobalStreamManager {
             }
 
             tracing::info!(?id, "cancelled background streaming job");
-            Ok(id)
+            Ok(Some(id))
         });
         let cancelled_recovered_ids = join_all(futures)
             .await
             .into_iter()
             .collect::<MetaResult<Vec<_>>>()?;
 
-        cancelled_ids.extend(cancelled_recovered_ids);
+        cancelled_ids.extend(cancelled_recovered_ids.into_iter().flatten());
         Ok(cancelled_ids)
     }
 
