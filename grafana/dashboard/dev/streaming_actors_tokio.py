@@ -14,7 +14,7 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_actor_execution_time')}[$__rate_interval]) > 0",
+                            f"rate({metric('stream_actor_execution_duration')}[$__rate_interval]) > 0",
                             "{{actor_id}}",
                         ),
                     ],
