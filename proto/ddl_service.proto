@@ -687,4 +687,5 @@ service DdlService {
   rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
   rpc ExpireIcebergTableSnapshots(ExpireIcebergTableSnapshotsRequest) returns (ExpireIcebergTableSnapshotsResponse);
   rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
+  rpc AlterStreamingJobConfig(AlterStreamingJobConfigRequest) returns (AlterStreamingJobConfigResponse);
 }

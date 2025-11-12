@@ -635,11 +635,16 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_config(
         &self,
-        _job_id: JobId,
-        _entries_to_add: HashMap<String, String>,
-        _keys_to_remove: Vec<String>,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
     ) -> Result<()> {
-        todo!()
+        self.meta_client
+            .alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
     }
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()> {
