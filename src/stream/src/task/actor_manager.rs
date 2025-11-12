@@ -398,13 +398,17 @@ impl StreamActorManager {
     }
 
     /// Get the overridden configuration for the given `config_override`.
-    fn get_overridden_config(&self, config_override: &str, actor_id: u32) -> Arc<StreamingConfig> {
+    fn get_overridden_config(
+        &self,
+        config_override: &str,
+        actor_id: ActorId,
+    ) -> Arc<StreamingConfig> {
         self.config_override_cache
             .get_with_by_ref(config_override, || {
                 let global = self.env.global_config();
                 match merge_config(global.as_ref(), config_override, ["streaming"]) {
                     Ok(Some(config)) => {
-                        tracing::info!(actor_id, "applied configuration override");
+                        tracing::info!(%actor_id, "applied configuration override");
                         Arc::new(config)
                     }
                     Ok(None) => global.clone(), // nothing to override
@@ -414,7 +418,7 @@ impl StreamActorManager {
                         // any compatibility issue.
                         tracing::error!(
                             error = %e.as_report(),
-                            actor_id,
+                            %actor_id,
                             "failed to apply configuration override, use global config instead",
                         );
                         global.clone()
