@@ -549,6 +549,9 @@ message Table {
 
   optional CdcTableType cdc_table_type = 47;
 
+  reserved "refresh_state";
+  reserved 48;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
