@@ -1,6 +1,15 @@
 # CDC source basic test
 control substitution on
 
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table phases (name varchar primary key, at timestamptz);
+
+statement ok
+insert into phases values ('00_begin', now());
+
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF
 db.all_types.insertOne({
@@ -33,6 +42,9 @@ EOF
 
 
 statement ok
+insert into phases values ('01_inserted', now());
+
+statement ok
 CREATE TABLE all_types_extjson (_id JSONB PRIMARY KEY, payload JSONB)
 INCLUDE TIMESTAMP as commit_ts
 INCLUDE DATABASE_NAME as database_name
@@ -44,33 +56,81 @@ WITH (
 );
 
 statement ok
+insert into phases values ('02_created', now());
+
+statement ok
 CREATE MATERIALIZED VIEW all_types_access AS
+WITH per_field AS (SELECT *, unnest(ARRAY[
+  'f01a_double',
+  -- 'f01b_double',
+  'f02_string',
+  'f03_object',
+  'f04_array',
+  'f05a_binData',
+  'f05b_binData',
+  'f05c_binData',
+  'f08_bool',
+  'f09a_date',
+  'f09b_date',
+  'f10_null',
+  'f11_regex',
+  'f13_javascript',
+  'f16_int',
+  'f17_timestamp',
+  'f18_long',
+  'f19_decimal'
+]) AS field FROM all_types_extjson)
 SELECT
-    (payload -> 'f01_double')::float8 as f01_double,
-    payload ->> 'f02_string' as f02_string,
-    payload -> 'f09_date' as f09_date
+    _id,
+    field,
+    payload -> field AS extjson
 FROM
-    all_types_extjson;
+    per_field;
 
 sleep 5s
 
-query I
-select * from all_types_extjson;
-----
-123
+control substitution off
 
-# historical data
-query I
-select count(*) from users where commit_ts > '2025-01-01 00:00:00+00:00';
+query TTT
+select _id, database_name, collection_name from all_types_extjson;
 ----
-55
+{"$oid": "6911a33502454e0f774f8803"} test all_types
+
+statement ok
+insert into phases values ('03_ingested', now());
+
+query TTT
+select * from all_types_access order by _id, field;
+----
+{"$oid": "6911a33502454e0f774f8803"} f01a_double    2.5
+{"$oid": "6911a33502454e0f774f8803"} f02_string     "Rising"
+{"$oid": "6911a33502454e0f774f8803"} f03_object     {"bar": false, "foo": true}
+{"$oid": "6911a33502454e0f774f8803"} f04_array      ["e0", "e1"]
+{"$oid": "6911a33502454e0f774f8803"} f05a_binData   {"$binary": "3q2+7w==", "$type": "00"}
+{"$oid": "6911a33502454e0f774f8803"} f05b_binData   {"$binary": "ABEiM0RVZneImaq7zN3u/w==", "$type": "04"}
+{"$oid": "6911a33502454e0f774f8803"} f05c_binData   {"$binary": "JwAAAABAAABAQA==", "$type": "09"}
+{"$oid": "6911a33502454e0f774f8803"} f08_bool       false
+{"$oid": "6911a33502454e0f774f8803"} f09a_date      {"$date": 1}
+{"$oid": "6911a33502454e0f774f8803"} f09b_date      {"$date": -138751200000}
+{"$oid": "6911a33502454e0f774f8803"} f10_null       null
+{"$oid": "6911a33502454e0f774f8803"} f11_regex      {"$options": "i", "$regex": "ab+c"}
+{"$oid": "6911a33502454e0f774f8803"} f13_javascript {"$code": "function() {}"}
+{"$oid": "6911a33502454e0f774f8803"} f16_int        42
+{"$oid": "6911a33502454e0f774f8803"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
+{"$oid": "6911a33502454e0f774f8803"} f18_long       {"$numberLong": "9007199254740993"}
+{"$oid": "6911a33502454e0f774f8803"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
 
 query TT
-select database_name, collection_name FROM users LIMIT 2;
+select name, at from phases
+union all
+select 'commit_ts', commit_ts from all_types_extjson
+order by 2;
 ----
-random_data users
-random_data users
+FOO
 
 
 statement ok
-DROP TABLE users cascade
+DROP TABLE all_types_extjson cascade;
+
+statement ok
+DROP TABLE phases;
