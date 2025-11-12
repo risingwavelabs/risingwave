@@ -26,7 +26,8 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
-    ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
+    ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID,
+    ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::Jvm;
@@ -66,7 +67,7 @@ use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_fro
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, TableVersion};
+use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{ColumnId, DatabaseId, SchemaId, SourceId, check_column_name_not_reserved};
 use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};

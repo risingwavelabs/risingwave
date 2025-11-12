@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
@@ -108,7 +109,10 @@ impl CatalogController {
                     object::Column::DatabaseId
                         .eq(database_id)
                         .and(object::Column::SchemaId.eq(obj.schema_id.unwrap()))
-                        .and(source::Column::Name.eq(format!("__iceberg_source_{}", table_name))),
+                        .and(
+                            source::Column::Name
+                                .eq(format!("{}{}", ICEBERG_SOURCE_PREFIX, table_name)),
+                        ),
                 )
                 .into_partial_model()
                 .one(&txn)
@@ -206,7 +210,7 @@ impl CatalogController {
             .filter(
                 sink::Column::SinkId
                     .is_in(removed_object_ids.clone())
-                    .and(sink::Column::Name.like("__iceberg_sink_%")),
+                    .and(sink::Column::Name.like(format!("{}%", ICEBERG_SINK_PREFIX))),
             )
             .all(&txn)
             .await?

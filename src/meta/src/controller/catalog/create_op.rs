@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_common::util::epoch::Epoch;
 
@@ -218,9 +219,9 @@ impl CatalogController {
 
         let mut job_notifications = vec![];
         // check if it belongs to iceberg table
-        if pb_source.name.starts_with("__iceberg_source_") {
+        if pb_source.name.starts_with(ICEBERG_SOURCE_PREFIX) {
             // 1. finish iceberg table job.
-            let table_name = pb_source.name.trim_start_matches("__iceberg_source_");
+            let table_name = pb_source.name.trim_start_matches(ICEBERG_SOURCE_PREFIX);
             let table_id = Table::find()
                 .select_only()
                 .column(table::Column::TableId)
@@ -240,7 +241,7 @@ impl CatalogController {
             job_notifications.push((table_id.as_job_id(), table_notifications));
 
             // 2. finish iceberg sink job.
-            let sink_name = format!("__iceberg_sink_{}", table_name);
+            let sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table_name);
             let sink_id = Sink::find()
                 .select_only()
                 .column(sink::Column::SinkId)

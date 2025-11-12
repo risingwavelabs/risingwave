@@ -18,8 +18,8 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, Schema,
-    StreamJobStatus, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, ICEBERG_SINK_PREFIX,
+    ICEBERG_SOURCE_PREFIX, Schema, StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::id::JobId;
@@ -210,9 +210,6 @@ pub struct TableCatalog {
 
     pub cdc_table_type: Option<ExternalCdcTableType>,
 }
-
-pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
-pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]

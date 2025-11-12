@@ -116,8 +116,8 @@ use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SC
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
+use risingwave_common::catalog::ICEBERG_SOURCE_PREFIX;
 
-use crate::catalog::table_catalog::ICEBERG_SINK_PREFIX;
 use crate::stream_fragmenter::GraphJobType;
 
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
@@ -1076,11 +1076,11 @@ pub async fn handle_create_source(
     if stmt
         .source_name
         .base_name()
-        .starts_with(ICEBERG_SINK_PREFIX)
+        .starts_with(ICEBERG_SOURCE_PREFIX)
     {
         return Err(RwError::from(InvalidInputSyntax(format!(
-            "source name cannot start with reserved prefix '{}'",
-            ICEBERG_SINK_PREFIX
+            "Source name cannot start with reserved prefix '{}'",
+            ICEBERG_SOURCE_PREFIX
         ))));
     }
 

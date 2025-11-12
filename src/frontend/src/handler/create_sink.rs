@@ -24,7 +24,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ConnectionId, ObjectId, Schema, UserId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, ICEBERG_SINK_PREFIX, ObjectId, Schema, UserId,
+};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -55,7 +57,7 @@ use super::create_mv::get_column_names;
 use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::util::gen_query_from_table_name;
 use crate::binder::{Binder, Relation};
-use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, TableType};
+use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;

@@ -1227,11 +1227,12 @@ impl DdlController {
                     table_identifier
                 );
 
-                let _ = iceberg_catalog.drop_table(&table_identifier)
+                let _ = iceberg_catalog
+                    .drop_table(&table_identifier)
                     .await
                     .inspect_err(|err| {
                         tracing::error!(
-                            "failed to drop iceberg table {} after create iceberg engine table failed: {}",
+                            "failed to drop iceberg table {} during cleanup: {}",
                             table_identifier,
                             err.as_report()
                         );

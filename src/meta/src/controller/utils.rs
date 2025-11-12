@@ -17,7 +17,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::JobId;
 use risingwave_common::types::Datum;
@@ -2043,8 +2043,7 @@ where
         return Ok(None);
     };
 
-    // TODO: more robust way to identify iceberg sink and table
-    if sink.name.starts_with("__iceberg_sink_") {
+    if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
         let object_ids: Vec<ObjectId> = ObjectDependency::find()
             .select_only()
             .column(object_dependency::Column::Oid)
@@ -2052,16 +2051,21 @@ where
             .into_tuple()
             .all(txn)
             .await?;
-        if let Some(table_id) = object_ids.into_iter().max()
-            && let Some(table_engine) = Table::find_by_id(TableId::new(table_id as _))
+        let mut iceberg_table_ids = vec![];
+        for object_id in object_ids {
+            if let Some(table_engine) = Table::find_by_id(TableId::new(object_id as _))
                 .select_only()
                 .column(table::Column::Engine)
                 .into_tuple::<table::Engine>()
                 .one(txn)
                 .await?
-            && table_engine == table::Engine::Iceberg
-        {
-            return Ok(Some(TableId::new(table_id as _)));
+                && table_engine == table::Engine::Iceberg
+            {
+                iceberg_table_ids.push(object_id);
+            }
+        }
+        if iceberg_table_ids.len() == 1 {
+            return Ok(Some(TableId::new(iceberg_table_ids[0] as _)));
         }
     }
     Ok(None)
@@ -2087,7 +2091,7 @@ where
         .into_tuple::<String>()
         .one(txn)
         .await?
-        && sink_name.starts_with("__iceberg_sink_")
+        && sink_name.starts_with(ICEBERG_SINK_PREFIX)
     {
         return Ok(true);
     }
@@ -2127,7 +2131,6 @@ where
         if check_if_belongs_to_iceberg_table(txn, JobId::new(job.oid as _)).await? {
             tracing::info!("Found dirty iceberg job with id: {}", job.oid);
             dirty_iceberg_table_jobs.push(job);
-            continue;
         }
     }
 

@@ -629,11 +629,10 @@ impl CatalogController {
             if streaming_job.create_type == CreateType::Background
                 && streaming_job.job_status == JobStatus::Creating
             {
-                if obj.obj_type == ObjectType::Table
-                    || obj.obj_type == ObjectType::Sink
-                        && check_if_belongs_to_iceberg_table(&txn, job_id).await?
+                if (obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
+                    && check_if_belongs_to_iceberg_table(&txn, job_id).await?
                 {
-                    // If the job belongs an iceberg table, we still need to clean it.
+                    // If the job belongs to an iceberg table, we still need to clean it.
                 } else {
                     // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
                     tracing::warn!(

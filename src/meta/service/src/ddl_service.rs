@@ -1454,13 +1454,12 @@ impl DdlService for DdlServiceImpl {
         // Set the source rate limit to 0 and reset it back after the iceberg sink is backfilling.
         let source_rate_limit = if let Some(source) = &source {
             for fragment in fragment_graph.fragments.values_mut() {
-                stream_graph_visitor::visit_fragment_mut(fragment, |node| match node {
-                    NodeBody::Source(source_node) => {
-                        if let Some(inner) = &mut source_node.source_inner {
-                            inner.rate_limit = Some(0);
-                        }
+                stream_graph_visitor::visit_fragment_mut(fragment, |node| {
+                    if let NodeBody::Source(source_node) = node
+                        && let Some(inner) = &mut source_node.source_inner
+                    {
+                        inner.rate_limit = Some(0);
                     }
-                    _ => {}
                 });
             }
             Some(source.rate_limit)
@@ -1597,7 +1596,7 @@ impl DdlService for DdlServiceImpl {
                 .await?;
         }
 
-        // 3. create iceberg source
+        // 4. create iceberg source
         let iceberg_source = iceberg_source.unwrap();
         let res = self
             .ddl_controller
