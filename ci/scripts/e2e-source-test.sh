@@ -120,8 +120,8 @@ echo '> ping mongodb'
 echo 'db.runCommand({ping: 1})' | mongosh mongodb://mongodb:27017
 echo '> rs config'
 echo 'rs.conf()' | mongosh mongodb://mongodb:27017
-type mongosh
 echo '> run test..'
+# This is actually redundant. `source_inline` is already executed above.
 risedev slt './e2e_test/source_inline/cdc/mongodb/**/*.slt'
 
 echo "--- inline cdc test"
