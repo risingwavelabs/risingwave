@@ -292,10 +292,8 @@ def _(outer_panels: Panels):
             ),
             panels.subheader("Backpressure"),
             panels.timeseries_percentage(
-                "Actor Output Blocking Time Ratio (Backpressure)",
-                "We first record the total blocking duration(ns) of output buffer of each actor. It shows how "
-                "much time it takes an actor to process a message, i.e. a barrier, a watermark or rows of data, "
-                "on average. Then we divide this duration by 1 second and show it as a percentage.",
+                "Actor Output Blocking Rate (Downstream Backpressure)",
+                "The rate that an actor is blocked by its downstream.",
                 [
                     # The metrics might be pre-aggregated locally on each compute node when `actor_id` is masked due to metrics level settings.
                     # Thus to calculate the average, we need to manually divide the actor count.
@@ -311,8 +309,8 @@ def _(outer_panels: Panels):
                 ],
             ),
             panels.timeseries_percentage(
-                "Actor Input Blocking Time Ratio",
-                "",
+                "Actor Input Blocking Rate (Upstream Backpressure)",
+                "The rate that an actor is blocked by its upstream.",
                 [
                     # The metrics might be pre-aggregated locally on each compute node when `actor_id` is masked due to metrics level settings.
                     # Thus to calculate the average, we need to manually divide the actor count.
@@ -327,35 +325,35 @@ def _(outer_panels: Panels):
             panels.subheader("Busy Rate"),
             panels.timeseries_percentage(
                 "Actor Busy Rate",
-                "1 - output_blocking - input_blocking, clamped to 0%",
+                "The rate that an actor is busy, i.e. the rate that an actor is not blocked by its downstream or upstream.",
                 [
                     _actor_busy_rate_alt_target(panels, "$__rate_interval"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Actor Busy Rate (10m)",
-                "1 - output_blocking - input_blocking, clamped to 0%",
+                "The rate that an actor is busy, i.e. the rate that an actor is not blocked by its downstream or upstream, over the last 10 minutes.",
                 [
                     _actor_busy_rate_alt_target(panels, "10m"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Actor Busy Rate (5m)",
-                "1 - output_blocking - input_blocking, clamped to 0%",
+                "The rate that an actor is busy, i.e. the rate that an actor is not blocked by its downstream or upstream, over the last 5 minutes.",
                 [
                     _actor_busy_rate_alt_target(panels, "5m"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Actor Busy Rate (3m)",
-                "1 - output_blocking - input_blocking, clamped to 0%",
+                "The rate that an actor is busy, i.e. the rate that an actor is not blocked by its downstream or upstream, over the last 3 minutes.",
                 [
                     _actor_busy_rate_alt_target(panels, "3m"),
                 ],
             ),
             panels.timeseries_latency_ns(
                 "Actor Busy Time (Relative)",
-                "- (output_blocking time + input_blocking time) + max (output_blocking time + input_blocking time)",
+                "The relative busy time of an actor, i.e. the time that an actor is not blocked by its downstream or upstream.",
                 [
                     _actor_busy_time_relative_target(panels),
                 ],
