@@ -163,6 +163,8 @@ pub struct StreamActor {
     pub vnode_bitmap: Option<Bitmap>,
     pub mview_definition: String,
     pub expr_context: Option<PbExprContext>,
+    // TODO: shall we merge `config_override` with `expr_context` to be a `StreamContext`?
+    pub config_override: String,
 }
 
 impl StreamActor {
@@ -177,6 +179,7 @@ impl StreamActor {
                 .map(|bitmap| bitmap.to_protobuf()),
             mview_definition: self.mview_definition.clone(),
             expr_context: self.expr_context.clone(),
+            config_override: self.config_override.clone(),
         }
     }
 }
@@ -279,6 +282,7 @@ pub struct StreamContext {
     pub timezone: Option<String>,
 
     /// The partial config of this job to override the global config.
+    // TODO(config): make it an `Arc`?
     pub config_override: String,
 }
 

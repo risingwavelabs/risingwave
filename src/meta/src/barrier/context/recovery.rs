@@ -740,6 +740,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .ok_or_else(|| anyhow!("no streaming job info for {}", job_id))?;
             let expr_context = extra_info.stream_context().to_expr_context();
             let job_definition = extra_info.job_definition;
+            let config_override = extra_info.config_override;
 
             for (fragment_id, fragment_info) in streaming_info {
                 for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_info.actors {
@@ -751,6 +752,7 @@ impl GlobalBarrierWorkerContextImpl {
                             vnode_bitmap: vnode_bitmap.clone(),
                             mview_definition: job_definition.clone(),
                             expr_context: Some(expr_context.clone()),
+                            config_override: config_override.clone(),
                         },
                     );
                 }

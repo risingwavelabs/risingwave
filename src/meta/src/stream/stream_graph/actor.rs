@@ -261,6 +261,7 @@ impl ActorBuilder {
             vnode_bitmap: self.vnode_bitmap,
             mview_definition,
             expr_context: Some(expr_context),
+            config_override: "".to_owned(), // TODO(config)
         })
     }
 }

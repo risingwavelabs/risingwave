@@ -1197,6 +1197,8 @@ message StreamActor {
   string mview_definition = 9;
   // Provide the necessary context, e.g. session info like time zone, for the actor.
   plan_common.ExprContext expr_context = 10;
+  // The config override for this actor.
+  string config_override = 11;
 }
 
 // The streaming context associated with a stream plan

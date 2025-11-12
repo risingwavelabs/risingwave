@@ -213,6 +213,7 @@ impl ScaleController {
         let extra_info = job_extra_info.cloned().unwrap_or_default();
         let expr_context = extra_info.stream_context().to_expr_context();
         let job_definition = extra_info.job_definition;
+        let config_override = extra_info.config_override;
 
         let newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> =
             added_actor_ids
@@ -224,6 +225,7 @@ impl ScaleController {
                         vnode_bitmap: curr_actors[actor_id].vnode_bitmap.clone(),
                         mview_definition: job_definition.clone(),
                         expr_context: Some(expr_context.clone()),
+                        config_override: config_override.clone(),
                     };
                     (
                         *actor_id,

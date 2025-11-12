@@ -102,6 +102,7 @@ struct ActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<VnodeBitmap>,
     pub expr_context: ExprContext,
+    pub config_override: String,
 }
 
 #[derive(Clone, Debug)]
@@ -350,6 +351,7 @@ impl CatalogController {
                 splits,
                 vnode_bitmap,
                 expr_context,
+                config_override,
                 ..
             } = actor;
 
@@ -372,6 +374,7 @@ impl CatalogController {
                 vnode_bitmap,
                 mview_definition: job_definition.clone().unwrap_or("".to_owned()),
                 expr_context: pb_expr_context,
+                config_override,
             })
         }
 
@@ -891,6 +894,7 @@ impl CatalogController {
                         .as_ref()
                         .map(|bitmap| VnodeBitmap::from(&bitmap.to_protobuf())),
                     expr_context: expr_context.clone(),
+                    config_override: stream_context.config_override.clone(),
                 })
                 .collect();
 
@@ -1887,6 +1891,7 @@ mod tests {
                     time_zone: String::from("America/New_York"),
                     strict_mode: false,
                 }),
+                config_override: "".to_owned(),
             })
             .collect_vec();
 
@@ -1950,6 +1955,7 @@ mod tests {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
                     }),
+                    config_override: "a.b.c = true".to_owned(),
                 }
             })
             .collect_vec();
