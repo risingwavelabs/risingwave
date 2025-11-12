@@ -11,7 +11,7 @@ CREATE TABLE t_validation (
 );
 
 # Test case 1: Error - unknown compaction_type
-statement error Unknown compaction type 'invalid_type'
+statement error Unknown compaction type 'invalid-type'
 CREATE SINK s_unknown AS SELECT * FROM t_validation WITH (
     connector = 'iceberg',
     type = 'upsert',
@@ -26,7 +26,7 @@ CREATE SINK s_unknown AS SELECT * FROM t_validation WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
-    compaction_type = 'invalid_type'
+    compaction.type = 'invalid_type'
 );
 
 # Test case 2: Error - COW mode with non-full compaction_type (small_files)
@@ -46,7 +46,7 @@ CREATE SINK s_cow_small_files AS SELECT * FROM t_validation WITH (
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
     write_mode = 'copy-on-write',
-    compaction_type = 'small_files'
+    compaction.type = 'small_files'
 );
 
 # Test case 3: Error - COW mode with files_with_delete
@@ -66,11 +66,11 @@ CREATE SINK s_cow_files_delete AS SELECT * FROM t_validation WITH (
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
     write_mode = 'copy-on-write',
-    compaction_type = 'files_with_delete'
+    compaction.type = 'files_with_delete'
 );
 
 # Test case 4: Error - small_files with conflicting parameter delete_files_count_threshold
-statement error `delete_files_count_threshold` is not supported for 'small_files' compaction type
+statement error `compaction.delete_files_count_threshold` is not supported for 'small-files' compaction type
 CREATE SINK s_small_files_conflict AS SELECT * FROM t_validation WITH (
     connector = 'iceberg',
     type = 'upsert',
@@ -86,12 +86,12 @@ CREATE SINK s_small_files_conflict AS SELECT * FROM t_validation WITH (
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
-    compaction_type = 'small_files',
-    delete_files_count_threshold = '5'
+    compaction.type = 'small_files',
+    compaction.delete_files_count_threshold = '5'
 );
 
 # Test case 5: Error - files_with_delete with conflicting parameter small_files_threshold_mb
-statement error `small_files_threshold_mb` must not be set for 'files_with_delete' compaction type
+statement error `compaction.small_files_threshold_mb` must not be set for 'files-with-delete' compaction type
 CREATE SINK s_delete_files_conflict AS SELECT * FROM t_validation WITH (
     connector = 'iceberg',
     type = 'upsert',
@@ -107,8 +107,8 @@ CREATE SINK s_delete_files_conflict AS SELECT * FROM t_validation WITH (
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
-    compaction_type = 'files_with_delete',
-    small_files_threshold_mb = '128'
+    compaction.type = 'files_with_delete',
+    compaction.small_files_threshold_mb = '128'
 );
 
 # Clean up

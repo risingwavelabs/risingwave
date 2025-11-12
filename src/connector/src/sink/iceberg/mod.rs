@@ -672,10 +672,10 @@ impl Sink for IcebergSink {
         // Check for unknown compaction types
         if !matches!(
             compaction_type,
-            "full" | "small_files" | "files_with_delete"
+            "full" | "small-files" | "files-with-delete"
         ) {
             bail!(
-                "Unknown compaction type '{}', must be one of: 'full', 'small_files', 'files_with_delete'",
+                "Unknown compaction type '{}', must be one of: 'full', 'small-files', 'files-with-delete'",
                 compaction_type
             );
         }
@@ -690,7 +690,7 @@ impl Sink for IcebergSink {
         }
 
         // Check MORE-specific compaction types
-        if "small_files".eq_ignore_ascii_case(compaction_type) {
+        if "small-files".eq_ignore_ascii_case(compaction_type) {
             // 1. check license
             risingwave_common::license::Feature::IcebergCompaction
                 .check_available()
@@ -699,7 +699,7 @@ impl Sink for IcebergSink {
             // 2. check write mode
             if self.config.write_mode != ICEBERG_WRITE_MODE_MERGE_ON_READ {
                 bail!(
-                    "Compaction type 'small_files' only supports write mode 'merge-on-read', got: {}",
+                    "Compaction type 'small-files' only supports write mode 'merge-on-read', got: {}",
                     self.config.write_mode
                 );
             }
@@ -707,12 +707,12 @@ impl Sink for IcebergSink {
             // 3. check conflicting parameters
             if self.config.delete_files_count_threshold.is_some() {
                 bail!(
-                    "`delete_files_count_threshold` is not supported for 'small_files' compaction type"
+                    "`compaction.delete_files_count_threshold` is not supported for 'small-files' compaction type"
                 );
             }
         }
 
-        if "files_with_delete".eq_ignore_ascii_case(compaction_type) {
+        if "files-with-delete".eq_ignore_ascii_case(compaction_type) {
             // 1. check license
             risingwave_common::license::Feature::IcebergCompaction
                 .check_available()
@@ -721,7 +721,7 @@ impl Sink for IcebergSink {
             // 2. check write mode
             if self.config.write_mode != ICEBERG_WRITE_MODE_MERGE_ON_READ {
                 bail!(
-                    "Compaction type 'files_with_delete' only supports write mode 'merge-on-read', got: {}",
+                    "Compaction type 'files-with-delete' only supports write mode 'merge-on-read', got: {}",
                     self.config.write_mode
                 );
             }
@@ -729,7 +729,7 @@ impl Sink for IcebergSink {
             // 3. check conflicting parameters
             if self.config.small_files_threshold_mb.is_some() {
                 bail!(
-                    "`small_files_threshold_mb` must not be set for 'files_with_delete' compaction type"
+                    "`compaction.small_files_threshold_mb` must not be set for 'files-with-delete' compaction type"
                 );
             }
         }
