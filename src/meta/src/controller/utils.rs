@@ -1262,10 +1262,7 @@ pub fn compose_dispatchers(
                     .to_protobuf(),
                 ),
                 dispatcher_id: target_fragment_id.as_raw_id() as _,
-                downstream_actor_id: target_fragment_actors
-                    .keys()
-                    .map(|actor_id| *actor_id as _)
-                    .collect(),
+                downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
             source_fragment_actors
                 .keys()
@@ -1279,10 +1276,7 @@ pub fn compose_dispatchers(
                 output_mapping: output_mapping.into(),
                 hash_mapping: None,
                 dispatcher_id: target_fragment_id.as_raw_id() as _,
-                downstream_actor_id: target_fragment_actors
-                    .keys()
-                    .map(|actor_id| *actor_id as _)
-                    .collect(),
+                downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
             source_fragment_actors
                 .keys()
@@ -1305,7 +1299,7 @@ pub fn compose_dispatchers(
                     output_mapping: output_mapping.clone().into(),
                     hash_mapping: None,
                     dispatcher_id: target_fragment_id.as_raw_id() as _,
-                    downstream_actor_id: vec![downstream_actor_id as _],
+                    downstream_actor_id: vec![downstream_actor_id],
                 },
             )
         })
@@ -1424,9 +1418,7 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
             let actor_locations = fragment
                 .actors
                 .iter()
-                .map(|(actor_id, actor_info)| {
-                    (*actor_id as hash::ActorId, actor_info.worker_id as u32)
-                })
+                .map(|(actor_id, actor_info)| (*actor_id as hash::ActorId, actor_info.worker_id))
                 .collect();
 
             actor_mapping.to_worker_slot(&actor_locations)
@@ -1557,7 +1549,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Sink => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Sink(PbSink {
-                    id: obj.oid as _,
+                    id: (obj.oid as u32).into(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1703,7 +1695,7 @@ pub async fn rename_relation(
             rename_relation!(Table, table, table_id, TableId::new(object_id as _))
         }
         ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
-        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
+        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, SinkId::new(object_id as _)),
         ObjectType::Subscription => {
             rename_relation!(Subscription, subscription, subscription_id, object_id)
         }
@@ -1776,7 +1768,7 @@ where
 }
 
 pub fn filter_workers_by_resource_group(
-    workers: &HashMap<u32, WorkerNode>,
+    workers: &HashMap<WorkerId, WorkerNode>,
     resource_group: &str,
 ) -> BTreeSet<WorkerId> {
     workers
@@ -1787,7 +1779,7 @@ pub fn filter_workers_by_resource_group(
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })
-        .map(|(id, _)| *id as WorkerId)
+        .map(|(id, _)| *id)
         .collect()
 }
 
@@ -1838,7 +1830,7 @@ pub async fn rename_relation_refer(
             .await?;
 
         objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
-            oid: id,
+            oid: id.as_raw_id() as _,
             obj_type: ObjectType::Sink,
             schema_id: None,
             database_id: None,
@@ -1850,7 +1842,9 @@ pub async fn rename_relation_refer(
             ObjectType::Table => {
                 rename_relation_ref!(Table, table, table_id, TableId::new(obj.oid as _))
             }
-            ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
+            ObjectType::Sink => {
+                rename_relation_ref!(Sink, sink, sink_id, SinkId::new(obj.oid as _))
+            }
             ObjectType::Subscription => {
                 rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
             }

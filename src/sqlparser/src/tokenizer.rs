@@ -16,28 +16,16 @@
 //!
 //! The tokens then form the input for the parser, which outputs an Abstract Syntax Tree (AST).
 
-#[cfg(not(feature = "std"))]
-use alloc::{
-    borrow::ToOwned,
-    format,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
-use core::fmt;
-use core::fmt::Debug;
-use core::iter::Peekable;
-use core::str::Chars;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::fmt::Debug;
+use std::iter::Peekable;
+use std::str::Chars;
 
 use crate::ast::{CstyleEscapedString, DollarQuotedString};
 use crate::keywords::{ALL_KEYWORDS, ALL_KEYWORDS_INDEX, Keyword};
 
 /// SQL Token enumeration
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Token {
     /// An end-of-file marker, not a real token
     EOF,
@@ -188,7 +176,6 @@ impl Token {
 
 /// A keyword (like SELECT) or an optionally quoted SQL identifier
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Word {
     /// The value of the token, without the enclosing quotes, and with the
     /// escape sequences (if any) processed (TODO: escapes are not handled)
@@ -226,7 +213,6 @@ impl Word {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Whitespace {
     Space,
     Newline,
@@ -321,7 +307,6 @@ impl fmt::Display for TokenizerError {
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for TokenizerError {}
 
 /// SQL Tokenizer
@@ -1062,17 +1047,16 @@ mod tests {
 
     #[test]
     fn tokenizer_error_impl() {
+        use std::error::Error;
+
         let err = TokenizerError {
             message: "test".into(),
             line: 1,
             col: 1,
             context: "LINE 1:".to_owned(),
         };
-        #[cfg(feature = "std")]
-        {
-            use std::error::Error;
-            assert!(err.source().is_none());
-        }
+
+        assert!(err.source().is_none());
         assert_eq!(err.to_string(), "test at line 1, column 1\nLINE 1:");
     }
 

@@ -26,7 +26,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::id::FragmentId;
+use risingwave_common::id::{ActorId, FragmentId};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
@@ -70,20 +70,20 @@ pub const WEBHOOK_CONNECTOR: &str = "webhook";
 /// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
 #[derive(Clone)]
 pub struct CdcAutoSchemaChangeFailCallback(
-    Arc<dyn Fn(u32, String, String, String, String) + Send + Sync>,
+    Arc<dyn Fn(TableId, String, String, String, String) + Send + Sync>,
 );
 
 impl CdcAutoSchemaChangeFailCallback {
     pub fn new<F>(f: F) -> Self
     where
-        F: Fn(u32, String, String, String, String) + Send + Sync + 'static,
+        F: Fn(TableId, String, String, String, String) + Send + Sync + 'static,
     {
         Self(Arc::new(f))
     }
 
     pub fn call(
         &self,
-        table_id: u32,
+        table_id: TableId,
         table_name: String,
         cdc_table_id: String,
         upstream_ddl: String,
@@ -325,7 +325,7 @@ pub struct SourceEnumeratorInfo {
 
 #[derive(Clone, Debug)]
 pub struct SourceContext {
-    pub actor_id: u32,
+    pub actor_id: ActorId,
     pub source_id: TableId,
     pub fragment_id: FragmentId,
     pub source_name: String,
@@ -341,7 +341,7 @@ pub struct SourceContext {
 
 impl SourceContext {
     pub fn new(
-        actor_id: u32,
+        actor_id: ActorId,
         source_id: TableId,
         fragment_id: FragmentId,
         source_name: String,
@@ -366,7 +366,7 @@ impl SourceContext {
     }
 
     pub fn new_with_auto_schema_change_callback(
-        actor_id: u32,
+        actor_id: ActorId,
         source_id: TableId,
         fragment_id: FragmentId,
         source_name: String,
@@ -395,7 +395,7 @@ impl SourceContext {
     /// where the real context doesn't matter.
     pub fn dummy() -> Self {
         Self::new(
-            0,
+            0.into(),
             TableId::new(0),
             0.into(),
             "dummy".to_owned(),
@@ -413,7 +413,7 @@ impl SourceContext {
     /// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
     pub fn on_cdc_auto_schema_change_failure(
         &self,
-        table_id: u32,
+        table_id: TableId,
         table_name: String,
         cdc_table_id: String,
         upstream_ddl: String,

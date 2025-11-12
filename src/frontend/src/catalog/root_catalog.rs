@@ -422,7 +422,7 @@ impl Catalog {
     pub fn update_sink(&mut self, proto: &PbSink) {
         let database = self.get_database_mut(proto.database_id).unwrap();
         let schema = database.get_schema_mut(proto.schema_id).unwrap();
-        if schema.get_sink_by_id(&proto.id).is_some() {
+        if schema.get_sink_by_id(proto.id).is_some() {
             schema.update_sink(proto);
         } else {
             // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
@@ -430,7 +430,7 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id && schema.get_sink_by_id(&proto.id).is_some()
+                    schema.id() != proto.schema_id && schema.get_sink_by_id(proto.id).is_some()
                 })
                 .unwrap()
                 .drop_sink(proto.id);
@@ -1166,7 +1166,7 @@ impl Catalog {
                 } else if let Some(item) = schema.get_view_by_name(class_name) {
                     Ok(Some(item.id))
                 } else if let Some(item) = schema.get_any_sink_by_name(class_name) {
-                    Ok(Some(item.id.into()))
+                    Ok(Some(item.id.as_raw_id()))
                 } else {
                     Ok(None)
                 }

@@ -165,7 +165,7 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::Sink => Sink::find_by_id(dst_object_id)
+            ObjectType::Sink => Sink::find_by_id(SinkId::new(dst_object_id as _))
                 .select_only()
                 .column(sink::Column::Name)
                 .into_tuple()
@@ -435,7 +435,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Sink => {
-                let sink = Sink::find_by_id(object_id)
+                let sink = Sink::find_by_id(SinkId::new(object_id as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
@@ -655,7 +655,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Sink => {
-                let sink = Sink::find_by_id(object_id)
+                let sink = Sink::find_by_id(SinkId::new(object_id as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;

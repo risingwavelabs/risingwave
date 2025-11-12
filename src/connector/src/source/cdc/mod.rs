@@ -23,6 +23,7 @@ use std::marker::PhantomData;
 
 pub use enumerator::*;
 use itertools::Itertools;
+use risingwave_common::id::ActorId;
 use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 use risingwave_pb::plan_common::ExternalTableDesc;
@@ -237,19 +238,19 @@ impl<T: CdcSourceTypeTrait> CdcProperties<T> {
     }
 }
 
-pub type CdcTableSnapshotSplitAssignment = HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>;
+pub type CdcTableSnapshotSplitAssignment = HashMap<ActorId, Vec<CdcTableSnapshotSplitRaw>>;
 
 pub const INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID: u64 = 0;
 pub const INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID: u64 = 1;
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CdcTableSnapshotSplitAssignmentWithGeneration {
-    pub splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>,
+    pub splits: HashMap<ActorId, Vec<CdcTableSnapshotSplitRaw>>,
     pub generation: u64,
 }
 
 impl CdcTableSnapshotSplitAssignmentWithGeneration {
-    pub fn new(splits: HashMap<u32, Vec<CdcTableSnapshotSplitRaw>>, generation: u64) -> Self {
+    pub fn new(splits: HashMap<ActorId, Vec<CdcTableSnapshotSplitRaw>>, generation: u64) -> Self {
         Self { splits, generation }
     }
 
@@ -274,7 +275,7 @@ pub fn build_pb_actor_cdc_table_snapshot_splits_with_generation(
 
 pub fn build_pb_actor_cdc_table_snapshot_splits(
     cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
-) -> HashMap<u32, PbCdcTableSnapshotSplits> {
+) -> HashMap<ActorId, PbCdcTableSnapshotSplits> {
     cdc_table_snapshot_split_assignment
         .into_iter()
         .map(|(actor_id, splits)| {

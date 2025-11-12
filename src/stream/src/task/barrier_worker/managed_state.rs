@@ -714,7 +714,7 @@ impl DatabaseManagedBarrierState {
 
         graph_state.transform_to_issued(
             barrier,
-            request.actor_ids_to_collect.iter().cloned(),
+            request.actor_ids_to_collect.iter().copied(),
             table_ids,
         );
 
@@ -770,8 +770,8 @@ impl DatabaseManagedBarrierState {
         // actors are spawned in the local test logic, but we assume that there is an entry for each spawned actor in ·actor_states`,
         // so under cfg!(test) we add a dummy entry for each new actor.
         if cfg!(test) {
-            for actor_id in &request.actor_ids_to_collect {
-                if !self.actor_states.contains_key(actor_id) {
+            for &actor_id in &request.actor_ids_to_collect {
+                if !self.actor_states.contains_key(&actor_id) {
                     let (tx, rx) = unbounded_channel();
                     let join_handle = self.actor_manager.runtime.spawn(async move {
                         // The rx is spawned so that tx.send() will not fail.
@@ -781,9 +781,9 @@ impl DatabaseManagedBarrierState {
                     assert!(
                         self.actor_states
                             .try_insert(
-                                *actor_id,
+                                actor_id,
                                 InflightActorState::start(
-                                    *actor_id,
+                                    actor_id,
                                     partial_graph_id,
                                     barrier,
                                     tx,
@@ -793,26 +793,26 @@ impl DatabaseManagedBarrierState {
                             )
                             .is_ok()
                     );
-                    new_actors.insert(*actor_id);
+                    new_actors.insert(actor_id);
                 }
             }
         }
 
         // Note: it's important to issue barrier to actor after issuing to graph to ensure that
         // we call `start_epoch` on the graph before the actors receive the barrier
-        for actor_id in &request.actor_ids_to_collect {
-            if new_actors.contains(actor_id) {
+        for &actor_id in &request.actor_ids_to_collect {
+            if new_actors.contains(&actor_id) {
                 continue;
             }
             self.actor_states
-                .get_mut(actor_id)
+                .get_mut(&actor_id)
                 .unwrap_or_else(|| {
                     panic!(
                         "should exist: {} {:?}",
                         actor_id, request.actor_ids_to_collect
                     );
                 })
-                .issue_barrier(partial_graph_id, barrier, is_stop_actor(*actor_id))?;
+                .issue_barrier(partial_graph_id, barrier, is_stop_actor(actor_id))?;
         }
 
         Ok(())
@@ -1042,13 +1042,13 @@ impl DatabaseManagedBarrierState {
                 .or_default()
                 .push(PbListFinishedSource {
                     reporter_actor_id: actor_id,
-                    table_id: table_id.as_raw_id(),
+                    table_id,
                     associated_source_id: associated_source_id.as_raw_id(),
                 });
         } else {
             warn!(
                 ?epoch,
-                actor_id, %table_id, %associated_source_id, "ignore source list finished"
+                %actor_id, %table_id, %associated_source_id, "ignore source list finished"
             );
         }
     }
@@ -1072,13 +1072,13 @@ impl DatabaseManagedBarrierState {
                 .or_default()
                 .push(PbLoadFinishedSource {
                     reporter_actor_id: actor_id,
-                    table_id: table_id.as_raw_id(),
+                    table_id,
                     associated_source_id: associated_source_id.as_raw_id(),
                 });
         } else {
             warn!(
                 ?epoch,
-                actor_id, %table_id, %associated_source_id, "ignore source load finished"
+                %actor_id, %table_id, %associated_source_id, "ignore source load finished"
             );
         }
     }
@@ -1095,7 +1095,7 @@ impl DatabaseManagedBarrierState {
         let Some(actor_state) = self.actor_states.get(&actor_id) else {
             warn!(
                 ?epoch,
-                actor_id, %table_id, "ignore refresh finished table: actor_state not found"
+                %actor_id, %table_id, "ignore refresh finished table: actor_state not found"
             );
             return;
         };
@@ -1103,7 +1103,7 @@ impl DatabaseManagedBarrierState {
             let inflight_barriers = actor_state.inflight_barriers.keys().collect::<Vec<_>>();
             warn!(
                 ?epoch,
-                actor_id,
+                %actor_id,
                 %table_id,
                 ?inflight_barriers,
                 "ignore refresh finished table: partial_graph_id not found in inflight_barriers"
@@ -1113,7 +1113,7 @@ impl DatabaseManagedBarrierState {
         let Some(graph_state) = self.graph_states.get_mut(partial_graph_id) else {
             warn!(
                 ?epoch,
-                actor_id, %table_id, "ignore refresh finished table: graph_state not found"
+                %actor_id, %table_id, "ignore refresh finished table: graph_state not found"
             );
             return;
         };
@@ -1264,10 +1264,11 @@ pub(crate) struct BarrierToComplete {
 
 impl PartialGraphManagedBarrierState {
     /// Collect a `barrier` from the actor with `actor_id`.
-    pub(super) fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) {
+    pub(super) fn collect(&mut self, actor_id: impl Into<ActorId>, epoch: EpochPair) {
+        let actor_id = actor_id.into();
         tracing::debug!(
             target: "events::stream::barrier::manager::collect",
-            ?epoch, actor_id, state = ?self.epoch_barrier_state_map,
+            ?epoch, %actor_id, state = ?self.epoch_barrier_state_map,
             "collect_barrier",
         );
 
@@ -1412,9 +1413,9 @@ mod tests {
         let barrier1 = Barrier::new_test_barrier(test_epoch(1));
         let barrier2 = Barrier::new_test_barrier(test_epoch(2));
         let barrier3 = Barrier::new_test_barrier(test_epoch(3));
-        let actor_ids_to_collect1 = HashSet::from([1, 2]);
-        let actor_ids_to_collect2 = HashSet::from([1, 2]);
-        let actor_ids_to_collect3 = HashSet::from([1, 2, 3]);
+        let actor_ids_to_collect1 = HashSet::from([1.into(), 2.into()]);
+        let actor_ids_to_collect2 = HashSet::from([1.into(), 2.into()]);
+        let actor_ids_to_collect3 = HashSet::from([1.into(), 2.into(), 3.into()]);
         managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
@@ -1462,9 +1463,9 @@ mod tests {
         let barrier1 = Barrier::new_test_barrier(test_epoch(1));
         let barrier2 = Barrier::new_test_barrier(test_epoch(2));
         let barrier3 = Barrier::new_test_barrier(test_epoch(3));
-        let actor_ids_to_collect1 = HashSet::from([1, 2, 3, 4]);
-        let actor_ids_to_collect2 = HashSet::from([1, 2, 3]);
-        let actor_ids_to_collect3 = HashSet::from([1, 2]);
+        let actor_ids_to_collect1 = HashSet::from([1.into(), 2.into(), 3.into(), 4.into()]);
+        let actor_ids_to_collect2 = HashSet::from([1.into(), 2.into(), 3.into()]);
+        let actor_ids_to_collect3 = HashSet::from([1.into(), 2.into()]);
         managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());

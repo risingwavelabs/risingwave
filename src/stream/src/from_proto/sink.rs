@@ -117,7 +117,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let chunk_size = params.config.developer.chunk_size;
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
-        let sink_id: SinkId = sink_desc.get_id().into();
+        let sink_id: SinkId = sink_desc.get_id();
         let sink_name = sink_desc.get_name().to_owned();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
@@ -150,7 +150,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         {
             tracing::info!("switching to native postgres connector");
             let jdbc_url = parse_jdbc_url(url)
-                .map_err(|e| StreamExecutorError::from((SinkError::Config(e), sink_id.sink_id)))?;
+                .map_err(|e| StreamExecutorError::from((SinkError::Config(e), sink_id)))?;
             properties_with_secret.insert(CONNECTOR_TYPE_KEY.to_owned(), "postgres".to_owned());
             properties_with_secret.insert("host".to_owned(), jdbc_url.host);
             properties_with_secret.insert("port".to_owned(), jdbc_url.port.to_string());
@@ -176,7 +176,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .ok_or_else(|| {
                     StreamExecutorError::from((
                         SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)),
-                        sink_id.sink_id,
+                        sink_id,
                     ))
                 })?;
 
@@ -188,7 +188,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 |other: &str| {
                     Err(StreamExecutorError::from((
                         SinkError::Config(anyhow!("unsupported sink connector {}", other)),
-                        sink_id.sink_id,
+                        sink_id,
                     )))
                 }
             )?
@@ -198,19 +198,19 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             Some(f) => Some(
                 f.clone()
                     .try_into()
-                    .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
+                    .map_err(|e| StreamExecutorError::from((e, sink_id)))?,
             ),
             None => match properties_with_secret.get(SINK_TYPE_OPTION) {
                 // Case B: old syntax `type = '...'`
                 Some(t) => SinkFormatDesc::from_legacy_type(connector, t)
-                    .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
+                    .map_err(|e| StreamExecutorError::from((e, sink_id)))?,
                 // Case C: no format + encode required
                 None => None,
             },
         };
 
         let format_desc = SinkParam::fill_secret_for_format_desc(format_desc)
-            .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?;
+            .map_err(|e| StreamExecutorError::from((e, sink_id)))?;
 
         // Backward compatibility: DEBEZIUM format should be treated as `Retract` type instead of `Upsert`.
         let sink_type = if let Some(format_desc) = &format_desc
@@ -260,11 +260,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let log_store_identity = format!(
             "sink[{}]-[{}]-executor[{}]",
-            connector, sink_id.sink_id, params.executor_id
+            connector, sink_id, params.executor_id
         );
 
         let sink = build_sink(sink_param.clone())
-            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
 
         let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the

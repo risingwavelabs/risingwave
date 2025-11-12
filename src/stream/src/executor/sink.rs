@@ -278,8 +278,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         };
 
         tracing::info!(
-            sink_id = sink_param.sink_id.sink_id,
-            actor_id = actor_context.id,
+            sink_id = %sink_param.sink_id,
+            actor_id = %actor_context.id,
             ?non_append_only_behavior,
             "Sink executor info"
         );
@@ -504,7 +504,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 }
                             }
                             Mutation::ConnectorPropsChange(config) => {
-                                if let Some(map) = config.get(&sink_id.sink_id)
+                                if let Some(map) = config.get(&sink_id.as_raw_id())
                                     && let Err(e) = rebuild_sink_tx
                                         .send(RebuildSinkMessage::UpdateConfig(map.clone()))
                                 {
@@ -740,7 +740,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if let Some(meta_client) = sink_writer_param.meta_client.as_ref() {
                         meta_client
                             .add_sink_fail_evet_log(
-                                sink_writer_param.sink_id.sink_id,
+                                sink_writer_param.sink_id,
                                 sink_writer_param.sink_name.clone(),
                                 sink_writer_param.connector.clone(),
                                 e.to_report_string(),
@@ -754,7 +754,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 error!(
                                     error = %e.as_report(),
                                     executor_id = sink_writer_param.executor_id,
-                                    sink_id = sink_param.sink_id.sink_id,
+                                    sink_id = %sink_param.sink_id,
                                     "reset log reader stream successfully after sink error"
                                 );
                                 Ok(())
@@ -770,7 +770,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     } else {
                         Err(e)
                     }
-                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                 }
             };
             select! {
@@ -792,10 +792,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 match log_reader.rewind().await {
                                     Ok(()) => {
                                         sink_param.properties.extend(config.into_iter());
-                                        sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                                        sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                                         info!(
                                             executor_id = sink_writer_param.executor_id,
-                                            sink_id = sink_param.sink_id.sink_id,
+                                            sink_id = %sink_param.sink_id,
                                             "alter sink config successfully with rewind"
                                         );
                                         Ok(())
@@ -810,10 +810,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 }
                             } else {
                                 sink_param.properties.extend(config.into_iter());
-                                sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                                sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                                 Err(anyhow!("This is not an actual error condition. The system is intentionally triggering recovery procedures to ensure ALTER SINK CONFIG are fully applied.").into())
                             }
-                            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                         },
                     }
                 }

@@ -259,7 +259,7 @@ impl<S: StateStore> BatchPosixFsListExecutor<S> {
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,
-                                            actor_id = self.actor_ctx.id,
+                                            actor_id = %self.actor_ctx.id,
                                             source_id = %self.stream_source_core.source_id,
                                             "RefreshStart triggered file re-listing"
                                         );

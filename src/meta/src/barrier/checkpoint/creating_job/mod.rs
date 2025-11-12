@@ -134,7 +134,7 @@ impl CreatingStreamingJobControl {
             PbBarrierKind::Checkpoint,
         );
 
-        let added_actors = info.stream_job_fragments.actor_ids();
+        let added_actors = info.stream_job_fragments.actor_ids().collect();
         let actor_splits = info
             .init_split_assignment
             .values()

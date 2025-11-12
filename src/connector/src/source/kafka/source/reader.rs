@@ -146,7 +146,7 @@ impl SplitReader for KafkaSplitReader {
             source_name = source_ctx.source_name,
             fragment_id = %source_ctx.fragment_id,
             source_id = %source_ctx.source_id,
-            actor_id = source_ctx.actor_id,
+            actor_id = %source_ctx.actor_id,
             "backfill_info: {:?}",
             backfill_info
         );

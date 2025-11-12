@@ -469,7 +469,7 @@ impl StreamActorManager {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
-                        tracing::error!(actor_id, error = ?err.as_report(), "actor exit with error");
+                        tracing::error!(%actor_id, error = ?err.as_report(), "actor exit with error");
                         barrier_manager.notify_failure(actor_id, err);
                     }
                 });

@@ -122,10 +122,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         list_finished: Vec<PbListFinishedSource>,
     ) -> MetaResult<()> {
-        let mut list_finished_info: HashMap<(TableId, TableId), HashSet<u32>> = HashMap::new();
+        let mut list_finished_info: HashMap<(TableId, TableId), HashSet<ActorId>> = HashMap::new();
 
         for list_finished in list_finished {
-            let table_id = TableId::new(list_finished.table_id);
+            let table_id = list_finished.table_id;
             let associated_source_id = TableId::new(list_finished.associated_source_id);
             list_finished_info
                 .entry((table_id, associated_source_id))
@@ -140,8 +140,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     lock_handle.inner.get_mut(&table_id).ok_or_else(|| {
                         MetaError::from(anyhow!("Table tracker not found for table {}", table_id))
                     })?;
-                single_task_tracker
-                    .report_list_finished(actors.iter().map(|x| *x as ActorId).collect());
+                single_task_tracker.report_list_finished(actors.iter().copied());
                 let allow_yield = single_task_tracker.is_list_finished()?;
 
                 Ok::<_, MetaError>(allow_yield)
@@ -183,10 +182,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         load_finished: Vec<PbLoadFinishedSource>,
     ) -> MetaResult<()> {
-        let mut load_finished_info: HashMap<(TableId, TableId), HashSet<u32>> = HashMap::new();
+        let mut load_finished_info: HashMap<(TableId, TableId), HashSet<ActorId>> = HashMap::new();
 
         for load_finished in load_finished {
-            let table_id = TableId::new(load_finished.table_id);
+            let table_id = load_finished.table_id;
             let associated_source_id = TableId::new(load_finished.associated_source_id);
             load_finished_info
                 .entry((table_id, associated_source_id))
@@ -201,8 +200,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                     lock_handle.inner.get_mut(&table_id).ok_or_else(|| {
                         MetaError::from(anyhow!("Table tracker not found for table {}", table_id))
                     })?;
-                single_task_tracker
-                    .report_load_finished(actors.iter().map(|x| *x as ActorId).collect());
+                single_task_tracker.report_load_finished(actors.iter().copied());
                 let allow_yield = single_task_tracker.is_load_finished()?;
 
                 Ok::<_, MetaError>(allow_yield)
@@ -467,7 +465,7 @@ impl CommandContext {
                             .metadata_manager
                             .catalog_controller
                             .post_collect_job_fragments(
-                                sink.tmp_sink_id,
+                                sink.tmp_sink_id.as_job_id(),
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 None, // no replace plan
                                 None, // no init split assignment

@@ -83,7 +83,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(|(index, column)| RwColumn {
-                relation_id: sink.id.sink_id as i32,
+                relation_id: sink.id.as_raw_id() as i32,
                 name: column.name().into(),
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,

@@ -19,6 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::WorkerId;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::worker_node::Property;
@@ -422,10 +423,10 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes: HashMap<u32, WorkerNode> = std::iter::once((
-        0,
+    let worker_nodes: HashMap<WorkerId, WorkerNode> = std::iter::once((
+        0.into(),
         WorkerNode {
-            id: 0,
+            id: 0.into(),
             property: Some(Property {
                 parallelism: 8,
                 resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),

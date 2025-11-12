@@ -13,12 +13,7 @@
 //! AST types specific to CREATE/ALTER variants of [`crate::ast::Statement`]
 //! (commonly referred to as Data Definition Language, or DDL)
 
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::ToString, vec::Vec};
-use core::fmt;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use std::fmt;
 
 use super::{ConfigParam, FormatEncodeOptions, SqlOption};
 use crate::ast::{
@@ -28,7 +23,6 @@ use crate::ast::{
 use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameDatabase { database_name: ObjectName },
@@ -36,7 +30,6 @@ pub enum AlterDatabaseOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameSchema { schema_name: ObjectName },
@@ -45,7 +38,6 @@ pub enum AlterSchemaOperation {
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterTableOperation {
     /// `ADD <table_constraint>`
     AddConstraint(TableConstraint),
@@ -131,7 +123,6 @@ pub enum AlterTableOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterIndexOperation {
     RenameIndex {
         index_name: ObjectName,
@@ -144,7 +135,6 @@ pub enum AlterIndexOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterViewOperation {
     RenameView {
         view_name: ObjectName,
@@ -184,7 +174,6 @@ pub enum AlterViewOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSinkOperation {
     RenameSink {
         sink_name: ObjectName,
@@ -216,7 +205,6 @@ pub enum AlterSinkOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSubscriptionOperation {
     RenameSubscription { subscription_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
@@ -225,7 +213,6 @@ pub enum AlterSubscriptionOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSourceOperation {
     RenameSource {
         source_name: ObjectName,
@@ -260,26 +247,22 @@ pub enum AlterSourceOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSecretOperation {
     ChangeCredential { new_credential: Value },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterFragmentOperation {
     AlterBackfillRateLimit { rate_limit: i32 },
     SetParallelism { parallelism: SetVariableValue },
@@ -634,7 +617,6 @@ impl fmt::Display for AlterSecretOperation {
 
 /// An `ALTER COLUMN` (`Statement::AlterTable`) operation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterColumnOperation {
     /// `SET NOT NULL`
     SetNotNull,
@@ -690,7 +672,6 @@ impl fmt::Display for AlterFragmentOperation {
 /// The watermark on source.
 /// `WATERMARK FOR <column> AS (<expr>)`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SourceWatermark {
     pub column: Ident,
     pub expr: Expr,
@@ -705,7 +686,6 @@ impl fmt::Display for SourceWatermark {
 /// A table-level constraint, specified in a `CREATE TABLE` or an
 /// `ALTER TABLE ADD <constraint>` statement.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TableConstraint {
     /// `[ CONSTRAINT <name> ] { PRIMARY KEY | UNIQUE } (<columns>)`
     Unique {
@@ -781,7 +761,6 @@ impl fmt::Display for TableConstraint {
 
 /// SQL column definition
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ColumnDef {
     pub name: Ident,
     pub data_type: Option<DataType>,
@@ -847,7 +826,6 @@ impl fmt::Display for ColumnDef {
 /// non-constraint options, lumping them all together under the umbrella of
 /// "column options," and we allow any column option to be named.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ColumnOptionDef {
     pub name: Option<Ident>,
     pub option: ColumnOption,
@@ -862,7 +840,6 @@ impl fmt::Display for ColumnOptionDef {
 /// `ColumnOption`s are modifiers that follow a column definition in a `CREATE
 /// TABLE` statement.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ColumnOption {
     /// `NULL`
     Null,
@@ -963,7 +940,6 @@ fn display_constraint_name(name: &'_ Option<Ident>) -> impl fmt::Display + '_ {
 ///
 /// Used in foreign key constraints in `ON UPDATE` and `ON DELETE` options.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ReferentialAction {
     Restrict,
     Cascade,
@@ -986,7 +962,6 @@ impl fmt::Display for ReferentialAction {
 
 /// secure secret definition for webhook source
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WebhookSourceInfo {
     pub secret_ref: Option<SecretRefValue>,
     pub signature_expr: Expr,
