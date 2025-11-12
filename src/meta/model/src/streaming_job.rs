@@ -29,6 +29,7 @@ pub struct Model {
     pub job_status: JobStatus,
     pub create_type: CreateType,
     pub timezone: Option<String>,
+    pub config_override: String,
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,

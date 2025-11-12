@@ -103,6 +103,7 @@ impl CatalogController {
             job_status: Set(JobStatus::Initial),
             create_type: Set(create_type.into()),
             timezone: Set(timezone),
+            config_override: Set("".into()), // TODO(config)
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),

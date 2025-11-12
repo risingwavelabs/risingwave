@@ -277,12 +277,16 @@ pub struct StreamJobFragments {
 pub struct StreamContext {
     /// The timezone used to interpret timestamps and dates for conversion
     pub timezone: Option<String>,
+
+    /// The partial config of this job to override the global config.
+    pub config_override: String,
 }
 
 impl StreamContext {
     pub fn to_protobuf(&self) -> PbStreamContext {
         PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
+            config_override: self.config_override.clone(),
         }
     }
 
@@ -301,6 +305,17 @@ impl StreamContext {
             } else {
                 Some(prost.get_timezone().clone())
             },
+            config_override: prost.get_config_override().clone(),
+        }
+    }
+}
+
+#[easy_ext::ext(StreamingJobModelContextExt)]
+impl risingwave_meta_model::streaming_job::Model {
+    pub fn stream_context(&self) -> StreamContext {
+        StreamContext {
+            timezone: self.timezone.clone(),
+            config_override: self.config_override.clone(),
         }
     }
 }

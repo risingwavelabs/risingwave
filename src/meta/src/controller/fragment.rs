@@ -54,8 +54,7 @@ use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchOutputMapping, PbDispatcherType, PbStreamContext, PbStreamNode, PbStreamScanType,
-    StreamScanType,
+    PbDispatchOutputMapping, PbDispatcherType, PbStreamNode, PbStreamScanType, StreamScanType,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
@@ -80,7 +79,8 @@ use crate::controller::utils::{
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
-    StreamActor, StreamContext, StreamJobFragments, TableParallelism,
+    StreamActor, StreamContext, StreamJobFragments, StreamingJobModelContextExt as _,
+    TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
 use crate::stream::UpstreamSinkInfo;
@@ -263,7 +263,7 @@ impl CatalogController {
     fn compose_table_fragments(
         job_id: JobId,
         state: PbState,
-        ctx: Option<PbStreamContext>,
+        ctx: StreamContext,
         fragments: Vec<(fragment::Model, Vec<ActorInfo>)>,
         parallelism: StreamingParallelism,
         max_parallelism: usize,
@@ -285,10 +285,7 @@ impl CatalogController {
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
-            ctx: ctx
-                .as_ref()
-                .map(StreamContext::from_protobuf)
-                .unwrap_or_default(),
+            ctx,
             assigned_parallelism: match parallelism {
                 StreamingParallelism::Custom => TableParallelism::Custom,
                 StreamingParallelism::Adaptive => TableParallelism::Adaptive,
@@ -559,7 +556,7 @@ impl CatalogController {
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
 
         let fragment_actors =
-            self.collect_fragment_actor_pairs(fragments, job_info.timezone.clone())?;
+            self.collect_fragment_actor_pairs(fragments, job_info.stream_context())?;
 
         let job_definition = resolve_streaming_job_definition(&inner.db, &HashSet::from([job_id]))
             .await?
@@ -568,7 +565,7 @@ impl CatalogController {
         Self::compose_table_fragments(
             job_id,
             job_info.job_status.into(),
-            job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
+            job_info.stream_context(),
             fragment_actors,
             job_info.parallelism.clone(),
             job_info.max_parallelism as _,
@@ -867,10 +864,9 @@ impl CatalogController {
     fn collect_fragment_actor_map(
         &self,
         fragment_ids: &[FragmentId],
-        timezone: Option<String>,
+        stream_context: StreamContext,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorInfo>>> {
         let guard = self.env.shared_actor_infos().read_guard();
-        let stream_context = StreamContext { timezone };
         let pb_expr_context = stream_context.to_expr_context();
         let expr_context: ExprContext = (&pb_expr_context).into();
 
@@ -907,10 +903,10 @@ impl CatalogController {
     fn collect_fragment_actor_pairs(
         &self,
         fragments: Vec<fragment::Model>,
-        timezone: Option<String>,
+        stream_context: StreamContext,
     ) -> MetaResult<Vec<(fragment::Model, Vec<ActorInfo>)>> {
         let fragment_ids: Vec<_> = fragments.iter().map(|f| f.fragment_id).collect();
-        let mut actor_map = self.collect_fragment_actor_map(&fragment_ids, timezone)?;
+        let mut actor_map = self.collect_fragment_actor_map(&fragment_ids, stream_context)?;
         fragments
             .into_iter()
             .map(|fragment| {
@@ -944,14 +940,14 @@ impl CatalogController {
                 .await?;
 
             let fragment_actors =
-                self.collect_fragment_actor_pairs(fragments, job.timezone.clone())?;
+                self.collect_fragment_actor_pairs(fragments, job.stream_context())?;
 
             table_fragments.insert(
                 job.job_id,
                 Self::compose_table_fragments(
                     job.job_id,
                     job.job_status.into(),
-                    job.timezone.map(|tz| PbStreamContext { timezone: tz }),
+                    job.stream_context(),
                     fragment_actors,
                     job.parallelism.clone(),
                     job.max_parallelism as _,
