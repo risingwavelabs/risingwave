@@ -1166,16 +1166,6 @@ impl CatalogControllerInner {
         }
     }
 
-    pub(crate) fn notify_cancelled(&mut self, database_id: DatabaseId, job_id: JobId) {
-        if let Some(creating_tables) = self.creating_table_finish_notifier.get_mut(&database_id)
-            && let Some(tx_list) = creating_tables.remove(&job_id)
-        {
-            for tx in tx_list {
-                let _ = tx.send(Err("Cancelled".to_owned()));
-            }
-        }
-    }
-
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
         let table_ids: Vec<TableId> = Table::find()
             .select_only()
