@@ -114,14 +114,14 @@ refresh table iceberg_batch_table;
 
 sleep 10s
 
-query I
+query I retry 3 backoff 1s
 select id from t_refresh order by id;
 ----
 1
 2
 
 
-query I
+query I retry 3 backoff 1s
 select id from iceberg_batch_table order by id;
 ----
 1

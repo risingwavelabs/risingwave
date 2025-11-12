@@ -238,8 +238,6 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 .set_table_refresh_state(table_id, RefreshState::Idle)
                 .await
                 .context("Failed to set table refresh state to Idle")?;
-
-            tracing::info!(%job_id, %table_id, "Table refresh completed, state updated to Idle");
         }
 
         Ok(())

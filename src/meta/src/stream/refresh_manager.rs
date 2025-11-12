@@ -129,6 +129,7 @@ impl GlobalRefreshManager {
             )
             .await?;
         self.remove_progress_tracker(table_id);
+        tracing::info!(%table_id, "Table refresh completed, state updated to Idle");
         Ok(())
     }
 

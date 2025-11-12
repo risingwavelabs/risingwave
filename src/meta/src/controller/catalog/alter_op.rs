@@ -974,15 +974,23 @@ impl CatalogController {
             trigger_interval_secs: Set(trigger_interval_secs),
             current_status: Set(RefreshJobStatus::Idle),
         };
-        RefreshJob::insert(active)
+        match RefreshJob::insert(active)
             .on_conflict(
                 OnConflict::column(refresh_job::Column::TableId)
                     .do_nothing()
                     .to_owned(),
             )
             .exec(&inner.db)
-            .await?;
-        Ok(())
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(sea_orm::DbErr::RecordNotInserted) => {
+                // This is expected when the refresh job already exists due to ON CONFLICT DO NOTHING
+                tracing::debug!("refresh job already exists for table_id={}", table_id);
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn update_refresh_job_status(
