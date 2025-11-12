@@ -1756,13 +1756,13 @@ pub async fn create_iceberg_engine_table(
         .unwrap_or_else(|| "60".to_owned());
     let commit_checkpoint_interval = commit_checkpoint_interval.parse::<u32>().map_err(|_| {
         ErrorCode::InvalidInputSyntax(format!(
-            "commit_checkpoint_interval must be a positive integer: {}",
+            "commit_checkpoint_interval must be greater than 0: {}",
             commit_checkpoint_interval
         ))
     })?;
 
     if commit_checkpoint_interval == 0 {
-        bail!("commit_checkpoint_interval must be a positive integer: 0");
+        bail!("commit_checkpoint_interval must be greater than 0");
     }
 
     // remove commit_checkpoint_interval from source options, otherwise it will be considered as an unknown field.
@@ -1813,12 +1813,12 @@ pub async fn create_iceberg_engine_table(
     if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
         let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!(
-                "compaction_interval_sec must be a positive integer: {}",
+                "compaction_interval_sec must be greater than 0: {}",
                 commit_checkpoint_interval
             ))
         })?;
         if compaction_interval_sec == 0 {
-            bail!("compaction_interval_sec must be a positive integer: 0");
+            bail!("compaction_interval_sec must be greater than 0");
         }
         sink_with.insert(
             "compaction_interval_sec".to_owned(),
@@ -1971,17 +1971,91 @@ pub async fn create_iceberg_engine_table(
             .parse::<u32>()
             .map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(
-                    "max_snapshots_num_before_compaction must be a positive integer: {}",
+                    "max_snapshots_num_before_compaction must be greater than 0: {}",
                     max_snapshots_num_before_compaction
                 ))
             })?;
         if max_snapshots_num_before_compaction == 0 {
-            bail!("max_snapshots_num_before_compaction must be a positive integer: 0");
+            bail!("max_snapshots_num_before_compaction must be greater than 0");
         }
         sink_with.insert(
             MAX_SNAPSHOTS_NUM.to_owned(),
             max_snapshots_num_before_compaction.to_string(),
         );
+    }
+
+    if let Some(small_files_threshold_mb) =
+        handler_args.with_options.get("small_files_threshold_mb")
+    {
+        let small_files_threshold_mb = small_files_threshold_mb.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "small_files_threshold_mb must be greater than 0: {}",
+                small_files_threshold_mb
+            ))
+        })?;
+        if small_files_threshold_mb == 0 {
+            bail!("small_files_threshold_mb must be a greater than 0");
+        }
+        sink_with.insert(
+            "small_files_threshold_mb".to_owned(),
+            small_files_threshold_mb.to_string(),
+        );
+    }
+
+    if let Some(delete_files_count_threshold) = handler_args
+        .with_options
+        .get("delete_files_count_threshold")
+    {
+        let delete_files_count_threshold =
+            delete_files_count_threshold.parse::<usize>().map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "delete_files_count_threshold must be greater than 0: {}",
+                    delete_files_count_threshold
+                ))
+            })?;
+        if delete_files_count_threshold == 0 {
+            bail!("delete_files_count_threshold must be greater than 0");
+        }
+        sink_with.insert(
+            "delete_files_count_threshold".to_owned(),
+            delete_files_count_threshold.to_string(),
+        );
+    }
+
+    if let Some(trigger_snapshot_count) = handler_args.with_options.get("trigger_snapshot_count") {
+        let trigger_snapshot_count = trigger_snapshot_count.parse::<usize>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "trigger_snapshot_count must be greater than 0: {}",
+                trigger_snapshot_count
+            ))
+        })?;
+        if trigger_snapshot_count == 0 {
+            bail!("trigger_snapshot_count must be greater than 0");
+        }
+        sink_with.insert(
+            "trigger_snapshot_count".to_owned(),
+            trigger_snapshot_count.to_string(),
+        );
+    }
+
+    if let Some(target_file_size_mb) = handler_args.with_options.get("target_file_size_mb") {
+        let target_file_size_mb = target_file_size_mb.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "target_file_size_mb must be greater than 0: {}",
+                target_file_size_mb
+            ))
+        })?;
+        if target_file_size_mb == 0 {
+            bail!("target_file_size_mb must be greater than 0");
+        }
+        sink_with.insert(
+            "target_file_size_mb".to_owned(),
+            target_file_size_mb.to_string(),
+        );
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove("target_file_size_mb"));
     }
 
     let partition_by = handler_args
