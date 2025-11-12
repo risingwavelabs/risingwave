@@ -67,7 +67,7 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             .local_barrier_manager
             .register_create_mview_progress(params.actor_context.id);
 
-        let pk_indices = params.info.pk_indices.clone();
+        let stream_key = params.info.stream_key.clone();
 
         let exec = LocalityProviderExecutor::new(
             input,
@@ -79,8 +79,8 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             params.executor_stats.clone(),
             params.config.developer.chunk_size,
             params.actor_context.fragment_id,
-            pk_indices,
-            params.env.config().developer.enable_locality_sort_buffer,
+            stream_key,
+            params.config.developer.enable_locality_sort_buffer,
         );
 
         Ok((params.info, exec).into())

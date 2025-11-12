@@ -190,7 +190,7 @@ pub struct LocalityProviderExecutor<S: StateStore> {
     /// Chunk size for output
     chunk_size: usize,
 
-    pk_indices: PkIndices,
+    stream_key: StreamKey,
 
     enable_locality_sort_buffer: bool,
 }
@@ -207,7 +207,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         fragment_id: FragmentId,
-        pk_indices: PkIndices,
+        stream_key: StreamKey,
         enable_locality_sort_buffer: bool,
     ) -> Self {
         Self {
@@ -221,7 +221,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             metrics,
             chunk_size,
             fragment_id,
-            pk_indices,
+            stream_key,
             enable_locality_sort_buffer,
         }
     }
@@ -814,12 +814,12 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
         if self.enable_locality_sort_buffer {
             debug_assert_eq!(
-                self.pk_indices,
+                self.stream_key,
                 state_table.pk_indices(),
                 "locality sort buffer expects executor pk to align with state table pk"
             );
 
-            let pk_indices = self.pk_indices.clone();
+            let pk_indices = self.stream_key.clone();
             let pk_serde = state_table.pk_serde().clone();
             let data_types = self.input_schema.data_types();
             let chunk_size = self.chunk_size;
