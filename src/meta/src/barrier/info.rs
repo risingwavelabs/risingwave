@@ -47,11 +47,28 @@ use crate::manager::NotificationManagerRef;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
 
 #[derive(Debug, Clone)]
+pub struct SharedActorInfo {
+    pub worker_id: WorkerId,
+    pub vnode_bitmap: Option<Bitmap>,
+    pub splits: Vec<SplitImpl>,
+}
+
+impl From<&InflightActorInfo> for SharedActorInfo {
+    fn from(value: &InflightActorInfo) -> Self {
+        Self {
+            worker_id: value.worker_id,
+            vnode_bitmap: value.vnode_bitmap.clone(),
+            splits: value.splits.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SharedFragmentInfo {
     pub fragment_id: FragmentId,
     pub job_id: JobId,
     pub distribution_type: DistributionType,
-    pub actors: HashMap<ActorId, InflightActorInfo>,
+    pub actors: HashMap<ActorId, SharedActorInfo>,
     pub vnode_count: usize,
     pub fragment_type_mask: FragmentTypeMask,
 }
@@ -74,7 +91,10 @@ impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
             job_id,
             distribution_type: *distribution_type,
             fragment_type_mask: *fragment_type_mask,
-            actors: actors.clone(),
+            actors: actors
+                .iter()
+                .map(|(actor_id, actor)| (*actor_id, actor.into()))
+                .collect(),
             vnode_count: *vnode_count,
         }
     }
@@ -217,14 +237,14 @@ impl SharedActorInfos {
         // delete the fragments that exist previously, but not included in the recovered fragments
         let mut writer = self.start_writer(database_id);
         let database = writer.write_guard.info.entry(database_id).or_default();
-        for (_, fragment) in database.extract_if(|fragment_id, fragment_info| {
+        for (_, fragment) in database.extract_if(|fragment_id, fragment_infos| {
             if let Some(info) = remaining_fragments.remove(fragment_id) {
                 let info = info.into();
                 writer
                     .updated_fragment_mapping
                     .get_or_insert_default()
                     .push(rebuild_fragment_mapping(&info));
-                *fragment_info = info;
+                *fragment_infos = info;
                 false
             } else {
                 true
@@ -342,8 +362,8 @@ impl BarrierInfo {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum CommandFragmentChanges {
+#[derive(Debug)]
+pub(super) enum CommandFragmentChanges {
     NewFragment {
         job_id: JobId,
         info: InflightFragmentInfo,
@@ -370,20 +390,25 @@ pub(crate) enum CommandFragmentChanges {
     },
 }
 
+pub(super) enum PostApplyFragmentChanges {
+    Reschedule { to_remove: HashSet<ActorId> },
+    RemoveFragment,
+}
+
 #[derive(Clone, Debug)]
 pub enum SubscriberType {
     Subscription(u64),
     SnapshotBackfill,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) enum CreateStreamingJobStatus {
     Init,
     Creating(CreateMviewProgressTracker),
     Created,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct InflightStreamingJobInfo {
     pub job_id: JobId,
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
@@ -430,7 +455,7 @@ impl<'a> IntoIterator for &'a InflightStreamingJobInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InflightDatabaseInfo {
     database_id: DatabaseId,
     jobs: HashMap<JobId, InflightStreamingJobInfo>,
@@ -681,16 +706,18 @@ impl InflightDatabaseInfo {
                 },
             )
             .expect("non-duplicate");
-        self.apply_add(fragment_infos.into_iter().map(|(fragment_id, info)| {
-            (
-                fragment_id,
-                CommandFragmentChanges::NewFragment {
-                    job_id: job.job_id,
-                    info,
-                    is_existing: true,
-                },
-            )
-        }))
+        let post_apply_changes =
+            self.apply_add(fragment_infos.into_iter().map(|(fragment_id, info)| {
+                (
+                    fragment_id,
+                    CommandFragmentChanges::NewFragment {
+                        job_id: job.job_id,
+                        info,
+                        is_existing: true,
+                    },
+                )
+            }));
+        self.post_apply(post_apply_changes);
     }
 
     /// Apply some actor changes before issuing a barrier command, if the command contains any new added actors, we should update
@@ -698,8 +725,8 @@ impl InflightDatabaseInfo {
     pub(crate) fn pre_apply(
         &mut self,
         new_job_id: Option<JobId>,
-        fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
-    ) {
+        fragment_changes: HashMap<FragmentId, CommandFragmentChanges>,
+    ) -> HashMap<FragmentId, PostApplyFragmentChanges> {
         if let Some(job_id) = new_job_id {
             self.jobs
                 .try_insert(
@@ -713,17 +740,14 @@ impl InflightDatabaseInfo {
                 )
                 .expect("non-duplicate");
         }
-        self.apply_add(
-            fragment_changes
-                .iter()
-                .map(|(fragment_id, change)| (*fragment_id, change.clone())),
-        )
+        self.apply_add(fragment_changes.into_iter())
     }
 
     fn apply_add(
         &mut self,
         fragment_changes: impl Iterator<Item = (FragmentId, CommandFragmentChanges)>,
-    ) {
+    ) -> HashMap<FragmentId, PostApplyFragmentChanges> {
+        let mut post_apply = HashMap::new();
         {
             let shared_infos = self.shared_actor_infos.clone();
             let mut shared_actor_writer = shared_infos.start_writer(self.database_id);
@@ -749,8 +773,8 @@ impl InflightDatabaseInfo {
                     CommandFragmentChanges::Reschedule {
                         new_actors,
                         actor_update_vnode_bitmap,
+                        to_remove,
                         actor_splits,
-                        ..
                     } => {
                         let (info, _) = self.fragment_mut(fragment_id);
                         let actors = &mut info.actors;
@@ -769,9 +793,16 @@ impl InflightDatabaseInfo {
                             actors.get_mut(&actor_id).expect("should exist").splits = splits;
                         }
 
+                        post_apply.insert(
+                            fragment_id,
+                            PostApplyFragmentChanges::Reschedule { to_remove },
+                        );
+
                         // info will be upserted into shared_actor_infos in post_apply stage
                     }
-                    CommandFragmentChanges::RemoveFragment => {}
+                    CommandFragmentChanges::RemoveFragment => {
+                        post_apply.insert(fragment_id, PostApplyFragmentChanges::RemoveFragment);
+                    }
                     CommandFragmentChanges::ReplaceNodeUpstream(replace_map) => {
                         let mut remaining_fragment_ids: HashSet<_> =
                             replace_map.keys().cloned().collect();
@@ -874,6 +905,7 @@ impl InflightDatabaseInfo {
             }
             shared_actor_writer.finish();
         }
+        post_apply
     }
 
     pub(super) fn build_edge(
@@ -1010,47 +1042,42 @@ impl InflightDatabaseInfo {
     /// remove that from the snapshot correspondingly.
     pub(crate) fn post_apply(
         &mut self,
-        fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
+        fragment_changes: HashMap<FragmentId, PostApplyFragmentChanges>,
     ) {
         let inner = self.shared_actor_infos.clone();
         let mut shared_actor_writer = inner.start_writer(self.database_id);
         {
             for (fragment_id, changes) in fragment_changes {
                 match changes {
-                    CommandFragmentChanges::NewFragment { .. } => {}
-                    CommandFragmentChanges::Reschedule { to_remove, .. } => {
-                        let job_id = self.fragment_location[fragment_id];
+                    PostApplyFragmentChanges::Reschedule { to_remove } => {
+                        let job_id = self.fragment_location[&fragment_id];
                         let info = self
                             .jobs
                             .get_mut(&job_id)
                             .expect("should exist")
                             .fragment_infos
-                            .get_mut(fragment_id)
+                            .get_mut(&fragment_id)
                             .expect("should exist");
                         for actor_id in to_remove {
-                            assert!(info.actors.remove(&(*actor_id as _)).is_some());
+                            assert!(info.actors.remove(&actor_id).is_some());
                         }
                         shared_actor_writer.upsert([(&*info, job_id)]);
                     }
-                    CommandFragmentChanges::RemoveFragment => {
+                    PostApplyFragmentChanges::RemoveFragment => {
                         let job_id = self
                             .fragment_location
-                            .remove(fragment_id)
+                            .remove(&fragment_id)
                             .expect("should exist");
                         let job = self.jobs.get_mut(&job_id).expect("should exist");
                         let fragment = job
                             .fragment_infos
-                            .remove(fragment_id)
+                            .remove(&fragment_id)
                             .expect("should exist");
                         shared_actor_writer.remove(&fragment);
                         if job.fragment_infos.is_empty() {
                             self.jobs.remove(&job_id).expect("should exist");
                         }
                     }
-                    CommandFragmentChanges::ReplaceNodeUpstream(_)
-                    | CommandFragmentChanges::AddNodeUpstream(_)
-                    | CommandFragmentChanges::DropNodeUpstream(_)
-                    | CommandFragmentChanges::SplitAssignment { .. } => {}
                 }
             }
         }
