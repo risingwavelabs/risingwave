@@ -63,6 +63,7 @@ pub mod alter_table_drop_connector;
 pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
+mod alter_utils;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;

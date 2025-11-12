@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::bail;
 use risingwave_pb::meta::table_parallelism::{
     AdaptiveParallelism, FixedParallelism, PbParallelism,
 };
@@ -22,11 +21,9 @@ use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSi
 use risingwave_sqlparser::keywords::Keyword;
 use thiserror_ext::AsReport;
 
+use super::alter_utils::resolve_streaming_job_id_for_alter;
 use super::{HandlerArgs, RwPgResponse};
-use crate::Binder;
-use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableType;
-use crate::catalog::{CatalogError, FragmentId};
+use crate::catalog::FragmentId;
 use crate::error::{ErrorCode, Result};
 
 pub async fn handle_alter_parallelism(
@@ -37,73 +34,8 @@ pub async fn handle_alter_parallelism(
     deferred: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = &session.database();
-    let (schema_name, real_table_name) = Binder::resolve_schema_qualified_name(db_name, &obj_name)?;
-    let search_path = session.config().search_path();
-    let user_name = &session.user_name();
-    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let job_id = {
-        let reader = session.env().catalog_reader().read_guard();
-
-        match stmt_type {
-            StatementType::ALTER_TABLE
-            | StatementType::ALTER_MATERIALIZED_VIEW
-            | StatementType::ALTER_INDEX => {
-                let (table, schema_name) =
-                    reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
-
-                match (table.table_type(), stmt_type) {
-                    (TableType::Internal, _) => {
-                        // we treat internal table as NOT FOUND
-                        return Err(CatalogError::NotFound("table", table.name().to_owned()).into());
-                    }
-                    (TableType::Table, StatementType::ALTER_TABLE)
-                    | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
-                    | (TableType::Index, StatementType::ALTER_INDEX) => {}
-                    _ => {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "cannot alter parallelism of {} {} by {}",
-                            table.table_type().to_prost().as_str_name(),
-                            table.name(),
-                            stmt_type,
-                        ))
-                        .into());
-                    }
-                }
-
-                session.check_privilege_for_drop_alter(schema_name, &**table)?;
-                table.id.as_job_id()
-            }
-            StatementType::ALTER_SOURCE => {
-                let (source, schema_name) =
-                    reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
-
-                if !source.info.is_shared() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "cannot alter parallelism of non-shared source.\nUse `ALTER MATERIALIZED VIEW SET PARALLELISM` to alter the materialized view using the source instead."
-                        .to_owned()
-                    )
-                    .into());
-                }
-
-                session.check_privilege_for_drop_alter(schema_name, &**source)?;
-                source.id.as_share_source_job_id()
-            }
-            StatementType::ALTER_SINK => {
-                let (sink, schema_name) =
-                    reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
-
-                session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-                sink.id.as_job_id()
-            }
-            // TODO: support alter parallelism for shared source
-            _ => bail!(
-                "invalid statement type for alter parallelism: {:?}",
-                stmt_type
-            ),
-        }
-    };
+    let job_id = resolve_streaming_job_id_for_alter(&session, obj_name, stmt_type, "parallelism")?;
 
     let target_parallelism = extract_table_parallelism(parallelism)?;
 

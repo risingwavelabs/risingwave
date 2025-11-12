@@ -1,0 +1,105 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use pgwire::pg_response::StatementType;
+use risingwave_common::bail;
+use risingwave_pb::id::JobId;
+use risingwave_sqlparser::ast::ObjectName;
+
+use crate::Binder;
+use crate::catalog::CatalogError;
+use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableType;
+use crate::error::{ErrorCode, Result, bail_invalid_input_syntax};
+use crate::session::SessionImpl;
+
+/// Resolve the **streaming** job id for alter operations.
+///
+/// This function will decide which catalog to lookup based on the given statement type, which should
+/// be one of `ALTER TABLE`, `ALTER MATERIALIZED VIEW`, `ALTER SOURCE`, `ALTER SINK`, `ALTER INDEX`.
+pub(super) fn resolve_streaming_job_id_for_alter(
+    session: &SessionImpl,
+    obj_name: ObjectName,
+    alter_stmt_type: StatementType,
+    alter_target: &str,
+) -> Result<JobId> {
+    let db_name = &session.database();
+    let (schema_name, real_table_name) = Binder::resolve_schema_qualified_name(db_name, &obj_name)?;
+    let search_path = session.config().search_path();
+    let user_name = &session.user_name();
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+    let reader = session.env().catalog_reader().read_guard();
+
+    let job_id = match alter_stmt_type {
+        StatementType::ALTER_TABLE
+        | StatementType::ALTER_MATERIALIZED_VIEW
+        | StatementType::ALTER_INDEX => {
+            let (table, schema_name) =
+                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+
+            match (table.table_type(), alter_stmt_type) {
+                (TableType::Internal, _) => {
+                    // we treat internal table as NOT FOUND
+                    return Err(CatalogError::NotFound("table", table.name().to_owned()).into());
+                }
+                (TableType::Table, StatementType::ALTER_TABLE)
+                | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
+                | (TableType::Index, StatementType::ALTER_INDEX) => {}
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "cannot alter {} of {} {} by {}",
+                        alter_target,
+                        table.table_type().to_prost().as_str_name(),
+                        table.name(),
+                        alter_stmt_type,
+                    ))
+                    .into());
+                }
+            }
+
+            session.check_privilege_for_drop_alter(schema_name, &**table)?;
+            table.id.as_job_id()
+        }
+        StatementType::ALTER_SOURCE => {
+            let (source, schema_name) =
+                reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
+
+            if !source.info.is_shared() {
+                bail_invalid_input_syntax!(
+                    "cannot alter {} of non-shared source.\n\
+                    Use `ALTER MATERIALIZED VIEW SET {}` to alter the materialized view using the source instead.",
+                    alter_target,
+                    alter_target.to_uppercase()
+                )
+            }
+
+            session.check_privilege_for_drop_alter(schema_name, &**source)?;
+            source.id.as_share_source_job_id()
+        }
+        StatementType::ALTER_SINK => {
+            let (sink, schema_name) =
+                reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
+
+            session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+            sink.id.sink_id().into()
+        }
+        _ => bail!(
+            "invalid statement type for alter {}: {:?}",
+            alter_target,
+            alter_stmt_type
+        ),
+    };
+
+    Ok(job_id)
+}
