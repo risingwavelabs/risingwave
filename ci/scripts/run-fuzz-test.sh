@@ -55,10 +55,10 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
         echo "Fuzzing failed, please look at the artifacts fuzzing.log and error.sql.log for more details"
         extract_error_sql $LOGDIR/fuzzing.log
         echo "--- Running reducer on failing queries"
-        ./target/debug/sqlsmith-reducer \
+        ./risedev sql-reduce-full \
             --input-file $LOGDIR/error.sql.log \
             --output-file $LOGDIR/error.sql.shrunk.log \
-            --run-rw-cmd './risedev k && ./risedev ci-start ci-3cn-1fe' \
+            --run-rw-cmd './risedev k && ./risedev clean-data && ./risedev ci-start ci-3cn-1fe' \
             > "$LOGDIR/reducer.log" 2>&1
         echo "--- Reducer finished (log: $LOGDIR/reducer.log)"
         echo "Reduced queries saved at $LOGDIR/error.sql.shrunk.log"
