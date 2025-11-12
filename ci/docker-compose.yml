@@ -182,7 +182,6 @@ services:
       - pulsar-server
       - mongodb
       - mongodb-setup
-      - mongo_data_generator
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
