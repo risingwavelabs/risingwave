@@ -422,7 +422,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     Self::report_collect_failure(&self.env, &err);
                                     for database_id in failed_databases {
                                         if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
-                                            warn!(worker_id, %database_id, "database entering recovery on node failure");
+                                            warn!(%worker_id, %database_id, "database entering recovery on node failure");
                                             self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
                                             self.context.notify_creating_job_failed(Some(database_id), format!("database {} reset due to node {} failure: {}", database_id, worker_id, err.as_report())).await;
                                             // TODO: add log on blocking time
@@ -431,7 +431,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         }
                                     }
                                 }  else {
-                                    warn!(worker_id, "no barrier to collect from worker, ignore err");
+                                    warn!(%worker_id, "no barrier to collect from worker, ignore err");
                                 }
                                 continue;
                             }
@@ -693,7 +693,6 @@ mod retry_strategy {
 
 pub(crate) use retry_strategy::*;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
-use risingwave_meta_model::WorkerId;
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
 use crate::barrier::edge_builder::FragmentEdgeBuilder;
@@ -834,11 +833,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         control_stream_manager.next_response(&term_id, &self.context).await;
                     let resp = match result {
                         Err(e) => {
-                            warn!(worker_id, err = %e.as_report(), "worker node failure during recovery");
+                            warn!(%worker_id, err = %e.as_report(), "worker node failure during recovery");
                             for (failed_database_id, _) in collecting_databases.extract_if(|_, node_to_collect| {
                                 !node_to_collect.is_valid_after_worker_err(worker_id)
                             }) {
-                                warn!(%failed_database_id, worker_id, "database failed to recovery in global recovery due to worker node err");
+                                warn!(%failed_database_id, %worker_id, "database failed to recovery in global recovery due to worker node err");
                                 assert!(failed_databases.insert(failed_database_id));
                             }
                             continue;
@@ -851,10 +850,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 Response::ReportDatabaseFailure(resp) => {
                                     let database_id = resp.database_id;
                                     if collecting_databases.remove(&database_id).is_some() {
-                                        warn!(%database_id, worker_id, "database reset during global recovery");
+                                        warn!(%database_id, %worker_id, "database reset during global recovery");
                                         assert!(failed_databases.insert(database_id));
                                     } else if collected_databases.remove(&database_id).is_some() {
-                                        warn!(%database_id, worker_id, "database initialized but later reset during global recovery");
+                                        warn!(%database_id, %worker_id, "database initialized but later reset during global recovery");
                                         assert!(failed_databases.insert(database_id));
                                     } else {
                                         assert!(failed_databases.contains(&database_id));
@@ -867,7 +866,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             }
                         }
                     };
-                    assert_eq!(worker_id, resp.worker_id as WorkerId);
+                    assert_eq!(worker_id, resp.worker_id);
                     let database_id = resp.database_id;
                     if failed_databases.contains(&database_id) {
                         assert!(!collecting_databases.contains_key(&database_id));

@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -175,7 +175,7 @@ impl ReplaceStreamJobPlan {
         if let Some(sinks) = &self.auto_refresh_schema_sinks {
             for sink in sinks {
                 let fragment_change = CommandFragmentChanges::NewFragment {
-                    job_id: JobId::new(sink.original_sink.id as _),
+                    job_id: sink.original_sink.id.as_job_id(),
                     info: sink.new_fragment_info(),
                     is_existing: false,
                 };
@@ -260,8 +260,7 @@ impl StreamJobFragments {
                                         .actor_status
                                         .get(&actor.actor_id)
                                         .expect("should exist")
-                                        .worker_id()
-                                        as WorkerId,
+                                        .worker_id(),
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
                                     splits: fragment_splits
                                         .remove(&actor.actor_id)
@@ -399,15 +398,15 @@ pub enum Command {
     /// and reloading data from source.
     Refresh {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     ListFinish {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     LoadFinish {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
 }
 
@@ -1330,20 +1329,20 @@ impl Command {
             } => Some(Mutation::RefreshStart(
                 risingwave_pb::stream_plan::RefreshStartMutation {
                     table_id: *table_id,
-                    associated_source_id: associated_source_id.as_raw_id(),
+                    associated_source_id: *associated_source_id,
                 },
             )),
             Command::ListFinish {
                 table_id: _,
                 associated_source_id,
             } => Some(Mutation::ListFinish(ListFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             })),
             Command::LoadFinish {
                 table_id: _,
                 associated_source_id,
             } => Some(Mutation::LoadFinish(LoadFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             })),
         }
     }
@@ -1444,10 +1443,10 @@ impl Command {
                                         .location
                                         .as_ref()
                                         .unwrap()
-                                        .worker_node_id as _,
+                                        .worker_node_id,
                                 )
                             }),
-                            graph_info.job_subscribers(sink.original_sink.id.into()),
+                            graph_info.job_subscribers(sink.original_sink.id.as_job_id()),
                         )
                     }));
                     for (worker_id, fragment_actors) in sink_actors {

@@ -19,8 +19,10 @@ use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_meta_model::ActorId;
+use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::{ActorId, SourceId};
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
@@ -121,11 +123,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         list_finished: Vec<PbListFinishedSource>,
     ) -> MetaResult<()> {
-        let mut list_finished_info: HashMap<(TableId, TableId), HashSet<ActorId>> = HashMap::new();
+        let mut list_finished_info: HashMap<(TableId, SourceId), HashSet<ActorId>> = HashMap::new();
 
         for list_finished in list_finished {
             let table_id = list_finished.table_id;
-            let associated_source_id = TableId::new(list_finished.associated_source_id);
+            let associated_source_id = list_finished.associated_source_id;
             list_finished_info
                 .entry((table_id, associated_source_id))
                 .or_default()
@@ -173,11 +175,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         load_finished: Vec<PbLoadFinishedSource>,
     ) -> MetaResult<()> {
-        let mut load_finished_info: HashMap<(TableId, TableId), HashSet<ActorId>> = HashMap::new();
+        let mut load_finished_info: HashMap<(TableId, SourceId), HashSet<ActorId>> = HashMap::new();
 
         for load_finished in load_finished {
             let table_id = load_finished.table_id;
-            let associated_source_id = TableId::new(load_finished.associated_source_id);
+            let associated_source_id = load_finished.associated_source_id;
             load_finished_info
                 .entry((table_id, associated_source_id))
                 .or_default()
@@ -297,7 +299,10 @@ impl CommandContext {
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(SourceChange::UpdateSourceProps {
-                        source_id_map_new_props: obj_id_map_props.clone(),
+                        source_id_map_new_props: obj_id_map_props
+                            .iter()
+                            .map(|(&source_id, props)| (source_id.into(), props.clone()))
+                            .collect(),
                     })
                     .await;
             }
@@ -435,7 +440,7 @@ impl CommandContext {
                             .metadata_manager
                             .catalog_controller
                             .post_collect_job_fragments(
-                                sink.tmp_sink_id,
+                                sink.tmp_sink_id.as_job_id(),
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 None, // no replace plan
                                 None, // no init split assignment

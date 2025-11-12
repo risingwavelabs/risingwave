@@ -53,7 +53,7 @@ pub async fn handle_explain_analyze_stream_job(
     let job_id = bind::bind_relation(&target, &handler_args)?;
 
     let meta_client = handler_args.session.env().meta_client();
-    let fragments = net::get_fragments(meta_client, job_id.into()).await?;
+    let fragments = net::get_fragments(meta_client, job_id).await?;
     let fragment_parallelisms = fragments
         .iter()
         .map(|f| (f.id, f.actors.len()))
@@ -101,6 +101,7 @@ pub async fn handle_explain_analyze_stream_job(
 /// Binding pass, since we don't go through the binder.
 /// TODO(noel): Should this be in binder? But it may make compilation slower and doesn't require any binder logic...
 mod bind {
+    use risingwave_common::id::JobId;
     use risingwave_sqlparser::ast::AnalyzeTarget;
 
     use crate::Binder;
@@ -112,9 +113,9 @@ mod bind {
     pub(super) fn bind_relation(
         target_relation: &AnalyzeTarget,
         handler_args: &HandlerArgs,
-    ) -> Result<u32> {
+    ) -> Result<JobId> {
         let job_id = match &target_relation {
-            AnalyzeTarget::Id(id) => *id,
+            AnalyzeTarget::Id(id) => (*id).into(),
             AnalyzeTarget::Index(name)
             | AnalyzeTarget::Table(name)
             | AnalyzeTarget::Sink(name)
@@ -133,22 +134,22 @@ mod bind {
                     AnalyzeTarget::Index(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_index_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.index_id
+                        catalog.id.index_id.into()
                     }
                     AnalyzeTarget::Table(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_table_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.as_raw_id()
+                        catalog.id.as_job_id()
                     }
                     AnalyzeTarget::Sink(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_sink_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.sink_id
+                        catalog.id.as_job_id()
                     }
                     AnalyzeTarget::MaterializedView(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_table_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.as_raw_id()
+                        catalog.id.as_job_id()
                     }
                     AnalyzeTarget::Id(_) => unreachable!(),
                 }
@@ -162,9 +163,8 @@ mod bind {
 mod net {
     use std::collections::HashSet;
 
-    use risingwave_common::id::FragmentId;
+    use risingwave_common::id::{FragmentId, JobId};
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::id::JobId;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::monitor_service::GetProfileStatsRequest;
     use tokio::time::{Duration, sleep};

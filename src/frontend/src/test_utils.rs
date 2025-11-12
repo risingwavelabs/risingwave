@@ -31,7 +31,7 @@ use risingwave_common::catalog::{
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -342,8 +342,9 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
-            table.optional_associated_source_id =
-                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+            table.optional_associated_source_id = Some(
+                OptionalAssociatedSourceId::AssociatedSourceId(source_id.as_raw_id()),
+            );
         }
         self.create_materialized_view(table, graph, HashSet::new(), None, if_not_exists)
             .await?;
@@ -474,7 +475,7 @@ impl CatalogWriter for MockCatalogWriter {
         if let Some(source_id) = source_id {
             self.catalog
                 .write()
-                .drop_source(database_id, schema_id, source_id);
+                .drop_source(database_id, schema_id, source_id.into());
         }
         Ok(())
     }
@@ -505,7 +506,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),
@@ -513,14 +514,14 @@ impl CatalogWriter for MockCatalogWriter {
             )
             .into());
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(source_id.as_raw_id());
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+    async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(
                 "drop cascade in MockCatalogWriter is unsupported".to_owned(),
@@ -528,7 +529,7 @@ impl CatalogWriter for MockCatalogWriter {
             )
             .into());
         }
-        let (database_id, schema_id) = self.drop_table_or_sink_id(sink_id);
+        let (database_id, schema_id) = self.drop_table_or_sink_id(sink_id.as_raw_id());
         self.catalog
             .write()
             .drop_sink(database_id, schema_id, sink_id);
@@ -869,10 +870,10 @@ impl MockCatalogWriter {
             .unwrap()
     }
 
-    fn create_source_inner(&self, mut source: PbSource) -> Result<u32> {
+    fn create_source_inner(&self, mut source: PbSource) -> Result<SourceId> {
         source.id = self.gen_id();
         self.catalog.write().create_source(&source);
-        self.add_table_or_source_id(source.id, source.schema_id, source.database_id);
+        self.add_table_or_source_id(source.id.as_raw_id(), source.schema_id, source.database_id);
         Ok(source.id)
     }
 
@@ -880,7 +881,7 @@ impl MockCatalogWriter {
         sink.id = self.gen_id();
         sink.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_sink(&sink);
-        self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
+        self.add_table_or_sink_id(sink.id.as_raw_id(), sink.schema_id, sink.database_id);
         Ok(())
     }
 
@@ -1118,7 +1119,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::new())
     }
 
-    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(WorkerId, u64)>> {
         unimplemented!()
     }
 
@@ -1213,7 +1214,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn alter_sink_props(
         &self,
-        _sink_id: u32,
+        _sink_id: SinkId,
         _changed_props: BTreeMap<String, String>,
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<u32>,
@@ -1223,9 +1224,9 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn alter_iceberg_table_props(
         &self,
-        _table_id: u32,
-        _sink_id: u32,
-        _source_id: u32,
+        _table_id: TableId,
+        _sink_id: SinkId,
+        _source_id: SourceId,
         _changed_props: BTreeMap<String, String>,
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<u32>,
@@ -1235,7 +1236,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn alter_source_connector_props(
         &self,
-        _source_id: u32,
+        _source_id: SourceId,
         _changed_props: BTreeMap<String, String>,
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<u32>,
@@ -1265,8 +1266,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    fn worker_id(&self) -> u32 {
-        0
+    fn worker_id(&self) -> WorkerId {
+        0.into()
     }
 
     async fn set_sync_log_store_aligned(&self, _job_id: JobId, _aligned: bool) -> RpcResult<()> {

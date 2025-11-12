@@ -156,10 +156,7 @@ pub async fn handle_rename_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::SinkId(sink_id.sink_id),
-            &new_sink_name,
-        )
+        .alter_name(sink_id.into(), &new_sink_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SINK))
@@ -233,10 +230,7 @@ pub async fn handle_rename_source(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::SourceId(source_id),
-            &new_source_name,
-        )
+        .alter_name(source_id.into(), &new_source_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))

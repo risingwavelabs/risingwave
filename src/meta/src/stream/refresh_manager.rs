@@ -24,6 +24,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
 use tokio::sync::{Notify, oneshot};
@@ -104,7 +105,7 @@ impl GlobalRefreshManager {
         shared_actor_infos: &SharedActorInfos,
     ) -> MetaResult<RefreshResponse> {
         let table_id = request.table_id;
-        let associated_source_id = TableId::new(request.associated_source_id);
+        let associated_source_id = request.associated_source_id;
         tracing::info!(%table_id, %associated_source_id, "trigger manual refresh");
 
         self.ensure_refreshable(table_id, associated_source_id)
@@ -339,7 +340,7 @@ impl GlobalRefreshManager {
     async fn ensure_refreshable(
         &self,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     ) -> MetaResult<()> {
         let table = self
             .metadata_manager

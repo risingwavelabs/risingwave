@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-pub use risingwave_common::id::{ActorId, DatabaseId, FragmentId, SchemaId, TableId};
+pub use risingwave_common::id::*;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
@@ -71,14 +71,10 @@ pub mod view;
 pub mod worker;
 pub mod worker_property;
 
-pub type WorkerId = i32;
-
 pub type TransactionId = i32;
 
 type RawObjectId = i32;
 pub type ObjectId = RawObjectId;
-pub type SourceId = RawObjectId;
-pub type SinkId = RawObjectId;
 pub type SubscriptionId = RawObjectId;
 pub type IndexId = RawObjectId;
 pub type ViewId = RawObjectId;

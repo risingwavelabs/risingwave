@@ -179,7 +179,7 @@ impl_object_id!(HummockVectorFileId);
 impl_object_id!(HummockHnswGraphFileId);
 
 pub type HummockRefCount = u64;
-pub type HummockContextId = u32;
+pub type HummockContextId = risingwave_common::id::WorkerId;
 pub type HummockEpoch = u64;
 pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;

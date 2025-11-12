@@ -6428,6 +6428,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hex-literal"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
+
+[[package]]
 name = "hickory-proto"
 version = "0.24.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6782,7 +6788,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6834,7 +6840,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6851,7 +6857,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-memory"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "async-trait",
  "futures",
@@ -6864,7 +6870,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6884,7 +6890,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=1e81f8a1ec2c2d6c6b9008438e77f26d0532effe#1e81f8a1ec2c2d6c6b9008438e77f26d0532effe"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=50ef52e257b5e062380d7b4447851a86bf5d131c#50ef52e257b5e062380d7b4447851a86bf5d131c"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6915,7 +6921,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12113,6 +12119,7 @@ dependencies = [
  "futures-util",
  "ginepro",
  "hex",
+ "hex-literal",
  "hmac",
  "iceberg",
  "itertools 0.14.0",
@@ -12151,6 +12158,7 @@ name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
  "itertools 0.14.0",
+ "proc-macro-error 1.0.4",
  "proc-macro2",
  "quote",
  "syn 2.0.107",

@@ -363,7 +363,7 @@ impl CatalogController {
             pb_actor_status.insert(
                 actor_id as _,
                 PbActorStatus {
-                    location: PbActorLocation::from_worker(worker_id as u32),
+                    location: PbActorLocation::from_worker(worker_id),
                 },
             );
 
@@ -1261,19 +1261,19 @@ impl CatalogController {
 
         let sink_name_mapping: HashMap<SinkId, String> = sink_id_names.into_iter().collect();
 
-        let actor_with_type: Vec<(ActorId, ObjectId)> = {
+        let actor_with_type: Vec<(ActorId, SinkId)> = {
             let info = self.env.shared_actor_infos().read_guard();
 
             info.iter_over_fragments()
                 .filter(|(_, fragment)| {
-                    sink_ids.contains(&(fragment.job_id.as_raw_id() as _))
+                    sink_ids.contains(&fragment.job_id.as_sink_id())
                         && fragment.fragment_type_mask.contains(FragmentTypeFlag::Sink)
                 })
                 .flat_map(|(_, fragment)| {
                     fragment
                         .actors
                         .keys()
-                        .map(move |actor_id| (*actor_id as _, fragment.job_id.as_raw_id() as _))
+                        .map(move |actor_id| (*actor_id as _, fragment.job_id.as_sink_id()))
                 })
                 .collect()
         };
@@ -1656,7 +1656,7 @@ impl CatalogController {
         for (fragment_id, stream_node) in fragments {
             if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {
                 source_fragment_ids
-                    .entry(source_id as SourceId)
+                    .entry(source_id)
                     .or_insert_with(BTreeSet::new)
                     .insert(fragment_id);
             }
@@ -1682,7 +1682,7 @@ impl CatalogController {
                 stream_node.to_protobuf().find_source_backfill()
             {
                 source_fragment_ids
-                    .entry(source_id as SourceId)
+                    .entry(source_id)
                     .or_insert_with(BTreeSet::new)
                     .insert((fragment_id, upstream_source_fragment_id));
             }
@@ -1700,14 +1700,14 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let sink_ids = incoming_sinks.iter().map(|s| s.id as SinkId).collect_vec();
+        let sink_ids = incoming_sinks.iter().map(|s| s.id).collect_vec();
         let sink_fragment_ids = get_sink_fragment_by_ids(&txn, sink_ids).await?;
 
         let mut upstream_sink_infos = Vec::with_capacity(incoming_sinks.len());
         for pb_sink in &incoming_sinks {
             let sink_fragment_id =
                 sink_fragment_ids
-                    .get(&(pb_sink.id as _))
+                    .get(&pb_sink.id)
                     .cloned()
                     .ok_or(anyhow::anyhow!(
                         "sink fragment not found for sink id {}",
@@ -1944,7 +1944,7 @@ mod tests {
                     actor_id: actor_id.into(),
                     fragment_id: TEST_FRAGMENT_ID,
                     splits: actor_splits,
-                    worker_id: 0,
+                    worker_id: 0.into(),
                     vnode_bitmap: actor_bitmaps
                         .remove(&actor_id.into())
                         .map(|bitmap| bitmap.to_protobuf())

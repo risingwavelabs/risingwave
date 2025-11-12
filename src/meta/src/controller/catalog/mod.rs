@@ -139,6 +139,9 @@ pub struct ReleaseContext {
 
     /// Removed sink fragment by target fragment.
     pub(crate) removed_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
+
+    /// Dropped iceberg table sinks
+    pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 }
 
 impl CatalogController {
@@ -438,7 +441,7 @@ impl CatalogController {
             filter_condition
         };
 
-        let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
+        let mut dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .columns([
@@ -452,6 +455,12 @@ impl CatalogController {
             .into_partial_model()
             .all(&txn)
             .await?;
+
+        // Check if there are any pending iceberg table jobs.
+        let dirty_iceberg_jobs = find_dirty_iceberg_table_jobs(&txn, database_id).await?;
+        if !dirty_iceberg_jobs.is_empty() {
+            dirty_job_objs.extend(dirty_iceberg_jobs);
+        }
 
         Self::clean_dirty_sink_downstreams(&txn).await?;
 
@@ -550,7 +559,11 @@ impl CatalogController {
                     .into_iter()
                     .map(|table_id| table_id.as_raw_id() as _),
             )
-            .chain(dirty_associated_source_ids.clone().into_iter())
+            .chain(
+                dirty_associated_source_ids
+                    .iter()
+                    .map(|source_id| source_id.as_raw_id() as _),
+            )
             .collect();
 
         let res = Object::delete_many()
@@ -1115,16 +1128,6 @@ impl CatalogControllerInner {
                 .flat_map(|(_, txs)| txs.into_iter())
             {
                 let _ = tx.send(Err(err.clone()));
-            }
-        }
-    }
-
-    pub(crate) fn notify_cancelled(&mut self, database_id: DatabaseId, job_id: JobId) {
-        if let Some(creating_tables) = self.creating_table_finish_notifier.get_mut(&database_id)
-            && let Some(tx_list) = creating_tables.remove(&job_id)
-        {
-            for tx in tx_list {
-                let _ = tx.send(Err("Cancelled".to_owned()));
             }
         }
     }

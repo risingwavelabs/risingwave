@@ -127,7 +127,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&source.owner())?;
-                    Object::SourceId(source.id)
+                    source.id.into()
                 }
                 StatementType::ALTER_SINK => {
                     let (sink, schema_name) = catalog_reader.get_created_sink_by_name(
@@ -144,7 +144,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&sink.owner())?;
-                    Object::SinkId(sink.id.sink_id)
+                    sink.id.into()
                 }
                 StatementType::ALTER_SUBSCRIPTION => {
                     let (subscription, schema_name) = catalog_reader.get_subscription_by_name(

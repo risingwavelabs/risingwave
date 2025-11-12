@@ -17,7 +17,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::JobId;
 use risingwave_common::types::Datum;
@@ -30,11 +30,11 @@ use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
-    ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, JobStatus,
-    ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo, TableId,
-    TableIdArray, UserId, WorkerId, connection, database, fragment, fragment_relation, function,
-    index, object, object_dependency, schema, secret, sink, source, streaming_job, subscription,
-    table, user, user_default_privilege, user_privilege, view,
+    ActorId, ColumnCatalogArray, CreateType, DataTypeArray, DatabaseId, DispatcherType, FragmentId,
+    JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
+    TableId, TableIdArray, UserId, WorkerId, connection, database, fragment, fragment_relation,
+    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
+    subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -561,7 +561,7 @@ where
                 let check_creation = if $obj_type == ObjectType::View {
                     false
                 } else if $obj_type == ObjectType::Source {
-                    let source_info = Source::find_by_id(oid)
+                    let source_info = Source::find_by_id(SourceId::new(oid as _))
                         .select_only()
                         .column(source::Column::SourceInfo)
                         .into_tuple::<Option<StreamSourceInfo>>()
@@ -700,6 +700,17 @@ where
                         .into_tuple()
                         .all(db)
                         .await?;
+                    if object_type == ObjectType::Table {
+                        let engine = Table::find_by_id(TableId::new(object_id as _))
+                            .select_only()
+                            .column(table::Column::Engine)
+                            .into_tuple::<table::Engine>()
+                            .one(db)
+                            .await?;
+                        if engine == Some(table::Engine::Iceberg) && sinks.len() == 1 {
+                            continue;
+                        }
+                    }
                     details.extend(sinks.into_iter().map(|(schema_name, sink_name)| {
                         format!("sink {}.{} depends on it", schema_name, sink_name)
                     }));
@@ -777,12 +788,15 @@ where
                 _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
             }
         }
+        if details.is_empty() {
+            return Ok(());
+        }
 
         return Err(MetaError::permission_denied(format!(
             "{} used by {} other objects. \nDETAIL: {}\n\
             {}",
             object_type.as_str(),
-            count,
+            details.len(),
             details.join("\n"),
             match object_type {
                 ObjectType::Function | ObjectType::Connection | ObjectType::Secret =>
@@ -1418,9 +1432,7 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
             let actor_locations = fragment
                 .actors
                 .iter()
-                .map(|(actor_id, actor_info)| {
-                    (*actor_id as hash::ActorId, actor_info.worker_id as u32)
-                })
+                .map(|(actor_id, actor_info)| (*actor_id as hash::ActorId, actor_info.worker_id))
                 .collect();
 
             actor_mapping.to_worker_slot(&actor_locations)
@@ -1493,7 +1505,7 @@ where
             && let Some(source_id) = stream_node.to_protobuf().find_stream_source()
         {
             source_fragment_ids
-                .entry(source_id as _)
+                .entry(source_id)
                 .or_default()
                 .insert(fragment_id);
         }
@@ -1543,7 +1555,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Source => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Source(PbSource {
-                    id: obj.oid as _,
+                    id: (obj.oid as u32).into(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1551,7 +1563,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Sink => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Sink(PbSink {
-                    id: obj.oid as _,
+                    id: (obj.oid as u32).into(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1696,8 +1708,10 @@ pub async fn rename_relation(
             }
             rename_relation!(Table, table, table_id, TableId::new(object_id as _))
         }
-        ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
-        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
+        ObjectType::Source => {
+            rename_relation!(Source, source, source_id, SourceId::new(object_id as _))
+        }
+        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, SinkId::new(object_id as _)),
         ObjectType::Subscription => {
             rename_relation!(Subscription, subscription, subscription_id, object_id)
         }
@@ -1770,7 +1784,7 @@ where
 }
 
 pub fn filter_workers_by_resource_group(
-    workers: &HashMap<u32, WorkerNode>,
+    workers: &HashMap<WorkerId, WorkerNode>,
     resource_group: &str,
 ) -> BTreeSet<WorkerId> {
     workers
@@ -1781,7 +1795,7 @@ pub fn filter_workers_by_resource_group(
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })
-        .map(|(id, _)| *id as WorkerId)
+        .map(|(id, _)| *id)
         .collect()
 }
 
@@ -1832,7 +1846,7 @@ pub async fn rename_relation_refer(
             .await?;
 
         objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
-            oid: id,
+            oid: id.as_raw_id() as _,
             obj_type: ObjectType::Sink,
             schema_id: None,
             database_id: None,
@@ -1844,7 +1858,9 @@ pub async fn rename_relation_refer(
             ObjectType::Table => {
                 rename_relation_ref!(Table, table, table_id, TableId::new(obj.oid as _))
             }
-            ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
+            ObjectType::Sink => {
+                rename_relation_ref!(Sink, sink, sink_id, SinkId::new(obj.oid as _))
+            }
             ObjectType::Subscription => {
                 rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
             }
@@ -2015,6 +2031,112 @@ where
         FragmentTypeMask::from(mview_fragment).contains(FragmentTypeFlag::UpstreamSinkUnion);
 
     Ok(migrated)
+}
+
+pub async fn try_get_iceberg_table_by_downstream_sink<C>(
+    txn: &C,
+    sink_id: SinkId,
+) -> MetaResult<Option<TableId>>
+where
+    C: ConnectionTrait,
+{
+    let sink = Sink::find_by_id(sink_id).one(txn).await?;
+    let Some(sink) = sink else {
+        return Ok(None);
+    };
+
+    if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
+        let object_ids: Vec<ObjectId> = ObjectDependency::find()
+            .select_only()
+            .column(object_dependency::Column::Oid)
+            .filter(object_dependency::Column::UsedBy.eq(sink_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        let mut iceberg_table_ids = vec![];
+        for object_id in object_ids {
+            if let Some(table_engine) = Table::find_by_id(TableId::new(object_id as _))
+                .select_only()
+                .column(table::Column::Engine)
+                .into_tuple::<table::Engine>()
+                .one(txn)
+                .await?
+                && table_engine == table::Engine::Iceberg
+            {
+                iceberg_table_ids.push(object_id);
+            }
+        }
+        if iceberg_table_ids.len() == 1 {
+            return Ok(Some(TableId::new(iceberg_table_ids[0] as _)));
+        }
+    }
+    Ok(None)
+}
+
+pub async fn check_if_belongs_to_iceberg_table<C>(txn: &C, job_id: JobId) -> MetaResult<bool>
+where
+    C: ConnectionTrait,
+{
+    if let Some(engine) = Table::find_by_id(job_id.as_mv_table_id())
+        .select_only()
+        .column(table::Column::Engine)
+        .into_tuple::<table::Engine>()
+        .one(txn)
+        .await?
+        && engine == table::Engine::Iceberg
+    {
+        return Ok(true);
+    }
+    if let Some(sink_name) = Sink::find_by_id(job_id.as_sink_id())
+        .select_only()
+        .column(sink::Column::Name)
+        .into_tuple::<String>()
+        .one(txn)
+        .await?
+        && sink_name.starts_with(ICEBERG_SINK_PREFIX)
+    {
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+pub async fn find_dirty_iceberg_table_jobs<C>(
+    txn: &C,
+    database_id: Option<DatabaseId>,
+) -> MetaResult<Vec<PartialObject>>
+where
+    C: ConnectionTrait,
+{
+    let mut filter_condition = streaming_job::Column::JobStatus
+        .ne(JobStatus::Created)
+        .and(object::Column::ObjType.is_in([ObjectType::Table, ObjectType::Sink]))
+        .and(streaming_job::Column::CreateType.eq(CreateType::Background));
+    if let Some(database_id) = database_id {
+        filter_condition = filter_condition.and(object::Column::DatabaseId.eq(database_id));
+    }
+    let creating_table_sink_jobs: Vec<PartialObject> = StreamingJob::find()
+        .select_only()
+        .columns([
+            object::Column::Oid,
+            object::Column::ObjType,
+            object::Column::SchemaId,
+            object::Column::DatabaseId,
+        ])
+        .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+        .filter(filter_condition)
+        .into_partial_model()
+        .all(txn)
+        .await?;
+
+    let mut dirty_iceberg_table_jobs = vec![];
+    for job in creating_table_sink_jobs {
+        if check_if_belongs_to_iceberg_table(txn, JobId::new(job.oid as _)).await? {
+            tracing::info!("Found dirty iceberg job with id: {}", job.oid);
+            dirty_iceberg_table_jobs.push(job);
+        }
+    }
+
+    Ok(dirty_iceberg_table_jobs)
 }
 
 pub fn build_select_node_list(

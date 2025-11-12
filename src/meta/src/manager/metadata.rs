@@ -98,7 +98,7 @@ impl ActiveStreamingWorkerNodes {
             .subscribe_active_streaming_compute_nodes()
             .await?;
         Ok(Self {
-            worker_nodes: nodes.into_iter().map(|node| (node.id as _, node)).collect(),
+            worker_nodes: nodes.into_iter().map(|node| (node.id, node)).collect(),
             rx,
             meta_manager: Some(meta_manager),
         })
@@ -119,7 +119,7 @@ impl ActiveStreamingWorkerNodes {
                 LocalNotification::WorkerNodeDeleted(worker) => {
                     let is_streaming_compute_node = worker.r#type == WorkerType::ComputeNode as i32
                         && worker.property.as_ref().unwrap().is_streaming;
-                    let Some(prev_worker) = self.worker_nodes.remove(&(worker.id as _)) else {
+                    let Some(prev_worker) = self.worker_nodes.remove(&worker.id) else {
                         if is_streaming_compute_node {
                             warn!(
                                 ?worker,
@@ -137,7 +137,7 @@ impl ActiveStreamingWorkerNodes {
                     }
                     if worker.state == State::Starting as i32 {
                         warn!(
-                            id = worker.id,
+                            id = %worker.id,
                             host = ?worker.host,
                             state = worker.state,
                             "a starting streaming worker is deleted"
@@ -149,7 +149,7 @@ impl ActiveStreamingWorkerNodes {
                     if worker.r#type != WorkerType::ComputeNode as i32
                         || !worker.property.as_ref().unwrap().is_streaming
                     {
-                        if let Some(prev_worker) = self.worker_nodes.remove(&(worker.id as _)) {
+                        if let Some(prev_worker) = self.worker_nodes.remove(&worker.id) {
                             warn!(
                                 ?worker,
                                 ?prev_worker,
@@ -166,9 +166,7 @@ impl ActiveStreamingWorkerNodes {
                         "not started worker added: {:?}",
                         worker
                     );
-                    if let Some(prev_worker) =
-                        self.worker_nodes.insert(worker.id as _, worker.clone())
-                    {
+                    if let Some(prev_worker) = self.worker_nodes.insert(worker.id, worker.clone()) {
                         assert_eq!(prev_worker.host, worker.host);
                         assert_eq!(prev_worker.r#type, worker.r#type);
                         warn!(
@@ -637,7 +635,7 @@ impl MetadataManager {
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
-    ) -> MetaResult<(HashMap<String, String>, u32)> {
+    ) -> MetaResult<(HashMap<String, String>, SinkId)> {
         let (new_props, sink_id) = self
             .catalog_controller
             .update_iceberg_table_props_by_table_id(table_id, props, alter_iceberg_table_props)
@@ -751,7 +749,7 @@ impl MetadataManager {
     /// Wait for job finishing notification in `TrackingJob::finish`.
     /// The progress is updated per barrier.
     #[await_tree::instrument]
-    pub(crate) async fn wait_streaming_job_finished(
+    pub async fn wait_streaming_job_finished(
         &self,
         database_id: DatabaseId,
         id: JobId,
@@ -774,10 +772,5 @@ impl MetadataManager {
     pub(crate) async fn notify_finish_failed(&self, database_id: Option<DatabaseId>, err: String) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         mgr.notify_finish_failed(database_id, err);
-    }
-
-    pub(crate) async fn notify_cancelled(&self, database_id: DatabaseId, job_id: JobId) {
-        let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        mgr.notify_cancelled(database_id, job_id);
     }
 }

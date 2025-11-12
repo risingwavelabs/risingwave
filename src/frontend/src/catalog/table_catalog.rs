@@ -18,11 +18,11 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, Schema,
-    StreamJobStatus, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, ICEBERG_SINK_PREFIX,
+    ICEBERG_SOURCE_PREFIX, Schema, StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
@@ -88,7 +88,7 @@ pub struct TableCatalog {
 
     pub database_id: DatabaseId,
 
-    pub associated_source_id: Option<TableId>, // TODO: use SourceId
+    pub associated_source_id: Option<SourceId>, // TODO: use SourceId
 
     pub name: String,
 
@@ -210,9 +210,6 @@ pub struct TableCatalog {
 
     pub cdc_table_type: Option<ExternalCdcTableType>,
 }
-
-pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
-pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -408,7 +405,7 @@ impl TableCatalog {
 
     /// Get the table catalog's associated source id.
     #[must_use]
-    pub fn associated_source_id(&self) -> Option<TableId> {
+    pub fn associated_source_id(&self) -> Option<SourceId> {
         self.associated_source_id
     }
 
@@ -966,7 +963,7 @@ mod tests {
                 id: TableId::new(0),
                 schema_id: 0.into(),
                 database_id: 0.into(),
-                associated_source_id: Some(TableId::new(233)),
+                associated_source_id: Some(SourceId::new(233)),
                 name: "test".to_owned(),
                 table_type: TableType::Table,
                 columns: vec![

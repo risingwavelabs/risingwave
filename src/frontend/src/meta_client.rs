@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
+use risingwave_common::id::{JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -28,7 +29,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
-use risingwave_pb::id::{ActorId, JobId};
+use risingwave_pb::id::ActorId;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -47,7 +48,7 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
-use crate::catalog::{DatabaseId, FragmentId, SinkId, TableId};
+use crate::catalog::{DatabaseId, FragmentId, SinkId};
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
@@ -104,7 +105,7 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<HashMap<TableId, Table>>;
 
     /// Returns vector of (`worker_id`, `min_pinned_version_id`)
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -154,7 +155,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_sink_props(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -162,9 +163,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_iceberg_table_props(
         &self,
-        table_id: u32,
-        sink_id: u32,
-        source_id: u32,
+        table_id: TableId,
+        sink_id: SinkId,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -172,7 +173,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_source_connector_props(
         &self,
-        source_id: u32,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -192,7 +193,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_actor_vnodes(&self, actor_id: ActorId) -> Result<Vec<u32>>;
 
-    fn worker_id(&self) -> u32;
+    fn worker_id(&self) -> WorkerId;
 
     async fn set_sync_log_store_aligned(&self, job_id: JobId, aligned: bool) -> Result<()>;
 
@@ -233,9 +234,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_table_fragments(
         &self,
-        table_ids: &[JobId],
+        job_ids: &[JobId],
     ) -> Result<HashMap<JobId, TableFragmentInfo>> {
-        self.0.list_table_fragments(table_ids).await
+        self.0.list_table_fragments(job_ids).await
     }
 
     async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>> {
@@ -300,7 +301,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(tables)
     }
 
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>> {
         let pinned_versions = self
             .0
             .risectl_get_pinned_versions_summary()
@@ -409,7 +410,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_sink_props(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -426,9 +427,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_iceberg_table_props(
         &self,
-        table_id: u32,
-        sink_id: u32,
-        source_id: u32,
+        table_id: TableId,
+        sink_id: SinkId,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -447,7 +448,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_source_connector_props(
         &self,
-        source_id: u32,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -484,7 +485,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.get_actor_vnodes(actor_id).await
     }
 
-    fn worker_id(&self) -> u32 {
+    fn worker_id(&self) -> WorkerId {
         self.0.worker_id()
     }
 

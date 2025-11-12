@@ -73,7 +73,7 @@ pub(super) struct BuildingFragment {
     /// Will be converted to indices when building the edge connected to the upstream.
     ///
     /// For shared CDC table on source, its `vec![]`, since the upstream source's output schema is fixed.
-    upstream_table_columns: HashMap<TableId, Vec<PbColumnDesc>>,
+    upstream_job_columns: HashMap<JobId, Vec<PbColumnDesc>>,
 }
 
 impl BuildingFragment {
@@ -94,13 +94,13 @@ impl BuildingFragment {
         Self::fill_internal_tables(&mut fragment, job, table_id_gen);
 
         let job_id = Self::fill_job(&mut fragment, job).then(|| job.id());
-        let upstream_table_columns =
-            Self::extract_upstream_table_columns_except_cross_db_backfill(&fragment);
+        let upstream_job_columns =
+            Self::extract_upstream_columns_except_cross_db_backfill(&fragment);
 
         Self {
             inner: fragment,
             job_id,
-            upstream_table_columns,
+            upstream_job_columns,
         }
     }
 
@@ -160,7 +160,7 @@ impl BuildingFragment {
                 has_job = true;
             }
             NodeBody::Sink(sink_node) => {
-                sink_node.sink_desc.as_mut().unwrap().id = job_id.as_raw_id();
+                sink_node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
 
                 has_job = true;
             }
@@ -177,7 +177,7 @@ impl BuildingFragment {
                     if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
                         source.optional_associated_table_id
                     {
-                        node_inner.associated_table_id = Some(id);
+                        node_inner.associated_table_id = Some(id.into());
                     }
                 }
             }
@@ -194,7 +194,7 @@ impl BuildingFragment {
                             if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
                                 source.optional_associated_table_id
                             {
-                                source_inner.associated_table_id = Some(id);
+                                source_inner.associated_table_id = Some(id.into());
                             }
                         }
                     }
@@ -206,7 +206,7 @@ impl BuildingFragment {
                             if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
                                 source.optional_associated_table_id
                             {
-                                source_inner.associated_table_id = Some(id);
+                                source_inner.associated_table_id = Some(id.into());
                             }
                         }
                     }
@@ -239,9 +239,9 @@ impl BuildingFragment {
     }
 
     /// Extract the required columns of each upstream table except for cross-db backfill.
-    fn extract_upstream_table_columns_except_cross_db_backfill(
+    fn extract_upstream_columns_except_cross_db_backfill(
         fragment: &StreamFragment,
-    ) -> HashMap<TableId, Vec<PbColumnDesc>> {
+    ) -> HashMap<JobId, Vec<PbColumnDesc>> {
         let mut table_columns = HashMap::new();
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| {
@@ -252,11 +252,17 @@ impl BuildingFragment {
                     {
                         return;
                     }
-                    (stream_scan.table_id, stream_scan.upstream_columns())
+                    (
+                        stream_scan.table_id.as_job_id(),
+                        stream_scan.upstream_columns(),
+                    )
                 }
-                NodeBody::CdcFilter(cdc_filter) => (cdc_filter.upstream_source_id.into(), vec![]),
+                NodeBody::CdcFilter(cdc_filter) => (
+                    cdc_filter.upstream_source_id.as_share_source_job_id(),
+                    vec![],
+                ),
                 NodeBody::SourceBackfill(backfill) => (
-                    backfill.upstream_source_id.into(),
+                    backfill.upstream_source_id.as_share_source_job_id(),
                     // FIXME: only pass required columns instead of all columns here
                     backfill.column_descs(),
                 ),
@@ -326,7 +332,7 @@ pub(super) enum EdgeId {
     /// MV on MV.
     UpstreamExternal {
         /// The ID of the upstream table or materialized view.
-        upstream_table_id: TableId,
+        upstream_job_id: JobId,
         /// The ID of the downstream fragment.
         downstream_fragment_id: GlobalFragmentId,
     },
@@ -1022,7 +1028,8 @@ impl StreamFragmentGraph {
                         }
                         Some(NodeBody::SourceBackfill(source_backfill)) => {
                             let source_id = source_backfill.upstream_source_id;
-                            let fragments: &mut Vec<_> = mapping.entry(source_id).or_default();
+                            let fragments: &mut Vec<_> =
+                                mapping.entry(source_id.as_raw_id()).or_default();
                             fragments.push(fragment_id);
                             // each fragment should have only 1 scan node.
                             false
@@ -1415,9 +1422,9 @@ impl CompleteStreamFragmentGraph {
             for (&id, fragment) in &mut graph.fragments {
                 let uses_shuffled_backfill = fragment.has_shuffled_backfill();
 
-                for (&upstream_table_id, required_columns) in &fragment.upstream_table_columns {
+                for (&upstream_job_id, required_columns) in &fragment.upstream_job_columns {
                     let (upstream_fragment, nodes) = upstream_root_fragments
-                        .get(&upstream_table_id.as_job_id())
+                        .get(&upstream_job_id)
                         .context("upstream fragment not found")?;
                     let upstream_root_fragment_id =
                         GlobalFragmentId::new(upstream_fragment.fragment_id);
@@ -1441,7 +1448,7 @@ impl CompleteStreamFragmentGraph {
 
                             StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
-                                    upstream_table_id,
+                                    upstream_job_id,
                                     downstream_fragment_id: id,
                                 },
                                 // We always use `NoShuffle` for the exchange between the upstream
@@ -1490,7 +1497,7 @@ impl CompleteStreamFragmentGraph {
 
                                 StreamFragmentEdge {
                                     id: EdgeId::UpstreamExternal {
-                                        upstream_table_id,
+                                        upstream_job_id,
                                         downstream_fragment_id: id,
                                     },
                                     dispatch_strategy,
@@ -1514,7 +1521,7 @@ impl CompleteStreamFragmentGraph {
 
                                 StreamFragmentEdge {
                                     id: EdgeId::UpstreamExternal {
-                                        upstream_table_id,
+                                        upstream_job_id,
                                         downstream_fragment_id: id,
                                     },
                                     // We always use `NoShuffle` for the exchange between the upstream
@@ -1577,7 +1584,7 @@ impl CompleteStreamFragmentGraph {
             for (dispatcher_type, fragment, nodes) in &downstream_fragments {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
-                // Similar to `extract_upstream_table_columns_except_cross_db_backfill`.
+                // Similar to `extract_upstream_columns_except_cross_db_backfill`.
                 let output_columns = {
                     let mut res = None;
 
@@ -1796,12 +1803,12 @@ impl CompleteStreamFragmentGraph {
         while let Some(&fragment_id) = topo.get(i) {
             i += 1;
             // Find if we can process more fragments.
-            for (upstream_id, _) in self.get_upstreams(fragment_id) {
-                let downstream_cnt = downstream_cnts.get_mut(&upstream_id).unwrap();
+            for (upstream_job_id, _) in self.get_upstreams(fragment_id) {
+                let downstream_cnt = downstream_cnts.get_mut(&upstream_job_id).unwrap();
                 *downstream_cnt -= 1;
                 if *downstream_cnt == 0 {
-                    downstream_cnts.remove(&upstream_id);
-                    topo.push(upstream_id);
+                    downstream_cnts.remove(&upstream_job_id);
+                    topo.push(upstream_job_id);
                 }
             }
         }
@@ -1828,7 +1835,7 @@ impl CompleteStreamFragmentGraph {
         let BuildingFragment {
             inner,
             job_id,
-            upstream_table_columns: _,
+            upstream_job_columns: _,
         } = building_fragment;
 
         let distribution_type = distribution.to_distribution_type();

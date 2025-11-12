@@ -673,7 +673,7 @@ impl DatabaseCheckpointControl {
         let worker_id = resp.worker_id;
         let prev_epoch = resp.epoch;
         tracing::trace!(
-            worker_id,
+            %worker_id,
             prev_epoch,
             partial_graph_id = resp.partial_graph_id,
             "barrier collected"
@@ -682,12 +682,7 @@ impl DatabaseCheckpointControl {
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
-                    assert!(
-                        node.state
-                            .node_to_collect
-                            .remove(&(worker_id as _))
-                            .is_some()
-                    );
+                    assert!(node.state.node_to_collect.remove(&worker_id).is_some());
                     node.state.resps.push(resp);
                 } else {
                     panic!(
@@ -811,13 +806,13 @@ impl DatabaseCheckpointControl {
                     .expect("should exist");
                 assert!(creating_streaming_job.is_finished());
 
-                let mut source_backfill_fragments = HashMap::new();
+                let mut source_backfill_fragments: HashMap<SourceId, _> = HashMap::new();
                 for info in creating_streaming_job.graph_info().fragment_infos() {
                     if let Some((source_id, upstream_source_fragment_id)) =
                         info.nodes.find_source_backfill()
                     {
                         source_backfill_fragments
-                            .entry(source_id as SourceId)
+                            .entry(source_id)
                             .or_insert(BTreeSet::new())
                             .insert((info.fragment_id, upstream_source_fragment_id));
                     }

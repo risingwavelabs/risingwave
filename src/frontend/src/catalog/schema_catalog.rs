@@ -291,7 +291,7 @@ impl SchemaCatalog {
                 self.table_incoming_sinks
                     .entry(target_table)
                     .or_default()
-                    .insert(sink_ref.id.sink_id)
+                    .insert(sink_ref.id)
             );
         }
 
@@ -318,14 +318,14 @@ impl SchemaCatalog {
                     .table_incoming_sinks
                     .get_mut(&target_table)
                     .expect("should exists");
-                assert!(incoming_sinks.remove(&sink_ref.id.sink_id));
+                assert!(incoming_sinks.remove(&sink_ref.id));
                 if incoming_sinks.is_empty() {
                     self.table_incoming_sinks.remove(&target_table);
                 }
             }
         } else {
             tracing::warn!(
-                id,
+                %id,
                 "sink not found when dropping, frontend might not be notified yet"
             );
         }
@@ -342,7 +342,7 @@ impl SchemaCatalog {
         // check if the sink name gets updated.
         if old_sink.name != name
             && let Some(s) = self.sink_by_name.get(&old_sink.name)
-            && s.id.sink_id == id
+            && s.id == id
         {
             self.sink_by_name.remove(&old_sink.name);
         }
@@ -700,7 +700,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SourceCatalog>> {
         self.source_by_name
             .values()
-            .filter(|s| has_access_to_object(user, s.id, s.owner))
+            .filter(|s| has_access_to_object(user, s.id.as_raw_id(), s.owner))
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
@@ -713,7 +713,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SinkCatalog>> {
         self.sink_by_name
             .values()
-            .filter(|s| has_access_to_object(user, s.id.sink_id, s.owner.user_id))
+            .filter(|s| has_access_to_object(user, s.id.as_raw_id(), s.owner.user_id))
     }
 
     pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
@@ -826,8 +826,8 @@ impl SchemaCatalog {
         self.source_by_name.get(source_name)
     }
 
-    pub fn get_source_by_id(&self, source_id: &SourceId) -> Option<&Arc<SourceCatalog>> {
-        self.source_by_id.get(source_id)
+    pub fn get_source_by_id(&self, source_id: SourceId) -> Option<&Arc<SourceCatalog>> {
+        self.source_by_id.get(&source_id)
     }
 
     pub fn get_sink_by_name(
@@ -848,8 +848,8 @@ impl SchemaCatalog {
         self.get_sink_by_name(sink_name, false)
     }
 
-    pub fn get_sink_by_id(&self, sink_id: &SinkId) -> Option<&Arc<SinkCatalog>> {
-        self.sink_by_id.get(sink_id)
+    pub fn get_sink_by_id(&self, sink_id: SinkId) -> Option<&Arc<SinkCatalog>> {
+        self.sink_by_id.get(&sink_id)
     }
 
     pub fn get_subscription_by_name(
@@ -1023,12 +1023,12 @@ impl SchemaCatalog {
                 owner: index.owner(),
                 object: Object::TableId(oid),
             })
-        } else if let Some(source) = self.get_source_by_id(&oid) {
+        } else if let Some(source) = self.get_source_by_id(oid.into()) {
             Some(OwnedGrantObject {
                 owner: source.owner,
                 object: Object::SourceId(oid),
             })
-        } else if let Some(sink) = self.get_sink_by_id(&oid) {
+        } else if let Some(sink) = self.get_sink_by_id(oid.into()) {
             Some(OwnedGrantObject {
                 owner: sink.owner.user_id,
                 object: Object::SinkId(oid),
@@ -1064,10 +1064,10 @@ impl SchemaCatalog {
     }
 
     pub fn contains_object(&self, oid: u32) -> bool {
-        self.table_by_id.contains_key(&TableId::new(oid))
+        self.table_by_id.contains_key(&oid.into())
             || self.index_by_id.contains_key(&IndexId::new(oid))
-            || self.source_by_id.contains_key(&oid)
-            || self.sink_by_id.contains_key(&oid)
+            || self.source_by_id.contains_key(&oid.into())
+            || self.sink_by_id.contains_key(&oid.into())
             || self.view_by_id.contains_key(&oid)
             || self.function_by_id.contains_key(&FunctionId::new(oid))
             || self.subscription_by_id.contains_key(&oid)

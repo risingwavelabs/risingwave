@@ -35,6 +35,8 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
+use risingwave_connector::sink::SinkParam;
+use risingwave_connector::sink::iceberg::IcebergSink;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
@@ -44,7 +46,6 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
-    WorkerId,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
@@ -133,11 +134,9 @@ impl std::fmt::Display for StreamingJobId {
 impl StreamingJobId {
     fn id(&self) -> JobId {
         match self {
-            StreamingJobId::MaterializedView(id) | StreamingJobId::Table(_, id) => {
-                id.as_raw_id().into()
-            }
+            StreamingJobId::MaterializedView(id) | StreamingJobId::Table(_, id) => id.as_job_id(),
             StreamingJobId::Index(id) => (*id as u32).into(),
-            StreamingJobId::Sink(id) => (*id as u32).into(),
+            StreamingJobId::Sink(id) => id.as_job_id(),
         }
     }
 }
@@ -199,7 +198,7 @@ impl DdlCommand {
             DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
             DdlCommand::DropSchema(id, _) => Right(id.as_raw_id() as ObjectId),
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
-            DdlCommand::DropSource(id, _) => Right(*id),
+            DdlCommand::DropSource(id, _) => Right(id.as_raw_id() as ObjectId),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id, _) => Right(*id),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
@@ -577,7 +576,7 @@ impl DdlController {
             .await?;
         self.source_manager
             .register_source_with_handle(source_id, handle)
-            .await?;
+            .await;
         Ok(version)
     }
 
@@ -586,7 +585,7 @@ impl DdlController {
         source_id: SourceId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Source, source_id as _, drop_mode)
+        self.drop_object(ObjectType::Source, source_id.as_raw_id() as _, drop_mode)
             .await
     }
 
@@ -1021,7 +1020,7 @@ impl DdlController {
                     if let Some(source_id) = source_id {
                         self.source_manager
                             .apply_source_change(SourceChange::DropSource {
-                                dropped_source_ids: vec![source_id as SourceId],
+                                dropped_source_ids: vec![source_id],
                             })
                             .await;
                     }
@@ -1178,6 +1177,7 @@ impl DdlController {
             removed_actors,
             removed_fragments,
             removed_sink_fragment_by_targets,
+            removed_iceberg_table_sinks,
         } = release_ctx;
 
         let _guard = self.source_manager.pause_tick().await;
@@ -1213,6 +1213,32 @@ impl DdlController {
                 dropped_source_fragments,
             })
             .await;
+
+        // clean up iceberg table sinks
+        for sink in removed_iceberg_table_sinks {
+            let sink_param = SinkParam::try_from_sink_catalog(sink.into())
+                .expect("Iceberg sink should be valid");
+            let iceberg_sink =
+                IcebergSink::try_from(sink_param).expect("Iceberg sink should be valid");
+            if let Ok(iceberg_catalog) = iceberg_sink.config.create_catalog().await {
+                let table_identifier = iceberg_sink.config.full_table_name().unwrap();
+                tracing::info!(
+                    "dropping iceberg table {} for dropped sink",
+                    table_identifier
+                );
+
+                let _ = iceberg_catalog
+                    .drop_table(&table_identifier)
+                    .await
+                    .inspect_err(|err| {
+                        tracing::error!(
+                            "failed to drop iceberg table {} during cleanup: {}",
+                            table_identifier,
+                            err.as_report()
+                        );
+                    });
+            }
+        }
 
         // remove secrets.
         for secret in secret_ids {
@@ -1293,7 +1319,7 @@ impl DdlController {
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
                         .metadata_manager
-                        .get_job_fragments_by_id(sink.id.into())
+                        .get_job_fragments_by_id(sink.id.as_job_id())
                         .await?;
                     if sink_job_fragments.fragments.len() != 1 {
                         return Err(anyhow!(
@@ -1342,7 +1368,8 @@ impl DdlController {
                         .metadata_manager
                         .catalog_controller
                         .create_job_catalog_for_replace(&streaming_job, None, None, None)
-                        .await?;
+                        .await?
+                        .as_sink_id();
                     let StreamingJob::Sink(sink) = streaming_job else {
                         unreachable!()
                     };
@@ -1408,7 +1435,7 @@ impl DdlController {
                         .iter()
                         .map(|sink| FinishAutoRefreshSchemaSinkContext {
                             tmp_sink_id: sink.tmp_sink_id,
-                            original_sink_id: sink.original_sink.id as _,
+                            original_sink_id: sink.original_sink.id,
                             columns: sink.new_schema.clone(),
                             new_log_store_table: sink
                                 .new_log_store_table
@@ -1448,7 +1475,7 @@ impl DdlController {
                     self.metadata_manager
                         .catalog_controller
                         .prepare_streaming_job(
-                            sink.tmp_sink_id,
+                            sink.tmp_sink_id.as_job_id(),
                             || [&sink.new_fragment].into_iter(),
                             &empty_downstreams,
                             true,
@@ -1518,7 +1545,7 @@ impl DdlController {
 
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id.as_raw_id() as _, ObjectType::Table),
-            StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
+            StreamingJobId::Sink(id) => (id.as_raw_id() as _, ObjectType::Sink),
             StreamingJobId::Table(_, id) => (id.as_raw_id() as _, ObjectType::Table),
             StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
         };
@@ -1943,10 +1970,8 @@ impl DdlController {
                         downstream_actor_location.remove(actor_id);
                     }
                     for (actor_id, status) in &sink.actor_status {
-                        downstream_actor_location.insert(
-                            *actor_id,
-                            status.location.as_ref().unwrap().worker_node_id as WorkerId,
-                        );
+                        downstream_actor_location
+                            .insert(*actor_id, status.location.as_ref().unwrap().worker_node_id);
                     }
 
                     *downstream_fragment = (&sink.new_fragment_info(), stream_job.id()).into();
@@ -2240,7 +2265,7 @@ fn report_create_object(
     );
 }
 
-async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> MetaResult<()> {
+async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: SinkId) -> MetaResult<()> {
     match Entity::delete_many()
         .filter(Column::SinkId.eq(sink_id))
         .exec(db)
@@ -2328,7 +2353,7 @@ pub fn build_upstream_sink_info(
     let current_target_columns = target_table.get_columns();
     let project_exprs = build_select_node_list(&sink_columns, current_target_columns)?;
     Ok(UpstreamSinkInfo {
-        sink_id: sink.id as _,
+        sink_id: sink.id,
         sink_fragment_id: sink_fragment_id as _,
         sink_output_fields,
         sink_original_target_columns: sink.get_original_target_columns().clone(),

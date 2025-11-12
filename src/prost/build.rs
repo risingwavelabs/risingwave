@@ -66,6 +66,9 @@ for_all_wrapped_id_fields! (
         InsertNode {
             table_id: TableId,
         }
+        SourceNode {
+            source_id: SourceId,
+        }
         SysRowSeqScanNode {
             table_id: TableId,
         }
@@ -105,12 +108,14 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
         }
         Sink {
+            id: SinkId,
             schema_id: SchemaId,
             database_id: DatabaseId,
             target_table: TableId,
             auto_refresh_schema_from_table: TableId,
         }
         Source {
+            id: SourceId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
@@ -137,6 +142,17 @@ for_all_wrapped_id_fields! (
         ActorInfo {
             actor_id: ActorId,
         }
+        ActorLocation {
+            worker_node_id: WorkerId,
+        }
+        WorkerNode {
+            id: WorkerId,
+        }
+    }
+    connector_service {
+        SinkParam {
+            sink_id: SinkId,
+        }
     }
     ddl_service {
         AlterCdcTableBackfillParallelismRequest {
@@ -161,6 +177,9 @@ for_all_wrapped_id_fields! (
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
         }
+        CompactIcebergTableRequest {
+            sink_id: SinkId,
+        }
         CreateConnectionRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
@@ -178,8 +197,17 @@ for_all_wrapped_id_fields! (
         DropSchemaRequest {
             schema_id: SchemaId,
         }
+        DropSinkRequest {
+            sink_id: SinkId,
+        }
+        DropSourceRequest {
+            source_id: SourceId,
+        }
         DropTableRequest {
             table_id: TableId,
+        }
+        ExpireIcebergTableSnapshotsRequest {
+            sink_id: SinkId,
         }
         GetTablesRequest {
             table_ids: TableId,
@@ -195,6 +223,9 @@ for_all_wrapped_id_fields! (
         }
     }
     hummock {
+        CancelCompactTask {
+            context_id: WorkerId,
+        }
         CompactTask {
             existing_table_ids: TableId,
             table_options: TableId,
@@ -202,11 +233,20 @@ for_all_wrapped_id_fields! (
             table_watermarks: TableId,
             table_schemas: TableId,
         }
+        CompactTaskAssignment {
+            context_id: WorkerId,
+        }
         CompactionGroupInfo {
             member_table_ids: TableId,
         }
         GetVersionByEpochRequest {
             table_id: TableId,
+        }
+        HummockPinnedSnapshot {
+            context_id: WorkerId,
+        }
+        HummockPinnedVersion {
+            context_id: WorkerId,
         }
         HummockVersion {
             table_watermarks: TableId,
@@ -224,6 +264,12 @@ for_all_wrapped_id_fields! (
         HummockVersionStats {
             table_stats: TableId,
         }
+        PinVersionRequest {
+            context_id: WorkerId,
+        }
+        PinnedVersionsSummary {
+            workers: WorkerId,
+        }
         ReportCompactionTaskRequest.ReportTask {
             table_stats_change: TableId,
         }
@@ -232,6 +278,9 @@ for_all_wrapped_id_fields! (
         }
         SstableInfo {
             table_ids: TableId,
+        }
+        SubscribeCompactionEventRequest.Register {
+            context_id: WorkerId,
         }
         SubscribeCompactionEventRequest.ReportTask {
             table_stats_change: TableId,
@@ -242,13 +291,37 @@ for_all_wrapped_id_fields! (
         TruncateTables {
             table_ids: TableId,
         }
+        UnpinVersionBeforeRequest {
+            context_id: WorkerId,
+        }
+        UnpinVersionRequest {
+            context_id: WorkerId,
+        }
         WriteLimits.WriteLimit {
             table_ids: TableId,
         }
     }
+    iceberg_compaction {
+        SubscribeIcebergCompactionEventRequest.Register {
+            context_id: WorkerId,
+        }
+    }
     meta {
+        ActivateWorkerNodeRequest {
+            node_id: WorkerId,
+        }
+        ActorCountPerParallelism {
+            worker_id_to_actor_count: WorkerId,
+        }
         ActorIds {
             ids: ActorId,
+        }
+        AddWorkerNodeResponse {
+            node_id: WorkerId,
+        }
+        AlterConnectorPropsRequest.AlterIcebergTableIds {
+            sink_id: SinkId,
+            source_id: SourceId,
         }
         CancelCreatingJobsRequest.CreatingJobIds {
             job_ids: JobId,
@@ -274,6 +347,12 @@ for_all_wrapped_id_fields! (
         }
         EventLog.EventDirtyStreamJobClear {
             id: JobId,
+        }
+        EventLog.EventSinkFail {
+            sink_id: SinkId,
+        }
+        EventLog.EventWorkerNodePanic {
+            worker_id: WorkerId,
         }
         EventLog.GlobalRecoverySuccess {
             running_database_ids: DatabaseId,
@@ -302,6 +381,7 @@ for_all_wrapped_id_fields! (
         }
         GetClusterInfoResponse {
             actor_splits: ActorId,
+            source_infos: SourceId,
         }
         GetFragmentByIdRequest {
             fragment_id: FragmentId,
@@ -318,13 +398,18 @@ for_all_wrapped_id_fields! (
         GetServingVnodeMappingsResponse {
             fragment_to_table: FragmentId,
         }
+        HeartbeatRequest {
+            node_id: WorkerId,
+        }
         ListActorSplitsResponse.ActorSplit {
             actor_id: ActorId,
             fragment_id: FragmentId,
+            source_id: SourceId,
         }
         ListActorStatesResponse.ActorState {
             actor_id: ActorId,
             fragment_id: FragmentId,
+            worker_id: WorkerId,
         }
         ListCdcProgressResponse {
             cdc_progress: JobId,
@@ -358,9 +443,13 @@ for_all_wrapped_id_fields! (
         }
         RefreshRequest {
             table_id: TableId,
+            associated_source_id: SourceId,
         }
         SetSyncLogStoreAlignedRequest {
             job_id: JobId,
+        }
+        SubscribeRequest {
+            worker_id: WorkerId,
         }
         TableFragments {
             table_id: JobId,
@@ -373,6 +462,12 @@ for_all_wrapped_id_fields! (
             state_table_ids: TableId,
             table_id: JobId,
         }
+        UpdateWorkerNodeSchedulabilityRequest {
+            worker_ids: WorkerId,
+        }
+        WorkerReschedule {
+            worker_actor_diff: WorkerId,
+        }
     }
     monitor_service {
         GetProfileStatsRequest {
@@ -382,16 +477,26 @@ for_all_wrapped_id_fields! (
             dispatch_fragment_output_row_count: FragmentId,
             dispatch_fragment_output_blocking_duration_ns: FragmentId,
         }
+        StackTraceResponse {
+            barrier_worker_state: WorkerId,
+            jvm_stack_traces: WorkerId,
+        }
     }
     plan_common {
         ExternalTableDesc {
             table_id: TableId,
+            source_id: SourceId,
         }
         StorageTableDesc {
             table_id: TableId,
         }
         VectorIndexReaderDesc {
             table_id: TableId,
+        }
+    }
+    recursive {
+        ComplexRecursiveMessage {
+            node_id: WorkerId,
         }
     }
     source {
@@ -416,6 +521,9 @@ for_all_wrapped_id_fields! (
         Barrier {
             passed_actors: ActorId,
         }
+        CdcFilterNode {
+            upstream_source_id: SourceId,
+        }
         DeltaIndexJoinNode {
             left_table_id: TableId,
             right_table_id: TableId,
@@ -426,6 +534,12 @@ for_all_wrapped_id_fields! (
         DmlNode {
             table_id: TableId,
         }
+        ListFinishMutation {
+            associated_source_id: SourceId,
+        }
+        LoadFinishMutation {
+            associated_source_id: SourceId,
+        }
         MaterializeNode {
             table_id: TableId,
         }
@@ -434,6 +548,13 @@ for_all_wrapped_id_fields! (
         }
         RefreshStartMutation {
             table_id: TableId,
+            associated_source_id: SourceId,
+        }
+        SinkDesc {
+            id: SinkId,
+        }
+        SourceBackfillNode {
+            upstream_source_id: SourceId,
         }
         SourceChangeSplitMutation {
             actor_splits: ActorId,
@@ -463,8 +584,16 @@ for_all_wrapped_id_fields! (
             upstream_id: FragmentId,
             downstream_id: FragmentId,
         }
+        StreamFsFetch {
+            source_id: SourceId,
+            associated_table_id: TableId,
+        }
         StreamScanNode {
             table_id: TableId,
+        }
+        StreamSource {
+            source_id: SourceId,
+            associated_table_id: TableId,
         }
         SubscriptionUpstreamInfo {
             upstream_mv_table_id: TableId,
@@ -477,6 +606,7 @@ for_all_wrapped_id_fields! (
             actor_splits: ActorId,
             actor_vnode_bitmap_update: ActorId,
             actor_new_dispatchers: ActorId,
+            sink_add_columns: SinkId,
         }
         UpdateMutation.DispatcherUpdate {
             actor_id: ActorId,
@@ -504,6 +634,9 @@ for_all_wrapped_id_fields! (
             refresh_finished_tables: TableId,
             table_watermarks: TableId,
             vector_index_adds: TableId,
+            worker_id: WorkerId,
+            list_finished_source_ids: SourceId,
+            load_finished_source_ids: SourceId,
         }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
@@ -515,10 +648,12 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.ListFinishedSource {
             reporter_actor_id: ActorId,
             table_id: TableId,
+            associated_source_id: SourceId,
         }
         BarrierCompleteResponse.LoadFinishedSource {
             reporter_actor_id: ActorId,
             table_id: TableId,
+            associated_source_id: SourceId,
         }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,
@@ -573,12 +708,11 @@ for_all_wrapped_id_fields! (
 
 fn check_declared_wrapped_fields_sorted() {
     let wrapped_fields = wrapped_fields();
-    assert!(
-        wrapped_fields
-            .iter()
-            .map(|(type_name, _)| type_name)
-            .is_sorted()
-    );
+    if let Some(i) =
+        (0..wrapped_fields.len() - 1).find(|i| wrapped_fields[*i].0 >= wrapped_fields[*i + 1].0)
+    {
+        panic!("types not sorted: first {}", wrapped_fields[i + 1].0)
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

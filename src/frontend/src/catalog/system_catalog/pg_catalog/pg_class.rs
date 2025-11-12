@@ -122,7 +122,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_source().map(|source| PgClass {
-                    oid: source.id as i32,
+                    oid: source.id.as_raw_id() as i32,
                     relname: source.name.clone(),
                     relnamespace: schema.id().as_raw_id() as i32,
                     relowner: source.owner as i32,
@@ -136,7 +136,7 @@ fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
                     relpartbound: None,
                 }))
                 .chain(schema.iter_sink().map(|sink| PgClass {
-                    oid: sink.id.sink_id as i32,
+                    oid: sink.id.as_raw_id() as i32,
                     relname: sink.name.clone(),
                     relnamespace: schema.id().as_raw_id() as i32,
                     relowner: sink.owner.user_id as i32,
