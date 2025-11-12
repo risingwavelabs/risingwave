@@ -991,8 +991,7 @@ impl CatalogController {
         table_id: TableId,
         trigger_interval_secs: Option<i64>,
     ) -> MetaResult<()> {
-        self.ensure_refresh_job(table_id, trigger_interval_secs)
-            .await?;
+        self.ensure_refresh_job(table_id, None).await?;
         let inner = self.inner.read().await;
         let active = refresh_job::ActiveModel {
             table_id: Set(table_id),

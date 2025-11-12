@@ -333,6 +333,9 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             fragment_id: FragmentId,
         }
+        ListRefreshTableStatesResponse.RefreshTableState {
+            table_id: TableId,
+        }
         ListStreamingJobStatesResponse.StreamingJobState {
             table_id: JobId,
             database_id: DatabaseId,

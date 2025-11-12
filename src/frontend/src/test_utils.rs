@@ -63,6 +63,7 @@ use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
@@ -1118,6 +1119,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
+        unimplemented!()
+    }
+
+    async fn list_refresh_table_states(&self) -> RpcResult<Vec<RefreshTableState>> {
         unimplemented!()
     }
 

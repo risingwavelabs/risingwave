@@ -32,6 +32,7 @@ use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObjec
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -88,6 +89,26 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(FlushResponse {
             status: None,
             hummock_version_id: version_id.to_u64(),
+        }))
+    }
+
+    async fn list_refresh_table_states(
+        &self,
+        _request: Request<ListRefreshTableStatesRequest>,
+    ) -> TonicResponse<ListRefreshTableStatesResponse> {
+        let refresh_jobs = self.metadata_manager.list_refresh_jobs().await?;
+        let refresh_table_states = refresh_jobs
+            .into_iter()
+            .map(|job| RefreshTableState {
+                table_id: job.table_id,
+                current_status: job.current_status.to_string(),
+                last_trigger_time: job.last_trigger_time.map(|time| time.to_string()),
+                trigger_interval_secs: job.trigger_interval_secs,
+                job_create_time: job.job_create_time.to_string(),
+            })
+            .collect();
+        Ok(Response::new(ListRefreshTableStatesResponse {
+            states: refresh_table_states,
         }))
     }
 

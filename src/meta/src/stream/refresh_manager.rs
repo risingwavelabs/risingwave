@@ -164,7 +164,6 @@ impl GlobalRefreshManager {
     }
 
     async fn handle_scheduler_tick(self: &Arc<Self>) -> MetaResult<()> {
-        self.sync_refreshable_jobs().await?;
         let jobs = self.metadata_manager.list_refresh_jobs().await?;
         for job in jobs {
             if let Err(err) = self.try_trigger_scheduled_refresh(&job).await {
@@ -193,6 +192,7 @@ impl GlobalRefreshManager {
         job: &refresh_job::Model,
     ) -> MetaResult<()> {
         if job.current_status != RefreshState::Idle {
+            tracing::info!(table_id = %job.table_id, "skip scheduled refresh: current status is not idle: {:?}", job.current_status);
             return Ok(());
         }
         let Some(interval_secs) = job.trigger_interval_secs else {

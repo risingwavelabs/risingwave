@@ -18,11 +18,11 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(RefreshJob::JobCreateTime)
-                            .date_time()
+                            .timestamp_with_time_zone()
                             .not_null()
                             .default(Expr::current_timestamp()),
                     )
-                    .col(ColumnDef::new(RefreshJob::LastTriggerTime).date_time())
+                    .col(ColumnDef::new(RefreshJob::LastTriggerTime).timestamp_with_time_zone())
                     .col(ColumnDef::new(RefreshJob::TriggerIntervalSecs).big_integer())
                     .col(
                         ColumnDef::new(RefreshJob::CurrentStatus)

@@ -406,6 +406,19 @@ message ListCdcProgressResponse {
   map<uint32, CdcProgress> cdc_progress = 1;
 }
 
+message ListRefreshTableStatesRequest {}
+
+message ListRefreshTableStatesResponse {
+  message RefreshTableState {
+    uint32 table_id = 1;
+    string current_status = 2;
+    optional string last_trigger_time = 3;
+    optional int64 trigger_interval_secs = 4;
+    string job_create_time = 5;
+  }
+  repeated RefreshTableState states = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -429,6 +442,7 @@ service StreamManagerService {
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
   rpc ListUnmigratedTables(ListUnmigratedTablesRequest) returns (ListUnmigratedTablesResponse);
+  rpc ListRefreshTableStates(ListRefreshTableStatesRequest) returns (ListRefreshTableStatesResponse);
 }
 
 // Below for cluster service.
