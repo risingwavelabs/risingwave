@@ -39,6 +39,7 @@ pub mod common;
 /// Converts JSON/AVRO/Protobuf data to RisingWave datum.
 /// The core API is [`decoder::Access`].
 pub mod decoder;
+pub mod kconnect;
 
 pub use apache_avro::schema::Schema as AvroSchema;
 pub use apache_avro::types::{Value as AvroValue, ValueKind as AvroValueKind};
