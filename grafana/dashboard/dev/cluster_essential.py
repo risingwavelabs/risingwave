@@ -124,7 +124,7 @@ def _actor_busy_rate_target(panels: Panels, rate_interval: str):
 def _relation_busy_rate_expr(rate_interval: str):
     actor_busy_rate_expr = _actor_busy_rate_expr(rate_interval)
     relation_busy_rate_expr = (
-        f"topk (1,"
+        f"topk(1,"
         f"  ({actor_busy_rate_expr}) * on (fragment_id) group_right {metric('table_info')}"
         f") by (materialized_view_id)"
     )
