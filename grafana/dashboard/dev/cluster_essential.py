@@ -350,28 +350,28 @@ def _(outer_panels: Panels):
             panels.subheader("Busy Rate"),
             panels.timeseries_percentage(
                 "Relation Busy Rate",
-                "1 - output_blocking - input_blocking, clamped to 0%",
+                "The rate that a relation is busy, i.e. the busy rate of its busiest actor.",
                 [
                     _relation_busy_rate_target(panels, "$__rate_interval"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Relation Busy Rate (10m)",
-                "1 - output_blocking - input_blocking, clamped to 0%",
+                "The rate that a relation is busy, i.e. the busy rate of its busiest actor, over the last 10 minutes.",
                 [
                     _relation_busy_rate_target(panels, "10m"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Relation Busy Rate (5m)",
-                "1 - output_blocking - input_blocking, clamped to 0%",
+                "The rate that a relation is busy, i.e. the busy rate of its busiest actor, over the last 5 minutes.",
                 [
                     _relation_busy_rate_target(panels, "5m"),
                 ],
             ),
             panels.timeseries_percentage(
                 "Relation Busy Rate (3m)",
-                "1 - output_blocking - input_blocking, clamped to 0%",
+                "The rate that a relation is busy, i.e. the busy rate of its busiest actor, over the last 3 minutes.",
                 [
                     _relation_busy_rate_target(panels, "3m"),
                 ],
