@@ -2,30 +2,42 @@
 # This test verifies that LDAP authentication works correctly
 # It tests both simple bind and search+bind modes (configured at cluster level)
 
-# Test 1: Create a user in RisingWave database
+# Create a user in RisingWave database
 statement ok
 CREATE USER testuser1;
 
 statement ok
 GRANT ALL PRIVILEGES ON SCHEMA public TO testuser1;
 
-# Test 2: Successful LDAP authentication
+# Successful LDAP authentication
 system ok
 PGPASSWORD=testpass1 psql -U testuser1 -c "SELECT 1 AS test;"
 
-# Test 3: Verify user can connect and execute queries
+# Verify user can connect and execute queries
 system ok
 PGPASSWORD=testpass1 psql -U testuser1 -c "CREATE TABLE test_table (id INT, name VARCHAR);"
 
 system ok
 PGPASSWORD=testpass1 psql -U testuser1 -c "INSERT INTO test_table VALUES (1, 'test1'), (2, 'test2');FLUSH;"
 
-# Test 4: Verify user can query data
+# Verify user can query data
 system ok
 PGPASSWORD=testpass1 psql -U testuser1 -c "SELECT * FROM test_table;" | grep -q "test1"
 
 system ok
 PGPASSWORD=testpass1 psql -U testuser1 -c "SELECT count(*) FROM test_table;" | grep -q "2"
+
+# wrong password
+system ok
+PGPASSWORD=wrongpassword psql -U testuser1 -c "SELECT 1;" 2>&1 | grep -q "invalidCredentials"
+
+# non-existent user
+system ok
+PGPASSWORD=anypass psql -U non-exist-user -c "SELECT 1;" 2>&1 | grep -q "does not exist"
+
+# LDAP injection attempt
+system ok
+PGPASSWORD=anypass psql -U "test*user" -c "SELECT 1;" 2>&1 | grep -q "does not exist"
 
 # Cleanup
 statement ok

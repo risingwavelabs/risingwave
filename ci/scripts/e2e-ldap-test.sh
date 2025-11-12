@@ -24,32 +24,6 @@ cleanup_ldap() {
 # Register cleanup function to run on exit
 trap cleanup_ldap EXIT
 
-# Function to test failure scenarios
-test_failure_scenarios() {
-    echo "--- Testing failure scenarios"
-
-    # Test wrong password (should fail)
-    if PGPASSWORD=wrongpassword psql -U testuser1 -c "SELECT 1;" 2>/dev/null; then
-        echo "ERROR: Wrong password should have failed but succeeded"
-        exit 1
-    fi
-    echo "✓ Wrong password correctly rejected"
-
-    # Test non-existent user (should fail)
-    if PGPASSWORD=anypass psql -U non-exist-user -c "SELECT 1;" 2>/dev/null; then
-        echo "ERROR: Non-existent user should have failed but succeeded"
-        exit 1
-    fi
-    echo "✓ Non-existent user correctly rejected"
-
-    # Test LDAP injection (should fail safely)
-    if PGPASSWORD=anypass psql -U "test*user" -c "SELECT 1;" 2>/dev/null; then
-        echo "ERROR: LDAP injection attempt should have failed but succeeded"
-        exit 1
-    fi
-    echo "✓ LDAP injection correctly rejected"
-}
-
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -123,8 +97,6 @@ source .risingwave/config/psql-env
 echo "--- Running LDAP authentication tests"
 sqllogictest -p 4566 -d dev './e2e_test/ldap/ldap_auth.slt'
 
-test_failure_scenarios
-
 echo "--- Stopping RisingWave cluster"
 risedev ci-kill
 
@@ -136,8 +108,6 @@ risedev ci-start ci-ldap-simple-bind
 
 echo "--- Running LDAP authentication tests"
 sqllogictest -p 4566 -d dev './e2e_test/ldap/ldap_auth.slt'
-
-test_failure_scenarios
 
 echo "--- Stopping RisingWave cluster"
 risedev ci-kill
@@ -153,8 +123,6 @@ risedev ci-start ci-ldap-search-bind
 echo "--- Running LDAP authentication tests"
 sqllogictest -p 4566 -d dev './e2e_test/ldap/ldap_auth.slt'
 
-test_failure_scenarios
-
 echo "--- Stopping RisingWave cluster"
 risedev ci-kill
 
@@ -166,8 +134,6 @@ risedev ci-start ci-ldap-search-bind
 
 echo "--- Running LDAP authentication tests"
 sqllogictest -p 4566 -d dev './e2e_test/ldap/ldap_auth.slt'
-
-test_failure_scenarios
 
 echo "--- Stopping RisingWave cluster"
 risedev ci-kill
@@ -183,8 +149,6 @@ risedev ci-start ci-ldap-simple-bind-url
 echo "--- Running LDAP authentication tests"
 sqllogictest -p 4566 -d dev './e2e_test/ldap/ldap_auth.slt'
 
-test_failure_scenarios
-
 echo "--- Stopping RisingWave cluster"
 risedev ci-kill
 
@@ -194,8 +158,6 @@ risedev ci-start ci-ldap-search-bind-url
 
 echo "--- Running LDAP authentication tests"
 sqllogictest -p 4566 -d dev './e2e_test/ldap/ldap_auth.slt'
-
-test_failure_scenarios
 
 echo "--- Stopping RisingWave cluster"
 risedev ci-kill
