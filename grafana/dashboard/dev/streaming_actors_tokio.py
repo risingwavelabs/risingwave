@@ -9,7 +9,7 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Streaming Actors (Tokio)",
             [
-                panels.timeseries_actor_latency(
+                panels.timeseries_percentage(
                     "Actor Execution Time",
                     "",
                     [
@@ -19,7 +19,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Fast Poll Time",
                     "",
                     [
@@ -69,7 +69,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Slow Poll Avg Time",
                     "",
                     [
@@ -79,7 +79,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Poll Total Time",
                     "",
                     [
@@ -99,7 +99,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Poll Avg Time",
                     "",
                     [
@@ -109,7 +109,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Idle Total Time",
                     "",
                     [
@@ -129,7 +129,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Idle Avg Time",
                     "",
                     [
@@ -139,7 +139,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Scheduled Total Time",
                     "",
                     [
@@ -159,7 +159,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Scheduled Avg Time",
                     "",
                     [
