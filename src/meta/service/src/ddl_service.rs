@@ -389,7 +389,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSource(source_id as _, drop_mode))
+            .run_command(DdlCommand::DropSource(source_id, drop_mode))
             .await?;
 
         Ok(Response::new(DropSourceResponse {
@@ -688,7 +688,7 @@ impl DdlService for DdlServiceImpl {
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Table(
-                    source_id.map(|PbSourceId::Id(id)| id as _),
+                    source_id.map(|PbSourceId::Id(id)| id.into()),
                     table_id,
                 ),
                 drop_mode,

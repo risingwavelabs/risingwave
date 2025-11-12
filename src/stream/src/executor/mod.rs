@@ -166,6 +166,7 @@ pub use now::*;
 pub use over_window::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
+use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
@@ -372,13 +373,13 @@ pub enum Mutation {
     },
     RefreshStart {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     ListFinish {
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     LoadFinish {
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
 }
 
@@ -906,17 +907,17 @@ impl Mutation {
                 associated_source_id,
             } => PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
                 table_id: *table_id,
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
             Mutation::ListFinish {
                 associated_source_id,
             } => PbMutation::ListFinish(risingwave_pb::stream_plan::ListFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
             Mutation::LoadFinish {
                 associated_source_id,
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
         }
     }
@@ -1093,13 +1094,13 @@ impl Mutation {
             }
             PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
                 table_id: refresh_start.table_id,
-                associated_source_id: TableId::new(refresh_start.associated_source_id),
+                associated_source_id: refresh_start.associated_source_id,
             },
             PbMutation::ListFinish(list_finish) => Mutation::ListFinish {
-                associated_source_id: TableId::new(list_finish.associated_source_id),
+                associated_source_id: list_finish.associated_source_id,
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
-                associated_source_id: TableId::new(load_finish.associated_source_id),
+                associated_source_id: load_finish.associated_source_id,
             },
         };
         Ok(mutation)

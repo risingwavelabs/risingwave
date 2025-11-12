@@ -23,6 +23,7 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::global_jvm::Jvm;
+use risingwave_common::id::SourceId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
@@ -44,7 +45,7 @@ pub const DATABASE_SERVERS_KEY: &str = "database.servers";
 #[derive(Debug)]
 pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
     /// The `source_id` in the catalog
-    source_id: u32,
+    source_id: SourceId,
     worker_node_addrs: Vec<HostAddr>,
     metrics: Arc<EnumeratorMetrics>,
     /// Properties specified in the WITH clause by user for database connection
@@ -94,7 +95,7 @@ where
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
             execute_with_jni_env(jvm, |env| {
                 let validate_source_request = ValidateSourceRequest {
-                    source_id: source_id as u64,
+                    source_id: source_id.as_raw_id() as u64,
                     source_type: source_type_pb as _,
                     properties: (*properties_arc_for_validation).clone(),
                     table_schema: Some(table_schema_exclude_additional_columns(
@@ -277,7 +278,7 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mysql> {
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         // CDC source only supports single split
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id,
+            self.source_id.as_raw_id(),
             None,
             None,
         )]
@@ -290,7 +291,7 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Postgres> {
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         // CDC source only supports single split
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id,
+            self.source_id.as_raw_id(),
             None,
             None,
         )]
@@ -329,7 +330,7 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         // CDC source only supports single split
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id,
+            self.source_id.as_raw_id(),
             None,
             None,
         )]
@@ -341,7 +342,7 @@ impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
 
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
-            self.source_id,
+            self.source_id.as_raw_id(),
             None,
             None,
         )]

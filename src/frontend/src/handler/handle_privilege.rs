@@ -147,7 +147,7 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (source, _) = reader.get_source_by_name(db_name, schema_path, &source_name)?;
-                grant_objs.push(PbObject::SourceId(source.id));
+                grant_objs.push(source.id.into());
             }
         }
         GrantObjects::Sinks(sinks) => {
@@ -270,7 +270,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_source().for_each(|source| {
-                    grant_objs.push(PbObject::SourceId(source.id));
+                    grant_objs.push(source.id.into());
                 });
             }
         }

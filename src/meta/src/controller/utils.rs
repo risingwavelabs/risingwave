@@ -561,7 +561,7 @@ where
                 let check_creation = if $obj_type == ObjectType::View {
                     false
                 } else if $obj_type == ObjectType::Source {
-                    let source_info = Source::find_by_id(oid)
+                    let source_info = Source::find_by_id(SourceId::new(oid as _))
                         .select_only()
                         .column(source::Column::SourceInfo)
                         .into_tuple::<Option<StreamSourceInfo>>()
@@ -1491,7 +1491,7 @@ where
             && let Some(source_id) = stream_node.to_protobuf().find_stream_source()
         {
             source_fragment_ids
-                .entry(source_id as _)
+                .entry(source_id)
                 .or_default()
                 .insert(fragment_id);
         }
@@ -1541,7 +1541,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Source => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Source(PbSource {
-                    id: obj.oid as _,
+                    id: (obj.oid as u32).into(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1694,7 +1694,9 @@ pub async fn rename_relation(
             }
             rename_relation!(Table, table, table_id, TableId::new(object_id as _))
         }
-        ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
+        ObjectType::Source => {
+            rename_relation!(Source, source, source_id, SourceId::new(object_id as _))
+        }
         ObjectType::Sink => rename_relation!(Sink, sink, sink_id, SinkId::new(object_id as _)),
         ObjectType::Subscription => {
             rename_relation!(Subscription, subscription, subscription_id, object_id)

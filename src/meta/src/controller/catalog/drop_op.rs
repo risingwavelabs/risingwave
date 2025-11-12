@@ -224,7 +224,7 @@ impl CatalogController {
             .await?;
         removed_objects.extend(removed_source_objs);
         if object_type == ObjectType::Source {
-            removed_source_ids.push(object_id);
+            removed_source_ids.push(SourceId::new(object_id as _));
         }
 
         let removed_secret_ids = removed_objects
@@ -438,7 +438,7 @@ async fn report_drop_object(
                 .ok()
                 .flatten()
                 .and_then(|properties| properties.inner_ref().get("connector").cloned()),
-            ObjectType::Source => Source::find_by_id(object_id)
+            ObjectType::Source => Source::find_by_id(SourceId::new(object_id as _))
                 .select_only()
                 .column(source::Column::WithProperties)
                 .into_tuple::<Property>()
