@@ -1066,6 +1066,13 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AlterFragmentParallelismResponse {}))
     }
 
+    async fn alter_streaming_job_config(
+        &self,
+        _request: Request<AlterStreamingJobConfigRequest>,
+    ) -> Result<Response<AlterStreamingJobConfigResponse>, Status> {
+        Err(Status::unimplemented("alter streaming job config"))
+    }
+
     /// Auto schema change for cdc sources,
     /// called by the source parser when a schema change is detected.
     async fn auto_schema_change(
