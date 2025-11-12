@@ -266,7 +266,7 @@ mod utils;
 /// Writer types:
 /// - For `varchar`: `impl std::fmt::Write`
 /// - For `bytea`: `impl std::io::Write`
-/// - For `jsonb`: jsonbb::Builder
+/// - For `jsonb`: `jsonbb::Builder`
 ///
 /// Note: Use fully-qualified trait paths (for example, `impl std::io::Write` or `impl std::fmt::Write`).
 /// Partial or relative paths (such as `impl Write` or `impl ::std::fmt::Write`) are not recognized.
