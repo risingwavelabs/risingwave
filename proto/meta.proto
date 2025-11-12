@@ -414,7 +414,6 @@ message ListRefreshTableStatesResponse {
     string current_status = 2;
     optional string last_trigger_time = 3;
     optional int64 trigger_interval_secs = 4;
-    string job_create_time = 5;
   }
   repeated RefreshTableState states = 1;
 }

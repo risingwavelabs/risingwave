@@ -25,7 +25,6 @@ struct RwRefreshTableState {
     current_status: String,
     last_trigger_time: Option<String>,
     trigger_interval_secs: Option<i64>,
-    job_create_time: Option<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_refresh_table_state")]
@@ -37,10 +36,9 @@ async fn read_rw_refresh_table_state(
         .into_iter()
         .map(|state| RwRefreshTableState {
             table_id: state.table_id.as_raw_id() as i32,
-            current_status: state.current_status.to_string(),
+            current_status: state.current_status,
             last_trigger_time: state.last_trigger_time,
             trigger_interval_secs: state.trigger_interval_secs,
-            job_create_time: Some(state.job_create_time),
         })
         .collect())
 }

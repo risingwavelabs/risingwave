@@ -35,6 +35,7 @@ use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
+use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
@@ -275,6 +276,17 @@ impl CatalogController {
                 }
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
+
+                if table.refreshable {
+                    RefreshJob::insert(refresh_job::ActiveModel {
+                        table_id: Set(table.id),
+                        last_trigger_time: Set(None),
+                        trigger_interval_secs: Set(None),
+                        current_status: Set(RefreshState::Idle),
+                    })
+                    .exec(&txn)
+                    .await?;
+                }
             }
             StreamingJob::Index(index, table) => {
                 ensure_object_id(

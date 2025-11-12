@@ -69,8 +69,7 @@ impl std::fmt::Display for RefreshState {
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub table_id: TableId,
-    pub job_create_time: DateTime,
-    pub last_trigger_time: Option<DateTime>,
+    pub last_trigger_time: Option<i64>, // timestamp in millis
     pub trigger_interval_secs: Option<i64>,
     pub current_status: RefreshState,
 }

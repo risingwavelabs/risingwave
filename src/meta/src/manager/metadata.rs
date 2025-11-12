@@ -440,24 +440,18 @@ impl MetadataManager {
         self.catalog_controller.list_refreshable_table_ids().await
     }
 
-    pub async fn ensure_refresh_job(
-        &self,
-        table_id: TableId,
-        trigger_interval_secs: Option<i64>,
-    ) -> MetaResult<()> {
-        self.catalog_controller
-            .ensure_refresh_job(table_id, trigger_interval_secs)
-            .await
+    pub async fn ensure_refresh_job(&self, table_id: TableId) -> MetaResult<()> {
+        self.catalog_controller.ensure_refresh_job(table_id).await
     }
 
     pub async fn update_refresh_job_status(
         &self,
         table_id: TableId,
         status: RefreshState,
-        last_trigger_time: Option<DateTime>,
+        trigger_time: Option<DateTime>,
     ) -> MetaResult<()> {
         self.catalog_controller
-            .update_refresh_job_status(table_id, status, last_trigger_time)
+            .update_refresh_job_status(table_id, status, trigger_time)
             .await
     }
 

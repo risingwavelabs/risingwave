@@ -17,9 +17,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use chrono::{Duration as ChronoDuration, NaiveDateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -108,20 +109,15 @@ impl GlobalRefreshManager {
 
         self.ensure_refreshable(table_id, associated_source_id)
             .await?;
-        self.execute_refresh(
-            table_id,
-            associated_source_id,
-            shared_actor_infos,
-            Utc::now().naive_utc(),
-        )
-        .await?;
+        self.execute_refresh(table_id, associated_source_id, shared_actor_infos)
+            .await?;
 
         Ok(RefreshResponse { status: None })
     }
 
     pub async fn mark_refresh_complete(&self, table_id: TableId) -> MetaResult<()> {
         self.metadata_manager
-            .update_refresh_job_status(table_id, RefreshState::Idle, Some(Utc::now().naive_utc()))
+            .update_refresh_job_status(table_id, RefreshState::Idle, None)
             .await?;
         self.remove_progress_tracker(table_id);
         tracing::info!(%table_id, "Table refresh completed, state updated to Idle");
@@ -180,9 +176,7 @@ impl GlobalRefreshManager {
     async fn sync_refreshable_jobs(&self) -> MetaResult<()> {
         let table_ids = self.metadata_manager.list_refreshable_table_ids().await?;
         for table_id in table_ids {
-            self.metadata_manager
-                .ensure_refresh_job(table_id, None)
-                .await?;
+            self.metadata_manager.ensure_refresh_job(table_id).await?;
         }
         Ok(())
     }
@@ -203,9 +197,28 @@ impl GlobalRefreshManager {
         }
 
         let interval = ChronoDuration::seconds(interval_secs);
-        let last_run = job.last_trigger_time.unwrap_or(job.job_create_time);
+        let last_run = if let Some(last_run) = job.last_trigger_time {
+            last_run
+        } else {
+            self.metadata_manager
+                .get_table_catalog_by_ids(&[job.table_id])
+                .await?
+                .first()
+                .map(|t| {
+                    Epoch(t.created_at_epoch())
+                        .as_timestamptz()
+                        .to_datetime_utc()
+                        .timestamp_millis()
+                })
+                .unwrap()
+        };
         let now = Utc::now().naive_utc();
-        if now.signed_duration_since(last_run) < interval {
+        if now.signed_duration_since(
+            DateTime::from_timestamp_millis(last_run)
+                .unwrap()
+                .naive_utc(),
+        ) < interval
+        {
             return Ok(());
         }
 
@@ -231,13 +244,8 @@ impl GlobalRefreshManager {
 
         self.ensure_refreshable(job.table_id, associated_source_id)
             .await?;
-        self.execute_refresh(
-            job.table_id,
-            associated_source_id,
-            &self.shared_actor_infos,
-            now,
-        )
-        .await?;
+        self.execute_refresh(job.table_id, associated_source_id, &self.shared_actor_infos)
+            .await?;
         Ok(())
     }
 
@@ -246,8 +254,8 @@ impl GlobalRefreshManager {
         table_id: TableId,
         associated_source_id: TableId,
         shared_actor_infos: &SharedActorInfos,
-        trigger_time: NaiveDateTime,
     ) -> MetaResult<()> {
+        let trigger_time = Utc::now().naive_utc();
         let database_id = self
             .metadata_manager
             .catalog_controller
@@ -316,7 +324,7 @@ impl GlobalRefreshManager {
                 "failed to execute refresh command"
             );
             self.metadata_manager
-                .update_refresh_job_status(table_id, RefreshState::Idle, Some(trigger_time))
+                .update_refresh_job_status(table_id, RefreshState::Idle, None)
                 .await?;
             self.remove_progress_tracker(table_id);
             Err(anyhow!(err)

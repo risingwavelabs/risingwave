@@ -16,13 +16,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(RefreshJob::JobCreateTime)
-                            .timestamp_with_time_zone()
-                            .not_null()
-                            .default(Expr::current_timestamp()),
-                    )
-                    .col(ColumnDef::new(RefreshJob::LastTriggerTime).timestamp_with_time_zone())
+                    .col(ColumnDef::new(RefreshJob::LastTriggerTime).big_integer())
                     .col(ColumnDef::new(RefreshJob::TriggerIntervalSecs).big_integer())
                     .col(
                         ColumnDef::new(RefreshJob::CurrentStatus)
@@ -34,12 +28,24 @@ impl MigrationTrait for Migration {
                         ForeignKey::create()
                             .name("fk_refresh_job_table")
                             .from(RefreshJob::Table, RefreshJob::TableId)
-                            .to(Table::Table, Table::TableId)
+                            .to(TableEnum::Table, TableEnum::TableId)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )
-            .await
+            .await?;
+
+        // revert changes from `src/meta/model/migration/src/m20250916_120000_add_refresh_fields.rs`
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(TableEnum::Table)
+                    .drop_column(TableEnum::RefreshState)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -49,7 +55,18 @@ impl MigrationTrait for Migration {
                     .table(RefreshJob::Table)
                     .to_owned(),
             )
-            .await
+            .await?;
+
+        // revert changes from `src/meta/model/migration/src/m20250916_120000_add_refresh_fields.rs`
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(TableEnum::Table)
+                    .add_column(ColumnDef::new(TableEnum::RefreshState).string())
+                    .to_owned(),
+            )
+            .await?;
+        Ok(())
     }
 }
 
@@ -58,15 +75,15 @@ enum RefreshJob {
     #[sea_orm(iden = "refresh_job")]
     Table,
     TableId,
-    JobCreateTime,
     LastTriggerTime,
     TriggerIntervalSecs,
     CurrentStatus,
 }
 
 #[derive(DeriveIden)]
-enum Table {
+enum TableEnum {
     #[sea_orm(iden = "table")]
     Table,
     TableId,
+    RefreshState,
 }

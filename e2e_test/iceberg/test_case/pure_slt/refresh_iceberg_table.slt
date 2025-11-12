@@ -72,8 +72,20 @@ create table iceberg_batch_table ( primary key (id) ) with (
 );
 
 
+qeury ?
+select current_status from rw_refresh_table_state;
+----
+IDLE
+
+
 statement ok
 refresh table iceberg_batch_table;
+
+qeury ?
+select current_status from rw_refresh_table_state;
+----
+REFRESHING
+
 
 sleep 10s
 

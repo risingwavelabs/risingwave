@@ -924,17 +924,12 @@ impl CatalogController {
         Ok((version, database))
     }
 
-    pub async fn ensure_refresh_job(
-        &self,
-        table_id: TableId,
-        trigger_interval_secs: Option<i64>,
-    ) -> MetaResult<()> {
+    pub async fn ensure_refresh_job(&self, table_id: TableId) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let active = refresh_job::ActiveModel {
             table_id: Set(table_id),
-            job_create_time: NotSet,
             last_trigger_time: Set(None),
-            trigger_interval_secs: Set(trigger_interval_secs),
+            trigger_interval_secs: Set(None),
             current_status: Set(RefreshState::Idle),
         };
         match RefreshJob::insert(active)
@@ -960,14 +955,21 @@ impl CatalogController {
         &self,
         table_id: TableId,
         status: RefreshState,
-        last_trigger_time: Option<DateTime>,
+        trigger_time: Option<DateTime>,
     ) -> MetaResult<()> {
-        self.ensure_refresh_job(table_id, None).await?;
+        self.ensure_refresh_job(table_id).await?;
         let inner = self.inner.read().await;
+
+        // expect only update trigger_time when the status changes to Refreshing
+        assert_eq!(trigger_time.is_some(), status == RefreshState::Refreshing);
         let active = refresh_job::ActiveModel {
             table_id: Set(table_id),
             current_status: Set(status),
-            last_trigger_time: Set(last_trigger_time),
+            last_trigger_time: if trigger_time.is_some() {
+                Set(trigger_time.map(|t| t.and_utc().timestamp_millis()))
+            } else {
+                NotSet
+            },
             ..Default::default()
         };
         active.update(&inner.db).await?;
@@ -991,7 +993,7 @@ impl CatalogController {
         table_id: TableId,
         trigger_interval_secs: Option<i64>,
     ) -> MetaResult<()> {
-        self.ensure_refresh_job(table_id, None).await?;
+        self.ensure_refresh_job(table_id).await?;
         let inner = self.inner.read().await;
         let active = refresh_job::ActiveModel {
             table_id: Set(table_id),

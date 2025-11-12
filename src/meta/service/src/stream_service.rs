@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use chrono::DateTime;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
@@ -102,9 +103,10 @@ impl StreamManagerService for StreamServiceImpl {
             .map(|job| RefreshTableState {
                 table_id: job.table_id,
                 current_status: job.current_status.to_string(),
-                last_trigger_time: job.last_trigger_time.map(|time| time.to_string()),
+                last_trigger_time: job
+                    .last_trigger_time
+                    .map(|time| DateTime::from_timestamp_millis(time).unwrap().to_string()),
                 trigger_interval_secs: job.trigger_interval_secs,
-                job_create_time: job.job_create_time.to_string(),
             })
             .collect();
         Ok(Response::new(ListRefreshTableStatesResponse {
