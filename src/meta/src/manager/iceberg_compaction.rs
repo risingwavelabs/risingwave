@@ -24,7 +24,9 @@ use parking_lot::RwLock;
 use risingwave_common::id::WorkerId;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
-use risingwave_connector::sink::iceberg::{IcebergConfig, should_enable_iceberg_cow};
+use risingwave_connector::sink::iceberg::{
+    CompactionType, IcebergConfig, should_enable_iceberg_cow,
+};
 use risingwave_connector::sink::{SinkError, SinkParam};
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::{
@@ -401,22 +403,18 @@ impl IcebergCompactionManager {
         let trigger_interval_sec = iceberg_config.compaction_interval_sec();
         let trigger_snapshot_count = iceberg_config.trigger_snapshot_count();
 
-        // For COW mode, always use Full compaction regardless of config
+        // For `copy-on-write` mode, always use Full compaction regardless of config
         let task_type = if should_enable_iceberg_cow(
             iceberg_config.r#type.as_str(),
             iceberg_config.write_mode.as_str(),
         ) {
             TaskType::Full
         } else {
-            // For MORE mode, use configured compaction_type
+            // For `merge-on-read` mode, use configured compaction_type
             match iceberg_config.compaction_type() {
-                "full" => TaskType::Full,
-                "small_files" => TaskType::SmallFiles,
-                "files_with_delete" => TaskType::FilesWithDelete,
-                unknown => {
-                    tracing::warn!("Unknown compaction_type '{}', defaulting to Full", unknown);
-                    TaskType::Full
-                }
+                CompactionType::Full => TaskType::Full,
+                CompactionType::SmallFiles => TaskType::SmallFiles,
+                CompactionType::FilesWithDelete => TaskType::FilesWithDelete,
             }
         };
 
@@ -679,6 +677,14 @@ impl IcebergCompactionManager {
             tokio::time::sleep(poll_interval).await;
             elapsed_time += current_interval_secs;
 
+            tracing::info!(
+                "Checking iceberg compaction completion for sink {} task_id={}, elapsed={}s, interval={}s",
+                sink_id,
+                task_id,
+                elapsed_time,
+                current_interval_secs
+            );
+
             let current_table = iceberg_config.load_table().await?;
 
             let metadata = current_table.metadata();
@@ -695,9 +701,19 @@ impl IcebergCompactionManager {
                 let summary = snapshot.summary();
                 if cow {
                     if matches!(summary.operation, Operation::Overwrite) {
+                        tracing::info!(
+                            "Iceberg compaction completed for sink {} task_id={} with Overwrite operation",
+                            sink_id,
+                            task_id
+                        );
                         return Ok(());
                     }
                 } else if matches!(summary.operation, Operation::Replace) {
+                    tracing::info!(
+                        "Iceberg compaction completed for sink {} task_id={} with Replace operation",
+                        sink_id,
+                        task_id
+                    );
                     return Ok(());
                 }
             }
@@ -709,7 +725,7 @@ impl IcebergCompactionManager {
         }
 
         Err(anyhow!(
-            "Compaction did not complete within {} seconds for sink {} (task_id={})",
+            "Iceberg compaction did not complete within {} seconds for sink {} (task_id={})",
             MAX_WAIT_TIME_SECS,
             sink_id,
             task_id

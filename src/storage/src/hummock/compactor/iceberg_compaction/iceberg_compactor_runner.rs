@@ -160,8 +160,9 @@ impl IcebergCompactionPlanRunner {
     /// ```
     pub fn unique_ident(&self) -> String {
         let task_type_str = match self.task_type {
-            TaskType::SmallFiles => "small_files",
+            TaskType::SmallFiles => "small-files",
             TaskType::Full => "full",
+            TaskType::FilesWithDelete => "files-with-delete",
             _ => "unknown",
         };
         format!(
