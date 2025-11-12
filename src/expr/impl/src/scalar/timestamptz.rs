@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use chrono::LocalResult;
 use chrono_tz::Tz;
 use num_traits::CheckedNeg;
@@ -93,7 +91,7 @@ pub fn timestamp_at_time_zone_internal(input: Timestamp, time_zone: Tz) -> Resul
 pub fn timestamptz_to_string(
     elem: Timestamptz,
     time_zone: &str,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
     let instant_local = elem.to_datetime_in_zone(time_zone);

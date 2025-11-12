@@ -16,6 +16,7 @@ use std::vec;
 
 use context::{CaptureContextAttr, DefineContextAttr, generate_captured_function};
 use proc_macro::TokenStream;
+use proc_macro_error::proc_macro_error;
 use proc_macro2::TokenStream as TokenStream2;
 use syn::{Error, ItemFn, Result};
 
@@ -226,33 +227,33 @@ mod utils;
 ///
 /// See `risingwave_common::row::Row` for more details.
 ///
-/// ## Functions Returning Strings
+/// ## Writer Style Function
 ///
-/// For functions that return varchar types, you can also use the writer style function signature to
-/// avoid memory copying and dynamic memory allocation:
+/// For functions returning `varchar` or `bytea`, you can use a writer-style function signature to
+/// avoid extra memory allocations and copying.
 ///
 /// ```ignore
 /// #[function("trim(varchar) -> varchar")]
-/// fn trim(s: &str, writer: &mut impl Write) {
+/// fn trim(s: &str, writer: &mut impl std::fmt::Write) {
 ///     writer.write_str(s.trim()).unwrap();
 /// }
 /// ```
 ///
-/// If errors may be returned, then the return value should be `Result<()>`:
+/// If the function may return an error, use `Result<()>`:
 ///
 /// ```ignore
 /// #[function("trim(varchar) -> varchar")]
-/// fn trim(s: &str, writer: &mut impl Write) -> Result<()> {
+/// fn trim(s: &str, writer: &mut impl std::fmt::Write) -> Result<()> {
 ///     writer.write_str(s.trim()).unwrap();
 ///     Ok(())
 /// }
 /// ```
 ///
-/// If null values may be returned, then the return value should be `Option<()>`:
+/// If the function may return NULL, use `Option<()>`:
 ///
 /// ```ignore
 /// #[function("trim(varchar) -> varchar")]
-/// fn trim(s: &str, writer: &mut impl Write) -> Option<()> {
+/// fn trim(s: &str, writer: &mut impl std::fmt::Write) -> Option<()> {
 ///     if s.is_empty() {
 ///         None
 ///     } else {
@@ -261,6 +262,13 @@ mod utils;
 ///     }
 /// }
 /// ```
+///
+/// Writer types:
+/// - For `varchar`: `impl std::fmt::Write`
+/// - For `bytea`: `impl std::io::Write`
+///
+/// Note: Use fully-qualified trait paths (for example, `impl std::io::Write` or `impl std::fmt::Write`).
+/// Partial or relative paths (such as `impl Write` or `impl ::std::fmt::Write`) are not recognized.
 ///
 /// ## Preprocessing Constant Arguments
 ///
@@ -404,6 +412,7 @@ mod utils;
 ///
 /// [type matrix]: #appendix-type-matrix
 #[proc_macro_attribute]
+#[proc_macro_error]
 pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let fn_attr: FunctionAttr = syn::parse(attr)?;
@@ -529,8 +538,8 @@ struct UserFunctionAttr {
     async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
-    /// Whether contains argument `&mut impl Write`.
-    write: bool,
+    /// The writer type kind, if any, such as `impl std::fmt::Write`.
+    writer_type_kind: Option<WriterTypeKind>,
     /// Whether the last argument type is `retract: bool`.
     retract: bool,
     /// Whether each argument type is `Option<T>`.
@@ -596,6 +605,12 @@ impl AggregateFnOrImpl {
     }
 }
 
+#[derive(Debug, Clone)]
+enum WriterTypeKind {
+    FmtWrite, // std::fmt::Write
+    IoWrite,  // std::io::Write
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum ReturnTypeKind {
     T,
@@ -619,7 +634,7 @@ impl UserFunctionAttr {
     /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
         !self.async_
-            && !self.write
+            && self.writer_type_kind.is_none()
             && !self.context
             && self.args_option.iter().all(|b| !b)
             && self.return_type_kind == ReturnTypeKind::T
