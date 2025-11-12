@@ -1701,17 +1701,17 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
                 }
             };
 
-        let mut pre_commit_metadata_bytes = Vec::new();
+        let mut write_results_bytes = Vec::new();
         for each_parallelism_write_result in write_results {
             let each_parallelism_write_result_bytes: Vec<u8> =
                 each_parallelism_write_result.try_into()?;
-            pre_commit_metadata_bytes.push(each_parallelism_write_result_bytes);
+            write_results_bytes.push(each_parallelism_write_result_bytes);
         }
 
         let snapshot_id_bytes: Vec<u8> = snapshot_id.to_le_bytes().to_vec();
-        pre_commit_metadata_bytes.push(snapshot_id_bytes);
+        write_results_bytes.push(snapshot_id_bytes);
 
-        let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
+        let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(write_results_bytes);
         Ok(pre_commit_metadata_bytes)
     }
 
