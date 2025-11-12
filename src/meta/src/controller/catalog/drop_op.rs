@@ -249,27 +249,32 @@ impl CatalogController {
 
         let mut removed_state_table_ids: HashSet<_> = removed_table_ids.clone().collect();
 
-        // Add associated sources.
-        let mut removed_source_ids: Vec<SourceId> = Table::find()
-            .select_only()
-            .column(table::Column::OptionalAssociatedSourceId)
-            .filter(
-                table::Column::TableId
-                    .is_in(removed_table_ids)
-                    .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
-            )
-            .into_tuple()
-            .all(&txn)
-            .await?;
-        let removed_source_objs: Vec<PartialObject> = Object::find()
-            .filter(object::Column::Oid.is_in(removed_source_ids.clone()))
-            .into_partial_model()
-            .all(&txn)
-            .await?;
-        removed_objects.extend(removed_source_objs);
-        if object_type == ObjectType::Source {
-            removed_source_ids.push(SourceId::new(object_id as _));
+        if !drop_database {
+            // Add associated sources.
+            let removed_source_ids: Vec<SourceId> = Table::find()
+                .select_only()
+                .column(table::Column::OptionalAssociatedSourceId)
+                .filter(
+                    table::Column::TableId
+                        .is_in(removed_table_ids)
+                        .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
+                )
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            let removed_source_objs: Vec<PartialObject> = Object::find()
+                .filter(object::Column::Oid.is_in(removed_source_ids))
+                .into_partial_model()
+                .all(&txn)
+                .await?;
+            removed_objects.extend(removed_source_objs);
         }
+
+        let removed_source_ids: HashSet<_> = removed_objects
+            .iter()
+            .filter(|obj| obj.obj_type == ObjectType::Source)
+            .map(|obj| SourceId::new(obj.oid as _))
+            .collect();
 
         let removed_secret_ids = removed_objects
             .iter()
@@ -426,7 +431,7 @@ impl CatalogController {
                 database_id,
                 removed_streaming_job_ids,
                 removed_state_table_ids: removed_state_table_ids.into_iter().collect(),
-                removed_source_ids,
+                removed_source_ids: removed_source_ids.into_iter().collect(),
                 removed_secret_ids,
                 removed_source_fragments,
                 removed_actors,
