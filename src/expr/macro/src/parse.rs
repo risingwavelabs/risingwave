@@ -14,10 +14,11 @@
 
 //! Parse the tokens of the macro.
 
+use proc_macro_error::abort;
 use quote::ToTokens;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::{LitStr, Token};
+use syn::{LitStr, Token, parse_quote};
 
 use super::*;
 
@@ -121,7 +122,7 @@ impl From<&syn::Signature> for UserFunctionAttr {
         UserFunctionAttr {
             name: sig.ident.to_string(),
             async_: sig.asyncness.is_some(),
-            write: sig.inputs.iter().any(arg_is_write),
+            writer_type_kind: sig.inputs.last().and_then(arg_writer_type),
             context: sig.inputs.iter().any(arg_is_context),
             retract: last_arg_is_retract(sig),
             args_option: sig.inputs.iter().map(arg_is_option).collect(),
@@ -176,24 +177,27 @@ impl Parse for AggregateFnOrImpl {
     }
 }
 
-/// Check if the argument is `&mut impl Write`.
-fn arg_is_write(arg: &syn::FnArg) -> bool {
+/// Check if the argument is a writer and return its type.
+fn arg_writer_type(arg: &syn::FnArg) -> Option<WriterTypeKind> {
     let syn::FnArg::Typed(arg) = arg else {
-        return false;
+        return None;
     };
     let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
-        return false;
+        return None;
     };
-    let syn::Type::ImplTrait(syn::TypeImplTrait { bounds, .. }) = elem.as_ref() else {
-        return false;
-    };
-    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else {
-        return false;
-    };
-    let Some(seg) = path.segments.last() else {
-        return false;
-    };
-    seg.ident == "Write"
+    let elem = elem.as_ref();
+    if elem == &parse_quote!(impl std::fmt::Write) {
+        Some(WriterTypeKind::FmtWrite)
+    } else if elem == &parse_quote!(impl std::io::Write) {
+        Some(WriterTypeKind::IoWrite)
+    } else if elem == &parse_quote!(impl Write) {
+        abort! { elem, "use of ambiguous `Write` trait.";
+            note = "`function!` macro can only recognize fully-qualified type.";
+            help = "Please use `std::fmt::Write` or `std::io::Write` instead."
+        };
+    } else {
+        None
+    }
 }
 
 /// Check if the argument is `&Context`.

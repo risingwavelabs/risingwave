@@ -138,6 +138,8 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
             });
         } else if ["u32", "u64", "f32", "f64", "i32", "i64", "bool"]
             .contains(&data_type.ident.to_string().as_str())
+            || (type_path.path.segments[0].ident.to_string().as_str() == "crate"
+                && type_path.path.segments[1].ident.to_string().as_str() == "id")
         {
             // Primitive types. Return value instead of reference.
             return Ok(quote! {

@@ -38,7 +38,7 @@ impl CatalogController {
         assert_eq!(obj.obj_type, object_type);
         let drop_database = object_type == ObjectType::Database;
         let database_id = if object_type == ObjectType::Database {
-            object_id
+            DatabaseId::new(object_id as _)
         } else {
             obj.database_id
                 .ok_or_else(|| anyhow!("dropped object should have database_id"))?
@@ -54,7 +54,7 @@ impl CatalogController {
             DropMode::Restrict => match object_type {
                 ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
                 ObjectType::Schema => {
-                    ensure_schema_empty(object_id, &txn).await?;
+                    ensure_schema_empty(SchemaId::new(object_id as _), &txn).await?;
                     Default::default()
                 }
                 ObjectType::Table => {
@@ -132,7 +132,7 @@ impl CatalogController {
 
         for obj in &removed_objects {
             if obj.obj_type == ObjectType::Sink {
-                let sink = Sink::find_by_id(obj.oid)
+                let sink = Sink::find_by_id(SinkId::new(obj.oid as _))
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
@@ -224,7 +224,7 @@ impl CatalogController {
             .await?;
         removed_objects.extend(removed_source_objs);
         if object_type == ObjectType::Source {
-            removed_source_ids.push(object_id);
+            removed_source_ids.push(SourceId::new(object_id as _));
         }
 
         let removed_secret_ids = removed_objects
@@ -339,7 +339,7 @@ impl CatalogController {
         self.notify_users_update(user_infos).await;
         inner
             .dropped_tables
-            .extend(dropped_tables.map(|t| (t.id.into(), t)));
+            .extend(dropped_tables.map(|t| (t.id, t)));
 
         let version = match object_type {
             ObjectType::Database => {
@@ -347,7 +347,7 @@ impl CatalogController {
                 self.notify_frontend(
                     NotificationOperation::Delete,
                     NotificationInfo::Database(PbDatabase {
-                        id: database_id as _,
+                        id: database_id,
                         ..Default::default()
                     }),
                 )
@@ -429,7 +429,7 @@ async fn report_drop_object(
 ) {
     let connector_name = {
         match object_type {
-            ObjectType::Sink => Sink::find_by_id(object_id)
+            ObjectType::Sink => Sink::find_by_id(SinkId::new(object_id as _))
                 .select_only()
                 .column(sink::Column::Properties)
                 .into_tuple::<Property>()
@@ -438,7 +438,7 @@ async fn report_drop_object(
                 .ok()
                 .flatten()
                 .and_then(|properties| properties.inner_ref().get("connector").cloned()),
-            ObjectType::Source => Source::find_by_id(object_id)
+            ObjectType::Source => Source::find_by_id(SourceId::new(object_id as _))
                 .select_only()
                 .column(source::Column::WithProperties)
                 .into_tuple::<Property>()

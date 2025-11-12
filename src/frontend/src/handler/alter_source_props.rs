@@ -1,3 +1,4 @@
+use risingwave_common::id::SourceId;
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,7 +49,7 @@ pub async fn handle_alter_table_connector_props(
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
         let (source_catalog, _) =
-            reader.get_source_by_id(db_name, schema_path, &associate_source_id.as_raw_id())?;
+            reader.get_source_by_id(db_name, schema_path, associate_source_id)?;
 
         ensure_alter_props_not_set_by_connection(
             &reader,
@@ -64,7 +65,7 @@ pub async fn handle_alter_table_connector_props(
             associate_source_id
         );
 
-        associate_source_id.as_raw_id()
+        associate_source_id
     };
 
     handle_alter_source_props_inner(&session, alter_props, source_id).await?;
@@ -75,7 +76,7 @@ pub async fn handle_alter_table_connector_props(
 async fn handle_alter_source_props_inner(
     session: &SessionImpl,
     alter_props: Vec<SqlOption>,
-    source_id: u32,
+    source_id: SourceId,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
     let (resolved_with_options, _, connector_conn_ref) = resolve_connection_ref_and_secret_ref(
@@ -88,6 +89,17 @@ async fn handle_alter_source_props_inner(
         return Err(ErrorCode::InvalidInputSyntax(
             "ALTER SOURCE CONNECTOR does not support CONNECTION".to_owned(),
         )
+        .into());
+    }
+
+    // Validate cdc.source.wait.streaming.start.timeout if present
+    if let Some(timeout_value) = changed_props.get("cdc.source.wait.streaming.start.timeout")
+        && timeout_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "cdc.source.wait.streaming.start.timeout".to_owned(),
+            config_value: timeout_value.to_owned(),
+        }
         .into());
     }
 

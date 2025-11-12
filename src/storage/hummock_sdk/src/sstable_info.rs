@@ -86,7 +86,7 @@ impl From<PbSstableInfo> for SstableInfoInner {
                 }
             },
             file_size: pb_sstable_info.file_size,
-            table_ids: pb_sstable_info.table_ids.iter().map(Into::into).collect(),
+            table_ids: pb_sstable_info.table_ids.clone(),
             meta_offset: pb_sstable_info.meta_offset,
             stale_key_count: pb_sstable_info.stale_key_count,
             total_key_count: pb_sstable_info.total_key_count,
@@ -123,7 +123,7 @@ impl From<&PbSstableInfo> for SstableInfoInner {
                 }
             },
             file_size: pb_sstable_info.file_size,
-            table_ids: pb_sstable_info.table_ids.iter().map(Into::into).collect(),
+            table_ids: pb_sstable_info.table_ids.clone(),
             meta_offset: pb_sstable_info.meta_offset,
             stale_key_count: pb_sstable_info.stale_key_count,
             total_key_count: pb_sstable_info.total_key_count,
@@ -166,7 +166,7 @@ impl From<SstableInfoInner> for PbSstableInfo {
             },
 
             file_size: sstable_info.file_size,
-            table_ids: sstable_info.table_ids.iter().map(Into::into).collect(),
+            table_ids: sstable_info.table_ids.clone(),
             meta_offset: sstable_info.meta_offset,
             stale_key_count: sstable_info.stale_key_count,
             total_key_count: sstable_info.total_key_count,
@@ -201,7 +201,7 @@ impl From<&SstableInfoInner> for PbSstableInfo {
             },
 
             file_size: sstable_info.file_size,
-            table_ids: sstable_info.table_ids.iter().map(Into::into).collect(),
+            table_ids: sstable_info.table_ids.clone(),
             meta_offset: sstable_info.meta_offset,
             stale_key_count: sstable_info.stale_key_count,
             total_key_count: sstable_info.total_key_count,

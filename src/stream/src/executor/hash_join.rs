@@ -183,7 +183,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding> std
             .field("input_right", &self.input_r.as_ref().unwrap().identity())
             .field("side_l", &self.side_l)
             .field("side_r", &self.side_r)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("stream_key", &self.info.stream_key)
             .field("schema", &self.info.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
             .finish()
@@ -286,11 +286,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         entry_state_max_rows: Option<usize>,
     ) -> Self {
         let entry_state_max_rows = match entry_state_max_rows {
-            None => {
-                ctx.streaming_config
-                    .developer
-                    .hash_join_entry_state_max_rows
-            }
+            None => ctx.config.developer.hash_join_entry_state_max_rows,
             Some(entry_state_max_rows) => entry_state_max_rows,
         };
         let side_l_column_n = input_l.schema().len();
@@ -318,8 +314,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         let state_all_data_types_l = input_l.schema().data_types();
         let state_all_data_types_r = input_r.schema().data_types();
 
-        let state_pk_indices_l = input_l.pk_indices().to_vec();
-        let state_pk_indices_r = input_r.pk_indices().to_vec();
+        let state_pk_indices_l = input_l.stream_key().to_vec();
+        let state_pk_indices_r = input_r.stream_key().to_vec();
 
         let state_join_key_indices_l = params_l.join_key_indices;
         let state_join_key_indices_r = params_r.join_key_indices;
@@ -968,8 +964,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     update_table_id = %side_update.ht.table_id(),
                     match_table_id = %side_match.ht.table_id(),
                     join_key = ?key,
-                    actor_id = ctx.id,
-                    fragment_id = ctx.fragment_id,
+                    actor_id = %ctx.id,
+                    fragment_id = %ctx.fragment_id,
                     "large rows matched for join key"
                 );
             }

@@ -25,6 +25,8 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
+pub mod id;
+
 use std::str::FromStr;
 
 use event_recovery::RecoveryEvent;
@@ -34,6 +36,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::id::{FragmentId, SourceId, WorkerId};
 use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
 
@@ -302,7 +305,7 @@ impl stream_plan::SourceNode {
 }
 
 impl meta::table_fragments::ActorStatus {
-    pub fn worker_id(&self) -> u32 {
+    pub fn worker_id(&self) -> WorkerId {
         self.location
             .as_ref()
             .expect("actor location should be exist")
@@ -318,7 +321,7 @@ impl common::WorkerNode {
 }
 
 impl common::ActorLocation {
-    pub fn from_worker(worker_node_id: u32) -> Option<Self> {
+    pub fn from_worker(worker_node_id: WorkerId) -> Option<Self> {
         Some(Self { worker_node_id })
     }
 }
@@ -399,7 +402,7 @@ impl stream_plan::StreamNode {
     /// Find the external stream source info inside the stream node, if any.
     ///
     /// Returns `source_id`.
-    pub fn find_stream_source(&self) -> Option<u32> {
+    pub fn find_stream_source(&self) -> Option<SourceId> {
         if let Some(crate::stream_plan::stream_node::NodeBody::Source(source)) =
             self.node_body.as_ref()
             && let Some(inner) = &source.source_inner
@@ -423,7 +426,7 @@ impl stream_plan::StreamNode {
     /// Note: we must get upstream fragment id from the merge node, not from the fragment's
     /// `upstream_fragment_ids`. e.g., DynamicFilter may have 2 upstream fragments, but only
     /// one is the upstream source fragment.
-    pub fn find_source_backfill(&self) -> Option<(u32, u32)> {
+    pub fn find_source_backfill(&self) -> Option<(SourceId, FragmentId)> {
         if let Some(crate::stream_plan::stream_node::NodeBody::SourceBackfill(source)) =
             self.node_body.as_ref()
         {

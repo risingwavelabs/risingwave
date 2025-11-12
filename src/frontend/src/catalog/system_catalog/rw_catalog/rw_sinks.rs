@@ -15,7 +15,6 @@
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::rw_catalog::rw_sources::serialize_props_with_secret;
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
@@ -81,9 +80,9 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     .unwrap_or_else(jsonbb::Value::null)
                     .into();
                 RwSink {
-                    id: sink.id.sink_id as i32,
+                    id: sink.id.as_raw_id() as i32,
                     name: sink.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_raw_id() as i32,
                     owner: sink.owner.user_id as i32,
                     connector: sink
                         .properties
@@ -94,12 +93,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     sink_type: sink.sink_type.to_proto().as_str_name().into(),
                     connection_id: sink.connection_id.map(|id| id.connection_id() as i32),
                     definition: sink.create_sql(),
-                    acl: get_acl_items(
-                        &Object::SinkId(sink.id.sink_id),
-                        false,
-                        &users,
-                        username_map,
-                    ),
+                    acl: get_acl_items(sink.id, false, &users, username_map),
                     initialized_at: sink.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: sink.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: sink.initialized_at_cluster_version.clone(),

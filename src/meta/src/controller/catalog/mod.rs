@@ -550,7 +550,11 @@ impl CatalogController {
                     .into_iter()
                     .map(|table_id| table_id.as_raw_id() as _),
             )
-            .chain(dirty_associated_source_ids.clone().into_iter())
+            .chain(
+                dirty_associated_source_ids
+                    .iter()
+                    .map(|source_id| source_id.as_raw_id() as _),
+            )
             .collect();
 
         let res = Object::delete_many()
@@ -621,15 +625,20 @@ impl CatalogController {
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        ensure_object_id(ObjectType::Database, comment.database_id as _, &txn).await?;
-        ensure_object_id(ObjectType::Schema, comment.schema_id as _, &txn).await?;
-        let table_obj = Object::find_by_id(comment.table_id as ObjectId)
+        ensure_object_id(
+            ObjectType::Database,
+            comment.database_id.as_raw_id() as _,
+            &txn,
+        )
+        .await?;
+        ensure_object_id(ObjectType::Schema, comment.schema_id.as_raw_id() as _, &txn).await?;
+        let table_obj = Object::find_by_id(comment.table_id.as_raw_id() as ObjectId)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
 
         let table = if let Some(col_idx) = comment.column_index {
-            let columns: ColumnCatalogArray = Table::find_by_id(TableId::new(comment.table_id))
+            let columns: ColumnCatalogArray = Table::find_by_id(comment.table_id)
                 .select_only()
                 .column(table::Column::Columns)
                 .into_tuple()
@@ -650,7 +659,7 @@ impl CatalogController {
             })?;
             column_desc.description = comment.description;
             table::ActiveModel {
-                table_id: Set(comment.table_id.into()),
+                table_id: Set(comment.table_id),
                 columns: Set(pb_columns.into()),
                 ..Default::default()
             }
@@ -658,7 +667,7 @@ impl CatalogController {
             .await?
         } else {
             table::ActiveModel {
-                table_id: Set(comment.table_id.into()),
+                table_id: Set(comment.table_id),
                 description: Set(comment.description),
                 ..Default::default()
             }

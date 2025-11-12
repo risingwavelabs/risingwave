@@ -21,6 +21,7 @@ use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::PbFieldNotFound;
+use risingwave_pb::id::FragmentId;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
 use crate::hummock::error::Error as HummockError;
@@ -75,7 +76,7 @@ pub enum MetaErrorInner {
     CatalogIdNotFound(&'static str, String),
 
     #[error("table_fragment not exist: id={0}")]
-    FragmentNotFound(u32),
+    FragmentNotFound(FragmentId),
 
     #[provide(PostgresErrorCode => PostgresErrorCode::DuplicateObject)]
     #[error("{0} with name {1} exists{under_creation}", under_creation = (.2).map(|_| " but under creation").unwrap_or(""))]

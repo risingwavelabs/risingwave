@@ -110,7 +110,7 @@ impl SourceManagerCore {
         let mut fragment_replacements = Default::default();
         let mut dropped_source_fragments = Default::default();
         let mut dropped_source_ids = Default::default();
-        let mut recreate_source_id_map_new_props: Vec<(u32, HashMap<String, String>)> =
+        let mut recreate_source_id_map_new_props: Vec<(SourceId, HashMap<String, String>)> =
             Default::default();
 
         match source_change {
@@ -311,18 +311,7 @@ impl SourceManager {
         let backfill_fragments = metadata_manager
             .catalog_controller
             .load_backfill_fragment_ids()
-            .await?
-            .into_iter()
-            .map(|(source_id, fragment_ids)| {
-                (
-                    source_id as SourceId,
-                    fragment_ids
-                        .into_iter()
-                        .map(|(id, up_id)| (id as _, up_id as _))
-                        .collect(),
-                )
-            })
-            .collect();
+            .await?;
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,
@@ -342,7 +331,7 @@ impl SourceManager {
 
     pub async fn validate_source_once(
         &self,
-        source_id: u32,
+        source_id: SourceId,
         new_source_props: WithOptionsSecResolved,
     ) -> MetaResult<()> {
         let props = ConnectorProperties::extract(new_source_props, false).unwrap();
@@ -395,7 +384,7 @@ impl SourceManager {
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         tracing::debug!("register_source: {}", source.get_id());
         let mut core = self.core.lock().await;
-        let source_id = source.get_id() as _;
+        let source_id = source.get_id();
         if core.managed_sources.contains_key(&source_id) {
             tracing::warn!("source {} already registered", source_id);
             return Ok(());
@@ -497,7 +486,7 @@ pub enum SourceChange {
     UpdateSourceProps {
         // the new properties to be set for each source_id
         // and the props should not affect split assignment and fragments
-        source_id_map_new_props: HashMap<u32, HashMap<String, String>>,
+        source_id_map_new_props: HashMap<SourceId, HashMap<String, String>>,
     },
     /// `CREATE SOURCE` (shared), or `CREATE MV` is _finished_ (backfill is done).
     /// This is applied after `wait_streaming_job_finished`.
@@ -521,7 +510,7 @@ pub enum SourceChange {
 
 pub fn build_actor_connector_splits(
     splits: &HashMap<ActorId, Vec<SplitImpl>>,
-) -> HashMap<u32, ConnectorSplits> {
+) -> HashMap<ActorId, ConnectorSplits> {
     splits
         .iter()
         .map(|(&actor_id, splits)| {
@@ -536,7 +525,7 @@ pub fn build_actor_connector_splits(
 }
 
 pub fn build_actor_split_impls(
-    actor_splits: &HashMap<u32, ConnectorSplits>,
+    actor_splits: &HashMap<ActorId, ConnectorSplits>,
 ) -> HashMap<ActorId, Vec<SplitImpl>> {
     actor_splits
         .iter()

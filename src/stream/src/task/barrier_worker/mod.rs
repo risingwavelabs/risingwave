@@ -26,7 +26,8 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbLocalSstableInfo,
+    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
+    PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -85,10 +86,10 @@ pub struct BarrierCompleteResult {
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
 
     /// The source IDs that have finished listing data for refreshable batch sources.
-    pub list_finished_source_ids: Vec<u32>,
+    pub list_finished_source_ids: Vec<PbListFinishedSource>,
 
     /// The source IDs that have finished loading data for refreshable batch sources.
-    pub load_finished_source_ids: Vec<u32>,
+    pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
 
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
 
@@ -176,7 +177,7 @@ impl ControlStreamHandle {
         reset_request_id: u32,
     ) {
         self.send_response(Response::ResetDatabase(ResetDatabaseResponse {
-            database_id: database_id.database_id,
+            database_id,
             root_err: root_err.map(|err| PbScoredError {
                 err_msg: err.error.to_report_string(),
                 score: err.score.0,
@@ -265,7 +266,7 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
             writeln!(
                 f,
                 "database {} status: {} managed_barrier_state:\n{}",
-                database_id.database_id,
+                database_id,
                 status,
                 managed_barrier_state
                     .as_ref()
@@ -454,7 +455,7 @@ impl LocalBarrierWorker {
     ) -> Result<(), (DatabaseId, StreamError)> {
         match request {
             Request::InjectBarrier(req) => {
-                let database_id = DatabaseId::new(req.database_id);
+                let database_id = req.database_id;
                 let result: StreamResult<()> = try {
                     let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
                     self.send_barrier(&barrier, req)?;
@@ -464,16 +465,13 @@ impl LocalBarrierWorker {
             }
             Request::RemovePartialGraph(req) => {
                 self.remove_partial_graphs(
-                    DatabaseId::new(req.database_id),
+                    req.database_id,
                     req.partial_graph_ids.into_iter().map(PartialGraphId::new),
                 );
                 Ok(())
             }
             Request::CreatePartialGraph(req) => {
-                self.add_partial_graph(
-                    DatabaseId::new(req.database_id),
-                    PartialGraphId::new(req.partial_graph_id),
-                );
+                self.add_partial_graph(req.database_id, PartialGraphId::new(req.partial_graph_id));
                 Ok(())
             }
             Request::ResetDatabase(req) => {
@@ -620,7 +618,8 @@ mod await_epoch_completed_future {
     use risingwave_common::id::TableId;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::{
-        PbCdcTableBackfillProgress, PbCreateMviewProgress,
+        PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource,
+        PbLoadFinishedSource,
     };
 
     use crate::error::StreamResult;
@@ -638,8 +637,8 @@ mod await_epoch_completed_future {
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
         create_mview_progress: Vec<PbCreateMviewProgress>,
-        list_finished_source_ids: Vec<u32>,
-        load_finished_source_ids: Vec<u32>,
+        list_finished_source_ids: Vec<PbListFinishedSource>,
+        load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
@@ -840,20 +839,20 @@ impl LocalBarrierWorker {
                         worker_id: self.actor_manager.env.worker_id(),
                         table_watermarks: table_watermarks
                             .into_iter()
-                            .map(|(key, value)| (key.as_raw_id(), value.into()))
+                            .map(|(key, value)| (key, value.into()))
                             .collect(),
                         old_value_sstables: old_value_ssts
                             .into_iter()
                             .map(|sst| sst.sst_info.into())
                             .collect(),
-                        database_id: database_id.database_id,
-                        list_finished_source_ids,
-                        load_finished_source_ids,
+                        database_id,
+                        list_finished_sources: list_finished_source_ids,
+                        load_finished_sources: load_finished_source_ids,
                         vector_index_adds: vector_index_adds
                             .into_iter()
                             .map(|(table_id, adds)| {
                                 (
-                                    table_id.as_raw_id(),
+                                    table_id,
                                     PbVectorIndexAdds {
                                         adds: adds.into_iter().map(|add| add.into()).collect(),
                                     },
@@ -861,11 +860,8 @@ impl LocalBarrierWorker {
                             })
                             .collect(),
                         cdc_table_backfill_progress,
-                        truncate_tables: truncate_tables.into_iter().map_into().collect(),
-                        refresh_finished_tables: refresh_finished_tables
-                            .into_iter()
-                            .map_into()
-                            .collect(),
+                        truncate_tables,
+                        refresh_finished_tables,
                     },
                 )
             }
@@ -895,7 +891,7 @@ impl LocalBarrierWorker {
         let database_status = self
             .state
             .databases
-            .get_mut(&DatabaseId::new(request.database_id))
+            .get_mut(&request.database_id)
             .expect("should exist");
         if let Some(state) = database_status.state_for_request() {
             state.transform_to_issued(barrier, request)?;
@@ -910,14 +906,14 @@ impl LocalBarrierWorker {
     ) {
         let Some(database_status) = self.state.databases.get_mut(&database_id) else {
             warn!(
-                database_id = database_id.database_id,
+                %database_id,
                 "database to remove partial graph not exist"
             );
             return;
         };
         let Some(database_state) = database_status.state_for_request() else {
             warn!(
-                database_id = database_id.database_id,
+                %database_id,
                 "ignore remove partial graph request on err database",
             );
             return;
@@ -983,7 +979,7 @@ impl LocalBarrierWorker {
     }
 
     fn reset_database(&mut self, req: ResetDatabaseRequest) {
-        let database_id = DatabaseId::new(req.database_id);
+        let database_id = req.database_id;
         if let Some(database_status) = self.state.databases.get_mut(&database_id) {
             database_status.start_reset(
                 database_id,
@@ -1002,7 +998,7 @@ impl LocalBarrierWorker {
         reset_request_id: u32,
     ) {
         info!(
-            database_id = database_id.database_id,
+            %database_id,
             "database reset successfully"
         );
         if let Some(reset_database) = self.state.databases.remove(&database_id) {
@@ -1032,7 +1028,7 @@ impl LocalBarrierWorker {
         message: impl Into<String>,
     ) {
         let message = message.into();
-        error!(database_id = database_id.database_id, ?failed_actor, message, err = ?err.as_report(), "suspend database on error");
+        error!(%database_id, ?failed_actor, message, err = ?err.as_report(), "suspend database on error");
         let completing_futures = self.await_epoch_completed_futures.remove(&database_id);
         self.state
             .databases
@@ -1041,9 +1037,7 @@ impl LocalBarrierWorker {
             .suspend(failed_actor, err, completing_futures);
         self.control_stream_handle
             .send_response(Response::ReportDatabaseFailure(
-                ReportDatabaseFailureResponse {
-                    database_id: database_id.database_id,
-                },
+                ReportDatabaseFailureResponse { database_id },
             ));
     }
 
@@ -1081,7 +1075,7 @@ impl LocalBarrierWorker {
     ) -> JoinHandle<()> {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
-            if let Some(worker_threads_num) = env.config().actor_runtime_worker_threads_num {
+            if let Some(worker_threads_num) = env.global_config().actor_runtime_worker_threads_num {
                 builder.worker_threads(worker_threads_num);
             }
             builder
@@ -1176,7 +1170,7 @@ pub(crate) mod barrier_test_utils {
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             PbCreatePartialGraphRequest {
                                 partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
-                                database_id: TEST_DATABASE_ID.database_id,
+                                database_id: TEST_DATABASE_ID,
                             },
                         ),
                     ),
@@ -1222,7 +1216,7 @@ pub(crate) mod barrier_test_utils {
                         InjectBarrierRequest {
                             request_id: "".to_owned(),
                             barrier: Some(barrier.to_protobuf()),
-                            database_id: TEST_DATABASE_ID.database_id,
+                            database_id: TEST_DATABASE_ID,
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),

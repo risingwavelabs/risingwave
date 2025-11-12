@@ -97,7 +97,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
                     while let Some(manifest_entry) = manifest_entries_stream.next().await {
                         let file = manifest_entry.data_file();
                         result.push(RwIcebergFiles {
-                            source_id: source.id as i32,
+                            source_id: source.id.as_raw_id() as i32,
                             schema_name: schema_name.clone(),
                             source_name: source.name.clone(),
                             content: format!("{:?}", file.content_type()),

@@ -34,7 +34,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<Model> for HummockPinnedSnapshot {
     fn from(value: Model) -> Self {
         Self {
-            context_id: value.context_id as _,
+            context_id: value.context_id,
             minimal_pinned_snapshot: value.min_pinned_snapshot as _,
         }
     }

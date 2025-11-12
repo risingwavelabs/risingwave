@@ -201,7 +201,7 @@ impl RemoteInput {
                 metrics,
                 local_barrier_manager
                     .env
-                    .config()
+                    .global_config()
                     .developer
                     .exchange_batched_permits,
             ),

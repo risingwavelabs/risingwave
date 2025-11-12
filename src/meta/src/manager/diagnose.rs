@@ -206,7 +206,7 @@ impl DiagnoseCommand {
                 {
                     None
                 } else {
-                    match worker_actor_count.get(&(worker_node.id as _)) {
+                    match worker_actor_count.get(&worker_node.id) {
                         None => Some(0),
                         Some(c) => Some(*c),
                     }
@@ -629,7 +629,7 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| {
                 (
-                    s.id,
+                    s.id.as_raw_id(),
                     (s.name, s.schema_id, s.definition, s.created_at_epoch),
                 )
             })
@@ -649,7 +649,7 @@ impl DiagnoseCommand {
             for (table_type, tables) in &grouped {
                 let tables = tables.into_iter().map(|t| {
                     (
-                        t.id,
+                        t.id.as_raw_id(),
                         (t.name, t.schema_id, t.definition, t.created_at_epoch),
                     )
                 });
@@ -672,7 +672,7 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| {
                 (
-                    s.id,
+                    s.id.as_raw_id(),
                     (s.name, s.schema_id, s.definition, s.created_at_epoch),
                 )
             })

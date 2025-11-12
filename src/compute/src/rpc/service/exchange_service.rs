@@ -19,7 +19,7 @@ use either::Either;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
-use risingwave_common::catalog::DatabaseId;
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits, permits,
@@ -107,11 +107,7 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .take_receiver(
-                DatabaseId::new(database_id),
-                term_id,
-                (up_actor_id, down_actor_id),
-            )
+            .take_receiver(database_id, term_id, (up_actor_id, down_actor_id))
             .await?;
 
         // Map the remaining stream to add-permits.
@@ -149,7 +145,7 @@ impl ExchangeServiceImpl {
         peer_addr: SocketAddr,
         mut receiver: Receiver,
         add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
-        up_down_fragment_ids: (u32, u32),
+        up_down_fragment_ids: (FragmentId, FragmentId),
     ) {
         tracing::debug!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         let up_fragment_id = up_down_fragment_ids.0.to_string();

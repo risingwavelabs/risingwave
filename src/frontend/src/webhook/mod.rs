@@ -211,7 +211,7 @@ pub(super) mod handlers {
         };
 
         let fast_insert_request = FastInsertRequest {
-            table_id: table_id.as_raw_id(),
+            table_id,
             table_version_id: version_id,
             column_indices: vec![0],
             // leave the data_chunk empty for now

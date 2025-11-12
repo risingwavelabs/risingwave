@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
+use risingwave_common::id::{JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -28,6 +29,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
+use risingwave_pb::id::ActorId;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -45,7 +47,7 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
-use crate::catalog::{DatabaseId, SinkId};
+use crate::catalog::{DatabaseId, FragmentId, SinkId};
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
@@ -66,8 +68,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_table_fragments(
         &self,
-        table_ids: &[u32],
-    ) -> Result<HashMap<u32, TableFragmentInfo>>;
+        table_ids: &[JobId],
+    ) -> Result<HashMap<JobId, TableFragmentInfo>>;
 
     async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>>;
 
@@ -97,12 +99,12 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_tables(
         &self,
-        table_ids: &[u32],
+        table_ids: Vec<TableId>,
         include_dropped_table: bool,
-    ) -> Result<HashMap<u32, Table>>;
+    ) -> Result<HashMap<TableId, Table>>;
 
     /// Returns vector of (`worker_id`, `min_pinned_version_id`)
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -134,7 +136,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_fragment_parallelism(
         &self,
-        fragment_ids: Vec<u32>,
+        fragment_ids: Vec<FragmentId>,
         parallelism: Option<PbTableParallelism>,
     ) -> Result<()>;
 
@@ -144,13 +146,13 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
-    async fn list_cdc_progress(&self) -> Result<HashMap<u32, PbCdcProgress>>;
+    async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
     async fn alter_sink_props(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -158,9 +160,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_iceberg_table_props(
         &self,
-        table_id: u32,
-        sink_id: u32,
-        source_id: u32,
+        table_id: TableId,
+        sink_id: SinkId,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -168,7 +170,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn alter_source_connector_props(
         &self,
-        source_id: u32,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -176,11 +178,21 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
-    async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>>;
+    async fn get_fragment_by_id(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Option<FragmentDistribution>>;
 
-    fn worker_id(&self) -> u32;
+    async fn get_fragment_vnodes(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Vec<(ActorId, Vec<u32>)>>;
 
-    async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()>;
+    async fn get_actor_vnodes(&self, actor_id: ActorId) -> Result<Vec<u32>>;
+
+    fn worker_id(&self) -> WorkerId;
+
+    async fn set_sync_log_store_aligned(&self, job_id: JobId, aligned: bool) -> Result<()>;
 
     async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64>;
 
@@ -189,6 +201,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
 
     fn cluster_id(&self) -> &str;
+
+    async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -217,9 +231,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_table_fragments(
         &self,
-        table_ids: &[u32],
-    ) -> Result<HashMap<u32, TableFragmentInfo>> {
-        self.0.list_table_fragments(table_ids).await
+        job_ids: &[JobId],
+    ) -> Result<HashMap<JobId, TableFragmentInfo>> {
+        self.0.list_table_fragments(job_ids).await
     }
 
     async fn list_streaming_job_states(&self) -> Result<Vec<StreamingJobState>> {
@@ -277,14 +291,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_tables(
         &self,
-        table_ids: &[u32],
+        table_ids: Vec<TableId>,
         include_dropped_tables: bool,
-    ) -> Result<HashMap<u32, Table>> {
+    ) -> Result<HashMap<TableId, Table>> {
         let tables = self.0.get_tables(table_ids, include_dropped_tables).await?;
         Ok(tables)
     }
 
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>> {
         let pinned_versions = self
             .0
             .risectl_get_pinned_versions_summary()
@@ -363,7 +377,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_fragment_parallelism(
         &self,
-        fragment_ids: Vec<u32>,
+        fragment_ids: Vec<FragmentId>,
         parallelism: Option<PbTableParallelism>,
     ) -> Result<()> {
         self.0
@@ -383,7 +397,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_rate_limits().await
     }
 
-    async fn list_cdc_progress(&self) -> Result<HashMap<u32, PbCdcProgress>> {
+    async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>> {
         self.0.list_cdc_progress().await
     }
 
@@ -393,7 +407,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_sink_props(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -410,9 +424,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_iceberg_table_props(
         &self,
-        table_id: u32,
-        sink_id: u32,
-        source_id: u32,
+        table_id: TableId,
+        sink_id: SinkId,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -431,7 +445,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn alter_source_connector_props(
         &self,
-        source_id: u32,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -450,15 +464,29 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_hosted_iceberg_tables().await
     }
 
-    async fn get_fragment_by_id(&self, fragment_id: u32) -> Result<Option<FragmentDistribution>> {
+    async fn get_fragment_by_id(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Option<FragmentDistribution>> {
         self.0.get_fragment_by_id(fragment_id).await
     }
 
-    fn worker_id(&self) -> u32 {
+    async fn get_fragment_vnodes(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<Vec<(ActorId, Vec<u32>)>> {
+        self.0.get_fragment_vnodes(fragment_id).await
+    }
+
+    async fn get_actor_vnodes(&self, actor_id: ActorId) -> Result<Vec<u32>> {
+        self.0.get_actor_vnodes(actor_id).await
+    }
+
+    fn worker_id(&self) -> WorkerId {
         self.0.worker_id()
     }
 
-    async fn set_sync_log_store_aligned(&self, job_id: u32, aligned: bool) -> Result<()> {
+    async fn set_sync_log_store_aligned(&self, job_id: JobId, aligned: bool) -> Result<()> {
         self.0.set_sync_log_store_aligned(job_id, aligned).await
     }
 
@@ -476,5 +504,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     fn cluster_id(&self) -> &str {
         self.0.cluster_id()
+    }
+
+    async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>> {
+        self.0.list_unmigrated_tables().await
     }
 }

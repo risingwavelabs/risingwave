@@ -49,8 +49,8 @@ pub mod utils;
 pub mod writer;
 pub mod prelude {
     pub use crate::sink::{
-        Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkError,
-        SinkParam, SinkWriterParam,
+        Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+        SINK_USER_FORCE_COMPACTION, Sink, SinkError, SinkParam, SinkWriterParam,
     };
 }
 
@@ -234,6 +234,7 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_TYPE_RETRACT: &str = "retract";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
+pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {
@@ -294,7 +295,7 @@ impl SinkParam {
 
     pub fn to_proto(&self) -> PbSinkParam {
         PbSinkParam {
-            sink_id: self.sink_id.sink_id,
+            sink_id: self.sink_id,
             sink_name: self.sink_name.clone(),
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
@@ -636,7 +637,7 @@ impl SinkMetaClient {
 
     pub async fn add_sink_fail_evet_log(
         &self,
-        sink_id: u32,
+        sink_id: SinkId,
         sink_name: String,
         connector: String,
         error: String,
@@ -649,7 +650,7 @@ impl SinkMetaClient {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Failed to add sink fail event to event log.");
+                        tracing::warn!(error = %e.as_report(), %sink_id, "Failed to add sink fail event to event log.");
                     }
                 }
             }
@@ -666,7 +667,7 @@ impl SinkWriterParam {
             meta_client: Default::default(),
             extra_partition_col_idx: Default::default(),
 
-            actor_id: 1,
+            actor_id: 1.into(),
             sink_id: SinkId::new(1),
             sink_name: "test_sink".to_owned(),
             connector: "test_connector".to_owned(),

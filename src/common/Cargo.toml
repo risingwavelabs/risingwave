@@ -44,12 +44,12 @@ faiss = { workspace = true }
 fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-governor = { workspace = true }
 hashbrown = { workspace = true }
 hashbrown0_14 = { workspace = true }
 hex = "0.4.3"
 http = "1"
 humantime = "2.3"
+ipnet = "2.9"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
@@ -78,6 +78,7 @@ regex = { workspace = true }
 reqwest = { version = "0.12.2", features = ["json"] }
 risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_estimate_size = { workspace = true }
+risingwave_common_log = { path = "./log" }
 risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { workspace = true }
 risingwave_common_secret = { path = "./secret" }
@@ -89,7 +90,6 @@ rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
 ryu = "1.0"
-sea-orm  = { workspace = true }
 serde = { workspace = true }
 serde_bytes = "0.11"
 serde_default = "0.2"
@@ -120,7 +120,6 @@ toml = "0.9"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-opentelemetry = { workspace = true }
-tracing-subscriber = "0.3.20"
 twox-hash = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }

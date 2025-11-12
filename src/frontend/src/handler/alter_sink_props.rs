@@ -55,7 +55,7 @@ pub async fn handle_alter_sink_props(
             &changed_props,
         )?;
 
-        sink.id.sink_id
+        sink.id
     };
 
     let meta_client = session.env().meta_client();

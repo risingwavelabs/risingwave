@@ -7,6 +7,7 @@ in_flight_barrier_nums = 10
 
 [storage]
 imm_merge_threshold = 2
+share_buffers_sync_parallelism = 4
 
 [system]
 barrier_interval_ms = 250

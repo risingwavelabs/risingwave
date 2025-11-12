@@ -31,6 +31,7 @@ struct RwFragment {
     flags: Vec<String>,
     parallelism: i32,
     max_parallelism: i32,
+    parallelism_policy: String,
     node: JsonbVal,
 }
 
@@ -55,18 +56,18 @@ async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmen
     Ok(distributions
         .into_iter()
         .map(|distribution| RwFragment {
-            fragment_id: distribution.fragment_id as i32,
-            table_id: distribution.table_id as i32,
+            fragment_id: distribution.fragment_id.as_raw_id() as i32,
+            table_id: distribution.table_id.as_raw_id() as i32,
             distribution_type: distribution.distribution_type().as_str_name().into(),
             state_table_ids: distribution
                 .state_table_ids
                 .into_iter()
-                .map(|id| id as i32)
+                .map(|id| id.as_raw_id() as i32)
                 .collect(),
             upstream_fragment_ids: distribution
                 .upstream_fragment_ids
                 .into_iter()
-                .map(|id| id as i32)
+                .map(|id| id.as_raw_id() as i32)
                 .collect(),
             flags: extract_fragment_type_flag(distribution.fragment_type_mask)
                 .into_iter()
@@ -74,6 +75,7 @@ async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmen
                 .collect(),
             parallelism: distribution.parallelism as i32,
             max_parallelism: distribution.vnode_count as i32,
+            parallelism_policy: distribution.parallelism_policy,
             node: json!(distribution.node).into(),
         })
         .collect())

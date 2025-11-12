@@ -236,6 +236,26 @@ message GetFragmentByIdResponse {
   FragmentDistribution distribution = 1;
 }
 
+message GetFragmentVnodesRequest {
+  uint32 fragment_id = 1;
+}
+
+message GetFragmentVnodesResponse {
+  message ActorVnodes {
+    uint32 actor_id = 1;
+    repeated uint32 vnode_indices = 2;
+  }
+  repeated ActorVnodes actor_vnodes = 1;
+}
+
+message GetActorVnodesRequest {
+  uint32 actor_id = 1;
+}
+
+message GetActorVnodesResponse {
+  repeated uint32 vnode_indices = 1;
+}
+
 message ListStreamingJobStatesRequest {}
 
 message ListStreamingJobStatesResponse {
@@ -264,6 +284,7 @@ message FragmentDistribution {
   uint32 parallelism = 7;
   uint32 vnode_count = 8;
   stream_plan.StreamNode node = 9;
+  string parallelism_policy = 10;
 }
 
 message ListFragmentDistributionResponse {
@@ -351,8 +372,8 @@ message RecoverResponse {}
 
 message AlterConnectorPropsRequest {
   message AlterIcebergTableIds {
-    int32 source_id = 1;
-    int32 sink_id = 2;
+    uint32 source_id = 1;
+    uint32 sink_id = 2;
   }
   enum AlterConnectorPropsObject {
     UNSPECIFIED = 0;
@@ -403,8 +424,11 @@ service StreamManagerService {
   rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
   rpc AlterConnectorProps(AlterConnectorPropsRequest) returns (AlterConnectorPropsResponse);
   rpc GetFragmentById(GetFragmentByIdRequest) returns (GetFragmentByIdResponse);
+  rpc GetFragmentVnodes(GetFragmentVnodesRequest) returns (GetFragmentVnodesResponse);
+  rpc GetActorVnodes(GetActorVnodesRequest) returns (GetActorVnodesResponse);
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
+  rpc ListUnmigratedTables(ListUnmigratedTablesRequest) returns (ListUnmigratedTablesResponse);
 }
 
 // Below for cluster service.
@@ -1017,3 +1041,13 @@ message SetSyncLogStoreAlignedRequest {
 }
 
 message SetSyncLogStoreAlignedResponse {}
+
+message ListUnmigratedTablesRequest {}
+
+message ListUnmigratedTablesResponse {
+  message UnmigratedTable {
+    uint32 table_id = 1;
+    string table_name = 2;
+  }
+  repeated UnmigratedTable tables = 1;
+}

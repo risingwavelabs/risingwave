@@ -24,9 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
-};
+use risingwave_common::catalog::{ColumnCatalog, ConnectionId, ObjectId, Schema, UserId};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -426,8 +424,8 @@ pub async fn gen_sink_plan(
             .collect();
 
     let sink_catalog = sink_desc.into_catalog(
-        SchemaId::new(sink_schema_id),
-        DatabaseId::new(sink_database_id),
+        sink_schema_id,
+        sink_database_id,
         UserId::new(session.user_id()),
         connector_conn_ref.map(ConnectionId::from),
     );
@@ -611,8 +609,8 @@ pub async fn handle_create_sink(
             .creating_streaming_job_tracker()
             .guard(CreatingStreamingJobInfo::new(
                 session.session_id(),
-                sink.database_id.database_id,
-                sink.schema_id.schema_id,
+                sink.database_id,
+                sink.schema_id,
                 sink.name.clone(),
             ));
 
@@ -629,7 +627,7 @@ pub fn fetch_incoming_sinks(
     table: &TableCatalog,
 ) -> Result<Vec<Arc<SinkCatalog>>> {
     let reader = session.env().catalog_reader().read_guard();
-    let schema = reader.get_schema_by_id(&table.database_id, &table.schema_id)?;
+    let schema = reader.get_schema_by_id(table.database_id, table.schema_id)?;
     let Some(incoming_sinks) = schema.table_incoming_sinks(table.id) else {
         return Ok(vec![]);
     };
@@ -637,7 +635,7 @@ pub fn fetch_incoming_sinks(
     for sink_id in incoming_sinks {
         sinks.push(
             schema
-                .get_sink_by_id(sink_id)
+                .get_sink_by_id(*sink_id)
                 .expect("should exist")
                 .clone(),
         );

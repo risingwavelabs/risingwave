@@ -36,12 +36,12 @@ async fn read_rw_rate_limit(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRateL
     Ok(rate_limits
         .into_iter()
         .map(|info| RwRateLimit {
-            fragment_id: info.fragment_id as i32,
+            fragment_id: info.fragment_id.as_raw_id() as i32,
             fragment_type: extract_fragment_type_flag(info.fragment_type_mask)
                 .into_iter()
                 .map(|t| t.as_str_name().to_owned())
                 .collect(),
-            table_id: info.job_id as i32,
+            table_id: info.job_id.as_raw_id() as i32,
             rate_limit: info.rate_limit as i32,
             node_name: info.node_name,
         })

@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::gap_fill_types::FillStrategy;
+use risingwave_common::gap_fill::FillStrategy;
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::GapFillNode;
 use risingwave_storage::StateStore;
@@ -75,7 +75,7 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             ctx: params.actor_context,
             input,
             schema: params.info.schema.clone(),
-            chunk_size: params.env.config().developer.chunk_size,
+            chunk_size: params.config.developer.chunk_size,
             time_column_index,
             fill_columns: fill_columns_with_strategies,
             gap_interval: interval_expr,

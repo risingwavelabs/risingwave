@@ -139,12 +139,22 @@ impl CatalogController {
         };
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
-        ensure_object_id(ObjectType::Database, streaming_job.database_id() as _, &txn).await?;
-        ensure_object_id(ObjectType::Schema, streaming_job.schema_id() as _, &txn).await?;
+        ensure_object_id(
+            ObjectType::Database,
+            streaming_job.database_id().as_raw_id() as _,
+            &txn,
+        )
+        .await?;
+        ensure_object_id(
+            ObjectType::Schema,
+            streaming_job.schema_id().as_raw_id() as _,
+            &txn,
+        )
+        .await?;
         check_relation_name_duplicate(
             &streaming_job.name(),
-            streaming_job.database_id() as _,
-            streaming_job.schema_id() as _,
+            streaming_job.database_id(),
+            streaming_job.schema_id(),
             &txn,
         )
         .await?;
@@ -187,8 +197,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id as _),
-                    Some(table.schema_id as _),
+                    Some(table.database_id),
+                    Some(table.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -196,14 +206,14 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                table.id = job_id.as_raw_id() as _;
+                table.id = job_id.as_mv_table_id();
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
             }
             StreamingJob::Sink(sink) => {
                 if let Some(target_table_id) = sink.target_table
                     && check_sink_into_table_cycle(
-                        target_table_id as ObjectId,
+                        target_table_id.as_raw_id() as ObjectId,
                         dependencies.iter().cloned().collect(),
                         &txn,
                     )
@@ -216,8 +226,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Sink,
                     sink.owner as _,
-                    Some(sink.database_id as _),
-                    Some(sink.schema_id as _),
+                    Some(sink.database_id),
+                    Some(sink.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -225,7 +235,7 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                sink.id = job_id.as_raw_id() as _;
+                sink.id = job_id.as_sink_id();
                 let sink_model: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink_model).exec(&txn).await?;
             }
@@ -234,8 +244,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id as _),
-                    Some(table.schema_id as _),
+                    Some(table.database_id),
+                    Some(table.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -243,17 +253,17 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                table.id = job_id.as_raw_id() as _;
+                table.id = job_id.as_mv_table_id();
                 if let Some(src) = src {
                     let src_obj = Self::create_object(
                         &txn,
                         ObjectType::Source,
                         src.owner as _,
-                        Some(src.database_id as _),
-                        Some(src.schema_id as _),
+                        Some(src.database_id),
+                        Some(src.schema_id),
                     )
                     .await?;
-                    src.id = src_obj.oid as _;
+                    src.id = (src_obj.oid as u32).into();
                     src.optional_associated_table_id = Some(
                         PbOptionalAssociatedTableId::AssociatedTableId(job_id.as_raw_id() as _),
                     );
@@ -267,13 +277,18 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
             }
             StreamingJob::Index(index, table) => {
-                ensure_object_id(ObjectType::Table, index.primary_table_id as _, &txn).await?;
+                ensure_object_id(
+                    ObjectType::Table,
+                    index.primary_table_id.as_raw_id() as ObjectId,
+                    &txn,
+                )
+                .await?;
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Index,
                     index.owner as _,
-                    Some(index.database_id as _),
-                    Some(index.schema_id as _),
+                    Some(index.database_id),
+                    Some(index.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -283,12 +298,12 @@ impl CatalogController {
                 .await?;
                 // to be compatible with old implementation.
                 index.id = job_id.as_raw_id();
-                index.index_table_id = job_id.as_raw_id();
-                table.id = job_id.as_raw_id();
+                index.index_table_id = job_id.as_mv_table_id();
+                table.id = job_id.as_mv_table_id();
 
                 ObjectDependency::insert(object_dependency::ActiveModel {
-                    oid: Set(index.primary_table_id as _),
-                    used_by: Set(table.id as _),
+                    oid: Set(index.primary_table_id.as_raw_id() as ObjectId),
+                    used_by: Set(table.id.as_raw_id() as ObjectId),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -304,8 +319,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Source,
                     src.owner as _,
-                    Some(src.database_id as _),
-                    Some(src.schema_id as _),
+                    Some(src.database_id),
+                    Some(src.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -313,7 +328,7 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                src.id = job_id.as_raw_id();
+                src.id = job_id.as_shared_source_id();
                 let source_model: source::ActiveModel = src.clone().into();
                 Source::insert(source_model).exec(&txn).await?;
             }
@@ -363,7 +378,7 @@ impl CatalogController {
         &self,
         job: &StreamingJob,
         mut incomplete_internal_tables: Vec<PbTable>,
-    ) -> MetaResult<HashMap<u32, u32>> {
+    ) -> MetaResult<HashMap<TableId, u32>> {
         let job_id = job.id();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -377,14 +392,14 @@ impl CatalogController {
                 &txn,
                 ObjectType::Table,
                 table.owner as _,
-                Some(table.database_id as _),
-                Some(table.schema_id as _),
+                Some(table.database_id),
+                Some(table.schema_id),
             )
             .await?
             .oid;
             table_id_map.insert(table.id, table_id as u32);
-            table.id = table_id as _;
-            table.job_id = Some(job_id.as_raw_id() as _);
+            table.id = (table_id as u32).into();
+            table.job_id = Some(job_id);
 
             let table_model = table::ActiveModel {
                 table_id: Set((table_id as u32).into()),
@@ -456,15 +471,14 @@ impl CatalogController {
             if !for_replace {
                 let all_tables = StreamJobFragments::collect_tables(get_fragments());
                 for state_table_id in state_table_ids {
-                    let state_table_id = (state_table_id as u32).into();
                     // Table's vnode count is not always the fragment's vnode count, so we have to
                     // look up the table from `TableFragments`.
                     // See `ActorGraphBuilder::new`.
                     let table = all_tables
                         .get(&state_table_id)
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
-                    assert_eq!(table.id, state_table_id.as_raw_id());
-                    assert_eq!(table.fragment_id, fragment_id as u32);
+                    assert_eq!(table.id, state_table_id);
+                    assert_eq!(table.fragment_id, fragment_id);
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
@@ -513,8 +527,8 @@ impl CatalogController {
             // Update dml fragment id.
             if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
                 Table::update(table::ActiveModel {
-                    table_id: Set(table.id.into()),
-                    dml_fragment_id: Set(table.dml_fragment_id.map(|id| id as _)),
+                    table_id: Set(table.id),
+                    dml_fragment_id: Set(table.dml_fragment_id),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -567,7 +581,7 @@ impl CatalogController {
 
         Ok(Command::DropStreamingJobs {
             streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
-            actors: table_fragments.actor_ids(),
+            actors: table_fragments.actor_ids().collect(),
             unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
             unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
             dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
@@ -650,7 +664,7 @@ impl CatalogController {
                 .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
             inner
                 .dropped_tables
-                .extend(dropped_tables.map(|t| (t.id.into(), t)));
+                .extend(dropped_tables.map(|t| (t.id, t)));
         }
 
         if need_notify {
@@ -686,7 +700,7 @@ impl CatalogController {
 
         // Check if the job is creating sink into table.
         if table_obj.is_none()
-            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_raw_id() as ObjectId)
+            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_sink_id())
                 .select_only()
                 .column(sink::Column::TargetTable)
                 .into_tuple::<Option<TableId>>()
@@ -732,7 +746,9 @@ impl CatalogController {
         if let Some(t) = &table_obj
             && let Some(source_id) = t.optional_associated_source_id
         {
-            Object::delete_by_id(source_id).exec(&txn).await?;
+            Object::delete_by_id(source_id.as_raw_id() as ObjectId)
+                .exec(&txn)
+                .await?;
         }
 
         let err = if is_cancelled {
@@ -995,7 +1011,7 @@ impl CatalogController {
                 });
             }
             ObjectType::Sink => {
-                let (sink, obj) = Sink::find_by_id(job_id.as_raw_id() as ObjectId)
+                let (sink, obj) = Sink::find_by_id(job_id.as_sink_id())
                     .find_also_related(Object)
                     .one(&txn)
                     .await?
@@ -1077,7 +1093,7 @@ impl CatalogController {
                 });
             }
             ObjectType::Source => {
-                let (source, obj) = Source::find_by_id(job_id.as_raw_id() as ObjectId)
+                let (source, obj) = Source::find_by_id(job_id.as_shared_source_id())
                     .find_also_related(Object)
                     .one(&txn)
                     .await?
@@ -1349,7 +1365,7 @@ impl CatalogController {
             }
             StreamingJobType::Source => {
                 let (source, source_obj) =
-                    Source::find_by_id(original_job_id.as_raw_id() as ObjectId)
+                    Source::find_by_id(original_job_id.as_shared_source_id())
                         .find_also_related(Object)
                         .one(txn)
                         .await?
@@ -1400,8 +1416,8 @@ impl CatalogController {
             for finish_sink_context in sinks {
                 finish_fragments(
                     txn,
-                    finish_sink_context.tmp_sink_id,
-                    JobId::new(finish_sink_context.original_sink_id as _),
+                    finish_sink_context.tmp_sink_id.as_job_id(),
+                    finish_sink_context.original_sink_id.as_job_id(),
                     Default::default(),
                 )
                 .await?;
@@ -1514,7 +1530,7 @@ impl CatalogController {
             } else if let Some(source_info) = &source.source_info
                 && source_info.to_protobuf().is_shared()
             {
-                vec![JobId::new(source_id as _)]
+                vec![source_id.as_share_source_job_id()]
             } else {
                 ObjectDependency::find()
                     .select_only()
@@ -1559,7 +1575,7 @@ impl CatalogController {
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node
                         && let Some(node_inner) = &mut node.source_inner
-                        && node_inner.source_id == source_id as u32
+                        && node_inner.source_id == source_id
                     {
                         node_inner.rate_limit = rate_limit;
                         found = true;
@@ -1573,7 +1589,7 @@ impl CatalogController {
                     if let PbNodeBody::StreamFsFetch(node) = node {
                         fragment_type_mask.add(FragmentTypeFlag::FsFetch);
                         if let Some(node_inner) = &mut node.node_inner
-                            && node_inner.source_id == source_id as u32
+                            && node_inner.source_id == source_id
                         {
                             node_inner.rate_limit = rate_limit;
                             found = true;
@@ -1588,7 +1604,7 @@ impl CatalogController {
             !fragments.is_empty(),
             "source id should be used by at least one fragment"
         );
-        let fragment_ids = fragments.iter().map(|(id, _, _)| *id as u32).collect_vec();
+        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
 
         for (id, fragment_type_mask, stream_node) in fragments {
             fragment::ActiveModel {
@@ -1622,18 +1638,18 @@ impl CatalogController {
 
     fn get_fragment_actors_from_running_info(
         &self,
-        fragment_ids: impl Iterator<Item = u32>,
+        fragment_ids: impl Iterator<Item = FragmentId>,
     ) -> HashMap<FragmentId, Vec<ActorId>> {
         let mut fragment_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
 
         let info = self.env.shared_actor_infos().read_guard();
 
         for fragment_id in fragment_ids {
-            let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id as _).unwrap();
+            let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id).unwrap();
             fragment_actors
                 .entry(fragment_id as _)
                 .or_default()
-                .extend(actors.keys().map(|actor| *actor as i32));
+                .extend(actors.keys().copied());
         }
 
         fragment_actors
@@ -1688,7 +1704,7 @@ impl CatalogController {
             )));
         }
 
-        let fragment_ids: HashSet<u32> = fragments.iter().map(|(id, _, _)| *id as u32).collect();
+        let fragment_ids: HashSet<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
@@ -1746,7 +1762,7 @@ impl CatalogController {
         .await?;
 
         let fragment_actors =
-            self.get_fragment_actors_from_running_info(std::iter::once(fragment_id as u32));
+            self.get_fragment_actors_from_running_info(std::iter::once(fragment_id));
 
         txn.commit().await?;
 
@@ -1825,7 +1841,7 @@ impl CatalogController {
             };
 
         self.mutate_fragments_by_job_id(
-            JobId::new(sink_id as _),
+            sink_id.as_job_id(),
             update_sink_rate_limit,
             "sink node not found",
         )
@@ -1920,7 +1936,7 @@ impl CatalogController {
         // can be source_id or table_id
         // if updating an associated source, the preferred_id is the table_id
         // otherwise, it is the source_id
-        let mut preferred_id: i32 = source_id;
+        let mut preferred_id: i32 = source_id.as_raw_id() as _;
         let rewrite_sql = {
             let definition = source.definition.clone();
 
@@ -2040,7 +2056,7 @@ impl CatalogController {
             // if updating table with connector, the fragment_id is table id
             associate_table_id.as_job_id()
         } else {
-            JobId::new(source_id as _)
+            source_id.as_share_source_job_id()
         }]
         .into_iter()
         .chain(dep_source_job_ids.into_iter())
@@ -2168,7 +2184,7 @@ impl CatalogController {
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
-    ) -> MetaResult<(HashMap<String, String>, u32)> {
+    ) -> MetaResult<(HashMap<String, String>, SinkId)> {
         let risingwave_pb::meta::alter_connector_props_request::PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) = alter_iceberg_table_props.
             ok_or_else(|| MetaError::invalid_parameter("alter_iceberg_table_props is required"))?;
         let inner = self.inner.read().await;
@@ -2272,7 +2288,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok((props.into_iter().collect(), sink_id as u32))
+        Ok((props.into_iter().collect(), sink_id))
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(
@@ -2324,7 +2340,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let fragments: Vec<(FragmentId, ObjectId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -2382,8 +2398,8 @@ impl CatalogController {
 
                 if let Some(rate_limit) = rate_limit {
                     rate_limits.push(RateLimitInfo {
-                        fragment_id: fragment_id as u32,
-                        job_id: job_id as u32,
+                        fragment_id,
+                        job_id,
                         fragment_type_mask: fragment_type_mask as u32,
                         rate_limit,
                         node_name: node_name.unwrap().to_owned(),
@@ -2474,7 +2490,7 @@ async fn update_sink_fragment_props(
             visit_stream_node_mut(&mut stream_node, |node| {
                 if let PbNodeBody::Sink(node) = node
                     && let Some(sink_desc) = &mut node.sink_desc
-                    && sink_desc.id == sink_id as u32
+                    && sink_desc.id == sink_id
                 {
                     sink_desc.properties.extend(props.clone());
                     found = true;
@@ -2506,8 +2522,8 @@ pub struct SinkIntoTableContext {
 }
 
 pub struct FinishAutoRefreshSchemaSinkContext {
-    pub tmp_sink_id: JobId,
-    pub original_sink_id: ObjectId,
+    pub tmp_sink_id: SinkId,
+    pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
     pub new_log_store_table: Option<(TableId, Vec<PbColumnCatalog>)>,
 }

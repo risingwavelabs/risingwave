@@ -19,6 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::WorkerId;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::worker_node::Property;
@@ -131,9 +132,9 @@ fn make_source_internal_table(id: u32) -> PbTable {
         make_column(TypeName::Varchar, 1),
     ];
     PbTable {
-        id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        id: id.into(),
+        schema_id: SchemaId::placeholder(),
+        database_id: DatabaseId::placeholder(),
         name: String::new(),
         columns,
         pk: vec![PbColumnOrder {
@@ -153,9 +154,9 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
         columns.push(make_column(TypeName::Int32, 1));
     }
     PbTable {
-        id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        id: id.into(),
+        schema_id: SchemaId::placeholder(),
+        database_id: DatabaseId::placeholder(),
         name: String::new(),
         columns,
         pk: vec![PbColumnOrder {
@@ -172,9 +173,9 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
 
 fn make_empty_table(id: u32) -> PbTable {
     PbTable {
-        id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        id: id.into(),
+        schema_id: SchemaId::placeholder(),
+        database_id: DatabaseId::placeholder(),
         name: String::new(),
         columns: vec![],
         pk: vec![],
@@ -209,7 +210,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(Box::new(SourceNode {
             source_inner: Some(StreamSource {
-                source_id: 1,
+                source_id: 1.into(),
                 state_table: Some(make_source_internal_table(0)),
                 columns,
                 ..Default::default()
@@ -219,7 +220,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         ..Default::default()
     };
     fragments.push(StreamFragment {
-        fragment_id: 2,
+        fragment_id: 2.into(),
         node: Some(source_node),
         fragment_type_mask: FragmentTypeFlag::Source as u32,
         requires_singleton: false,
@@ -287,7 +288,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     };
 
     fragments.push(StreamFragment {
-        fragment_id: 1,
+        fragment_id: 1.into(),
         node: Some(simple_agg_node),
         fragment_type_mask: 0,
         requires_singleton: false,
@@ -360,7 +361,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
             // `table_id` and `table` are left empty when generated from frontend.
-            table_id: TableId::placeholder().as_raw_id(),
+            table_id: TableId::placeholder(),
             table: None,
             column_orders: vec![make_column_order(1), make_column_order(2)],
             staging_table: None,
@@ -373,7 +374,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     };
 
     fragments.push(StreamFragment {
-        fragment_id: 0,
+        fragment_id: 0.into(),
         node: Some(mview_node),
         fragment_type_mask: FragmentTypeFlag::Mview as u32,
         requires_singleton: true,
@@ -391,8 +392,8 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 4,
-            upstream_id: 1,
-            downstream_id: 0,
+            upstream_id: 1.into(),
+            downstream_id: 0.into(),
         },
         StreamFragmentEdge {
             dispatch_strategy: Some(DispatchStrategy {
@@ -401,8 +402,8 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 output_mapping: PbDispatchOutputMapping::identical(0).into(), /* dummy length as it's not used */
             }),
             link_id: 1,
-            upstream_id: 2,
-            downstream_id: 1,
+            upstream_id: 2.into(),
+            downstream_id: 1.into(),
         },
     ]
 }
@@ -422,10 +423,10 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes: HashMap<u32, WorkerNode> = std::iter::once((
-        0,
+    let worker_nodes: HashMap<WorkerId, WorkerNode> = std::iter::once((
+        0.into(),
         WorkerNode {
-            id: 0,
+            id: 0.into(),
             property: Some(Property {
                 parallelism: 8,
                 resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),

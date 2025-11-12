@@ -83,7 +83,7 @@ impl StreamPlanVisitor for RelationCollectorVisitor {
 
     fn visit_stream_source(&mut self, plan: &StreamSource) {
         if let Some(catalog) = plan.source_catalog() {
-            self.relations.insert(catalog.id.into());
+            self.relations.insert(catalog.id.as_raw_id().into());
         }
     }
 }
@@ -103,7 +103,7 @@ impl BatchPlanVisitor for RelationCollectorVisitor {
 
     fn visit_batch_source(&mut self, plan: &BatchSource) {
         if let Some(catalog) = plan.source_catalog() {
-            self.relations.insert(catalog.id.into());
+            self.relations.insert(catalog.id.as_raw_id().into());
         }
     }
 }

@@ -1,0 +1,143 @@
+control substitution on
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+create table t_refresh (id int primary key, name varchar, foo varchar) with (commit_checkpoint_interval = 10) engine = iceberg;
+
+statement ok
+insert into t_refresh values(1, 'xxx', 'a') , (2, 'yyy', 'b'), (3, 'zzz', 'c'), (4, 'www', 'd'), (5, 'zzz', 'c');
+
+statement ok
+flush;
+
+statement ok
+delete from t_refresh where id = 4;
+
+statement ok
+flush;
+
+sleep 10s
+
+query ?
+select count(*) = 1 from rw_iceberg_files where source_name = '__iceberg_source_t_refresh' and content = 'PositionDeletes';
+----
+t
+
+
+statement error Invalid key
+create table iceberg_batch_table ( primary key (id) ) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh',
+  database.name = 'public',
+  refresh_mode = 'invalid_option'
+);
+
+statement ok
+create table iceberg_batch_table ( primary key (id) ) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh',
+  database.name = 'public',
+  refresh_mode = 'FULL_RECOMPUTE'
+);
+
+
+statement ok
+refresh table iceberg_batch_table;
+
+sleep 10s
+
+query I
+select id from t_refresh order by id;
+----
+1
+2
+3
+5
+
+query I
+select id from iceberg_batch_table order by id;
+----
+1
+2
+3
+5
+
+# ==== end PositionDeletes
+
+statement ok
+delete from t_refresh where name = 'zzz' and foo = 'c';
+
+statement ok
+flush;
+
+sleep 10s
+
+query ?
+select count(*) = 1 from rw_iceberg_files where source_name = '__iceberg_source_t_refresh' and content = 'EqualityDeletes';
+----
+t
+
+
+statement ok
+refresh table iceberg_batch_table;
+
+sleep 10s
+
+query I
+select id from t_refresh order by id;
+----
+1
+2
+
+
+query I
+select id from iceberg_batch_table order by id;
+----
+1
+2
+
+
+# Cleanup
+
+statement ok
+drop table iceberg_batch_table;
+
+statement ok
+drop table t_refresh;
+
+statement ok
+drop connection my_conn;
+
+statement ok
+drop secret my_secret;

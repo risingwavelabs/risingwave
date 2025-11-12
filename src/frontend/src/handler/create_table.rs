@@ -478,7 +478,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
@@ -523,6 +524,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         CreateSourceType::Table,
         rate_limit,
         sql_column_strategy,
+        refresh_mode,
     )
     .await?;
 
@@ -889,7 +891,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let cdc_table_type = ExternalCdcTableType::from_properties(&options);
     let cdc_table_desc = CdcTableDesc {
         table_id,
-        source_id: source.id.into(), // id of cdc source streaming job
+        source_id: source.id, // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: non_generated_column_descs,
@@ -1477,7 +1479,7 @@ pub async fn handle_create_table(
     );
 
     let dependencies = shared_source_id
-        .map(|id| HashSet::from([id as ObjectId]))
+        .map(|id| HashSet::from([id.as_raw_id() as ObjectId]))
         .unwrap_or_default();
 
     // Handle engine
@@ -1602,14 +1604,14 @@ pub async fn create_iceberg_engine_table(
         .env()
         .catalog_reader()
         .read_guard()
-        .get_database_by_id(&table.database_id)?
+        .get_database_by_id(table.database_id)?
         .name()
         .to_owned();
     let rw_schema_name = session
         .env()
         .catalog_reader()
         .read_guard()
-        .get_schema_by_id(&table.database_id, &table.schema_id)?
+        .get_schema_by_id(table.database_id, table.schema_id)?
         .name()
         .clone();
     let iceberg_catalog_name = rw_db_name.clone();
@@ -2053,7 +2055,8 @@ pub async fn create_iceberg_engine_table(
 
     let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
-    let with_properties = bind_connector_props(&source_handler_args, &format_encode, true)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&source_handler_args, &format_encode, true)?;
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
     // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
@@ -2093,6 +2096,7 @@ pub async fn create_iceberg_engine_table(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
+        refresh_mode,
     )
     .await?;
 
@@ -2356,7 +2360,7 @@ pub async fn generate_stream_graph_for_replace_table(
         table.associated_source_id = Some(source_id);
 
         let source = source.as_mut().unwrap();
-        source.id = source_id.as_raw_id();
+        source.id = source_id;
         source.associated_table_id = Some(table.id());
     }
 

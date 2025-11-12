@@ -22,7 +22,7 @@ use crate::version::HummockVersion;
 
 pub type TableStatsMap = HashMap<TableId, TableStats>;
 
-pub type PbTableStatsMap = HashMap<u32, PbTableStats>;
+pub type PbTableStatsMap = HashMap<TableId, PbTableStats>;
 
 #[derive(Default, Debug, Clone)]
 pub struct TableStats {
@@ -93,21 +93,21 @@ pub fn add_table_stats_map(this: &mut TableStatsMap, other: &TableStatsMap) {
 
 pub fn to_prost_table_stats_map(
     table_stats: impl Borrow<TableStatsMap>,
-) -> HashMap<u32, PbTableStats> {
+) -> HashMap<TableId, PbTableStats> {
     table_stats
         .borrow()
         .iter()
-        .map(|(t, s)| (t.as_raw_id(), s.into()))
+        .map(|(t, s)| (*t, s.into()))
         .collect()
 }
 
 pub fn from_prost_table_stats_map(
-    table_stats: impl Borrow<HashMap<u32, PbTableStats>>,
+    table_stats: impl Borrow<HashMap<TableId, PbTableStats>>,
 ) -> HashMap<TableId, TableStats> {
     table_stats
         .borrow()
         .iter()
-        .map(|(t, s)| (t.into(), s.into()))
+        .map(|(t, s)| (*t, s.into()))
         .collect()
 }
 
@@ -120,7 +120,7 @@ pub fn purge_prost_table_stats(
         hummock_version
             .state_table_info
             .info()
-            .contains_key(&TableId::new(*table_id))
+            .contains_key(table_id)
     });
     prev_count != table_stats.len()
 }

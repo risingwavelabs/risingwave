@@ -73,7 +73,7 @@ pub(crate) fn resolve_index_schema(
     Ok((schema_name.to_owned(), table.clone(), index_table_name))
 }
 
-struct IndexColumnExprValidator {
+pub(crate) struct IndexColumnExprValidator {
     allow_impure: bool,
     result: Result<()>,
 }
@@ -86,7 +86,7 @@ impl IndexColumnExprValidator {
         )
     }
 
-    fn validate(expr: &ExprImpl, allow_impure: bool) -> Result<()> {
+    pub(crate) fn validate(expr: &ExprImpl, allow_impure: bool) -> Result<()> {
         match expr {
             ExprImpl::InputRef(_) | ExprImpl::FunctionCall(_) => {}
             other_expr => {
@@ -455,8 +455,8 @@ pub(crate) fn gen_create_index_plan(
         database_id: index_database_id,
         name: index_table_name,
         owner: index_table.owner,
-        index_table_id: TableId::placeholder().as_raw_id(),
-        primary_table_id: table.id.as_raw_id(),
+        index_table_id: TableId::placeholder(),
+        primary_table_id: table.id,
         index_item,
         index_column_properties,
         index_columns_len,

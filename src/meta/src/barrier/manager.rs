@@ -62,7 +62,7 @@ impl GlobalBarrierManager {
             .list_background_creating_jobs(true, None)
             .await?;
         for (job_id, definition, _init_at) in job_info {
-            if let Entry::Vacant(e) = ddl_progress.entry(job_id as _) {
+            if let Entry::Vacant(e) = ddl_progress.entry(job_id) {
                 warn!(%job_id, "background job has no ddl progress");
                 e.insert(DdlProgress {
                     id: job_id.as_raw_id() as u64,
@@ -94,7 +94,7 @@ impl GlobalBarrierManager {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(BarrierManagerRequest::UpdateDatabaseBarrier {
-                database_id: (database_id as u32).into(),
+                database_id,
                 barrier_interval_ms,
                 checkpoint_frequency,
                 sender: tx,
