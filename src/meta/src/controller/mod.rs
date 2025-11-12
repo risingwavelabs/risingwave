@@ -263,7 +263,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             optional_associated_source_id: value
                 .0
                 .optional_associated_source_id
-                .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
+                .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id.as_raw_id())),
             description: value.0.description,
             #[expect(deprecated)]
             incoming_sinks: vec![],

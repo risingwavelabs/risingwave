@@ -217,7 +217,8 @@ mod tests {
             sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_owned(),
             ..Default::default()
         };
-        mgr.create_view(pb_view, HashSet::from([source_id])).await?;
+        mgr.create_view(pb_view, HashSet::from([source_id.as_raw_id() as _]))
+            .await?;
         let view_id: ViewId = View::find()
             .select_only()
             .column(view::Column::ViewId)
@@ -227,7 +228,8 @@ mod tests {
             .await?
             .unwrap();
 
-        mgr.alter_name(ObjectType::Source, source_id, "s2").await?;
+        mgr.alter_name(ObjectType::Source, source_id.as_raw_id() as _, "s2")
+            .await?;
         let source = Source::find_by_id(source_id)
             .one(&mgr.inner.read().await.db)
             .await?
@@ -252,8 +254,12 @@ mod tests {
             "CREATE VIEW view_1 AS SELECT v1 FROM s2 AS s1"
         );
 
-        mgr.drop_object(ObjectType::Source, source_id, DropMode::Cascade)
-            .await?;
+        mgr.drop_object(
+            ObjectType::Source,
+            source_id.as_raw_id() as _,
+            DropMode::Cascade,
+        )
+        .await?;
         assert!(
             View::find_by_id(view_id)
                 .one(&mgr.inner.read().await.db)

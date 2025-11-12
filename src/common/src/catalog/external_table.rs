@@ -18,6 +18,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::secret::PbSecretRef;
 
 use super::{ColumnDesc, ColumnId, TableId};
+use crate::id::SourceId;
 use crate::util::sort_util::ColumnOrder;
 
 /// Necessary information for compute node to access data in the external database.
@@ -28,7 +29,7 @@ pub struct CdcTableDesc {
     pub table_id: TableId,
 
     /// Id of the upstream source in sharing cdc mode
-    pub source_id: TableId,
+    pub source_id: SourceId,
 
     /// The full name of the table in external database, e.g. `database_name.table_name` in MySQL
     /// and `schema_name.table_name` in the Postgres.
@@ -51,7 +52,7 @@ impl CdcTableDesc {
     pub fn to_protobuf(&self) -> ExternalTableDesc {
         ExternalTableDesc {
             table_id: self.table_id,
-            source_id: self.source_id.as_raw_id(),
+            source_id: self.source_id,
             columns: self.columns.iter().map(Into::into).collect(),
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
             table_name: self.external_table_name.clone(),

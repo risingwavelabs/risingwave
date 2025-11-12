@@ -643,7 +643,9 @@ impl JsonParseOptions {
 
                 match self.bytea_handling {
                     ByteaHandling::Standard => {
-                        str_to_bytea(value_str).map_err(|_| create_error())?.into()
+                        let mut buf = Vec::new();
+                        str_to_bytea(value_str, &mut buf).map_err(|_| create_error())?;
+                        buf.into()
                     }
                     ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
                         .decode(value_str)

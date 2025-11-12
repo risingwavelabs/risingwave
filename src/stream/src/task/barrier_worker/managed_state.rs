@@ -25,6 +25,7 @@ use futures::FutureExt;
 use futures::stream::FuturesOrdered;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::SourceId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
@@ -1029,7 +1030,7 @@ impl DatabaseManagedBarrierState {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
@@ -1043,7 +1044,7 @@ impl DatabaseManagedBarrierState {
                 .push(PbListFinishedSource {
                     reporter_actor_id: actor_id,
                     table_id,
-                    associated_source_id: associated_source_id.as_raw_id(),
+                    associated_source_id,
                 });
         } else {
             warn!(
@@ -1059,7 +1060,7 @@ impl DatabaseManagedBarrierState {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
@@ -1073,7 +1074,7 @@ impl DatabaseManagedBarrierState {
                 .push(PbLoadFinishedSource {
                     reporter_actor_id: actor_id,
                     table_id,
-                    associated_source_id: associated_source_id.as_raw_id(),
+                    associated_source_id,
                 });
         } else {
             warn!(

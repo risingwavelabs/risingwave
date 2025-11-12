@@ -66,6 +66,9 @@ for_all_wrapped_id_fields! (
         InsertNode {
             table_id: TableId,
         }
+        SourceNode {
+            source_id: SourceId,
+        }
         SysRowSeqScanNode {
             table_id: TableId,
         }
@@ -112,6 +115,7 @@ for_all_wrapped_id_fields! (
             auto_refresh_schema_from_table: TableId,
         }
         Source {
+            id: SourceId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
@@ -195,6 +199,9 @@ for_all_wrapped_id_fields! (
         }
         DropSinkRequest {
             sink_id: SinkId,
+        }
+        DropSourceRequest {
+            source_id: SourceId,
         }
         DropTableRequest {
             table_id: TableId,
@@ -314,6 +321,7 @@ for_all_wrapped_id_fields! (
         }
         AlterConnectorPropsRequest.AlterIcebergTableIds {
             sink_id: SinkId,
+            source_id: SourceId,
         }
         CancelCreatingJobsRequest.CreatingJobIds {
             job_ids: JobId,
@@ -373,6 +381,7 @@ for_all_wrapped_id_fields! (
         }
         GetClusterInfoResponse {
             actor_splits: ActorId,
+            source_infos: SourceId,
         }
         GetFragmentByIdRequest {
             fragment_id: FragmentId,
@@ -395,6 +404,7 @@ for_all_wrapped_id_fields! (
         ListActorSplitsResponse.ActorSplit {
             actor_id: ActorId,
             fragment_id: FragmentId,
+            source_id: SourceId,
         }
         ListActorStatesResponse.ActorState {
             actor_id: ActorId,
@@ -430,6 +440,7 @@ for_all_wrapped_id_fields! (
         }
         RefreshRequest {
             table_id: TableId,
+            associated_source_id: SourceId,
         }
         SetSyncLogStoreAlignedRequest {
             job_id: JobId,
@@ -471,6 +482,7 @@ for_all_wrapped_id_fields! (
     plan_common {
         ExternalTableDesc {
             table_id: TableId,
+            source_id: SourceId,
         }
         StorageTableDesc {
             table_id: TableId,
@@ -506,6 +518,9 @@ for_all_wrapped_id_fields! (
         Barrier {
             passed_actors: ActorId,
         }
+        CdcFilterNode {
+            upstream_source_id: SourceId,
+        }
         DeltaIndexJoinNode {
             left_table_id: TableId,
             right_table_id: TableId,
@@ -516,6 +531,12 @@ for_all_wrapped_id_fields! (
         DmlNode {
             table_id: TableId,
         }
+        ListFinishMutation {
+            associated_source_id: SourceId,
+        }
+        LoadFinishMutation {
+            associated_source_id: SourceId,
+        }
         MaterializeNode {
             table_id: TableId,
         }
@@ -524,9 +545,13 @@ for_all_wrapped_id_fields! (
         }
         RefreshStartMutation {
             table_id: TableId,
+            associated_source_id: SourceId,
         }
         SinkDesc {
             id: SinkId,
+        }
+        SourceBackfillNode {
+            upstream_source_id: SourceId,
         }
         SourceChangeSplitMutation {
             actor_splits: ActorId,
@@ -556,8 +581,16 @@ for_all_wrapped_id_fields! (
             upstream_id: FragmentId,
             downstream_id: FragmentId,
         }
+        StreamFsFetch {
+            source_id: SourceId,
+            associated_table_id: TableId,
+        }
         StreamScanNode {
             table_id: TableId,
+        }
+        StreamSource {
+            source_id: SourceId,
+            associated_table_id: TableId,
         }
         SubscriptionUpstreamInfo {
             upstream_mv_table_id: TableId,
@@ -599,6 +632,8 @@ for_all_wrapped_id_fields! (
             table_watermarks: TableId,
             vector_index_adds: TableId,
             worker_id: WorkerId,
+            list_finished_source_ids: SourceId,
+            load_finished_source_ids: SourceId,
         }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
@@ -610,10 +645,12 @@ for_all_wrapped_id_fields! (
         BarrierCompleteResponse.ListFinishedSource {
             reporter_actor_id: ActorId,
             table_id: TableId,
+            associated_source_id: SourceId,
         }
         BarrierCompleteResponse.LoadFinishedSource {
             reporter_actor_id: ActorId,
             table_id: TableId,
+            associated_source_id: SourceId,
         }
         BarrierCompleteResponse.LocalSstableInfo {
             table_stats_map: TableId,

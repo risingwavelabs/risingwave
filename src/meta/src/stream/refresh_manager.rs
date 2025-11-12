@@ -21,6 +21,7 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
 
@@ -134,7 +135,7 @@ impl RefreshManager {
         shared_actor_infos: &SharedActorInfos,
     ) -> MetaResult<RefreshResponse> {
         let table_id = request.table_id;
-        let associated_source_id = TableId::new(request.associated_source_id);
+        let associated_source_id = request.associated_source_id;
 
         // Validate that the table exists and is refreshable
         self.validate_refreshable_table(table_id, associated_source_id)
@@ -257,7 +258,7 @@ impl RefreshManager {
     async fn validate_refreshable_table(
         &self,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     ) -> MetaResult<()> {
         // Check if table exists in catalog
         let table = self

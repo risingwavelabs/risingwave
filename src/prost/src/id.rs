@@ -235,6 +235,7 @@ pub type FragmentId = TypedId<5>;
 pub type ActorId = TypedId<6>;
 pub type WorkerId = TypedId<7>;
 pub type SinkId = TypedId<8>;
+pub type SourceId = TypedId<9>;
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {
@@ -248,6 +249,10 @@ impl JobId {
     pub fn as_sink_id(self) -> SinkId {
         SinkId::new(self.0)
     }
+
+    pub fn as_shared_source_id(self) -> SourceId {
+        SourceId::new(self.0)
+    }
 }
 
 impl TableId {
@@ -259,6 +264,16 @@ impl TableId {
 impl SinkId {
     pub fn as_job_id(self) -> JobId {
         JobId::new(self.0)
+    }
+}
+
+impl SourceId {
+    pub fn as_share_source_job_id(self) -> JobId {
+        JobId::new(self.0)
+    }
+
+    pub fn as_cdc_table_id(self) -> TableId {
+        TableId::new(self.0)
     }
 }
 
@@ -279,7 +294,8 @@ impl_into_object!(
     DatabaseId,
     TableId,
     SchemaId,
-    SinkId
+    SinkId,
+    SourceId
 );
 
 impl_into_object!(
@@ -287,7 +303,8 @@ impl_into_object!(
     DatabaseId,
     TableId,
     SchemaId,
-    SinkId
+    SinkId,
+    SourceId
 );
 
 impl_into_object!(
@@ -295,5 +312,6 @@ impl_into_object!(
     DatabaseId,
     TableId,
     SchemaId,
-    SinkId
+    SinkId,
+    SourceId
 );

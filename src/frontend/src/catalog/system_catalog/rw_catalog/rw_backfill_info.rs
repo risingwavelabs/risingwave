@@ -67,7 +67,7 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
                         .as_ref()
                         .map(|table| table.id.as_raw_id() as i32)
                         .unwrap_or(0),
-                    backfill_target_relation_id: node.upstream_source_id as i32,
+                    backfill_target_relation_id: node.upstream_source_id.as_raw_id() as i32,
                     backfill_type: backfill_type.to_string(),
                     backfill_epoch: 0,
                 });

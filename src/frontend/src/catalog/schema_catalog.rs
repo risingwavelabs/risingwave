@@ -700,7 +700,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SourceCatalog>> {
         self.source_by_name
             .values()
-            .filter(|s| has_access_to_object(user, s.id, s.owner))
+            .filter(|s| has_access_to_object(user, s.id.as_raw_id(), s.owner))
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
@@ -826,8 +826,8 @@ impl SchemaCatalog {
         self.source_by_name.get(source_name)
     }
 
-    pub fn get_source_by_id(&self, source_id: &SourceId) -> Option<&Arc<SourceCatalog>> {
-        self.source_by_id.get(source_id)
+    pub fn get_source_by_id(&self, source_id: SourceId) -> Option<&Arc<SourceCatalog>> {
+        self.source_by_id.get(&source_id)
     }
 
     pub fn get_sink_by_name(
@@ -1023,7 +1023,7 @@ impl SchemaCatalog {
                 owner: index.owner(),
                 object: Object::TableId(oid),
             })
-        } else if let Some(source) = self.get_source_by_id(&oid) {
+        } else if let Some(source) = self.get_source_by_id(oid.into()) {
             Some(OwnedGrantObject {
                 owner: source.owner,
                 object: Object::SourceId(oid),
@@ -1064,9 +1064,9 @@ impl SchemaCatalog {
     }
 
     pub fn contains_object(&self, oid: u32) -> bool {
-        self.table_by_id.contains_key(&TableId::new(oid))
+        self.table_by_id.contains_key(&oid.into())
             || self.index_by_id.contains_key(&IndexId::new(oid))
-            || self.source_by_id.contains_key(&oid)
+            || self.source_by_id.contains_key(&oid.into())
             || self.sink_by_id.contains_key(&oid.into())
             || self.view_by_id.contains_key(&oid)
             || self.function_by_id.contains_key(&FunctionId::new(oid))
