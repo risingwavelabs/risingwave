@@ -69,7 +69,7 @@ pub mod auto {
             }
             StreamPlanNodeType::StreamSourceScan => {
                 let source_scan = plan.as_stream_source_scan().expect("source scan");
-                let relation_id = source_scan.source_catalog().id;
+                let relation_id = source_scan.source_catalog().id.as_raw_id();
                 Some(BackfillTreeNode::Scan { id: relation_id })
             }
             StreamPlanNodeType::StreamUnion => {
@@ -259,7 +259,7 @@ mod fixed {
                 }
                 StreamPlanNodeType::StreamSourceScan => {
                     let source_scan = plan.as_stream_source_scan().expect("source scan");
-                    let relation_id = source_scan.source_catalog().id;
+                    let relation_id = source_scan.source_catalog().id.as_raw_id();
                     relation_ids.insert(relation_id);
                 }
                 _ => {}
@@ -406,7 +406,7 @@ mod common {
         if let Some(table) = schema_catalog.get_created_table_by_name(name) {
             Ok(table.id().as_raw_id())
         } else if let Some(source) = schema_catalog.get_source_by_name(name) {
-            Ok(source.id)
+            Ok(source.id.as_raw_id())
         } else {
             Err(CatalogError::NotFound("table or source", name.to_owned()).into())
         }

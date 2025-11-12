@@ -46,6 +46,7 @@ use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
+use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -396,7 +397,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSource(source_id as _, drop_mode))
+            .run_command(DdlCommand::DropSource(source_id, drop_mode))
             .await?;
 
         Ok(Response::new(DropSourceResponse {
@@ -695,7 +696,7 @@ impl DdlService for DdlServiceImpl {
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Table(
-                    source_id.map(|PbSourceId::Id(id)| id as _),
+                    source_id.map(|PbSourceId::Id(id)| id.into()),
                     table_id,
                 ),
                 drop_mode,
@@ -1576,7 +1577,7 @@ impl DdlService for DdlServiceImpl {
                 table_catalog.optional_associated_source_id.unwrap();
             let actors_to_apply = self
                 .metadata_manager
-                .update_source_rate_limit_by_source_id(source_id as _, source_rate_limit)
+                .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
             let mutation: ThrottleConfig = actors_to_apply
                 .into_iter()

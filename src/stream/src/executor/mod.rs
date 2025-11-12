@@ -55,13 +55,14 @@ use risingwave_pb::stream_plan::{
 };
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
 
 use crate::error::StreamResult;
 use crate::executor::exchange::input::{
     BoxedActorInput, BoxedInput, apply_dispatcher_barrier, assert_equal_dispatcher_barrier,
     new_input,
 };
+use crate::executor::monitor::ActorInputMetrics;
 use crate::executor::prelude::StreamingMetrics;
 use crate::executor::watermark::BufferedWatermarks;
 use crate::task::{ActorId, FragmentId, LocalBarrierManager};
@@ -165,6 +166,7 @@ pub use now::*;
 pub use over_window::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
+use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
@@ -371,13 +373,13 @@ pub enum Mutation {
     },
     RefreshStart {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     ListFinish {
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     LoadFinish {
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
 }
 
@@ -905,17 +907,17 @@ impl Mutation {
                 associated_source_id,
             } => PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
                 table_id: *table_id,
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
             Mutation::ListFinish {
                 associated_source_id,
             } => PbMutation::ListFinish(risingwave_pb::stream_plan::ListFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
             Mutation::LoadFinish {
                 associated_source_id,
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
         }
     }
@@ -1092,13 +1094,13 @@ impl Mutation {
             }
             PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
                 table_id: refresh_start.table_id,
-                associated_source_id: TableId::new(refresh_start.associated_source_id),
+                associated_source_id: refresh_start.associated_source_id,
             },
             PbMutation::ListFinish(list_finish) => Mutation::ListFinish {
-                associated_source_id: TableId::new(list_finish.associated_source_id),
+                associated_source_id: list_finish.associated_source_id,
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
-                associated_source_id: TableId::new(load_finish.associated_source_id),
+                associated_source_id: load_finish.associated_source_id,
             },
         };
         Ok(mutation)
@@ -1734,18 +1736,34 @@ impl DispatchBarrierBuffer {
     pub async fn await_next_message(
         &mut self,
         stream: &mut (impl Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin),
+        metrics: &ActorInputMetrics,
     ) -> StreamExecutorResult<DispatcherMessage> {
-        tokio::select! {
-            biased;
+        let mut start_time = Instant::now();
+        let interval_duration = Duration::from_secs(15);
+        let mut interval =
+            tokio::time::interval_at(start_time + interval_duration, interval_duration);
 
-            msg = stream.try_next() => {
-                msg?.ok_or_else(
-                    || StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
-                )
-            }
+        loop {
+            tokio::select! {
+                biased;
+                msg = stream.try_next() => {
+                    metrics
+                        .actor_input_buffer_blocking_duration_ns
+                        .inc_by(start_time.elapsed().as_nanos() as u64);
+                    return msg?.ok_or_else(
+                        || StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
+                    );
+                }
 
-            e = self.continuously_fetch_barrier_rx() => {
-                Err(e)
+                e = self.continuously_fetch_barrier_rx() => {
+                    return Err(e);
+                }
+
+                _ = interval.tick() => {
+                    start_time = Instant::now();
+                    metrics.actor_input_buffer_blocking_duration_ns.inc_by(interval_duration.as_nanos() as u64);
+                    continue;
+                }
             }
         }
     }

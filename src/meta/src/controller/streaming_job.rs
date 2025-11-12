@@ -264,7 +264,7 @@ impl CatalogController {
                         Some(src.schema_id),
                     )
                     .await?;
-                    src.id = src_obj.oid as _;
+                    src.id = (src_obj.oid as u32).into();
                     src.optional_associated_table_id = Some(
                         PbOptionalAssociatedTableId::AssociatedTableId(job_id.as_raw_id() as _),
                     );
@@ -329,7 +329,7 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                src.id = job_id.as_raw_id();
+                src.id = job_id.as_shared_source_id();
                 let source_model: source::ActiveModel = src.clone().into();
                 Source::insert(source_model).exec(&txn).await?;
             }
@@ -775,7 +775,9 @@ impl CatalogController {
         if let Some(t) = &table_obj
             && let Some(source_id) = t.optional_associated_source_id
         {
-            Object::delete_by_id(source_id).exec(&txn).await?;
+            Object::delete_by_id(source_id.as_raw_id() as ObjectId)
+                .exec(&txn)
+                .await?;
         }
 
         let err = if is_cancelled {
@@ -1163,7 +1165,7 @@ impl CatalogController {
                 });
             }
             ObjectType::Source => {
-                let (source, obj) = Source::find_by_id(job_id.as_raw_id() as ObjectId)
+                let (source, obj) = Source::find_by_id(job_id.as_shared_source_id())
                     .find_also_related(Object)
                     .one(txn)
                     .await?
@@ -1410,7 +1412,7 @@ impl CatalogController {
             }
             StreamingJobType::Source => {
                 let (source, source_obj) =
-                    Source::find_by_id(original_job_id.as_raw_id() as ObjectId)
+                    Source::find_by_id(original_job_id.as_shared_source_id())
                         .find_also_related(Object)
                         .one(txn)
                         .await?
@@ -1575,7 +1577,7 @@ impl CatalogController {
             } else if let Some(source_info) = &source.source_info
                 && source_info.to_protobuf().is_shared()
             {
-                vec![JobId::new(source_id as _)]
+                vec![source_id.as_share_source_job_id()]
             } else {
                 ObjectDependency::find()
                     .select_only()
@@ -1620,7 +1622,7 @@ impl CatalogController {
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node
                         && let Some(node_inner) = &mut node.source_inner
-                        && node_inner.source_id == source_id as u32
+                        && node_inner.source_id == source_id
                     {
                         node_inner.rate_limit = rate_limit;
                         found = true;
@@ -1634,7 +1636,7 @@ impl CatalogController {
                     if let PbNodeBody::StreamFsFetch(node) = node {
                         fragment_type_mask.add(FragmentTypeFlag::FsFetch);
                         if let Some(node_inner) = &mut node.node_inner
-                            && node_inner.source_id == source_id as u32
+                            && node_inner.source_id == source_id
                         {
                             node_inner.rate_limit = rate_limit;
                             found = true;
@@ -1981,7 +1983,7 @@ impl CatalogController {
         // can be source_id or table_id
         // if updating an associated source, the preferred_id is the table_id
         // otherwise, it is the source_id
-        let mut preferred_id: i32 = source_id;
+        let mut preferred_id: i32 = source_id.as_raw_id() as _;
         let rewrite_sql = {
             let definition = source.definition.clone();
 
@@ -2101,7 +2103,7 @@ impl CatalogController {
             // if updating table with connector, the fragment_id is table id
             associate_table_id.as_job_id()
         } else {
-            JobId::new(source_id as _)
+            source_id.as_share_source_job_id()
         }]
         .into_iter()
         .chain(dep_source_job_ids.into_iter())

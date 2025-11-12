@@ -198,7 +198,7 @@ impl DdlCommand {
             DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
             DdlCommand::DropSchema(id, _) => Right(id.as_raw_id() as ObjectId),
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
-            DdlCommand::DropSource(id, _) => Right(*id),
+            DdlCommand::DropSource(id, _) => Right(id.as_raw_id() as ObjectId),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id, _) => Right(*id),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
@@ -585,7 +585,7 @@ impl DdlController {
         source_id: SourceId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Source, source_id as _, drop_mode)
+        self.drop_object(ObjectType::Source, source_id.as_raw_id() as _, drop_mode)
             .await
     }
 
@@ -1020,7 +1020,7 @@ impl DdlController {
                     if let Some(source_id) = source_id {
                         self.source_manager
                             .apply_source_change(SourceChange::DropSource {
-                                dropped_source_ids: vec![source_id as SourceId],
+                                dropped_source_ids: vec![source_id],
                             })
                             .await;
                     }

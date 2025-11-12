@@ -446,7 +446,7 @@ impl KafkaSplitEnumerator {
                 Offset::End => {
                     let (_, high_watermark) = watermarks.get(&elem.partition()).unwrap();
                     tracing::info!(
-                        source_id = self.context.info.source_id,
+                        source_id = %self.context.info.source_id,
                         "no message found before timestamp {} (ms) for partition {}, start from latest",
                         time,
                         elem.partition()
@@ -459,7 +459,7 @@ impl KafkaSplitEnumerator {
                     // But in madsim, it returns `Offset::Invalid`
                     // So we align to Latest here
                     tracing::info!(
-                        source_id = self.context.info.source_id,
+                        source_id = %self.context.info.source_id,
                         "got invalid offset for partition  {} at timestamp {}, align to latest",
                         elem.partition(),
                         time
@@ -470,7 +470,7 @@ impl KafkaSplitEnumerator {
                 Offset::Beginning => {
                     let (low, _) = watermarks.get(&elem.partition()).unwrap();
                     tracing::info!(
-                        source_id = self.context.info.source_id,
+                        source_id = %self.context.info.source_id,
                         "all message in partition {} is after timestamp {} (ms), start from earliest",
                         elem.partition(),
                         time,
@@ -479,7 +479,7 @@ impl KafkaSplitEnumerator {
                 }
                 err_offset @ Offset::Stored | err_offset @ Offset::OffsetTail(_) => {
                     tracing::error!(
-                        source_id = self.context.info.source_id,
+                        source_id = %self.context.info.source_id,
                         "got invalid offset for partition {}: {err_offset:?}",
                         elem.partition(),
                         err_offset = err_offset,

@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::TableId;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -49,7 +48,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let source = node.node_inner.as_ref().unwrap();
         let is_full_recompute_refresh = is_full_recompute_refresh(&source.refresh_mode);
 
-        let source_id = TableId::new(source.source_id);
+        let source_id = source.source_id;
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
         let source_options_with_secret =
@@ -117,7 +116,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         upstream,
                         params.local_barrier_manager.clone(),
                         params.config.clone(),
-                        source.associated_table_id.map(TableId::new),
+                        source.associated_table_id,
                     )
                     .boxed()
                 } else {
@@ -156,7 +155,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     upstream,
                     source.rate_limit,
                     params.local_barrier_manager.clone(),
-                    source.associated_table_id.map(TableId::new),
+                    source.associated_table_id,
                 )
                 .boxed()
             }

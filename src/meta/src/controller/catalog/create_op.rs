@@ -273,8 +273,8 @@ impl CatalogController {
             Some(pb_source.schema_id),
         )
         .await?;
-        let source_id = source_obj.oid;
-        pb_source.id = source_id as _;
+        let source_id = SourceId::new(source_obj.oid as _);
+        pb_source.id = source_id;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
@@ -284,7 +284,7 @@ impl CatalogController {
             ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(*id as _),
-                    used_by: Set(source_id as _),
+                    used_by: Set(source_id.as_raw_id() as _),
                     ..Default::default()
                 }
             }))
@@ -292,7 +292,8 @@ impl CatalogController {
             .await?;
         }
 
-        let updated_user_info = grant_default_privileges_automatically(&txn, source_id).await?;
+        let updated_user_info =
+            grant_default_privileges_automatically(&txn, source_id.as_raw_id() as _).await?;
 
         txn.commit().await?;
 
