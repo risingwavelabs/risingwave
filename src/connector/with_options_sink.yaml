@@ -679,7 +679,7 @@ IcebergConfig:
     field_type: String
     comments: |-
       Compaction type: `full`, `small-files`, or `files-with-delete`
-      If not set, will auto set to `full`
+      If not set, will default to `full`
     required: false
     default: Default::default
     allow_alter_on_fly: true

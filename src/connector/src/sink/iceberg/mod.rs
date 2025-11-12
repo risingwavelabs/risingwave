@@ -334,7 +334,6 @@ pub struct IcebergConfig {
 
     /// Compaction type: `full`, `small-files`, or `files-with-delete`
     /// If not set, will default to `full`
-    /// Stored as String to satisfy `WithOptions` requirement, but accessed via `compaction_type()` method
     #[serde(
         rename = "compaction.type",
         default,
