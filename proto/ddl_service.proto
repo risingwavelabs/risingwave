@@ -631,6 +631,14 @@ message ExpireIcebergTableSnapshotsResponse {
   common.Status status = 1;
 }
 
+message AlterStreamingJobConfigRequest {
+  uint32 job_id = 1;
+  map<string, string> entries_to_add = 2;
+  repeated string keys_to_remove = 3;
+}
+
+message AlterStreamingJobConfigResponse {}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);

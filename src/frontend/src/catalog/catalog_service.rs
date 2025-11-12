@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -32,8 +32,9 @@ use risingwave_pb::ddl_service::replace_job_plan::{
     ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
 };
 use risingwave_pb::ddl_service::{
-    PbTableJobType, TableJobType, WaitVersion, alter_name_request, alter_owner_request,
-    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
+    AlterStreamingJobConfigRequest, PbTableJobType, TableJobType, WaitVersion, alter_name_request,
+    alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
+    create_connection_request,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -226,6 +227,13 @@ pub trait CatalogWriter: Send + Sync {
         job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
+    ) -> Result<()>;
+
+    async fn alter_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
     ) -> Result<()>;
 
     async fn alter_resource_group(
@@ -624,6 +632,15 @@ impl CatalogWriter for CatalogWriterImpl {
             .map_err(|e| anyhow!(e))?;
 
         Ok(())
+    }
+
+    async fn alter_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> Result<()> {
+        todo!()
     }
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()> {
