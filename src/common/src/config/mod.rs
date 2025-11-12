@@ -336,7 +336,7 @@ pub mod default {
         }
 
         pub fn enable_actor_tokio_metrics() -> bool {
-            false
+            true
         }
 
         pub fn stream_enable_auto_schema_change() -> bool {

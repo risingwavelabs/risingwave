@@ -22,15 +22,15 @@ use prometheus::{
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounter,
-    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedIntGaugeVec, MetricVecRelabelExt,
+    LabelGuardedHistogramVec, LabelGuardedIntCounter, LabelGuardedIntCounterVec,
+    LabelGuardedIntGauge, LabelGuardedIntGaugeVec, MetricVecRelabelExt,
     RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::monitor::in_mem::CountMap;
 use risingwave_common::{
-    register_guarded_gauge_vec_with_registry, register_guarded_histogram_vec_with_registry,
-    register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::sink::catalog::SinkId;
 
@@ -54,17 +54,17 @@ pub struct StreamingMetrics {
     pub mem_stream_node_output_blocking_duration_ns: CountMap,
 
     // Streaming actor metrics from tokio (disabled by default)
-    actor_execution_time: LabelGuardedGaugeVec,
-    actor_scheduled_duration: LabelGuardedGaugeVec,
-    actor_scheduled_cnt: LabelGuardedIntGaugeVec,
-    actor_fast_poll_duration: LabelGuardedGaugeVec,
-    actor_fast_poll_cnt: LabelGuardedIntGaugeVec,
-    actor_slow_poll_duration: LabelGuardedGaugeVec,
-    actor_slow_poll_cnt: LabelGuardedIntGaugeVec,
-    actor_poll_duration: LabelGuardedGaugeVec,
-    actor_poll_cnt: LabelGuardedIntGaugeVec,
-    actor_idle_duration: LabelGuardedGaugeVec,
-    actor_idle_cnt: LabelGuardedIntGaugeVec,
+    actor_execution_duration: RelabeledGuardedIntCounterVec,
+    actor_scheduled_duration: RelabeledGuardedIntCounterVec,
+    actor_scheduled_cnt: RelabeledGuardedIntCounterVec,
+    actor_fast_poll_duration: RelabeledGuardedIntCounterVec,
+    actor_fast_poll_cnt: RelabeledGuardedIntCounterVec,
+    actor_slow_poll_duration: RelabeledGuardedIntCounterVec,
+    actor_slow_poll_cnt: RelabeledGuardedIntCounterVec,
+    actor_poll_duration: RelabeledGuardedIntCounterVec,
+    actor_poll_cnt: RelabeledGuardedIntCounterVec,
+    actor_idle_duration: RelabeledGuardedIntCounterVec,
+    actor_idle_cnt: RelabeledGuardedIntCounterVec,
 
     // Streaming actor
     pub actor_count: LabelGuardedIntGaugeVec,
@@ -302,15 +302,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
-        let actor_execution_time = register_guarded_gauge_vec_with_registry!(
-            "stream_actor_actor_execution_time",
-            "Total execution time (s) of an actor",
-            &["actor_id"],
-            registry
-        )
-        .unwrap();
-
         let actor_output_buffer_blocking_duration_ns =
             register_guarded_int_counter_vec_with_registry!(
                 "stream_actor_output_buffer_blocking_duration_ns",
@@ -339,85 +330,104 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let actor_fast_poll_duration = register_guarded_gauge_vec_with_registry!(
+        let actor_execution_duration = register_guarded_int_counter_vec_with_registry!(
+            "stream_actor_execution_duration",
+            "Total execution duration (ns) of an actor",
+            &["actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
+        let actor_fast_poll_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_fast_poll_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_fast_poll_cnt = register_guarded_int_gauge_vec_with_registry!(
+        let actor_fast_poll_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_fast_poll_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_slow_poll_duration = register_guarded_gauge_vec_with_registry!(
+        let actor_slow_poll_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_slow_poll_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_slow_poll_cnt = register_guarded_int_gauge_vec_with_registry!(
+        let actor_slow_poll_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_slow_poll_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_poll_duration = register_guarded_gauge_vec_with_registry!(
+        let actor_poll_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_poll_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_poll_cnt = register_guarded_int_gauge_vec_with_registry!(
+        let actor_poll_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_poll_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_scheduled_duration = register_guarded_gauge_vec_with_registry!(
+        let actor_scheduled_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_scheduled_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_scheduled_cnt = register_guarded_int_gauge_vec_with_registry!(
+        let actor_scheduled_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_scheduled_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_idle_duration = register_guarded_gauge_vec_with_registry!(
+        let actor_idle_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_idle_duration",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
-        let actor_idle_cnt = register_guarded_int_gauge_vec_with_registry!(
+        let actor_idle_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_idle_cnt",
             "tokio's metrics",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
-        .unwrap();
+        .unwrap()
+        .relabel_debug_1(level);
 
         let actor_in_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_in_record_cnt",
@@ -1191,7 +1201,6 @@ impl StreamingMetrics {
             executor_row_count,
             mem_stream_node_output_row_count: stream_node_output_row_count,
             mem_stream_node_output_blocking_duration_ns: stream_node_output_blocking_duration_ns,
-            actor_execution_time,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,
@@ -1216,6 +1225,7 @@ impl StreamingMetrics {
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
+            actor_execution_duration,
             join_lookup_miss_count,
             join_lookup_total_count,
             join_insert_cache_miss_count,
@@ -1312,10 +1322,10 @@ impl StreamingMetrics {
         global_streaming_metrics(MetricLevel::Disabled)
     }
 
-    pub fn new_actor_metrics(&self, actor_id: ActorId) -> ActorMetrics {
-        let label_list: &[&str; 1] = &[&actor_id.to_string()];
-        let actor_execution_time = self
-            .actor_execution_time
+    pub fn new_actor_metrics(&self, actor_id: ActorId, fragment_id: FragmentId) -> ActorMetrics {
+        let label_list: &[&str; 2] = &[&actor_id.to_string(), &fragment_id.to_string()];
+        let actor_execution_duration = self
+            .actor_execution_duration
             .with_guarded_label_values(label_list);
         let actor_scheduled_duration = self
             .actor_scheduled_duration
@@ -1344,7 +1354,7 @@ impl StreamingMetrics {
             .with_guarded_label_values(label_list);
         let actor_idle_cnt = self.actor_idle_cnt.with_guarded_label_values(label_list);
         ActorMetrics {
-            actor_execution_time,
+            actor_execution_duration,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,
@@ -1681,17 +1691,17 @@ pub(crate) struct ActorInputMetrics {
 
 /// Tokio metrics for actors
 pub struct ActorMetrics {
-    pub actor_execution_time: LabelGuardedGauge,
-    pub actor_scheduled_duration: LabelGuardedGauge,
-    pub actor_scheduled_cnt: LabelGuardedIntGauge,
-    pub actor_fast_poll_duration: LabelGuardedGauge,
-    pub actor_fast_poll_cnt: LabelGuardedIntGauge,
-    pub actor_slow_poll_duration: LabelGuardedGauge,
-    pub actor_slow_poll_cnt: LabelGuardedIntGauge,
-    pub actor_poll_duration: LabelGuardedGauge,
-    pub actor_poll_cnt: LabelGuardedIntGauge,
-    pub actor_idle_duration: LabelGuardedGauge,
-    pub actor_idle_cnt: LabelGuardedIntGauge,
+    pub actor_execution_duration: LabelGuardedIntCounter,
+    pub actor_scheduled_duration: LabelGuardedIntCounter,
+    pub actor_scheduled_cnt: LabelGuardedIntCounter,
+    pub actor_fast_poll_duration: LabelGuardedIntCounter,
+    pub actor_fast_poll_cnt: LabelGuardedIntCounter,
+    pub actor_slow_poll_duration: LabelGuardedIntCounter,
+    pub actor_slow_poll_cnt: LabelGuardedIntCounter,
+    pub actor_poll_duration: LabelGuardedIntCounter,
+    pub actor_poll_cnt: LabelGuardedIntCounter,
+    pub actor_idle_duration: LabelGuardedIntCounter,
+    pub actor_idle_cnt: LabelGuardedIntCounter,
 }
 
 pub struct SinkExecutorMetrics {
