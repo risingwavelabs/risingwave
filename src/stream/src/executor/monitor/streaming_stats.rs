@@ -1382,11 +1382,10 @@ impl StreamingMetrics {
     }
 
     pub fn new_actor_metrics(&self, actor_id: ActorId, fragment_id: FragmentId) -> ActorMetrics {
+        let label_list: &[&str; 2] = &[&actor_id.to_string(), &fragment_id.to_string()];
         let actor_execution_duration = self
             .actor_execution_duration
-            .with_guarded_label_values(&[&actor_id.to_string(), &fragment_id.to_string()]);
-
-        let label_list: &[&str; 1] = &[&actor_id.to_string()];
+            .with_guarded_label_values(label_list);
         let actor_scheduled_duration = self
             .actor_scheduled_duration
             .with_guarded_label_values(label_list);
