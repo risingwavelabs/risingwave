@@ -508,12 +508,10 @@ impl CatalogController {
         // Add streaming job objects to notification
         if need_notify {
             match creating_streaming_job.unwrap() {
-                StreamingJob::Table(source, ..) => {
-                    if let Some(source) = source {
-                        objects_to_notify.push(PbObject {
-                            object_info: Some(PbObjectInfo::Source(source.clone())),
-                        });
-                    }
+                StreamingJob::Table(Some(source), ..) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(source.clone())),
+                    });
                 }
                 StreamingJob::Sink(sink) => {
                     objects_to_notify.push(PbObject {
