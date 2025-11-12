@@ -868,11 +868,23 @@ pub async fn handle(
                 )
                 .await
             }
-            AlterTableOperation::SetConfig { .. } => {
-                bail_not_implemented!("ALTER TABLE SET CONFIG")
+            AlterTableOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_TABLE,
+                )
+                .await
             }
-            AlterTableOperation::ResetConfig { .. } => {
-                bail_not_implemented!("ALTER TABLE RESET CONFIG")
+            AlterTableOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_TABLE,
+                )
+                .await
             }
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
@@ -923,11 +935,23 @@ pub async fn handle(
                 )
                 .await
             }
-            AlterIndexOperation::SetConfig { .. } => {
-                bail_not_implemented!("ALTER INDEX SET CONFIG")
+            AlterIndexOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_INDEX,
+                )
+                .await
             }
-            AlterIndexOperation::ResetConfig { .. } => {
-                bail_not_implemented!("ALTER INDEX RESET CONFIG")
+            AlterIndexOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_INDEX,
+                )
+                .await
             }
         },
         Statement::AlterView {
@@ -1044,17 +1068,29 @@ pub async fn handle(
                     }
                     alter_mv::handle_alter_mv(handler_args, name, query).await
                 }
-                AlterViewOperation::SetConfig { .. } => {
+                AlterViewOperation::SetConfig { entries } => {
                     if !materialized {
                         bail!("SET CONFIG is only supported for materialized views");
                     }
-                    bail_not_implemented!("ALTER MATERIALIZED VIEW SET CONFIG")
+                    alter_streaming_config::handle_alter_streaming_set_config(
+                        handler_args,
+                        name,
+                        entries,
+                        statement_type,
+                    )
+                    .await
                 }
-                AlterViewOperation::ResetConfig { .. } => {
+                AlterViewOperation::ResetConfig { keys } => {
                     if !materialized {
                         bail!("RESET CONFIG is only supported for materialized views");
                     }
-                    bail_not_implemented!("ALTER MATERIALIZED VIEW RESET CONFIG")
+                    alter_streaming_config::handle_alter_streaming_reset_config(
+                        handler_args,
+                        name,
+                        keys,
+                        statement_type,
+                    )
+                    .await
                 }
             }
         }
@@ -1098,11 +1134,23 @@ pub async fn handle(
                 )
                 .await
             }
-            AlterSinkOperation::SetConfig { .. } => {
-                bail_not_implemented!("ALTER SINK SET CONFIG")
+            AlterSinkOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_SINK,
+                )
+                .await
             }
-            AlterSinkOperation::ResetConfig { .. } => {
-                bail_not_implemented!("ALTER SINK RESET CONFIG")
+            AlterSinkOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_SINK,
+                )
+                .await
             }
             AlterSinkOperation::SwapRenameSink { target_sink } => {
                 alter_swap_rename::handle_swap_rename(
@@ -1239,11 +1287,23 @@ pub async fn handle(
                 )
                 .await
             }
-            AlterSourceOperation::SetConfig { .. } => {
-                bail_not_implemented!("ALTER SOURCE SET CONFIG")
+            AlterSourceOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_SOURCE,
+                )
+                .await
             }
-            AlterSourceOperation::ResetConfig { .. } => {
-                bail_not_implemented!("ALTER SOURCE RESET CONFIG")
+            AlterSourceOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_SOURCE,
+                )
+                .await
             }
         },
         Statement::AlterFunction {

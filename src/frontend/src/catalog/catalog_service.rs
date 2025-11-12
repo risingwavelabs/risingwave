@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -32,9 +32,8 @@ use risingwave_pb::ddl_service::replace_job_plan::{
     ReplaceJob, ReplaceMaterializedView, ReplaceSource, ReplaceTable,
 };
 use risingwave_pb::ddl_service::{
-    AlterStreamingJobConfigRequest, PbTableJobType, TableJobType, WaitVersion, alter_name_request,
-    alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request,
+    PbTableJobType, TableJobType, WaitVersion, alter_name_request, alter_owner_request,
+    alter_set_schema_request, alter_swap_rename_request, create_connection_request,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -636,9 +635,9 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_config(
         &self,
-        job_id: JobId,
-        entries_to_add: HashMap<String, String>,
-        keys_to_remove: Vec<String>,
+        _job_id: JobId,
+        _entries_to_add: HashMap<String, String>,
+        _keys_to_remove: Vec<String>,
     ) -> Result<()> {
         todo!()
     }
