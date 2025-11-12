@@ -14,6 +14,8 @@
 
 use indexmap::IndexMap;
 
+use crate::kconnect::errors::{SchemaBuilderException, bail_schema_builder_exception};
+
 #[derive(Debug, Clone)]
 pub enum ConnectSchema {
     Primitive(PrimitiveSchema),
@@ -188,16 +190,26 @@ impl ConnectSchema {
 }
 
 impl StructSchema {
-    pub fn add_field(&mut self, name: impl Into<Box<str>>, schema: ConnectSchema) -> &mut Self {
+    pub fn add_field(
+        &mut self,
+        name: impl Into<Box<str>>,
+        schema: ConnectSchema,
+    ) -> Result<&mut Self, SchemaBuilderException> {
         let index = self.fields.len();
         let name = name.into();
+        if name.is_empty() {
+            bail_schema_builder_exception!("field name cannot be empty");
+        }
+        if self.fields.contains_key(&name) {
+            bail_schema_builder_exception!("field name duplication {name}");
+        }
         let field = Field {
             name: name.clone(),
             index,
             schema,
         };
         self.fields.insert(name, field);
-        self
+        Ok(self)
     }
 
     pub fn build(self) -> ConnectSchema {

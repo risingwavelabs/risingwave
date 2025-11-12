@@ -13,4 +13,5 @@
 // limitations under the License.
 
 pub mod data;
+pub mod errors;
 pub mod json;
