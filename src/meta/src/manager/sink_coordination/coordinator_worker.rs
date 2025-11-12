@@ -587,20 +587,42 @@ impl CoordinatorWorker {
                             }
                         }
 
-                        let start_time = Instant::now();
-                        run_future_with_periodic_fn(
-                            coordinator.commit(epoch, commit_metadata),
-                            Duration::from_secs(5),
-                            || {
-                                warn!(
-                                    elapsed = ?start_time.elapsed(),
-                                    %sink_id,
-                                    "committing"
-                                );
-                            },
-                        )
-                        .await
-                        .map_err(|e| anyhow!(e))?;
+                        let mut delay = Duration::from_secs(1);
+                        let max_backoff = Duration::from_secs(60);
+                        let mut attempt = 0;
+
+                        loop {
+                            let start_time = Instant::now();
+                            attempt += 1;
+                            let commit_res = run_future_with_periodic_fn(
+                                coordinator.commit(epoch, commit_metadata.clone()),
+                                Duration::from_secs(5),
+                                || {
+                                    warn!(
+                                        elapsed = ?start_time.elapsed(),
+                                        %sink_id,
+                                        "committing"
+                                    );
+                                },
+                            )
+                            .await;
+
+                            match commit_res {
+                                Ok(_) => break,
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e.as_report(),
+                                        %sink_id,
+                                        "failed to commit epoch {}, attempt {}. Retrying after {:?}",
+                                        epoch,
+                                        attempt,
+                                        delay
+                                    );
+                                    sleep(delay).await;
+                                    delay = std::cmp::min(delay * 2, max_backoff);
+                                }
+                            }
+                        }
 
                         mark_record_committed(&db, sink_id as _, epoch).await?;
                     }
