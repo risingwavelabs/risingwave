@@ -69,7 +69,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 .iter_source_with_acl(current_user)
                 .filter(|s| s.info.is_shared())
                 .for_each(|s| {
-                    job_ids.push(s.id.into());
+                    job_ids.push(s.id.as_share_source_job_id());
                 });
 
             schema_catalog
@@ -187,7 +187,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             .iter_source_with_acl(current_user)
             .for_each(|t| {
                 let (timezone, fragments) = if t.info.is_shared()
-                    && let Some(fragments) = table_fragments.get(&t.id.into())
+                    && let Some(fragments) = table_fragments.get(&t.id.as_share_source_job_id())
                 {
                     (
                         fragments.get_ctx().unwrap().get_timezone().clone(),
@@ -203,7 +203,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     relationowner: t.owner as i32,
                     definition: t.create_sql_purified(),
                     relationtype: "SOURCE".into(),
-                    relationid: t.id as i32,
+                    relationid: t.id.as_raw_id() as i32,
                     relationtimezone: timezone,
                     fragments,
                     initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),

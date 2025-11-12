@@ -806,13 +806,13 @@ impl DatabaseCheckpointControl {
                     .expect("should exist");
                 assert!(creating_streaming_job.is_finished());
 
-                let mut source_backfill_fragments = HashMap::new();
+                let mut source_backfill_fragments: HashMap<SourceId, _> = HashMap::new();
                 for info in creating_streaming_job.graph_info().fragment_infos() {
                     if let Some((source_id, upstream_source_fragment_id)) =
                         info.nodes.find_source_backfill()
                     {
                         source_backfill_fragments
-                            .entry(source_id as SourceId)
+                            .entry(source_id)
                             .or_insert(BTreeSet::new())
                             .insert((info.fragment_id, upstream_source_fragment_id));
                     }

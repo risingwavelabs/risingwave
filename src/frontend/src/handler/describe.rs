@@ -265,7 +265,7 @@ pub async fn handle_describe_fragments(
             match relation {
                 Relation::Source(s) => {
                     if s.is_shared() {
-                        s.catalog.id.into()
+                        s.catalog.id.as_share_source_job_id()
                     } else {
                         bail!(ErrorCode::NotSupported(
                             "non shared source has no fragments to describe".to_owned(),

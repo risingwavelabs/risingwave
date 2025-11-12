@@ -550,7 +550,11 @@ impl CatalogController {
                     .into_iter()
                     .map(|table_id| table_id.as_raw_id() as _),
             )
-            .chain(dirty_associated_source_ids.clone().into_iter())
+            .chain(
+                dirty_associated_source_ids
+                    .iter()
+                    .map(|source_id| source_id.as_raw_id() as _),
+            )
             .collect();
 
         let res = Object::delete_many()

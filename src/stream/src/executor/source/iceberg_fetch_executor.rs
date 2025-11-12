@@ -23,10 +23,10 @@ use risingwave_common::array::{DataChunk, Op, SerialArray};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnId, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
-    TableId,
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::id::SourceId;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
@@ -394,7 +394,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
     fn build_source_ctx(
         &self,
         source_desc: &SourceDesc,
-        source_id: TableId,
+        source_id: SourceId,
         source_name: &str,
     ) -> SourceContext {
         SourceContext::new(

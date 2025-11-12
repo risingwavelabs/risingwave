@@ -546,7 +546,7 @@ impl StreamJobFragments {
             {
                 if let Some(source_id) = fragment.nodes.find_stream_source() {
                     source_fragments
-                        .entry(source_id as SourceId)
+                        .entry(source_id)
                         .or_insert(BTreeSet::new())
                         .insert(fragment.fragment_id as FragmentId);
                 }
@@ -580,7 +580,7 @@ impl StreamJobFragments {
                     fragment_node.find_source_backfill()
                 {
                     source_backfill_fragments
-                        .entry(source_id as SourceId)
+                        .entry(source_id)
                         .or_insert(BTreeSet::new())
                         .insert((fragment_id, upstream_source_fragment_id));
                 }

@@ -650,7 +650,7 @@ pub async fn handle_show_object(
                         .get_source_ids_by_connection(c.id)
                         .unwrap_or_default()
                         .into_iter()
-                        .filter_map(|sid| schema.get_source_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .filter_map(|sid| schema.get_source_by_id(sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let sink_names = schema
                         .get_sink_ids_by_connection(c.id)
@@ -912,7 +912,7 @@ pub fn handle_show_create_object(
                             .get_source_by_name(&object_name)
                             .filter(|s| {
                                 s.associated_table_id.is_none()
-                                    && has_access_to_object(current_user, s.id, s.owner)
+                                    && has_access_to_object(current_user, s.id.as_raw_id(), s.owner)
                             }),
                     )
                 })?

@@ -388,7 +388,7 @@ impl Catalog {
     pub fn update_source(&mut self, proto: &PbSource) {
         let database = self.get_database_mut(proto.database_id).unwrap();
         let schema = database.get_schema_mut(proto.schema_id).unwrap();
-        if schema.get_source_by_id(&proto.id).is_some() {
+        if schema.get_source_by_id(proto.id).is_some() {
             schema.update_source(proto);
         } else {
             // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
@@ -396,7 +396,7 @@ impl Catalog {
             database
                 .iter_schemas_mut()
                 .find(|schema| {
-                    schema.id() != proto.schema_id && schema.get_source_by_id(&proto.id).is_some()
+                    schema.id() != proto.schema_id && schema.get_source_by_id(proto.id).is_some()
                 })
                 .unwrap()
                 .drop_source(proto.id);
@@ -645,7 +645,7 @@ impl Catalog {
         &self,
         db_name: &'a str,
         schema_path: SchemaPath<'a>,
-        source_id: &SourceId,
+        source_id: SourceId,
     ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
         schema_path
             .try_find(|schema_name| {
@@ -1162,7 +1162,7 @@ impl Catalog {
                 } else if let Some(item) = schema.get_any_index_by_name(class_name) {
                     Ok(Some(item.id.into()))
                 } else if let Some(item) = schema.get_source_by_name(class_name) {
-                    Ok(Some(item.id))
+                    Ok(Some(item.id.as_raw_id()))
                 } else if let Some(item) = schema.get_view_by_name(class_name) {
                     Ok(Some(item.id))
                 } else if let Some(item) = schema.get_any_sink_by_name(class_name) {

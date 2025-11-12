@@ -19,7 +19,7 @@ use risingwave_common::catalog::TableVersionId;
 use risingwave_common::id::{DatabaseId, JobId, SchemaId};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
-use risingwave_meta_model::{SourceId, TableVersion, source, table};
+use risingwave_meta_model::{TableVersion, source, table};
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use sea_orm::entity::prelude::*;
@@ -124,7 +124,7 @@ impl StreamingJob {
             Self::Sink(sink) => sink.id.as_job_id(),
             Self::Table(_, table, ..) => table.id.as_job_id(),
             Self::Index(index, _) => index.id.into(),
-            Self::Source(source) => source.id.into(),
+            Self::Source(source) => source.id.as_share_source_job_id(),
         }
     }
 
@@ -295,7 +295,7 @@ impl StreamingJob {
             StreamingJob::Source(source) => {
                 let new_version = source.get_version();
                 let original_version: Option<i64> =
-                    SourceModel::find_by_id(id.as_raw_id() as SourceId)
+                    SourceModel::find_by_id(id.as_shared_source_id())
                         .select_only()
                         .column(source::Column::Version)
                         .into_tuple()

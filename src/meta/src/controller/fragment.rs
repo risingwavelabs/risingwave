@@ -1656,7 +1656,7 @@ impl CatalogController {
         for (fragment_id, stream_node) in fragments {
             if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {
                 source_fragment_ids
-                    .entry(source_id as SourceId)
+                    .entry(source_id)
                     .or_insert_with(BTreeSet::new)
                     .insert(fragment_id);
             }
@@ -1682,7 +1682,7 @@ impl CatalogController {
                 stream_node.to_protobuf().find_source_backfill()
             {
                 source_fragment_ids
-                    .entry(source_id as SourceId)
+                    .entry(source_id)
                     .or_insert_with(BTreeSet::new)
                     .insert((fragment_id, upstream_source_fragment_id));
             }

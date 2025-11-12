@@ -829,7 +829,11 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<WaitVersion> {
+    pub async fn drop_source(
+        &self,
+        source_id: risingwave_common::id::SourceId,
+        cascade: bool,
+    ) -> Result<WaitVersion> {
         let request = DropSourceRequest { source_id, cascade };
         let resp = self.inner.drop_source(request).await?;
         Ok(resp
@@ -1463,7 +1467,7 @@ impl MetaClient {
         &self,
         table_id: TableId,
         sink_id: SinkId,
-        source_id: u32,
+        source_id: risingwave_common::id::SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
@@ -1476,7 +1480,7 @@ impl MetaClient {
             object_type: AlterConnectorPropsObject::IcebergTable as i32,
             extra_options: Some(ExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds {
                 sink_id,
-                source_id: source_id as i32,
+                source_id,
             })),
         };
         let _resp = self.inner.alter_connector_props(req).await?;
@@ -1485,13 +1489,13 @@ impl MetaClient {
 
     pub async fn alter_source_connector_props(
         &self,
-        source_id: u32,
+        source_id: risingwave_common::id::SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<u32>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
-            object_id: source_id,
+            object_id: source_id.as_raw_id(),
             changed_props: changed_props.into_iter().collect(),
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
@@ -1740,14 +1744,14 @@ impl MetaClient {
 
     pub async fn add_cdc_auto_schema_change_fail_event(
         &self,
-        table_id: TableId,
+        source_id: risingwave_common::id::SourceId,
         table_name: String,
         cdc_table_id: String,
         upstream_ddl: String,
         fail_info: String,
     ) -> Result<()> {
         let event = event_log::EventAutoSchemaChangeFail {
-            table_id,
+            table_id: source_id.as_cdc_table_id(),
             table_name,
             cdc_table_id,
             upstream_ddl,

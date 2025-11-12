@@ -93,7 +93,7 @@ impl From<PbSource> for ActiveModel {
             OptionalAssociatedTableId::AssociatedTableId(id) => id.into(),
         });
         Self {
-            source_id: Set(source.id as _),
+            source_id: Set(source.id),
             name: Set(source.name),
             row_id_index: Set(source.row_id_index.map(|x| x as _)),
             columns: Set(ColumnCatalogArray::from(source.columns)),

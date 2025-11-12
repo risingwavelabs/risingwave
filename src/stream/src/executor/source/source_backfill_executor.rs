@@ -21,7 +21,8 @@ use either::Either;
 use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -90,7 +91,7 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     /// Streaming source for external
-    source_id: TableId,
+    source_id: SourceId,
     source_name: String,
     column_ids: Vec<ColumnId>,
     source_desc_builder: Option<SourceDescBuilder>,

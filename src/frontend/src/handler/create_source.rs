@@ -116,6 +116,7 @@ use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SC
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
+use risingwave_common::id::SourceId;
 
 use crate::stream_fragmenter::GraphJobType;
 
@@ -1031,7 +1032,7 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
         Some(TableId::placeholder())
     };
     let source = SourceCatalog {
-        id: TableId::placeholder().as_raw_id(),
+        id: SourceId::placeholder(),
         name: source_name,
         schema_id,
         database_id,
