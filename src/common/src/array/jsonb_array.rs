@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem::ManuallyDrop;
+
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{PbArray, PbArrayType};
 
@@ -91,6 +93,12 @@ impl ArrayBuilder for JsonbArrayBuilder {
             bitmap: self.bitmap.finish(),
             data: self.builder.finish(),
         }
+    }
+}
+
+impl JsonbArrayBuilder {
+    pub fn writer(&mut self) -> JsonbWriter<'_> {
+        JsonbWriter::new(self)
     }
 }
 
@@ -174,5 +182,42 @@ impl FromIterator<Option<JsonbVal>> for JsonbArray {
 impl FromIterator<JsonbVal> for JsonbArray {
     fn from_iter<I: IntoIterator<Item = JsonbVal>>(iter: I) -> Self {
         iter.into_iter().map(Some).collect()
+    }
+}
+
+/// Note: Dropping an unfinished `JsonbWriter` will roll back any partially
+/// written elements to the saved checkpoint. Callers must not pop entries
+/// beyond the checkpoint captured when the writer was created; doing so may
+/// leave the array in an inconsistent state.
+pub struct JsonbWriter<'a> {
+    array_builder: &'a mut JsonbArrayBuilder,
+    checkpoint: jsonbb::CheckPoint,
+}
+
+impl JsonbWriter<'_> {
+    pub fn new(array_builder: &mut JsonbArrayBuilder) -> JsonbWriter<'_> {
+        let checkpoint = array_builder.builder.checkpoint();
+        JsonbWriter {
+            array_builder,
+            checkpoint,
+        }
+    }
+
+    pub fn inner(&mut self) -> &mut jsonbb::Builder {
+        &mut self.array_builder.builder
+    }
+
+    pub fn finish(self) {
+        self.array_builder.bitmap.append(true);
+        let _ = ManuallyDrop::new(self);
+    }
+}
+
+impl Drop for JsonbWriter<'_> {
+    fn drop(&mut self) {
+        // The correctness should be guaranteed by the caller.
+        unsafe {
+            self.array_builder.builder.rollback_to(&self.checkpoint);
+        }
     }
 }

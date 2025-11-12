@@ -463,6 +463,16 @@ impl FunctionAttr {
                     builder.append_null();
                 }
             }},
+            Some(WriterTypeKind::JsonbbBuilder) => quote! {{
+                let mut writer_wrapper = builder.writer();
+                let mut writer = writer_wrapper.inner();
+                if #output.is_some() {
+                    writer_wrapper.finish();
+                } else {
+                    drop(writer_wrapper);
+                    builder.append_null();
+                }
+            }},
             None if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 builder.append(#output.as_ref().map(|s| s.as_ref()));
             },
@@ -480,6 +490,10 @@ impl FunctionAttr {
             Some(WriterTypeKind::IoWrite) => quote! {{
                 let mut writer = Vec::new();
                 #output.map(|_| writer.into())
+            }},
+            Some(WriterTypeKind::JsonbbBuilder) => quote! {{
+                let mut writer = jsonbb::Builder::<Vec<u8>>::new();
+                #output.map(|_| JsonbVal::from(writer.finish()).into())
             }},
             None if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 #output.map(|s| s.as_ref().into())

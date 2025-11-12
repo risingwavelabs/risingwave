@@ -200,12 +200,18 @@ fn jsonb_path_query4<'a>(
     "jsonb_path_query_array(jsonb, varchar) -> jsonb",
     prebuild = "JsonPath::new($1).map_err(parse_error)?"
 )]
-fn jsonb_path_query_array2(target: JsonbRef<'_>, path: &JsonPath) -> Result<JsonbVal> {
+fn jsonb_path_query_array2(
+    target: JsonbRef<'_>,
+    path: &JsonPath,
+    writer: &mut jsonbb::Builder,
+) -> Result<()> {
     let matched = path
         .query::<ValueRef<'_>>(target.into())
         .map_err(eval_error)?;
-    let array = jsonbb::Value::array(matched.iter().map(|json| json.as_ref()));
-    Ok(array.into())
+    for json in matched {
+        writer.add_value(json.as_ref());
+    }
+    Ok(())
 }
 
 #[function(
@@ -216,12 +222,15 @@ fn jsonb_path_query_array3(
     target: JsonbRef<'_>,
     vars: JsonbRef<'_>,
     path: &JsonPath,
-) -> Result<JsonbVal> {
+    writer: &mut jsonbb::Builder,
+) -> Result<()> {
     let matched = path
         .query_with_vars::<ValueRef<'_>>(target.into(), vars.into())
         .map_err(eval_error)?;
-    let array = jsonbb::Value::array(matched.iter().map(|json| json.as_ref()));
-    Ok(array.into())
+    for json in matched {
+        writer.add_value(json.as_ref());
+    }
+    Ok(())
 }
 
 /// Returns all JSON items returned by the JSON path for the specified JSON value, as a JSON array.
@@ -244,9 +253,10 @@ fn jsonb_path_query_array4(
     vars: JsonbRef<'_>,
     silent: bool,
     path: &JsonPath,
-) -> Result<Option<JsonbVal>> {
-    match jsonb_path_query_array3(target, vars, path) {
-        Ok(x) => Ok(Some(x)),
+    writer: &mut jsonbb::Builder,
+) -> Result<Option<()>> {
+    match jsonb_path_query_array3(target, vars, path, writer) {
+        Ok(()) => Ok(Some(())),
         Err(_) if silent => Ok(None),
         Err(e) => Err(e),
     }
@@ -256,14 +266,21 @@ fn jsonb_path_query_array4(
     "jsonb_path_query_first(jsonb, varchar) -> jsonb",
     prebuild = "JsonPath::new($1).map_err(parse_error)?"
 )]
-fn jsonb_path_query_first2(target: JsonbRef<'_>, path: &JsonPath) -> Result<Option<JsonbVal>> {
+fn jsonb_path_query_first2(
+    target: JsonbRef<'_>,
+    path: &JsonPath,
+    writer: &mut jsonbb::Builder,
+) -> Result<Option<()>> {
     let matched = path
         .query_first::<ValueRef<'_>>(target.into())
         .map_err(eval_error)?;
-    Ok(matched
-        .into_iter()
-        .next()
-        .map(|json| json.into_owned().into()))
+    match matched {
+        Some(json) => {
+            writer.add_value(json.as_ref());
+            Ok(Some(()))
+        }
+        None => Ok(None),
+    }
 }
 
 #[function(
@@ -274,14 +291,18 @@ fn jsonb_path_query_first3(
     target: JsonbRef<'_>,
     vars: JsonbRef<'_>,
     path: &JsonPath,
-) -> Result<Option<JsonbVal>> {
+    writer: &mut jsonbb::Builder,
+) -> Result<Option<()>> {
     let matched = path
         .query_first_with_vars::<ValueRef<'_>>(target.into(), vars.into())
         .map_err(eval_error)?;
-    Ok(matched
-        .into_iter()
-        .next()
-        .map(|json| json.into_owned().into()))
+    match matched {
+        Some(json) => {
+            writer.add_value(json.as_ref());
+            Ok(Some(()))
+        }
+        None => Ok(None),
+    }
 }
 
 /// Returns the first JSON item returned by the JSON path for the specified JSON value.
@@ -305,8 +326,9 @@ fn jsonb_path_query_first4(
     vars: JsonbRef<'_>,
     silent: bool,
     path: &JsonPath,
-) -> Result<Option<JsonbVal>> {
-    match jsonb_path_query_first3(target, vars, path) {
+    writer: &mut jsonbb::Builder,
+) -> Result<Option<()>> {
+    match jsonb_path_query_first3(target, vars, path, writer) {
         Ok(x) => Ok(x),
         Err(_) if silent => Ok(None),
         Err(e) => Err(e),
