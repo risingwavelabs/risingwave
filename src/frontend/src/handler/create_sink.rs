@@ -24,7 +24,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ConnectionId, ObjectId, Schema, UserId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, ICEBERG_SINK_PREFIX, ObjectId, Schema, UserId,
+};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -575,6 +577,13 @@ pub async fn handle_create_sink(
         if_not_exists,
     )? {
         return Ok(resp);
+    }
+
+    if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+            "Sink name cannot start with reserved prefix '{}'",
+            ICEBERG_SINK_PREFIX
+        ))));
     }
 
     let (mut sink, graph, target_table_catalog, dependencies) = {

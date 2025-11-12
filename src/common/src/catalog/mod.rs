@@ -137,6 +137,9 @@ pub const CDC_OFFSET_COLUMN_NAME: &str = "_rw_offset";
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
 pub const CDC_TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
+pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
+pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
+
 /// The local system catalog reader in the frontend node.
 pub trait SysCatalogReader: Sync + Send + 'static {
     /// Reads the data of the system catalog table.

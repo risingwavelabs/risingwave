@@ -35,6 +35,8 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
+use risingwave_connector::sink::SinkParam;
+use risingwave_connector::sink::iceberg::IcebergSink;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
@@ -574,7 +576,7 @@ impl DdlController {
             .await?;
         self.source_manager
             .register_source_with_handle(source_id, handle)
-            .await?;
+            .await;
         Ok(version)
     }
 
@@ -1175,6 +1177,7 @@ impl DdlController {
             removed_actors,
             removed_fragments,
             removed_sink_fragment_by_targets,
+            removed_iceberg_table_sinks,
         } = release_ctx;
 
         let _guard = self.source_manager.pause_tick().await;
@@ -1210,6 +1213,32 @@ impl DdlController {
                 dropped_source_fragments,
             })
             .await;
+
+        // clean up iceberg table sinks
+        for sink in removed_iceberg_table_sinks {
+            let sink_param = SinkParam::try_from_sink_catalog(sink.into())
+                .expect("Iceberg sink should be valid");
+            let iceberg_sink =
+                IcebergSink::try_from(sink_param).expect("Iceberg sink should be valid");
+            if let Ok(iceberg_catalog) = iceberg_sink.config.create_catalog().await {
+                let table_identifier = iceberg_sink.config.full_table_name().unwrap();
+                tracing::info!(
+                    "dropping iceberg table {} for dropped sink",
+                    table_identifier
+                );
+
+                let _ = iceberg_catalog
+                    .drop_table(&table_identifier)
+                    .await
+                    .inspect_err(|err| {
+                        tracing::error!(
+                            "failed to drop iceberg table {} during cleanup: {}",
+                            table_identifier,
+                            err.as_report()
+                        );
+                    });
+            }
+        }
 
         // remove secrets.
         for secret in secret_ids {

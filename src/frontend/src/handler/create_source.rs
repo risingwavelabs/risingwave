@@ -116,6 +116,7 @@ use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SC
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
+use risingwave_common::catalog::ICEBERG_SOURCE_PREFIX;
 use risingwave_common::id::SourceId;
 
 use crate::stream_fragmenter::GraphJobType;
@@ -1071,6 +1072,17 @@ pub async fn handle_create_source(
         stmt.if_not_exists,
     )? {
         return Ok(resp);
+    }
+
+    if stmt
+        .source_name
+        .base_name()
+        .starts_with(ICEBERG_SOURCE_PREFIX)
+    {
+        return Err(RwError::from(InvalidInputSyntax(format!(
+            "Source name cannot start with reserved prefix '{}'",
+            ICEBERG_SOURCE_PREFIX
+        ))));
     }
 
     if handler_args.with_options.is_empty() {

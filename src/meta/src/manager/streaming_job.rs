@@ -228,6 +228,7 @@ impl StreamingJob {
 
     pub fn create_type(&self) -> CreateType {
         match self {
+            Self::Table(_, table, ..) => table.get_create_type().unwrap_or(CreateType::Foreground),
             Self::MaterializedView(table) => {
                 table.get_create_type().unwrap_or(CreateType::Foreground)
             }

@@ -558,6 +558,7 @@ pub async fn start_service_as_election_leader(
         sink_manager.clone(),
         meta_metrics.clone(),
         iceberg_compaction_mgr.clone(),
+        barrier_scheduler.clone(),
     )
     .await;
 
