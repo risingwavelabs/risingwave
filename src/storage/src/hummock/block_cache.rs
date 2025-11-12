@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
-use foyer::{FetchState, HybridCacheEntry, HybridFetch};
+use foyer::{FetchState, HybridCacheEntry, HybridGetOrFetch};
 use risingwave_common::config::EvictionConfig;
 
 use super::{Block, HummockResult, SstableBlockIndex};
@@ -81,27 +81,27 @@ pub struct BlockCacheConfig {
 
 pub enum BlockResponse {
     Block(BlockHolder),
-    Entry(HybridFetch<SstableBlockIndex, Box<Block>>),
+    Fetch(HybridGetOrFetch<SstableBlockIndex, Box<Block>>),
 }
 
 impl BlockResponse {
     pub async fn wait(self) -> HummockResult<BlockHolder> {
-        let entry = match self {
+        let fetch = match self {
             BlockResponse::Block(block) => return Ok(block),
-            BlockResponse::Entry(entry) => entry,
+            BlockResponse::Fetch(fetch) => fetch,
         };
-        match entry.state() {
-            FetchState::Hit => entry
+        match fetch.state() {
+            FetchState::Hit => fetch
                 .await
                 .map(BlockHolder::from_hybrid_cache_entry)
                 .map_err(HummockError::foyer_error),
-            FetchState::Wait => entry
-                .instrument_await("wait_pending_fetch_block".verbose())
-                .await
-                .map(BlockHolder::from_hybrid_cache_entry)
-                .map_err(HummockError::foyer_error),
-            FetchState::Miss => entry
+            _ if fetch.is_leader() => fetch
                 .instrument_await("fetch_block".verbose())
+                .await
+                .map(BlockHolder::from_hybrid_cache_entry)
+                .map_err(HummockError::foyer_error),
+            _ => fetch
+                .instrument_await("wait_pending_fetch_block".verbose())
                 .await
                 .map(BlockHolder::from_hybrid_cache_entry)
                 .map_err(HummockError::foyer_error),

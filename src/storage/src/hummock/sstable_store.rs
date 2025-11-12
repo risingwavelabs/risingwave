@@ -15,7 +15,7 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,8 +24,8 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    Cache, CacheBuilder, CacheEntry, EventListener, FetchState, Hint, HybridCache,
-    HybridCacheBuilder, HybridCacheEntry, HybridCacheProperties,
+    Cache, CacheBuilder, CacheEntry, EventListener, Hint, HybridCache, HybridCacheBuilder,
+    HybridCacheEntry, HybridCacheProperties,
 };
 use futures::{StreamExt, future};
 use prost::Message;
@@ -457,6 +457,57 @@ impl SstableStore {
         )))
     }
 
+    async fn fetch_block(
+        store: ObjectStoreRef,
+        object_id: HummockSstableObjectId,
+        data_path: Arc<String>,
+        file_size: u32,
+        range: Range<usize>,
+        uncompressed_capacity: usize,
+    ) -> foyer::Result<Box<Block>> {
+        let block_data = match store
+            .read(&data_path, range.clone())
+            .instrument_await("get_block_response".verbose())
+            .await
+        {
+            Ok(data) => data,
+            Err(e) => {
+                tracing::error!(
+                    "get_block_response meet error when read {:?} from sst-{}, total length: {}",
+                    range,
+                    object_id,
+                    file_size
+                );
+                return Err(foyer::Error::other(HummockError::from(e)));
+            }
+        };
+        let block = Box::new(
+            Block::decode(block_data, uncompressed_capacity).map_err(foyer::Error::other)?,
+        );
+        Ok(block)
+    }
+
+    async fn fetch_block_with_hint(
+        store: ObjectStoreRef,
+        object_id: HummockSstableObjectId,
+        data_path: Arc<String>,
+        file_size: u32,
+        range: Range<usize>,
+        uncompressed_capacity: usize,
+        hint: Hint,
+    ) -> foyer::Result<(Box<Block>, HybridCacheProperties)> {
+        Self::fetch_block(
+            store,
+            object_id,
+            data_path,
+            file_size,
+            range,
+            uncompressed_capacity,
+        )
+        .await
+        .map(|block| (block, HybridCacheProperties::default().with_hint(hint)))
+    }
+
     pub async fn get_block_response(
         &self,
         sst: &Sstable,
@@ -470,7 +521,7 @@ impl SstableStore {
 
         stats.cache_data_block_total += 1;
         let file_size = sst.meta.estimated_size;
-        let data_path = self.get_sst_data_path(object_id);
+        let data_path = Arc::new(self.get_sst_data_path(object_id));
 
         let disable_cache: fn() -> bool = || {
             fail_point!("disable_block_cache", |_| true);
@@ -488,49 +539,23 @@ impl SstableStore {
             block_idx: block_index as _,
         };
 
-        // future: fetch block if hybrid cache miss
-        let fetch_block = move || {
-            let range = range.clone();
-
-            async move {
-                let block_data = match store
-                    .read(&data_path, range.clone())
-                    .instrument_await("get_block_response".verbose())
-                    .await
-                {
-                    Ok(data) => data,
-                    Err(e) => {
-                        tracing::error!(
-                            "get_block_response meet error when read {:?} from sst-{}, total length: {}",
-                            range,
-                            object_id,
-                            file_size
-                        );
-                        return Err(foyer::Error::other(HummockError::from(e)));
-                    }
-                };
-                let block = Box::new(
-                    Block::decode(block_data, uncompressed_capacity)
-                        .map_err(foyer::Error::other)?,
-                );
-                Ok(block)
-            }
-        };
-
         self.recent_filter
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
 
         match policy {
             CachePolicy::Fill(hint) => {
-                let entry = self.block_cache.fetch_with_properties(
-                    idx,
-                    HybridCacheProperties::default().with_hint(hint),
-                    fetch_block,
-                );
-                if matches!(entry.state(), FetchState::Miss) {
-                    stats.cache_data_block_miss += 1;
-                }
-                Ok(BlockResponse::Entry(entry))
+                let fetch = self.block_cache.get_or_fetch(&idx, move |_| {
+                    Self::fetch_block_with_hint(
+                        store,
+                        object_id,
+                        data_path,
+                        file_size,
+                        range,
+                        uncompressed_capacity,
+                        hint,
+                    )
+                });
+                Ok(BlockResponse::Fetch(fetch))
             }
             CachePolicy::NotFill => {
                 match self
@@ -543,13 +568,31 @@ impl SstableStore {
                         entry,
                     ))),
                     _ => {
-                        let block = fetch_block().await.map_err(HummockError::foyer_error)?;
+                        let block = Self::fetch_block(
+                            store,
+                            object_id,
+                            data_path,
+                            file_size,
+                            range,
+                            uncompressed_capacity,
+                        )
+                        .await
+                        .map_err(HummockError::foyer_error)?;
                         Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
                     }
                 }
             }
             CachePolicy::Disable => {
-                let block = fetch_block().await.map_err(HummockError::foyer_error)?;
+                let block = Self::fetch_block(
+                    store,
+                    object_id,
+                    data_path,
+                    file_size,
+                    range,
+                    uncompressed_capacity,
+                )
+                .await
+                .map_err(HummockError::foyer_error)?;
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
             }
         }
@@ -574,31 +617,24 @@ impl SstableStore {
     pub async fn get_vector_file_meta(
         &self,
         vector_file: &VectorFileInfo,
-        stats: &mut VectorStoreCacheStats,
+        _stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<VectorFileHolder> {
+        let store = self.store.clone();
+        let path = self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
+        let meta_offset = vector_file.meta_offset;
         let entry = self
             .vector_meta_cache
-            .fetch(vector_file.object_id.as_raw(), || {
-                let store = self.store.clone();
-                let path =
-                    self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
-                let meta_offset = vector_file.meta_offset;
-                async move {
-                    let encoded_footer = store
-                        .read(&path, meta_offset..)
-                        .await
-                        .map_err(foyer::Error::other)?;
-                    let meta = VectorFileMeta::decode_footer(&encoded_footer)
-                        .map_err(foyer::Error::other)?;
-                    Ok::<_, foyer::Error>(meta.into())
-                }
-            });
-        if let FetchState::Miss = entry.state() {
-            stats.file_meta_miss += 1;
-        }
-        stats.file_meta_total += 1;
-
-        let entry = entry.await?;
+            .get_or_fetch(&vector_file.object_id.as_raw(), move |_| async move {
+                let encoded_footer = store
+                    .read(&path, meta_offset..)
+                    .await
+                    .map_err(foyer::MemoryError::other)?;
+                let meta = VectorFileMeta::decode_footer(&encoded_footer)
+                    .map_err(foyer::MemoryError::other)?;
+                Ok(HummockVectorIndexMetaFile::from(meta))
+            })
+            .await
+            .map_err(HummockError::other)?;
         VectorFileHolder::try_from_entry(entry, vector_file.object_id.as_raw())
     }
 
@@ -607,31 +643,25 @@ impl SstableStore {
         vector_file: &VectorFileInfo,
         block_idx: usize,
         block_meta: &VectorBlockMeta,
-        stats: &mut VectorStoreCacheStats,
+        _stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<VectorBlockHolder> {
-        let entry = self
-            .vector_block_cache
-            .fetch((vector_file.object_id, block_idx), || {
-                let store = self.store.clone();
-                let path =
-                    self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
-                let start_offset = block_meta.offset;
-                let end_offset = start_offset + block_meta.block_size;
-                async move {
-                    let encoded_block = store
-                        .read(&path, start_offset..end_offset)
-                        .await
-                        .map_err(foyer::Error::other)?;
-                    let block = VectorBlock::decode(&encoded_block).map_err(foyer::Error::other)?;
-                    Ok(Box::new(block))
-                }
-            });
-        if let FetchState::Miss = entry.state() {
-            stats.file_block_miss += 1;
-        }
-        stats.file_block_total += 1;
-
-        entry.await.map_err(HummockError::foyer_error)
+        let store = self.store.clone();
+        let path = self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
+        let start_offset = block_meta.offset;
+        let end_offset = start_offset + block_meta.block_size;
+        self.vector_block_cache
+            .get_or_fetch(&(vector_file.object_id, block_idx), move |_| async move {
+                let encoded_block = store
+                    .read(&path, start_offset..end_offset)
+                    .await
+                    .map_err(foyer::MemoryError::other)?;
+                let block =
+                    VectorBlock::decode(&encoded_block).map_err(foyer::MemoryError::other)?;
+                Ok(Box::new(block))
+            })
+            .await
+            .map_err(foyer::Error::from)
+            .map_err(HummockError::foyer_error)
     }
 
     pub fn insert_vector_cache(
@@ -656,30 +686,25 @@ impl SstableStore {
     pub async fn get_hnsw_graph(
         &self,
         graph_file: &HnswGraphFileInfo,
-        stats: &mut VectorStoreCacheStats,
+        _stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<HnswGraphFileHolder> {
+        let store = self.store.clone();
+        let graph_file_path =
+            self.get_object_data_path(HummockObjectId::HnswGraphFile(graph_file.object_id));
         let entry = self
             .vector_meta_cache
-            .fetch(graph_file.object_id.as_raw(), || {
-                let store = self.store.clone();
-                let graph_file_path =
-                    self.get_object_data_path(HummockObjectId::HnswGraphFile(graph_file.object_id));
-                async move {
-                    let encoded_graph = store
-                        .read(&graph_file_path, ..)
-                        .await
-                        .map_err(foyer::Error::other)?;
-                    let graph =
-                        PbHnswGraph::decode(encoded_graph.as_ref()).map_err(foyer::Error::other)?;
-                    Ok::<_, foyer::Error>(graph.into())
-                }
-            });
-        if let FetchState::Miss = entry.state() {
-            stats.hnsw_graph_miss += 1;
-        }
-        stats.hnsw_graph_total += 1;
-
-        let entry = entry.await?;
+            .get_or_fetch(&graph_file.object_id.as_raw(), |_| async move {
+                let encoded_graph = store
+                    .read(&graph_file_path, ..)
+                    .await
+                    .map_err(foyer::MemoryError::other)?;
+                let graph = PbHnswGraph::decode(encoded_graph.as_ref())
+                    .map_err(foyer::MemoryError::other)?;
+                Ok(HummockVectorIndexMetaFile::from(graph))
+            })
+            .await
+            .map_err(foyer::Error::from)
+            .map_err(HummockError::foyer_error)?;
         HnswGraphFileHolder::try_from_entry(entry, graph_file.object_id.as_raw())
     }
 
@@ -736,13 +761,14 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static + use<> {
         let object_id = sstable_info_ref.object_id;
+        let store = self.store.clone();
+        let meta_path = self.get_sst_data_path(object_id);
+        let stats_ptr = stats.remote_io_time.clone();
+        let range = sstable_info_ref.meta_offset as usize..;
 
-        let entry = self.meta_cache.fetch(object_id, || {
-            let store = self.store.clone();
-            let meta_path = self.get_sst_data_path(object_id);
-            let stats_ptr = stats.remote_io_time.clone();
-            let range = sstable_info_ref.meta_offset as usize..;
-            async move {
+        let entry = self
+            .meta_cache
+            .get_or_fetch(&object_id, move |_| async move {
                 let now = Instant::now();
                 let buf = store
                     .read(&meta_path, range)
@@ -754,12 +780,7 @@ impl SstableStore {
                 let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                 stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
                 Ok(Box::new(sst))
-            }
-        });
-
-        if matches! { entry.state(), FetchState::Wait | FetchState::Miss } {
-            stats.cache_meta_block_miss += 1;
-        }
+            });
 
         stats.cache_meta_block_total += 1;
 

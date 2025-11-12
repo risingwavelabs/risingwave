@@ -23,7 +23,7 @@ use std::sync::atomic::Ordering;
 pub use ahash::RandomState;
 use hashbrown::HashTable;
 use hashbrown::hash_table::Entry;
-use hashbrown0_14 as _;
+use {hashbrown0_14 as _, hashbrown0_15 as _};
 
 use crate::sequence::{AtomicSequence, Sequence, Sequencer};
 

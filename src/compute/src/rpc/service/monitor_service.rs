@@ -496,17 +496,14 @@ impl MonitorService for MonitorServiceImpl {
                 options =
                     options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
             }
-            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
-                options = options
-                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
-            }
             if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
                 options = options
                     .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
-                options = options
-                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+                options = options.with_record_hybrid_get_or_fetch_threshold(Duration::from_millis(
+                    threshold as _,
+                ));
             }
             cache.update_tracing_options(options);
         }
@@ -526,17 +523,14 @@ impl MonitorService for MonitorServiceImpl {
                 options =
                     options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
             }
-            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
-                options = options
-                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
-            }
             if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
                 options = options
                     .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
-                options = options
-                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+                options = options.with_record_hybrid_get_or_fetch_threshold(Duration::from_millis(
+                    threshold as _,
+                ));
             }
             cache.update_tracing_options(options);
         }
