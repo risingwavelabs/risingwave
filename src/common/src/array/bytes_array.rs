@@ -14,7 +14,7 @@
 
 use std::io::Write;
 use std::iter;
-use std::mem::size_of;
+use std::mem::{ManuallyDrop, size_of};
 
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::Buffer;
@@ -267,7 +267,7 @@ impl BytesWriter<'_> {
     /// Exactly one new record was appended and the `builder` can be safely used.
     pub fn finish(self) {
         self.builder.finish_partial();
-        std::mem::forget(self);
+        let _ = ManuallyDrop::new(self); // Prevent drop
     }
 }
 

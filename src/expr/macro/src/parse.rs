@@ -14,6 +14,7 @@
 
 //! Parse the tokens of the macro.
 
+use proc_macro_error::abort;
 use quote::ToTokens;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
@@ -189,6 +190,11 @@ fn arg_writer_type(arg: &syn::FnArg) -> Option<WriterTypeKind> {
         Some(WriterTypeKind::FmtWrite)
     } else if elem == &parse_quote!(impl std::io::Write) {
         Some(WriterTypeKind::IoWrite)
+    } else if elem == &parse_quote!(impl Write) {
+        abort! { elem, "use of ambiguous `Write` trait.";
+            note = "`function!` macro can only recognize fully-qualified type.";
+            help = "Please use `std::fmt::Write` or `std::io::Write` instead."
+        };
     } else {
         None
     }
