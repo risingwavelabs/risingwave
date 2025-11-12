@@ -19,7 +19,6 @@ use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_meta_model::ActorId;
-use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::{
@@ -231,13 +230,6 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             let table_id = job_id.as_mv_table_id();
 
             self.refresh_manager.mark_refresh_complete(table_id).await?;
-
-            // Update the table's refresh state back to Idle (refresh complete)
-            self.metadata_manager
-                .catalog_controller
-                .set_table_refresh_state(table_id, RefreshState::Idle)
-                .await
-                .context("Failed to set table refresh state to Idle")?;
         }
 
         Ok(())
@@ -479,24 +471,7 @@ impl CommandContext {
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::StartFragmentBackfill { .. } => {}
-            Command::Refresh { table_id, .. } => {
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .set_table_refresh_state(*table_id, RefreshState::Refreshing)
-                    .await?;
-            }
-            Command::ListFinish { .. } => {
-                // List stage completed, table remains in Refreshing state
-                // The next stage will be load completion
-            }
-            Command::LoadFinish { table_id, .. } => {
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .set_table_refresh_state(*table_id, RefreshState::Finishing)
-                    .await?;
-            }
+            Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
         }
 
         Ok(())

@@ -14,13 +14,11 @@
 
 use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::system_param::{OverrideValidate, Validate};
-use risingwave_meta_model::refresh_job::{self, RefreshJobStatus};
-use risingwave_meta_model::table::RefreshState;
+use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
-use thiserror_ext::AsReport;
 
 use super::*;
 
@@ -926,41 +924,6 @@ impl CatalogController {
         Ok((version, database))
     }
 
-    /// Set the refresh state of a table
-    pub async fn set_table_refresh_state(
-        &self,
-        table_id: TableId,
-        new_state: RefreshState,
-    ) -> MetaResult<bool> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-
-        // It is okay to update refresh state unconditionally because the check is done in `ensure_refreshable` inside `GlobalRefreshManager`.
-        let active_model = table::ActiveModel {
-            table_id: Set(table_id),
-            refresh_state: Set(Some(new_state)),
-            ..Default::default()
-        };
-        if let Err(e) = active_model.update(&txn).await {
-            tracing::warn!(
-                "Failed to update table refresh state for table {}: {}",
-                table_id,
-                e.as_report()
-            );
-            let t = Table::find_by_id(table_id).all(&txn).await;
-            tracing::info!(table = ?t, "Table found");
-        }
-        txn.commit().await?;
-
-        tracing::debug!(
-            table_id = %table_id,
-            new_state = ?new_state,
-            "Updated table refresh state"
-        );
-
-        Ok(true)
-    }
-
     pub async fn ensure_refresh_job(
         &self,
         table_id: TableId,
@@ -972,7 +935,7 @@ impl CatalogController {
             job_create_time: NotSet,
             last_trigger_time: Set(None),
             trigger_interval_secs: Set(trigger_interval_secs),
-            current_status: Set(RefreshJobStatus::Idle),
+            current_status: Set(RefreshState::Idle),
         };
         match RefreshJob::insert(active)
             .on_conflict(
@@ -996,7 +959,7 @@ impl CatalogController {
     pub async fn update_refresh_job_status(
         &self,
         table_id: TableId,
-        status: RefreshJobStatus,
+        status: RefreshState,
         last_trigger_time: Option<DateTime>,
     ) -> MetaResult<()> {
         self.ensure_refresh_job(table_id, None).await?;
@@ -1016,7 +979,7 @@ impl CatalogController {
         RefreshJob::update_many()
             .col_expr(
                 refresh_job::Column::CurrentStatus,
-                Expr::value(RefreshJobStatus::Idle),
+                Expr::value(RefreshState::Idle),
             )
             .exec(&inner.db)
             .await?;

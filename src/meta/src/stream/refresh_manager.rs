@@ -21,8 +21,7 @@ use chrono::{Duration as ChronoDuration, NaiveDateTime, Utc};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_meta_model::ActorId;
-use risingwave_meta_model::refresh_job::{self, RefreshJobStatus};
-use risingwave_meta_model::table::RefreshState;
+use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
@@ -122,11 +121,7 @@ impl GlobalRefreshManager {
 
     pub async fn mark_refresh_complete(&self, table_id: TableId) -> MetaResult<()> {
         self.metadata_manager
-            .update_refresh_job_status(
-                table_id,
-                RefreshJobStatus::Idle,
-                Some(Utc::now().naive_utc()),
-            )
+            .update_refresh_job_status(table_id, RefreshState::Idle, Some(Utc::now().naive_utc()))
             .await?;
         self.remove_progress_tracker(table_id);
         tracing::info!(%table_id, "Table refresh completed, state updated to Idle");
@@ -197,7 +192,7 @@ impl GlobalRefreshManager {
         self: &Arc<Self>,
         job: &refresh_job::Model,
     ) -> MetaResult<()> {
-        if job.current_status != RefreshJobStatus::Idle {
+        if job.current_status != RefreshState::Idle {
             return Ok(());
         }
         let Some(interval_secs) = job.trigger_interval_secs else {
@@ -302,7 +297,7 @@ impl GlobalRefreshManager {
         self.register_progress_tracker(table_id, database_id, tracker);
 
         self.metadata_manager
-            .update_refresh_job_status(table_id, RefreshJobStatus::Running, Some(trigger_time))
+            .update_refresh_job_status(table_id, RefreshState::Refreshing, Some(trigger_time))
             .await?;
 
         let refresh_command = Command::Refresh {
@@ -321,13 +316,9 @@ impl GlobalRefreshManager {
                 "failed to execute refresh command"
             );
             self.metadata_manager
-                .update_refresh_job_status(table_id, RefreshJobStatus::Idle, Some(trigger_time))
+                .update_refresh_job_status(table_id, RefreshState::Idle, Some(trigger_time))
                 .await?;
             self.remove_progress_tracker(table_id);
-            self.metadata_manager
-                .catalog_controller
-                .set_table_refresh_state(table_id, RefreshState::Idle)
-                .await?;
             Err(anyhow!(err)
                 .context(format!("Failed to refresh table {}", table_id))
                 .into())
@@ -366,15 +357,15 @@ impl GlobalRefreshManager {
             )));
         }
 
-        let current_state = self
+        let refresh_job_state = self
             .metadata_manager
             .catalog_controller
-            .get_table_refresh_state(table_id)
+            .get_refresh_job_state_by_table_id(table_id)
             .await?;
-        if let Some(state @ (RefreshState::Finishing | RefreshState::Refreshing)) = current_state {
+        if refresh_job_state != RefreshState::Idle {
             return Err(MetaError::invalid_parameter(format!(
-                "Table '{}' is currently in state {:?}. Cannot start a new refresh operation.",
-                table.name, state
+                "Table '{}' is not in idle state. Current state: {:?}",
+                table.name, refresh_job_state
             )));
         }
 

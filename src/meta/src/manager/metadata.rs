@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
-use risingwave_meta_model::refresh_job::{self, RefreshJobStatus};
+use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
@@ -453,7 +453,7 @@ impl MetadataManager {
     pub async fn update_refresh_job_status(
         &self,
         table_id: TableId,
-        status: RefreshJobStatus,
+        status: RefreshState,
         last_trigger_time: Option<DateTime>,
     ) -> MetaResult<()> {
         self.catalog_controller

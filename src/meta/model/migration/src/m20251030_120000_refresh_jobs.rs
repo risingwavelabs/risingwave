@@ -26,7 +26,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(RefreshJob::TriggerIntervalSecs).big_integer())
                     .col(
                         ColumnDef::new(RefreshJob::CurrentStatus)
-                            .string_len(16)
+                            .string()
                             .not_null()
                             .default("IDLE"),
                     )

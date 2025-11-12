@@ -17,22 +17,50 @@ use serde::{Deserialize, Serialize};
 
 use crate::TableId;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize, Copy, Hash,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
-pub enum RefreshJobStatus {
+pub enum RefreshState {
+    /// The table is refreshable and the current state is `Pending`.
     #[sea_orm(string_value = "IDLE")]
     Idle,
-    #[sea_orm(string_value = "RUNNING")]
-    Running,
-    #[sea_orm(string_value = "DISABLED")]
-    Disabled,
+    /// The table is refreshable and the current state is `Refreshing` (`RefreshStart` barrier passed).
+    #[sea_orm(string_value = "REFRESHING")]
+    Refreshing,
+    /// The table is refreshable and the current state is `Finishing`. (`LoadFinish` barrier passed).
+    #[sea_orm(string_value = "FINISHING")]
+    Finishing,
 }
 
-impl RefreshJobStatus {
-    pub fn is_active(self) -> bool {
-        matches!(self, RefreshJobStatus::Idle | RefreshJobStatus::Running)
+impl From<RefreshState> for risingwave_pb::catalog::RefreshState {
+    fn from(refresh_state: RefreshState) -> Self {
+        match refresh_state {
+            RefreshState::Idle => Self::Idle,
+            RefreshState::Refreshing => Self::Refreshing,
+            RefreshState::Finishing => Self::Finishing,
+        }
+    }
+}
+
+impl From<risingwave_pb::catalog::RefreshState> for RefreshState {
+    fn from(refresh_state: risingwave_pb::catalog::RefreshState) -> Self {
+        match refresh_state {
+            risingwave_pb::catalog::RefreshState::Idle => Self::Idle,
+            risingwave_pb::catalog::RefreshState::Refreshing => Self::Refreshing,
+            risingwave_pb::catalog::RefreshState::Finishing => Self::Finishing,
+            risingwave_pb::catalog::RefreshState::Unspecified => {
+                unreachable!("Unspecified refresh state")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for RefreshState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefreshState::Idle => write!(f, "IDLE"),
+            RefreshState::Refreshing => write!(f, "REFRESHING"),
+            RefreshState::Finishing => write!(f, "FINISHING"),
+        }
     }
 }
 
@@ -44,7 +72,7 @@ pub struct Model {
     pub job_create_time: DateTime,
     pub last_trigger_time: Option<DateTime>,
     pub trigger_interval_secs: Option<i64>,
-    pub current_status: RefreshJobStatus,
+    pub current_status: RefreshState,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
