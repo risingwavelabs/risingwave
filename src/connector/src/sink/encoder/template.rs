@@ -433,7 +433,7 @@ impl TemplateEncoderOutput {
                 "RedisGeoKey can't convert to string".to_owned(),
             )),
             TemplateEncoderOutput::RedisGeoValue(_) => Err(SinkError::Encode(
-                "RedisGeoVelue can't convert to string".to_owned(),
+                "RedisGeoValue can't convert to string".to_owned(),
             )),
             TemplateEncoderOutput::RedisPubSubStreamKey(s) => Ok(s),
             TemplateEncoderOutput::RedisStreamValue((_, _)) => Err(SinkError::Encode(
@@ -451,7 +451,7 @@ impl SerTo<String> for TemplateEncoderOutput {
                 "RedisGeoKey can't convert to string".to_owned(),
             )),
             TemplateEncoderOutput::RedisGeoValue(_) => Err(SinkError::Encode(
-                "RedisGeoVelue can't convert to string".to_owned(),
+                "RedisGeoValue can't convert to string".to_owned(),
             )),
             TemplateEncoderOutput::RedisPubSubStreamKey(s) => Ok(s),
             TemplateEncoderOutput::RedisStreamValue((_, _)) => Err(SinkError::Encode(

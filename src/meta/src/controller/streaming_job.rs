@@ -70,10 +70,11 @@ use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
-    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
-    fetch_target_fragments, get_internal_tables_by_id, get_table_columns,
-    grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
+    PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
+    check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
+    ensure_object_id, ensure_user_id, fetch_target_fragments, get_internal_tables_by_id,
+    get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
+    list_user_info_by_ids, try_get_iceberg_table_by_downstream_sink,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -507,6 +508,11 @@ impl CatalogController {
         // Add streaming job objects to notification
         if need_notify {
             match creating_streaming_job.unwrap() {
+                StreamingJob::Table(Some(source), ..) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(source.clone())),
+                    });
+                }
                 StreamingJob::Sink(sink) => {
                     objects_to_notify.push(PbObject {
                         object_info: Some(PbObjectInfo::Sink(sink.clone())),
@@ -597,7 +603,7 @@ impl CatalogController {
     #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
-        job_id: JobId,
+        mut job_id: JobId,
         is_cancelled: bool,
     ) -> MetaResult<(bool, Option<DatabaseId>)> {
         let mut inner = self.inner.write().await;
@@ -623,14 +629,37 @@ impl CatalogController {
             if streaming_job.create_type == CreateType::Background
                 && streaming_job.job_status == JobStatus::Creating
             {
-                // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
-                tracing::warn!(
-                    id = %job_id,
-                    "streaming job is created in background and still in creating status"
-                );
-                return Ok((false, Some(database_id)));
+                if (obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
+                    && check_if_belongs_to_iceberg_table(&txn, job_id).await?
+                {
+                    // If the job belongs to an iceberg table, we still need to clean it.
+                } else {
+                    // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
+                    tracing::warn!(
+                        id = %job_id,
+                        "streaming job is created in background and still in creating status"
+                    );
+                    return Ok((false, Some(database_id)));
+                }
             }
         }
+
+        let iceberg_table_id =
+            try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_sink_id()).await?;
+        if let Some(iceberg_table_id) = iceberg_table_id {
+            // If the job is iceberg sink, we need to clean the iceberg table as well.
+            // Here we will drop the sink objects directly.
+            let internal_tables = get_internal_tables_by_id(job_id, &txn).await?;
+            Object::delete_many()
+                .filter(
+                    object::Column::Oid
+                        .eq(job_id)
+                        .or(object::Column::Oid.is_in(internal_tables)),
+                )
+                .exec(&txn)
+                .await?;
+            job_id = iceberg_table_id.as_job_id();
+        };
 
         let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
@@ -924,194 +953,18 @@ impl CatalogController {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let job_type = Object::find_by_id(job_id.as_raw_id() as ObjectId)
-            .select_only()
-            .column(object::Column::ObjType)
-            .into_tuple()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
-
-        let create_type: CreateType = StreamingJobModel::find_by_id(job_id)
-            .select_only()
-            .column(streaming_job::Column::CreateType)
-            .into_tuple()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
-
-        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
-        let res = Object::update_many()
-            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
-            .col_expr(
-                object::Column::CreatedAtClusterVersion,
-                current_cluster_version().into(),
-            )
-            .filter(object::Column::Oid.eq(job_id))
-            .exec(&txn)
-            .await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("streaming job", job_id));
+        // Check if the job belongs to iceberg table.
+        if check_if_belongs_to_iceberg_table(&txn, job_id).await? {
+            tracing::info!(
+                "streaming job {} is for iceberg table, wait for manual finish operation",
+                job_id
+            );
+            return Ok(());
         }
 
-        // mark the target stream job as `Created`.
-        let job = streaming_job::ActiveModel {
-            job_id: Set(job_id),
-            job_status: Set(JobStatus::Created),
-            ..Default::default()
-        };
-        job.update(&txn).await?;
+        let (notification_op, objects, updated_user_info) =
+            Self::finish_streaming_job_inner(&txn, job_id).await?;
 
-        // notify frontend: job, internal tables.
-        let internal_table_objs = Table::find()
-            .find_also_related(Object)
-            .filter(table::Column::BelongsToJobId.eq(job_id))
-            .all(&txn)
-            .await?;
-        let mut objects = internal_table_objs
-            .iter()
-            .map(|(table, obj)| PbObject {
-                object_info: Some(PbObjectInfo::Table(
-                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
-                )),
-            })
-            .collect_vec();
-        let mut notification_op = if create_type == CreateType::Background {
-            NotificationOperation::Update
-        } else {
-            NotificationOperation::Add
-        };
-        let mut updated_user_info = vec![];
-
-        match job_type {
-            ObjectType::Table => {
-                let (table, obj) = Table::find_by_id(job_id.as_mv_table_id())
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
-                if table.table_type == TableType::MaterializedView {
-                    notification_op = NotificationOperation::Update;
-                }
-
-                if let Some(source_id) = table.optional_associated_source_id {
-                    let (src, obj) = Source::find_by_id(source_id)
-                        .find_also_related(Object)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
-                    objects.push(PbObject {
-                        object_info: Some(PbObjectInfo::Source(
-                            ObjectModel(src, obj.unwrap()).into(),
-                        )),
-                    });
-                }
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Sink => {
-                let (sink, obj) = Sink::find_by_id(job_id.as_sink_id())
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Index => {
-                let (index, obj) = Index::find_by_id(job_id.as_raw_id() as ObjectId)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
-                {
-                    let (table, obj) = Table::find_by_id(index.index_table_id)
-                        .find_also_related(Object)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| {
-                            MetaError::catalog_id_not_found("table", index.index_table_id)
-                        })?;
-                    objects.push(PbObject {
-                        object_info: Some(PbObjectInfo::Table(
-                            ObjectModel(table, obj.unwrap()).into(),
-                        )),
-                    });
-                }
-
-                // If the index is created on a table with privileges, we should also
-                // grant the privileges for the index and its state tables.
-                let primary_table_privileges = UserPrivilege::find()
-                    .filter(
-                        user_privilege::Column::Oid
-                            .eq(index.primary_table_id)
-                            .and(user_privilege::Column::Action.eq(Action::Select)),
-                    )
-                    .all(&txn)
-                    .await?;
-                if !primary_table_privileges.is_empty() {
-                    let index_state_table_ids: Vec<TableId> = Table::find()
-                        .select_only()
-                        .column(table::Column::TableId)
-                        .filter(
-                            table::Column::BelongsToJobId
-                                .eq(job_id)
-                                .or(table::Column::TableId.eq(index.index_table_id)),
-                        )
-                        .into_tuple()
-                        .all(&txn)
-                        .await?;
-                    let mut new_privileges = vec![];
-                    for privilege in &primary_table_privileges {
-                        for state_table_id in &index_state_table_ids {
-                            new_privileges.push(user_privilege::ActiveModel {
-                                id: Default::default(),
-                                oid: Set(state_table_id.as_raw_id() as ObjectId),
-                                user_id: Set(privilege.user_id),
-                                action: Set(Action::Select),
-                                dependent_id: Set(privilege.dependent_id),
-                                granted_by: Set(privilege.granted_by),
-                                with_grant_option: Set(privilege.with_grant_option),
-                            });
-                        }
-                    }
-                    UserPrivilege::insert_many(new_privileges)
-                        .exec(&txn)
-                        .await?;
-
-                    updated_user_info = list_user_info_by_ids(
-                        primary_table_privileges.into_iter().map(|p| p.user_id),
-                        &txn,
-                    )
-                    .await?;
-                }
-
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Source => {
-                let (source, obj) = Source::find_by_id(job_id.as_shared_source_id())
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Source(
-                        ObjectModel(source, obj.unwrap()).into(),
-                    )),
-                });
-            }
-            _ => unreachable!("invalid job type: {:?}", job_type),
-        }
-
-        if job_type != ObjectType::Index {
-            updated_user_info =
-                grant_default_privileges_automatically(&txn, job_id.as_raw_id() as ObjectId)
-                    .await?;
-        }
         txn.commit().await?;
 
         let mut version = self
@@ -1138,6 +991,200 @@ impl CatalogController {
             });
 
         Ok(())
+    }
+
+    /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
+    pub async fn finish_streaming_job_inner(
+        txn: &DatabaseTransaction,
+        job_id: JobId,
+    ) -> MetaResult<(Operation, Vec<risingwave_pb::meta::Object>, Vec<PbUserInfo>)> {
+        let job_type = Object::find_by_id(job_id.as_raw_id() as ObjectId)
+            .select_only()
+            .column(object::Column::ObjType)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        let create_type: CreateType = StreamingJobModel::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::CreateType)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
+        let res = Object::update_many()
+            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
+            .filter(object::Column::Oid.eq(job_id))
+            .exec(txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("streaming job", job_id));
+        }
+
+        // mark the target stream job as `Created`.
+        let job = streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Created),
+            ..Default::default()
+        };
+        job.update(txn).await?;
+
+        // notify frontend: job, internal tables.
+        let internal_table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::BelongsToJobId.eq(job_id))
+            .all(txn)
+            .await?;
+        let mut objects = internal_table_objs
+            .iter()
+            .map(|(table, obj)| PbObject {
+                object_info: Some(PbObjectInfo::Table(
+                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
+                )),
+            })
+            .collect_vec();
+        let mut notification_op = if create_type == CreateType::Background {
+            NotificationOperation::Update
+        } else {
+            NotificationOperation::Add
+        };
+        let mut updated_user_info = vec![];
+
+        match job_type {
+            ObjectType::Table => {
+                let (table, obj) = Table::find_by_id(job_id.as_mv_table_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
+                if table.table_type == TableType::MaterializedView {
+                    notification_op = NotificationOperation::Update;
+                }
+
+                if let Some(source_id) = table.optional_associated_source_id {
+                    let (src, obj) = Source::find_by_id(source_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(
+                            ObjectModel(src, obj.unwrap()).into(),
+                        )),
+                    });
+                }
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
+                });
+            }
+            ObjectType::Sink => {
+                let (sink, obj) = Sink::find_by_id(job_id.as_sink_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+                });
+            }
+            ObjectType::Index => {
+                let (index, obj) = Index::find_by_id(job_id.as_raw_id() as ObjectId)
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
+                {
+                    let (table, obj) = Table::find_by_id(index.index_table_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("table", index.index_table_id)
+                        })?;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(
+                            ObjectModel(table, obj.unwrap()).into(),
+                        )),
+                    });
+                }
+
+                // If the index is created on a table with privileges, we should also
+                // grant the privileges for the index and its state tables.
+                let primary_table_privileges = UserPrivilege::find()
+                    .filter(
+                        user_privilege::Column::Oid
+                            .eq(index.primary_table_id)
+                            .and(user_privilege::Column::Action.eq(Action::Select)),
+                    )
+                    .all(txn)
+                    .await?;
+                if !primary_table_privileges.is_empty() {
+                    let index_state_table_ids: Vec<TableId> = Table::find()
+                        .select_only()
+                        .column(table::Column::TableId)
+                        .filter(
+                            table::Column::BelongsToJobId
+                                .eq(job_id)
+                                .or(table::Column::TableId.eq(index.index_table_id)),
+                        )
+                        .into_tuple()
+                        .all(txn)
+                        .await?;
+                    let mut new_privileges = vec![];
+                    for privilege in &primary_table_privileges {
+                        for state_table_id in &index_state_table_ids {
+                            new_privileges.push(user_privilege::ActiveModel {
+                                id: Default::default(),
+                                oid: Set(state_table_id.as_raw_id() as ObjectId),
+                                user_id: Set(privilege.user_id),
+                                action: Set(Action::Select),
+                                dependent_id: Set(privilege.dependent_id),
+                                granted_by: Set(privilege.granted_by),
+                                with_grant_option: Set(privilege.with_grant_option),
+                            });
+                        }
+                    }
+                    UserPrivilege::insert_many(new_privileges).exec(txn).await?;
+
+                    updated_user_info = list_user_info_by_ids(
+                        primary_table_privileges.into_iter().map(|p| p.user_id),
+                        txn,
+                    )
+                    .await?;
+                }
+
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
+                });
+            }
+            ObjectType::Source => {
+                let (source, obj) = Source::find_by_id(job_id.as_shared_source_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Source(
+                        ObjectModel(source, obj.unwrap()).into(),
+                    )),
+                });
+            }
+            _ => unreachable!("invalid job type: {:?}", job_type),
+        }
+
+        if job_type != ObjectType::Index {
+            updated_user_info =
+                grant_default_privileges_automatically(txn, job_id.as_raw_id() as ObjectId).await?;
+        }
+
+        Ok((notification_op, objects, updated_user_info))
     }
 
     pub async fn finish_replace_streaming_job(

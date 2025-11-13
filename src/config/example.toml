@@ -256,7 +256,6 @@ compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
 vector_file_block_size_kb = 1024
 time_travel_version_cache_capacity = 10
-iceberg_compaction_target_file_size_mb = 1024
 iceberg_compaction_enable_validate = false
 iceberg_compaction_max_record_batch_rows = 1024
 iceberg_compaction_min_size_per_partition_mb = 1024
@@ -267,7 +266,6 @@ iceberg_compaction_enable_heuristic_output_parallelism = false
 iceberg_compaction_max_concurrent_closes = 8
 iceberg_compaction_enable_dynamic_size_estimation = true
 iceberg_compaction_size_estimation_smoothing_factor = 0.3
-iceberg_compaction_small_file_threshold_mb = 32
 iceberg_compaction_pending_parallelism_budget_multiplier = 4.0
 iceberg_compaction_target_binpack_group_size_mb = 102400
 

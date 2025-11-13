@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_common::util::epoch::Epoch;
 
@@ -192,7 +193,7 @@ impl CatalogController {
         &self,
         mut pb_source: PbSource,
     ) -> MetaResult<(SourceId, NotificationVersion)> {
-        let inner = self.inner.write().await;
+        let mut inner = self.inner.write().await;
         let owner_id = pb_source.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
@@ -215,6 +216,50 @@ impl CatalogController {
             &txn,
         )
         .await?;
+
+        let mut job_notifications = vec![];
+        // check if it belongs to iceberg table
+        if pb_source.name.starts_with(ICEBERG_SOURCE_PREFIX) {
+            // 1. finish iceberg table job.
+            let table_name = pb_source.name.trim_start_matches(ICEBERG_SOURCE_PREFIX);
+            let table_id = Table::find()
+                .select_only()
+                .column(table::Column::TableId)
+                .join(JoinType::InnerJoin, table::Relation::Object1.def())
+                .filter(
+                    object::Column::DatabaseId
+                        .eq(pb_source.database_id)
+                        .and(object::Column::SchemaId.eq(pb_source.schema_id))
+                        .and(table::Column::Name.eq(table_name)),
+                )
+                .into_tuple::<TableId>()
+                .one(&txn)
+                .await?
+                .ok_or(MetaError::from(anyhow!("table {} not found", table_name)))?;
+            let table_notifications =
+                Self::finish_streaming_job_inner(&txn, table_id.as_job_id()).await?;
+            job_notifications.push((table_id.as_job_id(), table_notifications));
+
+            // 2. finish iceberg sink job.
+            let sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table_name);
+            let sink_id = Sink::find()
+                .select_only()
+                .column(sink::Column::SinkId)
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .filter(
+                    object::Column::DatabaseId
+                        .eq(pb_source.database_id)
+                        .and(object::Column::SchemaId.eq(pb_source.schema_id))
+                        .and(sink::Column::Name.eq(&sink_name)),
+                )
+                .into_tuple::<SinkId>()
+                .one(&txn)
+                .await?
+                .ok_or(MetaError::from(anyhow!("sink {} not found", sink_name)))?;
+            let sink_job_id = sink_id.as_job_id();
+            let sink_notifications = Self::finish_streaming_job_inner(&txn, sink_job_id).await?;
+            job_notifications.push((sink_job_id, sink_notifications));
+        }
 
         // handle secret ref
         let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
@@ -251,6 +296,25 @@ impl CatalogController {
             grant_default_privileges_automatically(&txn, source_id.as_raw_id() as _).await?;
 
         txn.commit().await?;
+
+        for (job_id, (op, objects, user_info)) in job_notifications {
+            let mut version = self
+                .notify_frontend(op, NotificationInfo::ObjectGroup(PbObjectGroup { objects }))
+                .await;
+            if !user_info.is_empty() {
+                version = self.notify_users_update(user_info).await;
+            }
+            inner
+                .creating_table_finish_notifier
+                .values_mut()
+                .for_each(|creating_tables| {
+                    if let Some(txs) = creating_tables.remove(&job_id) {
+                        for tx in txs {
+                            let _ = tx.send(Ok(version));
+                        }
+                    }
+                });
+        }
 
         let mut version = self
             .notify_frontend_relation_info(

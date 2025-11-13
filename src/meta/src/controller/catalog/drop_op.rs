@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
@@ -59,20 +60,21 @@ impl CatalogController {
                 }
                 ObjectType::Table => {
                     check_object_refer_for_drop(object_type, object_id, &txn).await?;
-                    let indexes = get_referring_objects(object_id, &txn).await?;
-                    for obj in indexes.iter().filter(|object| {
+                    let objects = get_referring_objects(object_id, &txn).await?;
+                    for obj in objects.iter().filter(|object| {
                         object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
                     }) {
                         report_drop_object(obj.obj_type, obj.oid, &txn).await;
                     }
                     assert!(
-                        indexes.iter().all(|obj| obj.obj_type == ObjectType::Index),
-                        "only index could be dropped in restrict mode"
+                        objects.iter().all(|obj| obj.obj_type == ObjectType::Index
+                            || obj.obj_type == ObjectType::Sink),
+                        "only index and iceberg sink could be dropped in restrict mode"
                     );
-                    for idx in &indexes {
-                        check_object_refer_for_drop(idx.obj_type, idx.oid, &txn).await?;
+                    for obj in &objects {
+                        check_object_refer_for_drop(obj.obj_type, obj.oid, &txn).await?;
                     }
-                    indexes
+                    objects
                 }
                 object_type @ (ObjectType::Source | ObjectType::Sink) => {
                     check_object_refer_for_drop(object_type, object_id, &txn).await?;
@@ -91,6 +93,35 @@ impl CatalogController {
                 }
             },
         };
+
+        // check iceberg source.
+        if obj.obj_type == ObjectType::Table {
+            let table_name = Table::find_by_id(TableId::new(object_id as _))
+                .select_only()
+                .column(table::Column::Name)
+                .into_tuple::<String>()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+            let iceberg_source = Source::find()
+                .inner_join(Object)
+                .filter(
+                    object::Column::DatabaseId
+                        .eq(database_id)
+                        .and(object::Column::SchemaId.eq(obj.schema_id.unwrap()))
+                        .and(
+                            source::Column::Name
+                                .eq(format!("{}{}", ICEBERG_SOURCE_PREFIX, table_name)),
+                        ),
+                )
+                .into_partial_model()
+                .one(&txn)
+                .await?;
+            if let Some(iceberg_source) = iceberg_source {
+                removed_objects.push(iceberg_source);
+            }
+        }
+
         removed_objects.push(obj);
         let mut removed_object_ids: HashSet<_> =
             removed_objects.iter().map(|obj| obj.oid).collect();
@@ -174,6 +205,19 @@ impl CatalogController {
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
             .map(|obj| TableId::new(obj.oid as _));
 
+        let removed_iceberg_table_sinks: Vec<PbSink> = Sink::find()
+            .find_also_related(Object)
+            .filter(
+                sink::Column::SinkId
+                    .is_in(removed_object_ids.clone())
+                    .and(sink::Column::Name.like(format!("{}%", ICEBERG_SINK_PREFIX))),
+            )
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .collect();
+
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -205,27 +249,32 @@ impl CatalogController {
 
         let mut removed_state_table_ids: HashSet<_> = removed_table_ids.clone().collect();
 
-        // Add associated sources.
-        let mut removed_source_ids: Vec<SourceId> = Table::find()
-            .select_only()
-            .column(table::Column::OptionalAssociatedSourceId)
-            .filter(
-                table::Column::TableId
-                    .is_in(removed_table_ids)
-                    .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
-            )
-            .into_tuple()
-            .all(&txn)
-            .await?;
-        let removed_source_objs: Vec<PartialObject> = Object::find()
-            .filter(object::Column::Oid.is_in(removed_source_ids.clone()))
-            .into_partial_model()
-            .all(&txn)
-            .await?;
-        removed_objects.extend(removed_source_objs);
-        if object_type == ObjectType::Source {
-            removed_source_ids.push(SourceId::new(object_id as _));
+        if !drop_database {
+            // Add associated sources.
+            let removed_source_ids: Vec<SourceId> = Table::find()
+                .select_only()
+                .column(table::Column::OptionalAssociatedSourceId)
+                .filter(
+                    table::Column::TableId
+                        .is_in(removed_table_ids)
+                        .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
+                )
+                .into_tuple()
+                .all(&txn)
+                .await?;
+            let removed_source_objs: Vec<PartialObject> = Object::find()
+                .filter(object::Column::Oid.is_in(removed_source_ids))
+                .into_partial_model()
+                .all(&txn)
+                .await?;
+            removed_objects.extend(removed_source_objs);
         }
+
+        let removed_source_ids: HashSet<_> = removed_objects
+            .iter()
+            .filter(|obj| obj.obj_type == ObjectType::Source)
+            .map(|obj| SourceId::new(obj.oid as _))
+            .collect();
 
         let removed_secret_ids = removed_objects
             .iter()
@@ -382,12 +431,13 @@ impl CatalogController {
                 database_id,
                 removed_streaming_job_ids,
                 removed_state_table_ids: removed_state_table_ids.into_iter().collect(),
-                removed_source_ids,
+                removed_source_ids: removed_source_ids.into_iter().collect(),
                 removed_secret_ids,
                 removed_source_fragments,
                 removed_actors,
                 removed_fragments,
                 removed_sink_fragment_by_targets,
+                removed_iceberg_table_sinks,
             },
             version,
         ))
