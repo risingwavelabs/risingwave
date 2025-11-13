@@ -205,7 +205,7 @@ pub fn build_graph_with_strategy(
     // Set timezone.
     fragment_graph.ctx = Some(StreamContext {
         timezone: ctx.get_session_timezone(),
-        config_override: "".to_string(), // TODO(config): intialize with session config
+        config_override: "".to_string(), // TODO(config): initialize from session config
     });
 
     fragment_graph.backfill_order = backfill_order;
