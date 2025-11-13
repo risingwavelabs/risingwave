@@ -10,22 +10,22 @@ def _(outer_panels: Panels):
             "Streaming Actors (Tokio)",
             [
                 panels.timeseries_percentage(
-                    "Actor Execution Time",
+                    "Actor Execution Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_execution_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_execution_duration')}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Fast Poll Time",
+                    "Tokio: Actor Fast Poll Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -35,27 +35,27 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Tokio: Actor Fast Poll Avg Rate",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Fast Poll Avg Time",
+                    "Tokio: Actor Slow Poll Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Slow Poll Total Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -65,27 +65,27 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Slow Poll Avg Time",
+                    "Tokio: Actor Slow Poll Avg Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Poll Total Time",
+                    "Tokio: Actor Poll Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -95,27 +95,27 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Poll Avg Time",
+                    "Tokio: Actor Poll Avg Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Idle Total Time",
+                    "Tokio: Actor Idle Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -125,27 +125,27 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Idle Avg Time",
+                    "Tokio: Actor Idle Avg Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / (rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Scheduled Total Time",
+                    "Tokio: Actor Scheduled Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -155,17 +155,17 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Scheduled Avg Time",
+                    "Tokio: Actor Scheduled Avg Rate",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / (rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}}",
                         ),
                     ],
                 ),
