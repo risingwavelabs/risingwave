@@ -49,7 +49,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
+                panels.timeseries_percentage(
                     "Tokio: Actor Slow Poll Rate",
                     "",
                     [
