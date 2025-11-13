@@ -31,4 +31,4 @@ jq -Rs "{\"schema\": ., \"schemaType\": \"$encoding\"}" \
 
 # Wait for the subject to be registered.
 # Otherwise we may encounter "Subject ... not found".
-sleep 2
+sleep 1
