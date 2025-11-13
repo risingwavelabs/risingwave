@@ -103,7 +103,7 @@ impl CatalogController {
             job_status: Set(JobStatus::Initial),
             create_type: Set(create_type.into()),
             timezone: Set(ctx.timezone),
-            config_override: Set(ctx.config_override.to_string()),
+            config_override: Set(Some(ctx.config_override.to_string())),
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
@@ -865,7 +865,7 @@ impl CatalogController {
         let (original_max_parallelism, original_timezone, original_config_override): (
             i32,
             Option<String>,
-            String,
+            Option<String>,
         ) = StreamingJobModel::find_by_id(id)
             .select_only()
             .column(streaming_job::Column::MaxParallelism)
@@ -900,7 +900,8 @@ impl CatalogController {
                 .map(|ctx| ctx.timezone.clone())
                 .unwrap_or(original_timezone),
             // We don't expect replacing a job with a different config override.
-            config_override: original_config_override.into(),
+            // Thus always use the original config override.
+            config_override: original_config_override.unwrap_or_default().into(),
         };
 
         // 4. create streaming object for new replace table.

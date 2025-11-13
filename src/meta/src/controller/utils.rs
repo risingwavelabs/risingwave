@@ -2234,7 +2234,7 @@ pub async fn get_streaming_job_extra_info<C>(
 where
     C: ConnectionTrait,
 {
-    let pairs: Vec<(JobId, Option<String>, String)> = StreamingJob::find()
+    let pairs: Vec<(JobId, Option<String>, Option<String>)> = StreamingJob::find()
         .select_only()
         .columns([
             streaming_job::Column::JobId,
@@ -2258,7 +2258,7 @@ where
                 job_id,
                 StreamingJobExtraInfo {
                     timezone,
-                    config_override: config_override.into(),
+                    config_override: config_override.unwrap_or_default().into(),
                     job_definition,
                 },
             )

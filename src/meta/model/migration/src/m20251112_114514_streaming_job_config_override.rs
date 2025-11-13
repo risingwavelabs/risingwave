@@ -1,9 +1,9 @@
 use sea_orm_migration::prelude::*;
 
+use crate::utils::ColumnDefExt;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
-
-const DEFAULT_CONFIG_OVERRIDE: &str = "";
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
@@ -12,12 +12,9 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(StreamingJob::Table)
-                    .add_column(
-                        ColumnDef::new(StreamingJob::ConfigOverride)
-                            .text()
-                            .not_null()
-                            .default(DEFAULT_CONFIG_OVERRIDE.to_string()),
-                    )
+                    // MySQL does not support default value for long text column.
+                    // So we have to make it nullable here.
+                    .add_column(ColumnDef::new(StreamingJob::ConfigOverride).rw_long_text(manager))
                     .to_owned(),
             )
             .await

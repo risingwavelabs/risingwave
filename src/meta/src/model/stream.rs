@@ -319,7 +319,7 @@ impl risingwave_meta_model::streaming_job::Model {
     pub fn stream_context(&self) -> StreamContext {
         StreamContext {
             timezone: self.timezone.clone(),
-            config_override: self.config_override.as_str().into(),
+            config_override: self.config_override.clone().unwrap_or_default().into(),
         }
     }
 }
