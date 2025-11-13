@@ -43,7 +43,9 @@ use risingwave_connector::sink::test_sink::{
 use risingwave_connector::sink::writer::{
     AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, SinkWriter,
 };
-use risingwave_connector::sink::{SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError};
+use risingwave_connector::sink::{
+    SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError,
+};
 use risingwave_connector::source::test_source::{
     BoxSource, TestSourceRegistryGuard, TestSourceSplit, register_test_source,
 };
@@ -309,19 +311,16 @@ pub struct TestCoordinator {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for TestCoordinator {
-    async fn init(
-        &mut self,
-        subscriber: SinkCommittedEpochSubscriber,
-    ) -> risingwave_connector::sink::Result<Option<u64>> {
-        Ok(None)
+impl SinglePhaseCommitCoordinator for TestCoordinator {
+    async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
+        Ok(())
     }
 
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit(
+    async fn commit_directly(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
@@ -478,12 +477,13 @@ impl SimulationTestSink {
                         let err_rate = err_rate.clone();
                         let store = store.clone();
                         let staging_store = staging_store.clone();
-                        move |_, _, _| {
-                            Box::new(TestCoordinator {
+                        move |_, _| {
+                            let coordinator = TestCoordinator {
                                 err_rate: err_rate.clone(),
                                 store: store.clone(),
                                 staging_store: staging_store.clone(),
-                            })
+                            };
+                            SinkCommitCoordinator::SinglePhase(Box::new(coordinator))
                         }
                     },
                 )
