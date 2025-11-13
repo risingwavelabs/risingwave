@@ -1096,7 +1096,7 @@ impl ControlStreamManager {
                                                                 vnode_bitmap: actor.vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
                                                                 mview_definition: actor.mview_definition,
                                                                 expr_context: actor.expr_context,
-                                                                config_override: actor.config_override,
+                                                                config_override: actor.config_override.to_string(),
                                                                 initial_subscriber_ids: initial_subscriber_ids.iter().copied().collect(),
                                                             }
                                                         })

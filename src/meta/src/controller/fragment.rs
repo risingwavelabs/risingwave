@@ -102,7 +102,7 @@ struct ActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<VnodeBitmap>,
     pub expr_context: ExprContext,
-    pub config_override: String,
+    pub config_override: Arc<str>,
 }
 
 #[derive(Clone, Debug)]
@@ -1891,7 +1891,7 @@ mod tests {
                     time_zone: String::from("America/New_York"),
                     strict_mode: false,
                 }),
-                config_override: "".to_owned(),
+                config_override: "".into(),
             })
             .collect_vec();
 
@@ -1955,7 +1955,7 @@ mod tests {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
                     }),
-                    config_override: "a.b.c = true".to_owned(),
+                    config_override: "a.b.c = true".into(),
                 }
             })
             .collect_vec();

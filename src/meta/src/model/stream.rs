@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::{AddAssign, Deref};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
@@ -164,7 +165,7 @@ pub struct StreamActor {
     pub mview_definition: String,
     pub expr_context: Option<PbExprContext>,
     // TODO: shall we merge `config_override` with `expr_context` to be a `StreamContext`?
-    pub config_override: String,
+    pub config_override: Arc<str>,
 }
 
 impl StreamActor {
@@ -179,7 +180,7 @@ impl StreamActor {
                 .map(|bitmap| bitmap.to_protobuf()),
             mview_definition: self.mview_definition.clone(),
             expr_context: self.expr_context.clone(),
-            config_override: self.config_override.clone(),
+            config_override: self.config_override.to_string(),
         }
     }
 }
@@ -282,15 +283,14 @@ pub struct StreamContext {
     pub timezone: Option<String>,
 
     /// The partial config of this job to override the global config.
-    // TODO(config): make it an `Arc`?
-    pub config_override: String,
+    pub config_override: Arc<str>,
 }
 
 impl StreamContext {
     pub fn to_protobuf(&self) -> PbStreamContext {
         PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
-            config_override: self.config_override.clone(),
+            config_override: self.config_override.to_string(),
         }
     }
 
@@ -309,7 +309,7 @@ impl StreamContext {
             } else {
                 Some(prost.get_timezone().clone())
             },
-            config_override: prost.get_config_override().clone(),
+            config_override: prost.get_config_override().as_str().into(),
         }
     }
 }
@@ -319,7 +319,7 @@ impl risingwave_meta_model::streaming_job::Model {
     pub fn stream_context(&self) -> StreamContext {
         StreamContext {
             timezone: self.timezone.clone(),
-            config_override: self.config_override.clone(),
+            config_override: self.config_override.as_str().into(),
         }
     }
 }

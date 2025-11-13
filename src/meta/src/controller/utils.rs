@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
@@ -2213,7 +2214,7 @@ pub fn build_select_node_list(
 #[derive(Clone, Debug, Default)]
 pub struct StreamingJobExtraInfo {
     pub timezone: Option<String>,
-    pub config_override: String,
+    pub config_override: Arc<str>,
     pub job_definition: String,
 }
 
@@ -2257,7 +2258,7 @@ where
                 job_id,
                 StreamingJobExtraInfo {
                     timezone,
-                    config_override,
+                    config_override: config_override.into(),
                     job_definition,
                 },
             )
