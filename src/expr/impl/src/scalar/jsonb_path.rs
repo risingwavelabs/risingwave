@@ -208,9 +208,11 @@ fn jsonb_path_query_array2(
     let matched = path
         .query::<ValueRef<'_>>(target.into())
         .map_err(eval_error)?;
+    writer.begin_array();
     for json in matched {
         writer.add_value(json.as_ref());
     }
+    writer.end_array();
     Ok(())
 }
 
@@ -227,9 +229,11 @@ fn jsonb_path_query_array3(
     let matched = path
         .query_with_vars::<ValueRef<'_>>(target.into(), vars.into())
         .map_err(eval_error)?;
+    writer.begin_array();
     for json in matched {
         writer.add_value(json.as_ref());
     }
+    writer.end_array();
     Ok(())
 }
 
