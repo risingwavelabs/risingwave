@@ -35,6 +35,10 @@ sr_register test-rw-sink-enum-basic-value AVRO << EOF
 }
 EOF
 
+# Set the parallelism to 1 to make the test easier to reason about.
+statement ok
+set streaming_parallelism = 1;
+
 statement ok
 create table t_basic_enum(
   id int,
@@ -144,29 +148,26 @@ select * from from_nullable_enum order by id;
 
 # ===== Test 3: Illegal Enum Value Handling =====
 statement ok
-insert into t_basic_enum values (5, 'INVALID_STATUS');
+insert into t_basic_enum values
+  (6, 'ACTIVE'),
+  (7, 'INVALID_STATUS'),
+  (8, 'INACTIVE');
 
-sleep 5s
-
-# Should still only show the valid enum values
-query IT retry 5 backoff 1s
+# Under current impl, an invalid enum value will cause the entire sink to fail, triggering a recovery.
+# Records before the failure can still be successfully written, but subsequent records will not.
+query IT retry 5 backoff 3s
 select * from from_basic_enum order by id;
 ----
 1 ACTIVE
 2 INACTIVE
 3 PENDING
+6 ACTIVE
 
-statement ok
-insert into t_basic_enum values
-  (6, 'ACTIVE'),
-  (7, 'INACTIVE'),
-  (8, 'INVALID_STATUS');
-
-sleep 5s
-
-# Should still only show the valid enum values
-query IT retry 5 backoff 1s
-select * from from_basic_enum order by id;
+# However, the entire insertion batch will be rolled back atomically.
+# So we can't find any of 6, 7, 8 in the source table.
+# FIXME: such breakage of exactly once semantics can be very confusing to users.
+query IT
+select * from t_basic_enum order by id;
 ----
 1 ACTIVE
 2 INACTIVE
@@ -201,3 +202,6 @@ drop table from_nullable_enum;
 
 statement ok
 set sink_decouple to default;
+
+statement ok
+set streaming_parallelism to default;

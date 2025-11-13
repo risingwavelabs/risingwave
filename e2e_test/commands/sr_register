@@ -28,3 +28,7 @@ fi
 
 jq -Rs "{\"schema\": ., \"schemaType\": \"$encoding\"}" \
 | curl -X POST -H 'content-type:application/vnd.schemaregistry.v1+json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL:-http://schemaregistry:8082}/subjects/${subject}/versions"
+
+# Wait for the subject to be registered.
+# Otherwise we may encounter "Subject ... not found".
+sleep 2
