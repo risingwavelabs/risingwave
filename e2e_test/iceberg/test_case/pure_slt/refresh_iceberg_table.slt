@@ -124,13 +124,20 @@ t
 statement ok
 refresh table iceberg_batch_table;
 
-sleep 10s
+sleep 15s
 
 query I retry 3 backoff 1s
 select id from t_refresh order by id;
 ----
 1
 2
+
+
+# make sure the refresh finished
+query ?
+select current_status from rw_refresh_table_state;
+----
+IDLE
 
 
 query I retry 3 backoff 1s
