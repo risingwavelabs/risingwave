@@ -817,11 +817,9 @@ impl DatabaseCheckpointControl {
 
                 self.handle_refresh_table_info(task, &node);
 
-                self.state.inflight_graph_info.apply_create_mview_progress(
-                    node.state
-                        .resps
-                        .iter()
-                        .flat_map(|resp| &resp.create_mview_progress),
+                self.state.inflight_graph_info.apply_collected_command(
+                    node.command_ctx.command.as_ref(),
+                    node.state.resps.iter(),
                     hummock_version_stats,
                 );
                 let finished_cdc_backfill = self
@@ -1160,9 +1158,7 @@ impl DatabaseCheckpointControl {
             table_ids_to_commit,
             jobs_to_wait,
             prev_paused_reason,
-        ) = self
-            .state
-            .apply_command(command.as_ref(), hummock_version_stats);
+        ) = self.state.apply_command(command.as_ref());
 
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {

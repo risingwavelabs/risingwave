@@ -19,7 +19,6 @@ use std::mem::take;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::hummock::HummockVersionStats;
 use tracing::warn;
 
 use crate::barrier::info::{
@@ -137,7 +136,6 @@ impl BarrierWorkerState {
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
-        hummock_version_stats: &HummockVersionStats,
     ) -> (
         InflightDatabaseInfo,
         HashMap<TableId, u64>,
@@ -152,11 +150,11 @@ impl BarrierWorkerState {
         }) = command
         {
             None
-        } else if let Some((new_job, fragment_changes)) =
-            command.and_then(|command| command.fragment_changes(hummock_version_stats))
+        } else if let Some((new_job_id, fragment_changes)) =
+            command.and_then(Command::fragment_changes)
         {
             self.inflight_graph_info
-                .pre_apply(new_job, &fragment_changes);
+                .pre_apply(new_job_id, &fragment_changes);
             Some(fragment_changes)
         } else {
             None

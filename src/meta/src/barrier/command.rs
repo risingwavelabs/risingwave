@@ -38,7 +38,6 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
-use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
@@ -63,7 +62,6 @@ use super::info::{CommandFragmentChanges, InflightDatabaseInfo};
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::utils::collect_resp_info;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -485,14 +483,9 @@ impl Command {
         Self::Resume
     }
 
-    #[expect(clippy::type_complexity)]
-    pub(super) fn fragment_changes(
+    pub(crate) fn fragment_changes(
         &self,
-        hummock_version_stats: &HummockVersionStats,
-    ) -> Option<(
-        Option<(JobId, CreateMviewProgressTracker)>,
-        HashMap<FragmentId, CommandFragmentChanges>,
-    )> {
+    ) -> Option<(Option<JobId>, HashMap<FragmentId, CommandFragmentChanges>)> {
         match self {
             Command::Flush => None,
             Command::Pause => None,
@@ -548,9 +541,8 @@ impl Command {
                         }),
                     );
                 }
-                let tracker = CreateMviewProgressTracker::new(info, hummock_version_stats);
 
-                Some((Some((info.streaming_job.id(), tracker)), changes))
+                Some((Some(info.streaming_job.id()), changes))
             }
             Command::RescheduleFragment { reschedules, .. } => Some((
                 None,

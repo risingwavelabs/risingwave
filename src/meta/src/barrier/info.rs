@@ -33,8 +33,8 @@ use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
-use tracing::warn;
+use risingwave_pb::stream_service::BarrierCompleteResponse;
+use tracing::{info, warn};
 
 use crate::MetaResult;
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
@@ -378,6 +378,7 @@ pub enum SubscriberType {
 
 #[derive(Debug, Clone)]
 pub(super) enum CreateStreamingJobStatus {
+    Init,
     Creating(CreateMviewProgressTracker),
     Created,
 }
@@ -460,6 +461,7 @@ impl InflightDatabaseInfo {
         self.jobs
             .iter()
             .filter_map(|(job_id, job)| match &job.status {
+                CreateStreamingJobStatus::Init => None,
                 CreateStreamingJobStatus::Creating(tracker) => {
                     Some((*job_id, tracker.gen_ddl_progress()))
                 }
@@ -467,12 +469,36 @@ impl InflightDatabaseInfo {
             })
     }
 
-    pub(super) fn apply_create_mview_progress(
+    pub(super) fn apply_collected_command(
         &mut self,
-        create_mview_progress: impl Iterator<Item = &PbCreateMviewProgress>,
+        command: Option<&Command>,
+        resps: impl Iterator<Item = &BarrierCompleteResponse>,
         version_stats: &HummockVersionStats,
     ) {
-        for progress in create_mview_progress {
+        if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
+            match job_type {
+                CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
+                    let job_id = info.streaming_job.id();
+                    if let Some(job_info) = self.jobs.get_mut(&job_id) {
+                        let CreateStreamingJobStatus::Init = replace(
+                            &mut job_info.status,
+                            CreateStreamingJobStatus::Creating(CreateMviewProgressTracker::new(
+                                info,
+                                version_stats,
+                            )),
+                        ) else {
+                            unreachable!("should be init before collect the first barrier")
+                        };
+                    } else {
+                        info!(%job_id, "newly create job get cancelled before first barrier is collected")
+                    }
+                }
+                CreateStreamingJobType::SnapshotBackfill(_) => {
+                    // The progress of SnapshotBackfill won't be tracked here
+                }
+            }
+        }
+        for progress in resps.flat_map(|resp| &resp.create_mview_progress) {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
                 warn!(
                     "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
@@ -491,6 +517,7 @@ impl InflightDatabaseInfo {
 
     fn iter_creating_job_tracker(&self) -> impl Iterator<Item = &CreateMviewProgressTracker> {
         self.jobs.values().filter_map(|job| match &job.status {
+            CreateStreamingJobStatus::Init => None,
             CreateStreamingJobStatus::Creating(tracker) => Some(tracker),
             CreateStreamingJobStatus::Created => None,
         })
@@ -502,6 +529,7 @@ impl InflightDatabaseInfo {
         self.jobs
             .values_mut()
             .filter_map(|job| match &mut job.status {
+                CreateStreamingJobStatus::Init => None,
                 CreateStreamingJobStatus::Creating(tracker) => Some(tracker),
                 CreateStreamingJobStatus::Created => None,
             })
@@ -669,10 +697,10 @@ impl InflightDatabaseInfo {
     /// the info correspondingly.
     pub(crate) fn pre_apply(
         &mut self,
-        new_job: Option<(JobId, CreateMviewProgressTracker)>,
+        new_job_id: Option<JobId>,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
     ) {
-        if let Some((job_id, tracker)) = new_job {
+        if let Some(job_id) = new_job_id {
             self.jobs
                 .try_insert(
                     job_id,
@@ -680,7 +708,7 @@ impl InflightDatabaseInfo {
                         job_id,
                         fragment_infos: Default::default(),
                         subscribers: Default::default(), // no subscriber for newly create job
-                        status: CreateStreamingJobStatus::Creating(tracker),
+                        status: CreateStreamingJobStatus::Init,
                     },
                 )
                 .expect("non-duplicate");
