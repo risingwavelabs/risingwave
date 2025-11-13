@@ -15,7 +15,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_execution_duration')}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -25,7 +25,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -35,7 +35,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -45,7 +45,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -55,7 +55,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -65,7 +65,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -75,7 +75,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -85,7 +85,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -95,7 +95,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -105,7 +105,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -115,7 +115,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -125,7 +125,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -135,7 +135,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / (rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -145,7 +145,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -155,7 +155,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -165,7 +165,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / (rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}}",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
