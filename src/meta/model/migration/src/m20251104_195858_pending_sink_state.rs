@@ -67,33 +67,57 @@ impl MigrationTrait for Migration {
         {
             let conn = manager.get_connection();
 
-            let select_sql = "
-                SELECT sink_id, end_epoch, metadata, snapshot_id, committed
-                FROM exactly_once_iceberg_sink_metadata
-            ";
-            let old_rows: Vec<OldRow> = OldRow::find_by_statement(Statement::from_string(
-                conn.get_database_backend(),
-                select_sql.to_owned(),
-            ))
-            .all(conn)
-            .await?;
+            let (sql, values) = Query::select()
+                .columns([
+                    ExactlyOnceIcebergSinkMetadata::SinkId,
+                    ExactlyOnceIcebergSinkMetadata::EndEpoch,
+                    ExactlyOnceIcebergSinkMetadata::Metadata,
+                    ExactlyOnceIcebergSinkMetadata::SnapshotId,
+                    ExactlyOnceIcebergSinkMetadata::Committed,
+                ])
+                .from(ExactlyOnceIcebergSinkMetadata::Table)
+                .to_owned()
+                .build_any(&*conn.get_database_backend().get_query_builder());
 
-            if !old_rows.is_empty() {
-                // Batched insert
+            let rows = conn
+                .query_all(Statement::from_sql_and_values(
+                    conn.get_database_backend(),
+                    sql,
+                    values,
+                ))
+                .await?;
+
+            if !rows.is_empty() {
                 let mut insert = Query::insert();
-                insert.into_table(PendingSinkState::Table).columns([
-                    PendingSinkState::SinkId,
-                    PendingSinkState::Epoch,
-                    PendingSinkState::SinkState,
-                    PendingSinkState::Metadata,
-                ]);
-
-                for r in old_rows {
-                    let sink_state = if r.committed { "COMMITTED" } else { "PENDING" };
-                    let combined_metadata = transform_metadata(r.metadata, r.snapshot_id);
+                insert
+                    .into_table(PendingSinkState::Table)
+                    .columns([
+                        PendingSinkState::SinkId,
+                        PendingSinkState::Epoch,
+                        PendingSinkState::SinkState,
+                        PendingSinkState::Metadata,
+                    ])
+                    .on_conflict(
+                        sea_query::OnConflict::columns([
+                            PendingSinkState::SinkId,
+                            PendingSinkState::Epoch,
+                        ])
+                        .do_nothing()
+                        .to_owned(),
+                    );
+                for row in rows {
+                    let OldRow {
+                        sink_id,
+                        end_epoch,
+                        metadata,
+                        snapshot_id,
+                        committed,
+                    } = OldRow::from_query_result(&row, "")?;
+                    let sink_state = if committed { "COMMITTED" } else { "PENDING" };
+                    let combined_metadata = transform_metadata(metadata, snapshot_id);
                     insert.values_panic([
-                        r.sink_id.into(),
-                        r.end_epoch.into(),
+                        sink_id.into(),
+                        end_epoch.into(),
                         sink_state.into(),
                         combined_metadata.into(),
                     ]);
@@ -124,4 +148,9 @@ enum PendingSinkState {
 #[derive(DeriveIden)]
 enum ExactlyOnceIcebergSinkMetadata {
     Table,
+    SinkId,
+    EndEpoch,
+    Metadata,
+    SnapshotId,
+    Committed,
 }

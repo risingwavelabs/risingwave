@@ -576,13 +576,19 @@ impl CoordinatorWorker {
                                 hummock_committed_epoch,
                                 epoch
                             );
-                            while let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
-                                tracing::info!(
-                                    "Received next committed epoch: {}",
-                                    next_committed_epoch
-                                );
-                                if next_committed_epoch >= epoch {
-                                    break;
+                            loop {
+                                if let Some(next_committed_epoch) = rw_futures_utilrx.recv().await {
+                                    tracing::info!(
+                                        "Received next committed epoch: {}",
+                                        next_committed_epoch
+                                    );
+                                    if next_committed_epoch >= epoch {
+                                        break;
+                                    }
+                                } else {
+                                    return Err(anyhow!(
+                                        "Hummock committed epoch sender closed unexpectedly"
+                                    ));
                                 }
                             }
                         }

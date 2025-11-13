@@ -427,7 +427,10 @@ mod tests {
     use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
     use crate::manager::sink_coordination::manager::SinkCommittedEpochSubscriber;
 
-    struct MockCoordinator<C, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError>> {
+    struct MockSinglePhaseCoordinator<
+        C,
+        F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError>,
+    > {
         context: C,
         f: F,
     }
@@ -435,16 +438,16 @@ mod tests {
     impl<
         C: Send + 'static,
         F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send + 'static,
-    > MockCoordinator<C, F>
+    > MockSinglePhaseCoordinator<C, F>
     {
         fn new_coordinator(context: C, f: F) -> SinkCommitCoordinator {
-            SinkCommitCoordinator::SinglePhase(Box::new(MockCoordinator { context, f }))
+            SinkCommitCoordinator::SinglePhase(Box::new(MockSinglePhaseCoordinator { context, f }))
         }
     }
 
     #[async_trait]
     impl<C: Send, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError> + Send>
-        SinglePhaseCommitCoordinator for MockCoordinator<C, F>
+        SinglePhaseCommitCoordinator for MockSinglePhaseCoordinator<C, F>
     {
         async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
             Ok(())
@@ -517,7 +520,7 @@ mod tests {
                                 DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
-                                MockCoordinator::new_coordinator(
+                                MockSinglePhaseCoordinator::new_coordinator(
                                     0,
                                     move |epoch, metadata_list, count: &mut usize| {
                                         *count += 1;
@@ -710,7 +713,7 @@ mod tests {
                                 DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
-                                MockCoordinator::new_coordinator(
+                                MockSinglePhaseCoordinator::new_coordinator(
                                     0,
                                     move |epoch, metadata_list, count: &mut usize| {
                                         *count += 1;
@@ -847,7 +850,10 @@ mod tests {
                                 DatabaseConnection::Disconnected,
                                 param,
                                 new_writer_rx,
-                                MockCoordinator::new_coordinator((), |_, _, _| unreachable!()),
+                                MockSinglePhaseCoordinator::new_coordinator(
+                                    (),
+                                    |_, _, _| unreachable!(),
+                                ),
                                 subscriber.clone(),
                             )
                             .await;
@@ -940,7 +946,7 @@ mod tests {
                                     DatabaseConnection::Disconnected,
                                     param,
                                     new_writer_rx,
-                                    MockCoordinator::new_coordinator((), |_, _, _| {
+                                    MockSinglePhaseCoordinator::new_coordinator((), |_, _, _| {
                                         Err(SinkError::Coordinator(anyhow!("failed to commit")))
                                     }),
                                     subscriber.clone(),
@@ -1065,7 +1071,7 @@ mod tests {
                                 DatabaseConnection::Disconnected,
                                 param.clone(),
                                 new_writer_rx,
-                                MockCoordinator::new_coordinator(
+                                MockSinglePhaseCoordinator::new_coordinator(
                                     0,
                                     move |epoch, metadata_list, count: &mut usize| {
                                         *count += 1;

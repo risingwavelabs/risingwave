@@ -47,7 +47,6 @@ use risingwave_connector::sink::{
 use risingwave_connector::source::test_source::{
     BoxSource, TestSourceRegistryGuard, TestSourceSplit, register_test_source,
 };
-use risingwave_meta_model::exactly_once_iceberg_sink::{self, Column, Entity, Model};
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
