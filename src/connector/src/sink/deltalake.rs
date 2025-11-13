@@ -622,8 +622,14 @@ impl DeltaLakeWriteResult {
     }
 }
 
+impl From<::deltalake::DeltaTableError> for SinkError {
+    fn from(value: ::deltalake::DeltaTableError) -> Self {
+        SinkError::DeltaLake(anyhow!(value))
+    }
+}
+
 #[cfg(all(test, not(madsim)))]
-mod test {
+mod tests {
     use deltalake::kernel::DataType as SchemaDataType;
     use deltalake::operations::create::CreateBuilder;
     use maplit::btreemap;

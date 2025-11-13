@@ -1102,19 +1102,6 @@ impl From<RpcError> for SinkError {
     }
 }
 
-#[cfg(feature = "sink-clickhouse")]
-impl From<::clickhouse::error::Error> for SinkError {
-    fn from(value: ::clickhouse::error::Error) -> Self {
-        SinkError::ClickHouse(value.to_report_string())
-    }
-}
-
-#[cfg(feature = "sink-deltalake")]
-impl From<::deltalake::DeltaTableError> for SinkError {
-    fn from(value: ::deltalake::DeltaTableError) -> Self {
-        SinkError::DeltaLake(anyhow!(value))
-    }
-}
 
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
