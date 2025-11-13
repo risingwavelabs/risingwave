@@ -79,7 +79,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "2.6.1"
+version = "2.6.2"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
