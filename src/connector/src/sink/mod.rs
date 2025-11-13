@@ -1102,7 +1102,6 @@ impl From<RpcError> for SinkError {
     }
 }
 
-
 impl From<RedisError> for SinkError {
     fn from(value: RedisError) -> Self {
         SinkError::Redis(value.to_report_string())
