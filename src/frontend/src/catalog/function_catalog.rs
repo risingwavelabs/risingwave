@@ -67,7 +67,7 @@ impl From<&PbKind> for FunctionKind {
 impl From<&PbFunction> for FunctionCatalog {
     fn from(prost: &PbFunction) -> Self {
         FunctionCatalog {
-            id: prost.id.into(),
+            id: prost.id,
             name: prost.name.clone(),
             owner: prost.owner,
             kind: prost.kind.as_ref().unwrap().into(),

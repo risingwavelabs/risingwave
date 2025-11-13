@@ -83,6 +83,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
         }
         Connection {
+            id: ConnectionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
@@ -90,10 +91,12 @@ for_all_wrapped_id_fields! (
             id: DatabaseId,
         }
         Function {
+            id: FunctionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
         Index {
+            id: IndexId,
             index_table_id: TableId,
             primary_table_id: TableId,
             schema_id: SchemaId,
@@ -104,6 +107,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
         }
         Secret {
+            id: SecretId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
@@ -113,13 +117,22 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             target_table: TableId,
             auto_refresh_schema_from_table: TableId,
+            connection_id: ConnectionId,
+        }
+        SinkFormatDesc {
+            connection_id: ConnectionId,
         }
         Source {
             id: SourceId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            connection_id: ConnectionId,
+        }
+        StreamSourceInfo {
+            connection_id: ConnectionId,
         }
         Subscription {
+            id: SubscriptionId,
             dependent_table_id: TableId,
             schema_id: SchemaId,
             database_id: DatabaseId,
@@ -134,6 +147,7 @@ for_all_wrapped_id_fields! (
             dml_fragment_id: FragmentId,
         }
         View {
+            id: ViewId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
@@ -173,9 +187,14 @@ for_all_wrapped_id_fields! (
         AlterSecretRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
+            secret_id: SecretId,
         }
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
+        }
+        AlterSwapRenameRequest.ObjectNameSwapPair {
+            src_object_id: ObjectId,
+            dst_object_id: ObjectId,
         }
         CompactIcebergTableRequest {
             sink_id: SinkId,
@@ -184,12 +203,33 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             schema_id: SchemaId,
         }
+        CreateMaterializedViewRequest {
+            dependencies: ObjectId,
+        }
         CreateSecretRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
         }
+        CreateSinkRequest {
+            dependencies: ObjectId,
+        }
+        CreateTableRequest {
+            dependencies: ObjectId,
+        }
+        CreateViewRequest {
+            dependencies: ObjectId,
+        }
+        DropConnectionRequest {
+            connection_id: ConnectionId,
+        }
         DropDatabaseRequest {
             database_id: DatabaseId,
+        }
+        DropFunctionRequest {
+            function_id: FunctionId,
+        }
+        DropIndexRequest {
+            index_id: IndexId,
         }
         DropMaterializedViewRequest {
             table_id: TableId,
@@ -197,14 +237,23 @@ for_all_wrapped_id_fields! (
         DropSchemaRequest {
             schema_id: SchemaId,
         }
+        DropSecretRequest {
+            secret_id: SecretId,
+        }
         DropSinkRequest {
             sink_id: SinkId,
         }
         DropSourceRequest {
             source_id: SourceId,
         }
+        DropSubscriptionRequest {
+            subscription_id: SubscriptionId,
+        }
         DropTableRequest {
             table_id: TableId,
+        }
+        DropViewRequest {
+            view_id: ViewId,
         }
         ExpireIcebergTableSnapshotsRequest {
             sink_id: SinkId,
@@ -319,6 +368,9 @@ for_all_wrapped_id_fields! (
         AddWorkerNodeResponse {
             node_id: WorkerId,
         }
+        AlterConnectorPropsRequest {
+            connector_conn_ref: ConnectionId,
+        }
         AlterConnectorPropsRequest.AlterIcebergTableIds {
             sink_id: SinkId,
             source_id: SourceId,
@@ -414,6 +466,10 @@ for_all_wrapped_id_fields! (
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
+        ListObjectDependenciesResponse.ObjectDependencies {
+            object_id: ObjectId,
+            referenced_object_id: ObjectId,
+        }
         ListRateLimitsResponse.RateLimitInfo {
             job_id: JobId,
             fragment_id: FragmentId,
@@ -494,6 +550,11 @@ for_all_wrapped_id_fields! (
     recursive {
         ComplexRecursiveMessage {
             node_id: WorkerId,
+        }
+    }
+    secret {
+        SecretRef {
+            secret_id: SecretId,
         }
     }
     source {

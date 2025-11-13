@@ -34,7 +34,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
-use risingwave_common::id::{DatabaseId, JobId, SchemaId, SinkId, WorkerId};
+use risingwave_common::id::{
+    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, ViewId, WorkerId,
+};
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
@@ -64,7 +66,6 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
-use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
@@ -78,7 +79,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::{ActorId, FragmentId};
+use risingwave_pb::id::{ActorId, FragmentId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -131,8 +132,6 @@ use crate::hummock_meta_client::{
     IcebergCompactionEventItem,
 };
 use crate::meta_rpc_client_method_impl;
-
-type ConnectionId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
@@ -250,9 +249,7 @@ impl MetaClient {
     }
 
     pub async fn drop_secret(&self, secret_id: SecretId) -> Result<WaitVersion> {
-        let request = DropSecretRequest {
-            secret_id: secret_id.into(),
-        };
+        let request = DropSecretRequest { secret_id };
         let resp = self.inner.drop_secret(request).await?;
         Ok(resp
             .version
@@ -708,7 +705,7 @@ impl MetaClient {
 
     pub async fn alter_secret(
         &self,
-        secret_id: u32,
+        secret_id: SecretId,
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
@@ -798,7 +795,7 @@ impl MetaClient {
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropTableRequest {
-            source_id: source_id.map(SourceId::Id),
+            source_id: source_id.map(risingwave_pb::ddl_service::drop_table_request::SourceId::Id),
             table_id,
             cascade,
         };
@@ -821,7 +818,7 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
+    pub async fn drop_view(&self, view_id: ViewId, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
         Ok(resp
@@ -829,11 +826,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_source(
-        &self,
-        source_id: risingwave_common::id::SourceId,
-        cascade: bool,
-    ) -> Result<WaitVersion> {
+    pub async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<WaitVersion> {
         let request = DropSourceRequest { source_id, cascade };
         let resp = self.inner.drop_source(request).await?;
         Ok(resp
@@ -851,7 +844,7 @@ impl MetaClient {
 
     pub async fn drop_subscription(
         &self,
-        subscription_id: u32,
+        subscription_id: SubscriptionId,
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropSubscriptionRequest {
@@ -865,10 +858,7 @@ impl MetaClient {
     }
 
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<WaitVersion> {
-        let request = DropIndexRequest {
-            index_id: index_id.index_id,
-            cascade,
-        };
+        let request = DropIndexRequest { index_id, cascade };
         let resp = self.inner.drop_index(request).await?;
         Ok(resp
             .version
@@ -881,7 +871,7 @@ impl MetaClient {
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropFunctionRequest {
-            function_id: function_id.0,
+            function_id,
             cascade,
         };
         let resp = self.inner.drop_function(request).await?;
@@ -1449,7 +1439,7 @@ impl MetaClient {
         sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: sink_id.as_raw_id(),
@@ -1467,10 +1457,10 @@ impl MetaClient {
         &self,
         table_id: TableId,
         sink_id: SinkId,
-        source_id: risingwave_common::id::SourceId,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: table_id.as_raw_id(),
@@ -1489,10 +1479,10 @@ impl MetaClient {
 
     pub async fn alter_source_connector_props(
         &self,
-        source_id: risingwave_common::id::SourceId,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: source_id.as_raw_id(),
@@ -1744,7 +1734,7 @@ impl MetaClient {
 
     pub async fn add_cdc_auto_schema_change_fail_event(
         &self,
-        source_id: risingwave_common::id::SourceId,
+        source_id: SourceId,
         table_name: String,
         cdc_table_id: String,
         upstream_ddl: String,

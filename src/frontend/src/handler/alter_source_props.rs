@@ -1,4 +1,4 @@
-use risingwave_common::id::SourceId;
+use risingwave_common::id::{ConnectionId, SourceId};
 // Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -161,7 +161,7 @@ pub async fn handle_alter_source_connector_props(
 pub(crate) fn ensure_alter_props_not_set_by_connection(
     reader: &CatalogReadGuard,
     db_name: &str,
-    connection_id: Option<u32>,
+    connection_id: Option<ConnectionId>,
     alter_props: &[SqlOption],
 ) -> Result<()> {
     if let Some(conn_id) = connection_id {
