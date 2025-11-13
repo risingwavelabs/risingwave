@@ -156,7 +156,7 @@ criterion = { version = "0.7", features = ["async_futures"] }
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 # TODO(MrCroxx): Switch to a release version.
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "f8c68089548f3635ac641b03ae15b55e16f344e4", features = ["serde", "tracing", "nightly"] }
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "14225a492167deb404692c6dc46c004edfeebe1a", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.16", features = [
