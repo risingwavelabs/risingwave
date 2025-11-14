@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod join_encoding_type;
 mod non_zero64;
+mod opt;
 mod over_window;
 pub mod parallelism;
 mod query_mode;
@@ -23,6 +23,7 @@ mod transaction_isolation_level;
 mod visibility_mode;
 
 use chrono_tz::Tz;
+pub use opt::OptionConfig;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
@@ -32,8 +33,8 @@ use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
+use crate::config::streaming::JoinEncodingType;
 use crate::hash::VirtualNode;
-use crate::session_config::join_encoding_type::JoinEncodingType;
 use crate::session_config::parallelism::ConfigParallelism;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
@@ -230,9 +231,8 @@ pub struct SessionConfig {
     streaming_separate_sink: bool,
 
     /// Determine which encoding will be used to encode join rows in operator cache.
-    #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = JoinEncodingType::default())]
-    streaming_join_encoding: JoinEncodingType,
+    #[parameter(default = None)]
+    streaming_join_encoding: OptionConfig<JoinEncodingType>,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, alias = "rw_enable_join_ordering")]

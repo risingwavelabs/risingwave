@@ -14,28 +14,11 @@
 
 use super::*;
 
-#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
-pub enum AsyncStackTraceOption {
-    /// Disabled.
-    Off,
-    /// Enabled with basic instruments.
-    On,
-    /// Enabled with extra verbose instruments in release build.
-    /// Behaves the same as `on` in debug build due to performance concern.
-    #[default]
-    #[clap(alias = "verbose")]
-    ReleaseVerbose,
-}
+mod async_stack_trace;
+mod join_encoding_type;
 
-impl AsyncStackTraceOption {
-    pub fn is_verbose(self) -> Option<bool> {
-        match self {
-            Self::Off => None,
-            Self::On => Some(false),
-            Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
-        }
-    }
-}
+pub use async_stack_trace::*;
+pub use join_encoding_type::*;
 
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -252,6 +235,10 @@ pub struct StreamingDeveloperConfig {
     /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
     #[serde(default = "default::developer::refresh_scheduler_interval_sec")]
     pub refresh_scheduler_interval_sec: u64,
+
+    /// Determine which encoding will be used to encode join rows in operator cache.
+    #[serde(default)]
+    pub join_encoding_type: JoinEncodingType,
 }
 
 pub mod default {

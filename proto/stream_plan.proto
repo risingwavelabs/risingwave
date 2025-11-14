@@ -575,7 +575,8 @@ message HashJoinNode {
   bool is_append_only = 14;
 
   // Which encoding will be used to encode join rows in operator cache.
-  JoinEncodingType join_encoding_type = 15;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  JoinEncodingType join_encoding_type = 15 [deprecated = true];
 }
 
 message AsOfJoinNode {
@@ -599,7 +600,8 @@ message AsOfJoinNode {
   repeated bool null_safe = 9;
   optional plan_common.AsOfJoinDesc asof_desc = 10;
   // Which encoding will be used to encode join rows in operator cache.
-  JoinEncodingType join_encoding_type = 11;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  JoinEncodingType join_encoding_type = 11 [deprecated = true];
 }
 
 message TemporalJoinNode {
