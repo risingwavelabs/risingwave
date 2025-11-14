@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanRef, SourceNodeKind};
@@ -248,6 +249,7 @@ impl LogicalSource {
         // Iceberg source supports column pruning at source level
         // Schema invariant: [table columns] + [_iceberg_sequence_number, _iceberg_file_path, _iceberg_file_pos, _row_id]
         // The last 4 columns are always: 3 iceberg hidden columns + _row_id
+
         let schema_len = self.schema().len();
         assert!(
             schema_len >= 4,
@@ -355,7 +357,16 @@ impl Distill for LogicalSource {
 
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        if self.core.is_iceberg_connector() {
+        let is_refreshable_iceberg = self.source_catalog().is_some_and(|catalog| {
+            catalog.refresh_mode.is_some_and(|refresh_mode| {
+                matches!(
+                    refresh_mode.refresh_mode,
+                    Some(RefreshMode::FullRecompute(_))
+                )
+            })
+        }); // for refreshable iceberg table, we does not expose iceberg hidden columns to the user
+
+        if self.core.is_iceberg_connector() && !is_refreshable_iceberg {
             self.prune_col_for_iceberg_source(required_cols)
         } else {
             // For other sources, use a LogicalProject to prune columns

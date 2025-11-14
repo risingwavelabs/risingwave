@@ -13,19 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        java: [ '11', '17' ]
+        java: [ '17', '21' ]
     name: Java ${{ matrix.java }}
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
-        with:
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-          root-reserve-mb: 10240
-          temp-reserve-mb: 10240
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter

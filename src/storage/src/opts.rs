@@ -160,13 +160,11 @@ pub struct StorageOpts {
     pub object_store_config: ObjectStoreConfig,
     pub time_travel_version_cache_capacity: u64,
 
-    pub iceberg_compaction_target_file_size_mb: u32,
     pub iceberg_compaction_enable_validate: bool,
     pub iceberg_compaction_max_record_batch_rows: usize,
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     pub iceberg_compaction_max_file_count_per_partition: u32,
-    pub iceberg_compaction_small_file_threshold_mb: u32,
     pub iceberg_compaction_target_binpack_group_size_mb: Option<u64>,
     pub iceberg_compaction_min_group_size_mb: Option<u64>,
     pub iceberg_compaction_min_group_file_count: Option<usize>,
@@ -305,9 +303,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
             compactor_max_preload_meta_file_count: c.storage.compactor_max_preload_meta_file_count,
 
-            iceberg_compaction_target_file_size_mb: c
-                .storage
-                .iceberg_compaction_target_file_size_mb,
             iceberg_compaction_enable_validate: c.storage.iceberg_compaction_enable_validate,
             iceberg_compaction_max_record_batch_rows: c
                 .storage
@@ -321,9 +316,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_max_file_count_per_partition: c
                 .storage
                 .iceberg_compaction_max_file_count_per_partition,
-            iceberg_compaction_small_file_threshold_mb: c
-                .storage
-                .iceberg_compaction_small_file_threshold_mb,
             iceberg_compaction_task_parallelism_ratio: c
                 .storage
                 .iceberg_compaction_task_parallelism_ratio,

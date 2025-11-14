@@ -20,7 +20,7 @@ use apache_avro::schema::{DecimalSchema, NamesRef, RecordSchema, ResolvedSchema,
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::NotImplemented;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::types::{DataType, Decimal, MapType, StructType};
 use risingwave_common::{bail, bail_not_implemented};
 
@@ -113,9 +113,9 @@ fn avro_type_mapping(
         Schema::Double => DataType::Float64,
         Schema::Decimal(DecimalSchema { precision, .. }) => {
             if *precision > Decimal::MAX_PRECISION.into() {
-                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                    LazyLock::new(LogSuppresser::default);
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(LogSuppressor::default);
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                     tracing::warn!(
                         suppressed_count,
                         "RisingWave supports decimal precision up to {}, but got {}. Will truncate.",

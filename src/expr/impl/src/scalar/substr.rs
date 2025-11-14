@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::{ExprError, Result, function};
 
 #[function("substr(varchar, int4) -> varchar")]
-pub fn substr_start(s: &str, start: i32, writer: &mut impl Write) -> Result<()> {
+pub fn substr_start(s: &str, start: i32, writer: &mut impl std::fmt::Write) -> Result<()> {
     let skip = start.saturating_sub(1).max(0) as usize;
 
     let substr = s.chars().skip(skip);
@@ -29,10 +27,12 @@ pub fn substr_start(s: &str, start: i32, writer: &mut impl Write) -> Result<()> 
 }
 
 #[function("substr(bytea, int4) -> bytea")]
-pub fn substr_start_bytea(s: &[u8], start: i32) -> Box<[u8]> {
+pub fn substr_start_bytea(s: &[u8], start: i32, writer: &mut impl std::io::Write) {
     let skip = start.saturating_sub(1).max(0) as usize;
-
-    s.iter().copied().skip(skip).collect()
+    if skip >= s.len() {
+        return;
+    }
+    writer.write_all(&s[skip..]).unwrap();
 }
 
 fn convert_args(start: i32, count: i32) -> Result<(usize, usize)> {
@@ -56,7 +56,12 @@ fn convert_args(start: i32, count: i32) -> Result<(usize, usize)> {
 }
 
 #[function("substr(varchar, int4, int4) -> varchar")]
-pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut impl Write) -> Result<()> {
+pub fn substr_start_for(
+    s: &str,
+    start: i32,
+    count: i32,
+    writer: &mut impl std::fmt::Write,
+) -> Result<()> {
     let (skip, take) = convert_args(start, count)?;
 
     let substr = s.chars().skip(skip).take(take);
@@ -68,10 +73,20 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut impl Write
 }
 
 #[function("substr(bytea, int4, int4) -> bytea")]
-pub fn substr_start_for_bytea(s: &[u8], start: i32, count: i32) -> Result<Box<[u8]>> {
+pub fn substr_start_for_bytea(
+    s: &[u8],
+    start: i32,
+    count: i32,
+    writer: &mut impl std::io::Write,
+) -> Result<()> {
     let (skip, take) = convert_args(start, count)?;
 
-    Ok(s.iter().copied().skip(skip).take(take).collect())
+    if skip >= s.len() {
+        return Ok(());
+    }
+    let end = (skip + take).min(s.len());
+    writer.write_all(&s[skip..end]).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]

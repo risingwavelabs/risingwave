@@ -38,8 +38,6 @@ use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
-use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -70,10 +68,11 @@ use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
-    PartialObject, build_object_group_for_delete, check_relation_name_duplicate,
-    check_sink_into_table_cycle, ensure_job_not_canceled, ensure_object_id, ensure_user_id,
-    fetch_target_fragments, get_internal_tables_by_id, get_table_columns,
-    grant_default_privileges_automatically, insert_fragment_relations, list_user_info_by_ids,
+    PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
+    check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
+    ensure_object_id, ensure_user_id, fetch_target_fragments, get_internal_tables_by_id,
+    get_table_columns, grant_default_privileges_automatically, insert_fragment_relations,
+    list_user_info_by_ids, try_get_iceberg_table_by_downstream_sink,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -98,7 +97,7 @@ impl CatalogController {
         specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
     ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
-        let job_id = (obj.oid as u32).into();
+        let job_id = obj.oid.as_job_id();
         let job = streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
@@ -139,18 +138,8 @@ impl CatalogController {
         };
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            streaming_job.database_id().as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(
-            ObjectType::Schema,
-            streaming_job.schema_id().as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
+        ensure_object_id(ObjectType::Schema, streaming_job.schema_id(), &txn).await?;
         check_relation_name_duplicate(
             &streaming_job.name(),
             streaming_job.database_id(),
@@ -197,8 +186,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id.into()),
-                    Some(table.schema_id.into()),
+                    Some(table.database_id),
+                    Some(table.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -206,14 +195,14 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                table.id = job_id.as_raw_id() as _;
+                table.id = job_id.as_mv_table_id();
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
             }
             StreamingJob::Sink(sink) => {
                 if let Some(target_table_id) = sink.target_table
                     && check_sink_into_table_cycle(
-                        target_table_id as ObjectId,
+                        target_table_id.into(),
                         dependencies.iter().cloned().collect(),
                         &txn,
                     )
@@ -226,8 +215,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Sink,
                     sink.owner as _,
-                    Some(sink.database_id.into()),
-                    Some(sink.schema_id.into()),
+                    Some(sink.database_id),
+                    Some(sink.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -235,7 +224,7 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                sink.id = job_id.as_raw_id() as _;
+                sink.id = job_id.as_sink_id();
                 let sink_model: sink::ActiveModel = sink.clone().into();
                 Sink::insert(sink_model).exec(&txn).await?;
             }
@@ -244,8 +233,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id.into()),
-                    Some(table.schema_id.into()),
+                    Some(table.database_id),
+                    Some(table.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -253,23 +242,19 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                table.id = job_id.as_raw_id() as _;
+                table.id = job_id.as_mv_table_id();
                 if let Some(src) = src {
                     let src_obj = Self::create_object(
                         &txn,
                         ObjectType::Source,
                         src.owner as _,
-                        Some(src.database_id.into()),
-                        Some(src.schema_id.into()),
+                        Some(src.database_id),
+                        Some(src.schema_id),
                     )
                     .await?;
-                    src.id = src_obj.oid as _;
-                    src.optional_associated_table_id = Some(
-                        PbOptionalAssociatedTableId::AssociatedTableId(job_id.as_raw_id() as _),
-                    );
-                    table.optional_associated_source_id = Some(
-                        PbOptionalAssociatedSourceId::AssociatedSourceId(src_obj.oid as _),
-                    );
+                    src.id = src_obj.oid.as_source_id();
+                    src.optional_associated_table_id = Some(job_id.as_mv_table_id().into());
+                    table.optional_associated_source_id = Some(src_obj.oid.as_source_id().into());
                     let source: source::ActiveModel = src.clone().into();
                     Source::insert(source).exec(&txn).await?;
                 }
@@ -277,13 +262,13 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
             }
             StreamingJob::Index(index, table) => {
-                ensure_object_id(ObjectType::Table, index.primary_table_id as _, &txn).await?;
+                ensure_object_id(ObjectType::Table, index.primary_table_id, &txn).await?;
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Index,
                     index.owner as _,
-                    Some(index.database_id.into()),
-                    Some(index.schema_id.into()),
+                    Some(index.database_id),
+                    Some(index.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -292,13 +277,13 @@ impl CatalogController {
                 )
                 .await?;
                 // to be compatible with old implementation.
-                index.id = job_id.as_raw_id();
-                index.index_table_id = job_id.as_raw_id();
-                table.id = job_id.as_raw_id();
+                index.id = job_id.as_index_id();
+                index.index_table_id = job_id.as_mv_table_id();
+                table.id = job_id.as_mv_table_id();
 
                 ObjectDependency::insert(object_dependency::ActiveModel {
-                    oid: Set(index.primary_table_id as _),
-                    used_by: Set(table.id as _),
+                    oid: Set(index.primary_table_id.into()),
+                    used_by: Set(table.id.into()),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -314,8 +299,8 @@ impl CatalogController {
                     &txn,
                     ObjectType::Source,
                     src.owner as _,
-                    Some(src.database_id.into()),
-                    Some(src.schema_id.into()),
+                    Some(src.database_id),
+                    Some(src.schema_id),
                     create_type,
                     ctx.timezone.clone(),
                     streaming_parallelism,
@@ -323,7 +308,7 @@ impl CatalogController {
                     specific_resource_group,
                 )
                 .await?;
-                src.id = job_id.as_raw_id();
+                src.id = job_id.as_shared_source_id();
                 let source_model: source::ActiveModel = src.clone().into();
                 Source::insert(source_model).exec(&txn).await?;
             }
@@ -334,14 +319,14 @@ impl CatalogController {
             streaming_job
                 .dependent_secret_ids()?
                 .into_iter()
-                .map(|secret_id| secret_id as ObjectId),
+                .map(|id| id.as_object_id()),
         );
         // collect dependent connection
         dependencies.extend(
             streaming_job
                 .dependent_connection_ids()?
                 .into_iter()
-                .map(|conn_id| conn_id as ObjectId),
+                .map(|id| id.as_object_id()),
         );
 
         // record object dependency.
@@ -349,7 +334,7 @@ impl CatalogController {
             ObjectDependency::insert_many(dependencies.into_iter().map(|oid| {
                 object_dependency::ActiveModel {
                     oid: Set(oid),
-                    used_by: Set(streaming_job.id().as_raw_id() as _),
+                    used_by: Set(streaming_job.id().as_object_id()),
                     ..Default::default()
                 }
             }))
@@ -373,7 +358,7 @@ impl CatalogController {
         &self,
         job: &StreamingJob,
         mut incomplete_internal_tables: Vec<PbTable>,
-    ) -> MetaResult<HashMap<u32, u32>> {
+    ) -> MetaResult<HashMap<TableId, TableId>> {
         let job_id = job.id();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -387,17 +372,18 @@ impl CatalogController {
                 &txn,
                 ObjectType::Table,
                 table.owner as _,
-                Some(table.database_id.into()),
-                Some(table.schema_id.into()),
+                Some(table.database_id),
+                Some(table.schema_id),
             )
             .await?
-            .oid;
-            table_id_map.insert(table.id, table_id as u32);
-            table.id = table_id as _;
-            table.job_id = Some(job_id.as_raw_id() as _);
+            .oid
+            .as_table_id();
+            table_id_map.insert(table.id, table_id);
+            table.id = table_id;
+            table.job_id = Some(job_id);
 
             let table_model = table::ActiveModel {
-                table_id: Set((table_id as u32).into()),
+                table_id: Set(table_id),
                 belongs_to_job_id: Set(Some(job_id)),
                 fragment_id: NotSet,
                 ..table.clone().into()
@@ -466,15 +452,14 @@ impl CatalogController {
             if !for_replace {
                 let all_tables = StreamJobFragments::collect_tables(get_fragments());
                 for state_table_id in state_table_ids {
-                    let state_table_id = (state_table_id as u32).into();
                     // Table's vnode count is not always the fragment's vnode count, so we have to
                     // look up the table from `TableFragments`.
                     // See `ActorGraphBuilder::new`.
                     let table = all_tables
                         .get(&state_table_id)
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
-                    assert_eq!(table.id, state_table_id.as_raw_id());
-                    assert_eq!(table.fragment_id, fragment_id as u32);
+                    assert_eq!(table.id, state_table_id);
+                    assert_eq!(table.fragment_id, fragment_id);
                     let vnode_count = table.vnode_count();
 
                     table::ActiveModel {
@@ -503,6 +488,11 @@ impl CatalogController {
         // Add streaming job objects to notification
         if need_notify {
             match creating_streaming_job.unwrap() {
+                StreamingJob::Table(Some(source), ..) => {
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(source.clone())),
+                    });
+                }
                 StreamingJob::Sink(sink) => {
                     objects_to_notify.push(PbObject {
                         object_info: Some(PbObjectInfo::Sink(sink.clone())),
@@ -523,8 +513,8 @@ impl CatalogController {
             // Update dml fragment id.
             if let Some(StreamingJob::Table(_, table, _)) = creating_streaming_job {
                 Table::update(table::ActiveModel {
-                    table_id: Set(table.id.into()),
-                    dml_fragment_id: Set(table.dml_fragment_id.map(|id| id as _)),
+                    table_id: Set(table.id),
+                    dml_fragment_id: Set(table.dml_fragment_id),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -577,7 +567,7 @@ impl CatalogController {
 
         Ok(Command::DropStreamingJobs {
             streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
-            actors: table_fragments.actor_ids(),
+            actors: table_fragments.actor_ids().collect(),
             unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
             unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
             dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
@@ -593,15 +583,13 @@ impl CatalogController {
     #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
-        job_id: JobId,
+        mut job_id: JobId,
         is_cancelled: bool,
     ) -> MetaResult<(bool, Option<DatabaseId>)> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let obj = Object::find_by_id(job_id.as_raw_id() as ObjectId)
-            .one(&txn)
-            .await?;
+        let obj = Object::find_by_id(job_id).one(&txn).await?;
         let Some(obj) = obj else {
             tracing::warn!(
                 id = %job_id,
@@ -619,14 +607,37 @@ impl CatalogController {
             if streaming_job.create_type == CreateType::Background
                 && streaming_job.job_status == JobStatus::Creating
             {
-                // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
-                tracing::warn!(
-                    id = %job_id,
-                    "streaming job is created in background and still in creating status"
-                );
-                return Ok((false, Some(database_id)));
+                if (obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
+                    && check_if_belongs_to_iceberg_table(&txn, job_id).await?
+                {
+                    // If the job belongs to an iceberg table, we still need to clean it.
+                } else {
+                    // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
+                    tracing::warn!(
+                        id = %job_id,
+                        "streaming job is created in background and still in creating status"
+                    );
+                    return Ok((false, Some(database_id)));
+                }
             }
         }
+
+        let iceberg_table_id =
+            try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_sink_id()).await?;
+        if let Some(iceberg_table_id) = iceberg_table_id {
+            // If the job is iceberg sink, we need to clean the iceberg table as well.
+            // Here we will drop the sink objects directly.
+            let internal_tables = get_internal_tables_by_id(job_id, &txn).await?;
+            Object::delete_many()
+                .filter(
+                    object::Column::Oid
+                        .eq(job_id)
+                        .or(object::Column::Oid.is_in(internal_tables)),
+                )
+                .exec(&txn)
+                .await?;
+            job_id = iceberg_table_id.as_job_id();
+        };
 
         let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
@@ -660,11 +671,11 @@ impl CatalogController {
                 .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
             inner
                 .dropped_tables
-                .extend(dropped_tables.map(|t| (t.id.into(), t)));
+                .extend(dropped_tables.map(|t| (t.id, t)));
         }
 
         if need_notify {
-            let obj: Option<PartialObject> = Object::find_by_id(job_id.as_raw_id() as ObjectId)
+            let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
                 .columns([
                     object::Column::Oid,
@@ -696,7 +707,7 @@ impl CatalogController {
 
         // Check if the job is creating sink into table.
         if table_obj.is_none()
-            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_raw_id() as ObjectId)
+            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_sink_id())
                 .select_only()
                 .column(sink::Column::TargetTable)
                 .into_tuple::<Option<TableId>>()
@@ -722,7 +733,7 @@ impl CatalogController {
                 .await?;
             if let Some(tmp_id) = tmp_id {
                 tracing::warn!(
-                    id = tmp_id,
+                    id = %tmp_id,
                     "aborting temp streaming job for sink into table"
                 );
 
@@ -730,9 +741,7 @@ impl CatalogController {
             }
         }
 
-        Object::delete_by_id(job_id.as_raw_id() as ObjectId)
-            .exec(&txn)
-            .await?;
+        Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
                 .filter(object::Column::Oid.is_in(internal_table_ids))
@@ -839,7 +848,7 @@ impl CatalogController {
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
             .filter(
                 object_dependency::Column::Oid
-                    .eq(id.as_raw_id() as ObjectId)
+                    .eq(id)
                     .and(object::Column::ObjType.eq(ObjectType::Table))
                     .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
             )
@@ -901,8 +910,8 @@ impl CatalogController {
 
         // 5. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
-            oid: Set(id.as_raw_id() as _),
-            used_by: Set(new_obj_id.as_raw_id() as _),
+            oid: Set(id.as_object_id()),
+            used_by: Set(new_obj_id.as_object_id()),
             ..Default::default()
         })
         .exec(&txn)
@@ -918,194 +927,18 @@ impl CatalogController {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let job_type = Object::find_by_id(job_id.as_raw_id() as ObjectId)
-            .select_only()
-            .column(object::Column::ObjType)
-            .into_tuple()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
-
-        let create_type: CreateType = StreamingJobModel::find_by_id(job_id)
-            .select_only()
-            .column(streaming_job::Column::CreateType)
-            .into_tuple()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
-
-        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
-        let res = Object::update_many()
-            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
-            .col_expr(
-                object::Column::CreatedAtClusterVersion,
-                current_cluster_version().into(),
-            )
-            .filter(object::Column::Oid.eq(job_id))
-            .exec(&txn)
-            .await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("streaming job", job_id));
+        // Check if the job belongs to iceberg table.
+        if check_if_belongs_to_iceberg_table(&txn, job_id).await? {
+            tracing::info!(
+                "streaming job {} is for iceberg table, wait for manual finish operation",
+                job_id
+            );
+            return Ok(());
         }
 
-        // mark the target stream job as `Created`.
-        let job = streaming_job::ActiveModel {
-            job_id: Set(job_id),
-            job_status: Set(JobStatus::Created),
-            ..Default::default()
-        };
-        job.update(&txn).await?;
+        let (notification_op, objects, updated_user_info) =
+            Self::finish_streaming_job_inner(&txn, job_id).await?;
 
-        // notify frontend: job, internal tables.
-        let internal_table_objs = Table::find()
-            .find_also_related(Object)
-            .filter(table::Column::BelongsToJobId.eq(job_id))
-            .all(&txn)
-            .await?;
-        let mut objects = internal_table_objs
-            .iter()
-            .map(|(table, obj)| PbObject {
-                object_info: Some(PbObjectInfo::Table(
-                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
-                )),
-            })
-            .collect_vec();
-        let mut notification_op = if create_type == CreateType::Background {
-            NotificationOperation::Update
-        } else {
-            NotificationOperation::Add
-        };
-        let mut updated_user_info = vec![];
-
-        match job_type {
-            ObjectType::Table => {
-                let (table, obj) = Table::find_by_id(job_id.as_mv_table_id())
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
-                if table.table_type == TableType::MaterializedView {
-                    notification_op = NotificationOperation::Update;
-                }
-
-                if let Some(source_id) = table.optional_associated_source_id {
-                    let (src, obj) = Source::find_by_id(source_id)
-                        .find_also_related(Object)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
-                    objects.push(PbObject {
-                        object_info: Some(PbObjectInfo::Source(
-                            ObjectModel(src, obj.unwrap()).into(),
-                        )),
-                    });
-                }
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Sink => {
-                let (sink, obj) = Sink::find_by_id(job_id.as_raw_id() as ObjectId)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Index => {
-                let (index, obj) = Index::find_by_id(job_id.as_raw_id() as ObjectId)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
-                {
-                    let (table, obj) = Table::find_by_id(index.index_table_id)
-                        .find_also_related(Object)
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| {
-                            MetaError::catalog_id_not_found("table", index.index_table_id)
-                        })?;
-                    objects.push(PbObject {
-                        object_info: Some(PbObjectInfo::Table(
-                            ObjectModel(table, obj.unwrap()).into(),
-                        )),
-                    });
-                }
-
-                // If the index is created on a table with privileges, we should also
-                // grant the privileges for the index and its state tables.
-                let primary_table_privileges = UserPrivilege::find()
-                    .filter(
-                        user_privilege::Column::Oid
-                            .eq(index.primary_table_id)
-                            .and(user_privilege::Column::Action.eq(Action::Select)),
-                    )
-                    .all(&txn)
-                    .await?;
-                if !primary_table_privileges.is_empty() {
-                    let index_state_table_ids: Vec<TableId> = Table::find()
-                        .select_only()
-                        .column(table::Column::TableId)
-                        .filter(
-                            table::Column::BelongsToJobId
-                                .eq(job_id)
-                                .or(table::Column::TableId.eq(index.index_table_id)),
-                        )
-                        .into_tuple()
-                        .all(&txn)
-                        .await?;
-                    let mut new_privileges = vec![];
-                    for privilege in &primary_table_privileges {
-                        for state_table_id in &index_state_table_ids {
-                            new_privileges.push(user_privilege::ActiveModel {
-                                id: Default::default(),
-                                oid: Set(state_table_id.as_raw_id() as ObjectId),
-                                user_id: Set(privilege.user_id),
-                                action: Set(Action::Select),
-                                dependent_id: Set(privilege.dependent_id),
-                                granted_by: Set(privilege.granted_by),
-                                with_grant_option: Set(privilege.with_grant_option),
-                            });
-                        }
-                    }
-                    UserPrivilege::insert_many(new_privileges)
-                        .exec(&txn)
-                        .await?;
-
-                    updated_user_info = list_user_info_by_ids(
-                        primary_table_privileges.into_iter().map(|p| p.user_id),
-                        &txn,
-                    )
-                    .await?;
-                }
-
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
-                });
-            }
-            ObjectType::Source => {
-                let (source, obj) = Source::find_by_id(job_id.as_raw_id() as ObjectId)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
-                objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Source(
-                        ObjectModel(source, obj.unwrap()).into(),
-                    )),
-                });
-            }
-            _ => unreachable!("invalid job type: {:?}", job_type),
-        }
-
-        if job_type != ObjectType::Index {
-            updated_user_info =
-                grant_default_privileges_automatically(&txn, job_id.as_raw_id() as ObjectId)
-                    .await?;
-        }
         txn.commit().await?;
 
         let mut version = self
@@ -1132,6 +965,199 @@ impl CatalogController {
             });
 
         Ok(())
+    }
+
+    /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
+    pub async fn finish_streaming_job_inner(
+        txn: &DatabaseTransaction,
+        job_id: JobId,
+    ) -> MetaResult<(Operation, Vec<risingwave_pb::meta::Object>, Vec<PbUserInfo>)> {
+        let job_type = Object::find_by_id(job_id)
+            .select_only()
+            .column(object::Column::ObjType)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        let create_type: CreateType = StreamingJobModel::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::CreateType)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
+        let res = Object::update_many()
+            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
+            .filter(object::Column::Oid.eq(job_id))
+            .exec(txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("streaming job", job_id));
+        }
+
+        // mark the target stream job as `Created`.
+        let job = streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Created),
+            ..Default::default()
+        };
+        job.update(txn).await?;
+
+        // notify frontend: job, internal tables.
+        let internal_table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::BelongsToJobId.eq(job_id))
+            .all(txn)
+            .await?;
+        let mut objects = internal_table_objs
+            .iter()
+            .map(|(table, obj)| PbObject {
+                object_info: Some(PbObjectInfo::Table(
+                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
+                )),
+            })
+            .collect_vec();
+        let mut notification_op = if create_type == CreateType::Background {
+            NotificationOperation::Update
+        } else {
+            NotificationOperation::Add
+        };
+        let mut updated_user_info = vec![];
+
+        match job_type {
+            ObjectType::Table => {
+                let (table, obj) = Table::find_by_id(job_id.as_mv_table_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
+                if table.table_type == TableType::MaterializedView {
+                    notification_op = NotificationOperation::Update;
+                }
+
+                if let Some(source_id) = table.optional_associated_source_id {
+                    let (src, obj) = Source::find_by_id(source_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(
+                            ObjectModel(src, obj.unwrap()).into(),
+                        )),
+                    });
+                }
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
+                });
+            }
+            ObjectType::Sink => {
+                let (sink, obj) = Sink::find_by_id(job_id.as_sink_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+                });
+            }
+            ObjectType::Index => {
+                let (index, obj) = Index::find_by_id(job_id.as_index_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
+                {
+                    let (table, obj) = Table::find_by_id(index.index_table_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| {
+                            MetaError::catalog_id_not_found("table", index.index_table_id)
+                        })?;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(
+                            ObjectModel(table, obj.unwrap()).into(),
+                        )),
+                    });
+                }
+
+                // If the index is created on a table with privileges, we should also
+                // grant the privileges for the index and its state tables.
+                let primary_table_privileges = UserPrivilege::find()
+                    .filter(
+                        user_privilege::Column::Oid
+                            .eq(index.primary_table_id)
+                            .and(user_privilege::Column::Action.eq(Action::Select)),
+                    )
+                    .all(txn)
+                    .await?;
+                if !primary_table_privileges.is_empty() {
+                    let index_state_table_ids: Vec<TableId> = Table::find()
+                        .select_only()
+                        .column(table::Column::TableId)
+                        .filter(
+                            table::Column::BelongsToJobId
+                                .eq(job_id)
+                                .or(table::Column::TableId.eq(index.index_table_id)),
+                        )
+                        .into_tuple()
+                        .all(txn)
+                        .await?;
+                    let mut new_privileges = vec![];
+                    for privilege in &primary_table_privileges {
+                        for state_table_id in &index_state_table_ids {
+                            new_privileges.push(user_privilege::ActiveModel {
+                                id: Default::default(),
+                                oid: Set(state_table_id.as_object_id()),
+                                user_id: Set(privilege.user_id),
+                                action: Set(Action::Select),
+                                dependent_id: Set(privilege.dependent_id),
+                                granted_by: Set(privilege.granted_by),
+                                with_grant_option: Set(privilege.with_grant_option),
+                            });
+                        }
+                    }
+                    UserPrivilege::insert_many(new_privileges).exec(txn).await?;
+
+                    updated_user_info = list_user_info_by_ids(
+                        primary_table_privileges.into_iter().map(|p| p.user_id),
+                        txn,
+                    )
+                    .await?;
+                }
+
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
+                });
+            }
+            ObjectType::Source => {
+                let (source, obj) = Source::find_by_id(job_id.as_shared_source_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Source(
+                        ObjectModel(source, obj.unwrap()).into(),
+                    )),
+                });
+            }
+            _ => unreachable!("invalid job type: {:?}", job_type),
+        }
+
+        if job_type != ObjectType::Index {
+            updated_user_info = grant_default_privileges_automatically(txn, job_id).await?;
+        }
+
+        Ok((notification_op, objects, updated_user_info))
     }
 
     pub async fn finish_replace_streaming_job(
@@ -1333,9 +1359,7 @@ impl CatalogController {
             }
 
             // 3. remove dummy object.
-            Object::delete_by_id(tmp_id.as_raw_id() as ObjectId)
-                .exec(txn)
-                .await?;
+            Object::delete_by_id(tmp_id).exec(txn).await?;
 
             Ok(())
         }
@@ -1359,7 +1383,7 @@ impl CatalogController {
             }
             StreamingJobType::Source => {
                 let (source, source_obj) =
-                    Source::find_by_id(original_job_id.as_raw_id() as ObjectId)
+                    Source::find_by_id(original_job_id.as_shared_source_id())
                         .find_also_related(Object)
                         .one(txn)
                         .await?
@@ -1410,8 +1434,8 @@ impl CatalogController {
             for finish_sink_context in sinks {
                 finish_fragments(
                     txn,
-                    finish_sink_context.tmp_sink_id,
-                    JobId::new(finish_sink_context.original_sink_id as _),
+                    finish_sink_context.tmp_sink_id.as_job_id(),
+                    finish_sink_context.original_sink_id.as_job_id(),
                     Default::default(),
                 )
                 .await?;
@@ -1478,9 +1502,7 @@ impl CatalogController {
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        Object::delete_by_id(tmp_job_id.as_raw_id() as ObjectId)
-            .exec(&txn)
-            .await?;
+        Object::delete_by_id(tmp_job_id).exec(&txn).await?;
         if let Some(tmp_sink_ids) = tmp_sink_ids {
             for tmp_sink_id in tmp_sink_ids {
                 Object::delete_by_id(tmp_sink_id).exec(&txn).await?;
@@ -1524,7 +1546,7 @@ impl CatalogController {
             } else if let Some(source_info) = &source.source_info
                 && source_info.to_protobuf().is_shared()
             {
-                vec![JobId::new(source_id as _)]
+                vec![source_id.as_share_source_job_id()]
             } else {
                 ObjectDependency::find()
                     .select_only()
@@ -1569,7 +1591,7 @@ impl CatalogController {
                 visit_stream_node_mut(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node
                         && let Some(node_inner) = &mut node.source_inner
-                        && node_inner.source_id == source_id as u32
+                        && node_inner.source_id == source_id
                     {
                         node_inner.rate_limit = rate_limit;
                         found = true;
@@ -1583,7 +1605,7 @@ impl CatalogController {
                     if let PbNodeBody::StreamFsFetch(node) = node {
                         fragment_type_mask.add(FragmentTypeFlag::FsFetch);
                         if let Some(node_inner) = &mut node.node_inner
-                            && node_inner.source_id == source_id as u32
+                            && node_inner.source_id == source_id
                         {
                             node_inner.rate_limit = rate_limit;
                             found = true;
@@ -1598,7 +1620,7 @@ impl CatalogController {
             !fragments.is_empty(),
             "source id should be used by at least one fragment"
         );
-        let fragment_ids = fragments.iter().map(|(id, _, _)| *id as u32).collect_vec();
+        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
 
         for (id, fragment_type_mask, stream_node) in fragments {
             fragment::ActiveModel {
@@ -1632,18 +1654,18 @@ impl CatalogController {
 
     fn get_fragment_actors_from_running_info(
         &self,
-        fragment_ids: impl Iterator<Item = u32>,
+        fragment_ids: impl Iterator<Item = FragmentId>,
     ) -> HashMap<FragmentId, Vec<ActorId>> {
         let mut fragment_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
 
         let info = self.env.shared_actor_infos().read_guard();
 
         for fragment_id in fragment_ids {
-            let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id as _).unwrap();
+            let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id).unwrap();
             fragment_actors
                 .entry(fragment_id as _)
                 .or_default()
-                .extend(actors.keys().map(|actor| *actor as i32));
+                .extend(actors.keys().copied());
         }
 
         fragment_actors
@@ -1698,7 +1720,7 @@ impl CatalogController {
             )));
         }
 
-        let fragment_ids: HashSet<u32> = fragments.iter().map(|(id, _, _)| *id as u32).collect();
+        let fragment_ids: HashSet<FragmentId> = fragments.iter().map(|(id, _, _)| *id).collect();
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
@@ -1756,7 +1778,7 @@ impl CatalogController {
         .await?;
 
         let fragment_actors =
-            self.get_fragment_actors_from_running_info(std::iter::once(fragment_id as u32));
+            self.get_fragment_actors_from_running_info(std::iter::once(fragment_id));
 
         txn.commit().await?;
 
@@ -1835,7 +1857,7 @@ impl CatalogController {
             };
 
         self.mutate_fragments_by_job_id(
-            JobId::new(sink_id as _),
+            sink_id.as_job_id(),
             update_sink_rate_limit,
             "sink node not found",
         )
@@ -1930,7 +1952,7 @@ impl CatalogController {
         // can be source_id or table_id
         // if updating an associated source, the preferred_id is the table_id
         // otherwise, it is the source_id
-        let mut preferred_id: i32 = source_id;
+        let mut preferred_id = source_id.as_object_id();
         let rewrite_sql = {
             let definition = source.definition.clone();
 
@@ -1967,9 +1989,7 @@ impl CatalogController {
                     options.push(sql_option);
                 }
                 for (k, v) in options_with_secret.as_secret() {
-                    if let Some(secret_model) =
-                        Secret::find_by_id(v.secret_id as i32).one(txn).await?
-                    {
+                    if let Some(secret_model) = Secret::find_by_id(v.secret_id).one(txn).await? {
                         let sql_option =
                             SqlOption::try_from((k, &format!("SECRET {}", secret_model.name)))
                                 .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
@@ -1990,7 +2010,7 @@ impl CatalogController {
                     *with_options =
                         format_with_option_secret_resolved(&txn, &options_with_secret).await?;
                     associate_table_id = source.optional_associated_table_id;
-                    preferred_id = associate_table_id.unwrap().as_raw_id() as _;
+                    preferred_id = associate_table_id.unwrap().as_object_id();
                 }
                 _ => unreachable!(),
             }
@@ -2003,8 +2023,8 @@ impl CatalogController {
             if !to_add_secret_dep.is_empty() {
                 ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
-                        oid: Set(secret_id as _),
-                        used_by: Set(preferred_id as _),
+                        oid: Set(secret_id.into()),
+                        used_by: Set(preferred_id),
                         ..Default::default()
                     }
                 }))
@@ -2017,9 +2037,7 @@ impl CatalogController {
                     .filter(
                         object_dependency::Column::Oid
                             .is_in(to_remove_secret_dep)
-                            .and(
-                                object_dependency::Column::UsedBy.eq::<ObjectId>(preferred_id as _),
-                            ),
+                            .and(object_dependency::Column::UsedBy.eq(preferred_id)),
                     )
                     .exec(&txn)
                     .await?;
@@ -2050,7 +2068,7 @@ impl CatalogController {
             // if updating table with connector, the fragment_id is table id
             associate_table_id.as_job_id()
         } else {
-            JobId::new(source_id as _)
+            source_id.as_share_source_job_id()
         }]
         .into_iter()
         .chain(dep_source_job_ids.into_iter())
@@ -2178,7 +2196,7 @@ impl CatalogController {
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
-    ) -> MetaResult<(HashMap<String, String>, u32)> {
+    ) -> MetaResult<(HashMap<String, String>, SinkId)> {
         let risingwave_pb::meta::alter_connector_props_request::PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) = alter_iceberg_table_props.
             ok_or_else(|| MetaError::invalid_parameter("alter_iceberg_table_props is required"))?;
         let inner = self.inner.read().await;
@@ -2282,7 +2300,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok((props.into_iter().collect(), sink_id as u32))
+        Ok((props.into_iter().collect(), sink_id))
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(
@@ -2334,7 +2352,7 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let fragments: Vec<(FragmentId, ObjectId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
@@ -2392,8 +2410,8 @@ impl CatalogController {
 
                 if let Some(rate_limit) = rate_limit {
                     rate_limits.push(RateLimitInfo {
-                        fragment_id: fragment_id as u32,
-                        job_id: job_id as u32,
+                        fragment_id,
+                        job_id,
                         fragment_type_mask: fragment_type_mask as u32,
                         rate_limit,
                         node_name: node_name.unwrap().to_owned(),
@@ -2484,7 +2502,7 @@ async fn update_sink_fragment_props(
             visit_stream_node_mut(&mut stream_node, |node| {
                 if let PbNodeBody::Sink(node) = node
                     && let Some(sink_desc) = &mut node.sink_desc
-                    && sink_desc.id == sink_id as u32
+                    && sink_desc.id == sink_id
                 {
                     sink_desc.properties.extend(props.clone());
                     found = true;
@@ -2516,8 +2534,8 @@ pub struct SinkIntoTableContext {
 }
 
 pub struct FinishAutoRefreshSchemaSinkContext {
-    pub tmp_sink_id: JobId,
-    pub original_sink_id: ObjectId,
+    pub tmp_sink_id: SinkId,
+    pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
     pub new_log_store_table: Option<(TableId, Vec<PbColumnCatalog>)>,
 }

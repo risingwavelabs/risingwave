@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::id::JobId;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::CtlContext;
@@ -19,7 +20,7 @@ use crate::CtlContext;
 pub async fn trigger_manual_compaction(
     context: &CtlContext,
     compaction_group_id: u64,
-    table_id: u32,
+    table_id: JobId,
     level: u32,
     sst_ids: Vec<u64>,
 ) -> anyhow::Result<()> {

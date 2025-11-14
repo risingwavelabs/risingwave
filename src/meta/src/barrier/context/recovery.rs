@@ -24,7 +24,6 @@ use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
@@ -40,7 +39,7 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor, StreamContext};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
-use crate::stream::{SourceChange, StreamFragmentGraph};
+use crate::stream::{REFRESH_TABLE_PROGRESS_TRACKER, SourceChange, StreamFragmentGraph};
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
@@ -315,7 +314,7 @@ impl GlobalBarrierWorkerContextImpl {
             .await?;
         for table in tables {
             assert_eq!(table.table_type(), PbTableType::Table);
-            let fragment_infos = jobs.get_mut(&table.id.into()).unwrap();
+            let fragment_infos = jobs.get_mut(&table.id.as_job_id()).unwrap();
             let mut target_fragment_id = None;
             for fragment in fragment_infos.values() {
                 let mut is_target_fragment = false;
@@ -395,7 +394,7 @@ impl GlobalBarrierWorkerContextImpl {
                         for job_id in background_streaming_jobs {
                             let scan_types = self
                                 .metadata_manager
-                                .get_job_backfill_scan_types(job_id.as_raw_id() as ObjectId)
+                                .get_job_backfill_scan_types(job_id)
                                 .await?;
 
                             if scan_types
@@ -700,6 +699,11 @@ impl GlobalBarrierWorkerContextImpl {
                     .next_generation(cdc_table_ids.into_iter()),
             )
         };
+
+        REFRESH_TABLE_PROGRESS_TRACKER
+            .lock()
+            .remove_tracker_by_database_id(database_id);
+
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,
@@ -747,7 +751,7 @@ impl GlobalBarrierWorkerContextImpl {
                         *actor_id,
                         StreamActor {
                             actor_id: *actor_id as _,
-                            fragment_id: *fragment_id as _,
+                            fragment_id: *fragment_id,
                             vnode_bitmap: vnode_bitmap.clone(),
                             mview_definition: job_definition.clone(),
                             expr_context: expr_context.clone(),

@@ -94,7 +94,7 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        if !env.config().unsafe_enable_strict_consistency {
+        if !env.global_config().unsafe_enable_strict_consistency {
             // If strict consistency is disabled, should disable storage sanity check.
             // Since this is a special config, we have to check it here.
             risingwave_storage::hummock::utils::disable_sanity_check();
@@ -178,11 +178,12 @@ impl LocalStreamManager {
 
 #[cfg(test)]
 pub mod test_utils {
+    use risingwave_common::id::ActorId;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
 
-    pub fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+    pub fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
         ActorInfo {
             actor_id,
             host: Some(HostAddress {

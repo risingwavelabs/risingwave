@@ -25,9 +25,12 @@ use futures::FutureExt;
 use futures::stream::FuturesOrdered;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::SourceId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::barrier_complete_response::PbCdcTableBackfillProgress;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
+};
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
@@ -66,8 +69,8 @@ enum ManagedBarrierStateInner {
     /// The barrier has been collected by all remaining actors
     AllCollected {
         create_mview_progress: Vec<PbCreateMviewProgress>,
-        list_finished_source_ids: Vec<u32>,
-        load_finished_source_ids: Vec<u32>,
+        list_finished_source_ids: Vec<PbListFinishedSource>,
+        load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
@@ -84,7 +87,6 @@ struct BarrierState {
 
 use risingwave_common::must_match;
 use risingwave_pb::stream_service::InjectBarrierRequest;
-use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
@@ -313,12 +315,14 @@ pub(crate) struct PartialGraphManagedBarrierState {
     pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
     /// Record the source list finished reports for each epoch of concurrent checkpoints.
-    /// Used for refreshable batch source.
-    pub(crate) list_finished_source_ids: HashMap<u64, HashSet<u32>>,
+    /// Used for refreshable batch source. The map key is epoch and the value is
+    /// a list of pb messages reported by actors.
+    pub(crate) list_finished_source_ids: HashMap<u64, Vec<PbListFinishedSource>>,
 
     /// Record the source load finished reports for each epoch of concurrent checkpoints.
-    /// Used for refreshable batch source.
-    pub(crate) load_finished_source_ids: HashMap<u64, HashSet<u32>>,
+    /// Used for refreshable batch source. The map key is epoch and the value is
+    /// a list of pb messages reported by actors.
+    pub(crate) load_finished_source_ids: HashMap<u64, Vec<PbLoadFinishedSource>>,
 
     pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
 
@@ -706,13 +710,12 @@ impl DatabaseManagedBarrierState {
             .get_mut(&partial_graph_id)
             .expect("should exist");
 
-        let table_ids =
-            HashSet::from_iter(request.table_ids_to_sync.iter().cloned().map(TableId::new));
+        let table_ids = HashSet::from_iter(request.table_ids_to_sync);
         self.table_ids.extend(table_ids.iter().cloned());
 
         graph_state.transform_to_issued(
             barrier,
-            request.actor_ids_to_collect.iter().cloned(),
+            request.actor_ids_to_collect.iter().copied(),
             table_ids,
         );
 
@@ -768,8 +771,8 @@ impl DatabaseManagedBarrierState {
         // actors are spawned in the local test logic, but we assume that there is an entry for each spawned actor in ·actor_states`,
         // so under cfg!(test) we add a dummy entry for each new actor.
         if cfg!(test) {
-            for actor_id in &request.actor_ids_to_collect {
-                if !self.actor_states.contains_key(actor_id) {
+            for &actor_id in &request.actor_ids_to_collect {
+                if !self.actor_states.contains_key(&actor_id) {
                     let (tx, rx) = unbounded_channel();
                     let join_handle = self.actor_manager.runtime.spawn(async move {
                         // The rx is spawned so that tx.send() will not fail.
@@ -779,9 +782,9 @@ impl DatabaseManagedBarrierState {
                     assert!(
                         self.actor_states
                             .try_insert(
-                                *actor_id,
+                                actor_id,
                                 InflightActorState::start(
-                                    *actor_id,
+                                    actor_id,
                                     partial_graph_id,
                                     barrier,
                                     tx,
@@ -791,26 +794,26 @@ impl DatabaseManagedBarrierState {
                             )
                             .is_ok()
                     );
-                    new_actors.insert(*actor_id);
+                    new_actors.insert(actor_id);
                 }
             }
         }
 
         // Note: it's important to issue barrier to actor after issuing to graph to ensure that
         // we call `start_epoch` on the graph before the actors receive the barrier
-        for actor_id in &request.actor_ids_to_collect {
-            if new_actors.contains(actor_id) {
+        for &actor_id in &request.actor_ids_to_collect {
+            if new_actors.contains(&actor_id) {
                 continue;
             }
             self.actor_states
-                .get_mut(actor_id)
+                .get_mut(&actor_id)
                 .unwrap_or_else(|| {
                     panic!(
                         "should exist: {} {:?}",
                         actor_id, request.actor_ids_to_collect
                     );
                 })
-                .issue_barrier(partial_graph_id, barrier, is_stop_actor(*actor_id))?;
+                .issue_barrier(partial_graph_id, barrier, is_stop_actor(actor_id))?;
         }
 
         Ok(())
@@ -822,7 +825,7 @@ impl DatabaseManagedBarrierState {
         upstream_actor_id: ActorId,
         result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
     ) {
-        let (tx, rx) = channel_from_config(self.local_barrier_manager.env.config());
+        let (tx, rx) = channel_from_config(self.local_barrier_manager.env.global_config());
         self.new_actor_output_request(actor_id, upstream_actor_id, NewOutputRequest::Remote(tx));
         let _ = result_sender.send(Ok(rx));
     }
@@ -1026,8 +1029,8 @@ impl DatabaseManagedBarrierState {
         &mut self,
         epoch: EpochPair,
         actor_id: ActorId,
-        _table_id: u32,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: SourceId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
@@ -1038,11 +1041,15 @@ impl DatabaseManagedBarrierState {
                 .list_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
-                .insert(associated_source_id);
+                .push(PbListFinishedSource {
+                    reporter_actor_id: actor_id,
+                    table_id,
+                    associated_source_id,
+                });
         } else {
             warn!(
                 ?epoch,
-                actor_id, associated_source_id, "ignore source list finished"
+                %actor_id, %table_id, %associated_source_id, "ignore source list finished"
             );
         }
     }
@@ -1052,8 +1059,8 @@ impl DatabaseManagedBarrierState {
         &mut self,
         epoch: EpochPair,
         actor_id: ActorId,
-        _table_id: TableId,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: SourceId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
@@ -1064,11 +1071,15 @@ impl DatabaseManagedBarrierState {
                 .load_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
-                .insert(associated_source_id);
+                .push(PbLoadFinishedSource {
+                    reporter_actor_id: actor_id,
+                    table_id,
+                    associated_source_id,
+                });
         } else {
             warn!(
                 ?epoch,
-                actor_id, associated_source_id, "ignore source load finished"
+                %actor_id, %table_id, %associated_source_id, "ignore source load finished"
             );
         }
     }
@@ -1085,7 +1096,7 @@ impl DatabaseManagedBarrierState {
         let Some(actor_state) = self.actor_states.get(&actor_id) else {
             warn!(
                 ?epoch,
-                actor_id, %table_id, "ignore refresh finished table: actor_state not found"
+                %actor_id, %table_id, "ignore refresh finished table: actor_state not found"
             );
             return;
         };
@@ -1093,7 +1104,7 @@ impl DatabaseManagedBarrierState {
             let inflight_barriers = actor_state.inflight_barriers.keys().collect::<Vec<_>>();
             warn!(
                 ?epoch,
-                actor_id,
+                %actor_id,
                 %table_id,
                 ?inflight_barriers,
                 "ignore refresh finished table: partial_graph_id not found in inflight_barriers"
@@ -1103,7 +1114,7 @@ impl DatabaseManagedBarrierState {
         let Some(graph_state) = self.graph_states.get_mut(partial_graph_id) else {
             warn!(
                 ?epoch,
-                actor_id, %table_id, "ignore refresh finished table: graph_state not found"
+                %actor_id, %table_id, "ignore refresh finished table: graph_state not found"
             );
             return;
         };
@@ -1151,16 +1162,12 @@ impl PartialGraphManagedBarrierState {
             let list_finished_source_ids = self
                 .list_finished_source_ids
                 .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
+                .unwrap_or_default();
 
             let load_finished_source_ids = self
                 .load_finished_source_ids
                 .remove(&barrier_state.barrier.epoch.curr)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
+                .unwrap_or_default();
 
             let cdc_table_backfill_progress = self
                 .cdc_table_backfill_progress
@@ -1249,8 +1256,8 @@ pub(crate) struct BarrierToComplete {
     pub barrier: Barrier,
     pub table_ids: Option<HashSet<TableId>>,
     pub create_mview_progress: Vec<PbCreateMviewProgress>,
-    pub list_finished_source_ids: Vec<u32>,
-    pub load_finished_source_ids: Vec<u32>,
+    pub list_finished_source_ids: Vec<PbListFinishedSource>,
+    pub load_finished_source_ids: Vec<PbLoadFinishedSource>,
     pub truncate_tables: Vec<TableId>,
     pub refresh_finished_tables: Vec<TableId>,
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
@@ -1258,10 +1265,11 @@ pub(crate) struct BarrierToComplete {
 
 impl PartialGraphManagedBarrierState {
     /// Collect a `barrier` from the actor with `actor_id`.
-    pub(super) fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) {
+    pub(super) fn collect(&mut self, actor_id: impl Into<ActorId>, epoch: EpochPair) {
+        let actor_id = actor_id.into();
         tracing::debug!(
             target: "events::stream::barrier::manager::collect",
-            ?epoch, actor_id, state = ?self.epoch_barrier_state_map,
+            ?epoch, %actor_id, state = ?self.epoch_barrier_state_map,
             "collect_barrier",
         );
 
@@ -1406,9 +1414,9 @@ mod tests {
         let barrier1 = Barrier::new_test_barrier(test_epoch(1));
         let barrier2 = Barrier::new_test_barrier(test_epoch(2));
         let barrier3 = Barrier::new_test_barrier(test_epoch(3));
-        let actor_ids_to_collect1 = HashSet::from([1, 2]);
-        let actor_ids_to_collect2 = HashSet::from([1, 2]);
-        let actor_ids_to_collect3 = HashSet::from([1, 2, 3]);
+        let actor_ids_to_collect1 = HashSet::from([1.into(), 2.into()]);
+        let actor_ids_to_collect2 = HashSet::from([1.into(), 2.into()]);
+        let actor_ids_to_collect3 = HashSet::from([1.into(), 2.into(), 3.into()]);
         managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
@@ -1456,9 +1464,9 @@ mod tests {
         let barrier1 = Barrier::new_test_barrier(test_epoch(1));
         let barrier2 = Barrier::new_test_barrier(test_epoch(2));
         let barrier3 = Barrier::new_test_barrier(test_epoch(3));
-        let actor_ids_to_collect1 = HashSet::from([1, 2, 3, 4]);
-        let actor_ids_to_collect2 = HashSet::from([1, 2, 3]);
-        let actor_ids_to_collect3 = HashSet::from([1, 2]);
+        let actor_ids_to_collect1 = HashSet::from([1.into(), 2.into(), 3.into(), 4.into()]);
+        let actor_ids_to_collect2 = HashSet::from([1.into(), 2.into(), 3.into()]);
+        let actor_ids_to_collect3 = HashSet::from([1.into(), 2.into()]);
         managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
         managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());

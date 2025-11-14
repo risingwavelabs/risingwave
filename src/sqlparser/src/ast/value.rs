@@ -10,18 +10,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(feature = "std"))]
-use alloc::string::String;
-use core::fmt;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use std::fmt;
 
 use super::ObjectName;
 
 /// Primitive SQL values such as number and string
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Value {
     /// Numeric literal
     Number(String),
@@ -118,7 +112,6 @@ impl fmt::Display for Value {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DollarQuotedString {
     pub value: String,
     pub tag: Option<String>,
@@ -138,7 +131,6 @@ impl fmt::Display for DollarQuotedString {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CstyleEscapedString {
     /// The unescaped string.
     pub value: String,
@@ -153,7 +145,6 @@ impl fmt::Display for CstyleEscapedString {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DateTimeField {
     Year,
     Month,
@@ -196,7 +187,6 @@ pub fn escape_single_quote_string(s: &str) -> EscapeSingleQuoteString<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TrimWhereField {
     Both,
     Leading,
@@ -215,7 +205,6 @@ impl fmt::Display for TrimWhereField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum JsonPredicateType {
     #[default]
     Value,
@@ -236,7 +225,6 @@ impl fmt::Display for JsonPredicateType {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SecretRefValue {
     pub secret_name: ObjectName,
     pub ref_as: SecretRefAsType,
@@ -252,14 +240,12 @@ impl fmt::Display for SecretRefValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SecretRefAsType {
     Text,
     File,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConnectionRefValue {
     pub connection_name: ObjectName,
 }

@@ -53,6 +53,7 @@ use crate::hummock::block_stream::{
 };
 use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
+use crate::hummock::vector::monitor::VectorStoreCacheStats;
 use crate::hummock::{BlockHolder, HummockError, HummockResult, RecentFilterTrait};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
@@ -107,7 +108,7 @@ impl<T> Deref for VectorMetaFileHolder<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        // #safety: VectorFileHolder is exposed only as immutable, and `VectorFileMeta` is pinned via box
+        // SAFETY: VectorFileHolder is exposed only as immutable, and `VectorFileMeta` is pinned via box
         unsafe { &*self.ptr }
     }
 }
@@ -573,6 +574,7 @@ impl SstableStore {
     pub async fn get_vector_file_meta(
         &self,
         vector_file: &VectorFileInfo,
+        stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<VectorFileHolder> {
         let entry = self
             .vector_meta_cache
@@ -590,8 +592,13 @@ impl SstableStore {
                         .map_err(foyer::Error::other)?;
                     Ok::<_, foyer::Error>(meta.into())
                 }
-            })
-            .await?;
+            });
+        if let FetchState::Miss = entry.state() {
+            stats.file_meta_miss += 1;
+        }
+        stats.file_meta_total += 1;
+
+        let entry = entry.await?;
         VectorFileHolder::try_from_entry(entry, vector_file.object_id.as_raw())
     }
 
@@ -600,8 +607,10 @@ impl SstableStore {
         vector_file: &VectorFileInfo,
         block_idx: usize,
         block_meta: &VectorBlockMeta,
+        stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<VectorBlockHolder> {
-        self.vector_block_cache
+        let entry = self
+            .vector_block_cache
             .fetch((vector_file.object_id, block_idx), || {
                 let store = self.store.clone();
                 let path =
@@ -616,9 +625,13 @@ impl SstableStore {
                     let block = VectorBlock::decode(&encoded_block).map_err(foyer::Error::other)?;
                     Ok(Box::new(block))
                 }
-            })
-            .await
-            .map_err(HummockError::foyer_error)
+            });
+        if let FetchState::Miss = entry.state() {
+            stats.file_block_miss += 1;
+        }
+        stats.file_block_total += 1;
+
+        entry.await.map_err(HummockError::foyer_error)
     }
 
     pub fn insert_vector_cache(
@@ -643,6 +656,7 @@ impl SstableStore {
     pub async fn get_hnsw_graph(
         &self,
         graph_file: &HnswGraphFileInfo,
+        stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<HnswGraphFileHolder> {
         let entry = self
             .vector_meta_cache
@@ -659,8 +673,13 @@ impl SstableStore {
                         PbHnswGraph::decode(encoded_graph.as_ref()).map_err(foyer::Error::other)?;
                     Ok::<_, foyer::Error>(graph.into())
                 }
-            })
-            .await?;
+            });
+        if let FetchState::Miss = entry.state() {
+            stats.hnsw_graph_miss += 1;
+        }
+        stats.hnsw_graph_total += 1;
+
+        let entry = entry.await?;
         HnswGraphFileHolder::try_from_entry(entry, graph_file.object_id.as_raw())
     }
 

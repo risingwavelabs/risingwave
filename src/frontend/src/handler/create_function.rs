@@ -167,9 +167,9 @@ pub async fn handle_create_function(
     })?;
 
     let function = PbFunction {
-        id: FunctionId::placeholder().0,
-        schema_id: schema_id.into(),
-        database_id: database_id.into(),
+        id: FunctionId::placeholder(),
+        schema_id,
+        database_id,
         name: function_name,
         kind: Some(kind),
         arg_names,

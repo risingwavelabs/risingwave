@@ -80,6 +80,8 @@ ENABLE_BUILD_RUST=$ENABLE_BUILD
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 ENABLE_UDF=true
+
+ENABLE_BUILD_RW_CONNECTOR=true
 EOF
 
 # See https://github.com/risingwavelabs/risingwave/pull/15448

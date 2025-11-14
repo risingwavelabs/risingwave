@@ -221,10 +221,7 @@ impl CreatingStreamingJobStatus {
                     } else {
                         Some(Mutation::StartFragmentBackfill(
                             StartFragmentBackfillMutation {
-                                fragment_ids: pending_backfill_nodes
-                                    .into_iter()
-                                    .map(|fragment_id| fragment_id as _)
-                                    .collect(),
+                                fragment_ids: pending_backfill_nodes.into_iter().collect(),
                             },
                         ))
                     }

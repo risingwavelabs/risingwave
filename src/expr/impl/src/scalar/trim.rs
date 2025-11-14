@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::function;
 
 #[function("trim(varchar) -> varchar")]
-pub fn trim(s: &str, writer: &mut impl Write) {
+pub fn trim(s: &str, writer: &mut impl std::fmt::Write) {
     writer.write_str(s.trim()).unwrap();
 }
 
@@ -25,7 +23,7 @@ pub fn trim(s: &str, writer: &mut impl Write) {
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[function("ltrim(varchar) -> varchar")]
-pub fn ltrim(s: &str, writer: &mut impl Write) {
+pub fn ltrim(s: &str, writer: &mut impl std::fmt::Write) {
     writer.write_str(s.trim_start()).unwrap();
 }
 
@@ -33,12 +31,12 @@ pub fn ltrim(s: &str, writer: &mut impl Write) {
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[function("rtrim(varchar) -> varchar")]
-pub fn rtrim(s: &str, writer: &mut impl Write) {
+pub fn rtrim(s: &str, writer: &mut impl std::fmt::Write) {
     writer.write_str(s.trim_end()).unwrap();
 }
 
 #[function("trim(varchar, varchar) -> varchar")]
-pub fn trim_characters(s: &str, characters: &str, writer: &mut impl Write) {
+pub fn trim_characters(s: &str, characters: &str, writer: &mut impl std::fmt::Write) {
     let pattern = |c| characters.chars().any(|ch| ch == c);
     // We remark that feeding a &str and a slice of chars into trim_left/right_matches
     // means different, one is matching with the entire string and the other one is matching
@@ -47,13 +45,13 @@ pub fn trim_characters(s: &str, characters: &str, writer: &mut impl Write) {
 }
 
 #[function("ltrim(varchar, varchar) -> varchar")]
-pub fn ltrim_characters(s: &str, characters: &str, writer: &mut impl Write) {
+pub fn ltrim_characters(s: &str, characters: &str, writer: &mut impl std::fmt::Write) {
     let pattern = |c| characters.chars().any(|ch| ch == c);
     writer.write_str(s.trim_start_matches(pattern)).unwrap();
 }
 
 #[function("rtrim(varchar, varchar) -> varchar")]
-pub fn rtrim_characters(s: &str, characters: &str, writer: &mut impl Write) {
+pub fn rtrim_characters(s: &str, characters: &str, writer: &mut impl std::fmt::Write) {
     let pattern = |c| characters.chars().any(|ch| ch == c);
     writer.write_str(s.trim_end_matches(pattern)).unwrap();
 }
@@ -87,13 +85,12 @@ fn trim_bound(bytes: &[u8], bytesremoved: &[u8]) -> (usize, usize) {
 /// \x345678
 /// ```
 #[function("trim(bytea, bytea) -> bytea")]
-pub fn trim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+pub fn trim_bytea(bytes: &[u8], bytesremoved: &[u8], writer: &mut impl std::io::Write) {
     let (start, end) = trim_bound(bytes, bytesremoved);
 
-    bytes
-        .get(start..end)
-        .map(|s| s.iter().copied().collect())
-        .unwrap_or_else(|| Box::<[u8]>::from([]))
+    if let Some(slice) = bytes.get(start..end) {
+        writer.write_all(slice).unwrap();
+    }
 }
 
 /// Removes the longest string containing only bytes appearing in bytesremoved
@@ -108,9 +105,9 @@ pub fn trim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
 /// \x34567890
 /// ```
 #[function("ltrim(bytea, bytea) -> bytea")]
-pub fn ltrim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+pub fn ltrim_bytea(bytes: &[u8], bytesremoved: &[u8], writer: &mut impl std::io::Write) {
     let (start, _) = trim_bound(bytes, bytesremoved);
-    bytes[start..].iter().copied().collect()
+    writer.write_all(&bytes[start..]).unwrap();
 }
 
 /// Removes the longest string containing only bytes appearing in bytesremoved
@@ -125,13 +122,15 @@ pub fn ltrim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
 /// \x12345678
 /// ```
 #[function("rtrim(bytea, bytea) -> bytea")]
-pub fn rtrim_bytea(bytes: &[u8], bytesremoved: &[u8]) -> Box<[u8]> {
+pub fn rtrim_bytea(bytes: &[u8], bytesremoved: &[u8], writer: &mut impl std::io::Write) {
     let (_, end) = trim_bound(bytes, bytesremoved);
-    bytes[..end].iter().copied().collect()
+    writer.write_all(&bytes[..end]).unwrap();
 }
 
 #[cfg(test)]
 mod tests {
+    use hex_literal::hex;
+
     use super::*;
 
     #[test]
@@ -218,6 +217,85 @@ mod tests {
             let mut writer = String::new();
             rtrim_characters(s, characters, &mut writer);
             assert_eq!(writer, expected);
+        }
+    }
+
+    #[test]
+    fn test_trim_bytea() {
+        let cases = [
+            (
+                &hex!("1234567890") as &[u8],
+                &hex!("9012") as &[u8],
+                &hex!("345678") as &[u8],
+            ),
+            (
+                &hex!("abcdef") as &[u8],
+                &hex!("00abcf") as &[u8],
+                &hex!("cdef") as &[u8],
+            ),
+            (
+                &hex!("11112222") as &[u8],
+                &hex!("1122") as &[u8],
+                b"" as &[u8],
+            ),
+        ];
+
+        for (bytes, bytesremoved, expected) in cases {
+            let mut result = Vec::new();
+            trim_bytea(bytes, bytesremoved, &mut result);
+            assert_eq!(&result, expected);
+        }
+    }
+
+    #[test]
+    fn test_ltrim_bytea() {
+        let cases = [
+            (
+                &hex!("1234567890") as &[u8],
+                &hex!("9012") as &[u8],
+                &hex!("34567890") as &[u8],
+            ),
+            (
+                &hex!("abcdef") as &[u8],
+                &hex!("00abcf") as &[u8],
+                &hex!("cdef") as &[u8],
+            ),
+            (
+                &hex!("11112222") as &[u8],
+                &hex!("1122") as &[u8],
+                b"" as &[u8],
+            ),
+        ];
+        for (bytes, bytesremoved, expected) in cases {
+            let mut result = Vec::new();
+            ltrim_bytea(bytes, bytesremoved, &mut result);
+            assert_eq!(&result, expected);
+        }
+    }
+
+    #[test]
+    fn test_rtrim_bytea() {
+        let cases = [
+            (
+                &hex!("1234567890") as &[u8],
+                &hex!("9012") as &[u8],
+                &hex!("12345678") as &[u8],
+            ),
+            (
+                &hex!("abcdef") as &[u8],
+                &hex!("00abcf") as &[u8],
+                &hex!("abcdef") as &[u8],
+            ),
+            (
+                &hex!("11112222") as &[u8],
+                &hex!("1122") as &[u8],
+                b"" as &[u8],
+            ),
+        ];
+        for (bytes, bytesremoved, expected) in cases {
+            let mut result = Vec::new();
+            rtrim_bytea(bytes, bytesremoved, &mut result);
+            assert_eq!(&result, expected);
         }
     }
 }

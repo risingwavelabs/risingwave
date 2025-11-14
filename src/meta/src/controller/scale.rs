@@ -19,7 +19,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
@@ -140,7 +139,7 @@ where
         .filter(|worker| worker.is_streaming_schedulable())
         .map(|worker| {
             (
-                worker.id as i32,
+                worker.id,
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
                     resource_group: worker.resource_group(),
@@ -544,7 +543,9 @@ fn render_actors(
 
         let assigner = AssignerBuilder::new(job_id).build();
 
-        let actors = (0..actual_parallelism).collect_vec();
+        let actors = (0..(actual_parallelism as u32))
+            .map_into::<ActorId>()
+            .collect_vec();
         let vnodes = (0..vnode_count).collect_vec();
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
@@ -570,10 +571,8 @@ fn render_actors(
 
                 let entry_fragment_id = entry_fragment.fragment_id;
 
-                let empty_actor_splits: HashMap<_, _> = actors
-                    .iter()
-                    .map(|actor_id| (*actor_id as u32, vec![]))
-                    .collect();
+                let empty_actor_splits: HashMap<_, _> =
+                    actors.iter().map(|actor_id| (*actor_id, vec![])).collect();
 
                 let splits = fragment_splits_map
                     .get(&entry_fragment_id)
@@ -583,7 +582,7 @@ fn render_actors(
                 let splits: BTreeMap<_, _> = splits.into_iter().map(|s| (s.id(), s)).collect();
 
                 let fragment_splits = crate::stream::source_manager::reassign_splits(
-                    entry_fragment_id as u32,
+                    entry_fragment_id,
                     empty_actor_splits,
                     &splits,
                     SplitDiffOptions::default(),
@@ -622,13 +621,13 @@ fn render_actors(
                         DistributionType::Hash => Some(Bitmap::from_indices(vnode_count, vnodes)),
                     };
 
-                    let actor_id = actor_id_base + actor_idx as u32;
+                    let actor_id = actor_idx + actor_id_base;
 
                     let splits = if let Some(source_id) = fragment_source_ids.get(&fragment_id) {
                         assert_eq!(shared_source_id, Some(*source_id));
 
                         fragment_splits
-                            .get(&(actor_idx as u32))
+                            .get(&(actor_idx))
                             .cloned()
                             .unwrap_or_default()
                     } else {
@@ -647,17 +646,13 @@ fn render_actors(
                 .collect();
 
             let fragment = InflightFragmentInfo {
-                fragment_id: fragment_id as u32,
+                fragment_id,
                 distribution_type,
                 fragment_type_mask: fragment_type_mask.into(),
                 vnode_count,
                 nodes: stream_node.to_protobuf(),
                 actors,
-                state_table_ids: state_table_ids
-                    .inner_ref()
-                    .iter()
-                    .map(|id| catalog::TableId::new(*id as _))
-                    .collect(),
+                state_table_ids: state_table_ids.inner_ref().iter().copied().collect(),
             };
 
             let &database_id = streaming_job_databases.get(&job_id).ok_or_else(|| {
@@ -752,7 +747,7 @@ async fn resolve_source_fragments<C>(
 where
     C: ConnectionTrait,
 {
-    let mut source_fragment_ids = HashMap::new();
+    let mut source_fragment_ids: HashMap<SourceId, _> = HashMap::new();
     for (fragment_id, fragment) in fragment_map {
         let mask = FragmentTypeMask::from(fragment.fragment_type_mask);
         if mask.contains(FragmentTypeFlag::Source)
@@ -867,7 +862,7 @@ pub async fn find_fragment_no_shuffle_dags_detailed(
 }
 
 fn find_no_shuffle_graphs(
-    initial_fragment_ids: &[FragmentId],
+    initial_fragment_ids: &[impl Into<FragmentId> + Copy],
     forward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
     backward_edges: &HashMap<FragmentId, Vec<FragmentId>>,
 ) -> MetaResult<Vec<NoShuffleEnsemble>> {
@@ -875,6 +870,7 @@ fn find_no_shuffle_graphs(
     let mut globally_visited: HashSet<FragmentId> = HashSet::new();
 
     for &init_id in initial_fragment_ids {
+        let init_id = init_id.into();
         if globally_visited.contains(&init_id) {
             continue;
         }
@@ -932,7 +928,7 @@ mod tests {
 
     use risingwave_connector::source::SplitImpl;
     use risingwave_connector::source::test_source::TestSourceSplit;
-    use risingwave_meta_model::{CreateType, I32Array, JobStatus, StreamNode};
+    use risingwave_meta_model::{CreateType, I32Array, JobStatus, StreamNode, TableIdArray};
     use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
 
     use super::*;
@@ -946,19 +942,25 @@ mod tests {
 
     /// A helper function to build forward and backward edge maps from a simple list of tuples.
     /// This reduces boilerplate in each test.
-    fn build_edges(relations: &[(FragmentId, FragmentId)]) -> Edges {
+    fn build_edges(relations: &[(u32, u32)]) -> Edges {
         let mut forward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
         let mut backward_edges: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
         for &(src, dst) in relations {
-            forward_edges.entry(src).or_default().push(dst);
-            backward_edges.entry(dst).or_default().push(src);
+            forward_edges
+                .entry(src.into())
+                .or_default()
+                .push(dst.into());
+            backward_edges
+                .entry(dst.into())
+                .or_default()
+                .push(src.into());
         }
         (forward_edges, backward_edges)
     }
 
     /// Helper function to create a `HashSet` from a slice easily.
-    fn to_hashset(ids: &[FragmentId]) -> HashSet<FragmentId> {
-        ids.iter().cloned().collect()
+    fn to_hashset(ids: &[u32]) -> HashSet<FragmentId> {
+        ids.iter().map(|id| (*id).into()).collect()
     }
 
     #[allow(deprecated)]
@@ -976,14 +978,14 @@ mod tests {
             fragment_type_mask,
             distribution_type,
             stream_node: StreamNode::from(&PbStreamNode::default()),
-            state_table_ids: I32Array::default(),
+            state_table_ids: TableIdArray::default(),
             upstream_fragment_id: I32Array::default(),
             vnode_count,
             parallelism: Some(parallelism),
         }
     }
 
-    type ActorState = (u32, WorkerId, Option<Vec<usize>>, Vec<String>);
+    type ActorState = (ActorId, WorkerId, Option<Vec<usize>>, Vec<String>);
 
     fn collect_actor_state(fragment: &InflightFragmentInfo) -> Vec<ActorState> {
         let base = fragment.actors.keys().copied().min().unwrap_or_default();
@@ -992,7 +994,7 @@ mod tests {
             .actors
             .iter()
             .map(|(&actor_id, info)| {
-                let idx = actor_id - base;
+                let idx = actor_id.as_raw_id() - base.as_raw_id();
                 let vnode_indices = info.vnode_bitmap.as_ref().map(|bitmap| {
                     bitmap
                         .iter()
@@ -1005,7 +1007,7 @@ mod tests {
                     .iter()
                     .map(|split| split.id().to_string())
                     .collect::<Vec<_>>();
-                (idx, info.worker_id, vnode_indices, splits)
+                (idx.into(), info.worker_id, vnode_indices, splits)
             })
             .collect();
 
@@ -1047,7 +1049,7 @@ mod tests {
         assert_eq!(graphs.len(), 2);
 
         // Sort results to make the test deterministic, as HashMap iteration order is not guaranteed.
-        graphs.sort_by_key(|g| *g.components.iter().min().unwrap_or(&0));
+        graphs.sort_by_key(|g| *g.components.iter().min().unwrap_or(&0.into()));
 
         // Graph 1
         assert_eq!(graphs[0].entries, to_hashset(&[1]));
@@ -1111,7 +1113,7 @@ mod tests {
     fn test_empty_initial_ids() {
         // Scenario: The initial ID list is empty.
         let (forward, backward) = build_edges(&[(1, 2)]);
-        let initial_ids = &[];
+        let initial_ids: &[u32] = &[];
 
         // Act
         let graphs = find_no_shuffle_graphs(initial_ids, &forward, &backward).unwrap();
@@ -1165,7 +1167,7 @@ mod tests {
         // Assert
         assert_eq!(graphs.len(), 2);
         // Sort results to make the test deterministic, as HashMap iteration order is not guaranteed.
-        graphs.sort_by_key(|g| *g.components.iter().min().unwrap_or(&0));
+        graphs.sort_by_key(|g| *g.components.iter().min().unwrap_or(&0.into()));
 
         // Graph 1
         assert_eq!(graphs[0].entries, to_hashset(&[1, 2, 4]));
@@ -1179,7 +1181,7 @@ mod tests {
     #[test]
     fn render_actors_increments_actor_counter() {
         let actor_id_counter = AtomicU32::new(100);
-        let fragment_id: FragmentId = 1;
+        let fragment_id: FragmentId = 1.into();
         let job_id: JobId = 10.into();
         let database_id: DatabaseId = DatabaseId::new(3);
 
@@ -1219,7 +1221,7 @@ mod tests {
         let job_map = HashMap::from([(job_id, job_model)]);
 
         let worker_map = BTreeMap::from([(
-            1,
+            1.into(),
             WorkerInfo {
                 parallelism: NonZeroUsize::new(1).unwrap(),
                 resource_group: Some("rg-a".into()),
@@ -1261,8 +1263,8 @@ mod tests {
     #[test]
     fn render_actors_aligns_hash_vnode_bitmaps() {
         let actor_id_counter = AtomicU32::new(0);
-        let entry_fragment_id: FragmentId = 1;
-        let downstream_fragment_id: FragmentId = 2;
+        let entry_fragment_id: FragmentId = 1.into();
+        let downstream_fragment_id: FragmentId = 2.into();
         let job_id: JobId = 20.into();
         let database_id: DatabaseId = DatabaseId::new(5);
 
@@ -1315,14 +1317,14 @@ mod tests {
 
         let worker_map = BTreeMap::from([
             (
-                1,
+                1.into(),
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-hash".into()),
                 },
             ),
             (
-                2,
+                2.into(),
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-hash".into()),
@@ -1377,11 +1379,11 @@ mod tests {
     #[test]
     fn render_actors_propagates_source_splits() {
         let actor_id_counter = AtomicU32::new(0);
-        let entry_fragment_id: FragmentId = 11;
-        let downstream_fragment_id: FragmentId = 12;
+        let entry_fragment_id: FragmentId = 11.into();
+        let downstream_fragment_id: FragmentId = 12.into();
         let job_id: JobId = 30.into();
         let database_id: DatabaseId = DatabaseId::new(7);
-        let source_id: SourceId = 99;
+        let source_id: SourceId = 99.into();
 
         let source_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::Source]) as i32;
         let source_scan_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::SourceScan]) as i32;
@@ -1435,14 +1437,14 @@ mod tests {
 
         let worker_map = BTreeMap::from([
             (
-                1,
+                1.into(),
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-source".into()),
                 },
             ),
             (
-                2,
+                2.into(),
                 WorkerInfo {
                     parallelism: NonZeroUsize::new(1).unwrap(),
                     resource_group: Some("rg-source".into()),

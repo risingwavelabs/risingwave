@@ -39,10 +39,10 @@ async fn read_rw_streaming_jobs(reader: &SysCatalogReaderImpl) -> Result<Vec<RwS
         .map(|state| {
             let parallelism = extract_parallelism_from_table_state(&state);
             RwStreamingJob {
-                id: state.table_id as i32,
+                id: state.table_id.as_i32_id(),
                 status: state.state().as_str_name().into(),
                 name: state.name,
-                database_id: state.database_id as i32,
+                database_id: state.database_id.as_i32_id(),
                 parallelism: parallelism.to_uppercase(),
                 max_parallelism: state.max_parallelism as i32,
                 resource_group: state.resource_group,

@@ -25,7 +25,6 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
     register_int_gauge_with_registry,
 };
-use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
@@ -1067,7 +1066,7 @@ pub async fn refresh_fragment_info_metrics(
                 Some(host) => format!("{}:{}", host.host, host.port),
                 None => "".to_owned(),
             };
-            (worker_node.id as WorkerId, addr)
+            (worker_node.id, addr)
         })
         .collect();
     let table_compaction_group_id_mapping = hummock_manager
@@ -1110,7 +1109,6 @@ pub async fn refresh_fragment_info_metrics(
         let fragment_id_str = fragment_id.to_string();
         let job_id_str = job_id.to_string();
         for table_id in state_table_ids.into_inner() {
-            let table_id = TableId::new(table_id as _);
             let table_id_str = table_id.to_string();
             let (table_name, table_type) = table_name_and_type_mapping
                 .get(&table_id)

@@ -17,10 +17,10 @@ use std::num::NonZeroU32;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Engine, OBJECT_ID_PLACEHOLDER, StreamJobStatus,
-    TableId,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, StreamJobStatus, TableId,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbVectorIndexInfo;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -166,7 +166,7 @@ impl StreamVectorIndexWrite {
             table_type: TableType::VectorIndex,
             append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            fragment_id: OBJECT_ID_PLACEHOLDER,
+            fragment_id: FragmentId::placeholder(),
             dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index: None,

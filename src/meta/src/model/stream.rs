@@ -158,8 +158,8 @@ impl Deref for StreamJobFragmentsToCreate {
 
 #[derive(Clone, Debug)]
 pub struct StreamActor {
-    pub actor_id: u32,
-    pub fragment_id: u32,
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
     pub vnode_bitmap: Option<Bitmap>,
     pub mview_definition: String,
     pub expr_context: Option<PbExprContext>,
@@ -215,7 +215,7 @@ impl Fragment {
                     )
                 })
                 .collect(),
-            state_table_ids: self.state_table_ids.iter().map_into().collect(),
+            state_table_ids: self.state_table_ids.clone(),
             upstream_fragment_ids: upstream_fragments.collect(),
             maybe_vnode_count: self.maybe_vnode_count,
             nodes: Some(self.nodes.clone()),
@@ -312,7 +312,7 @@ impl StreamJobFragments {
         fragment_dispatchers: &FragmentActorDispatchers,
     ) -> PbTableFragments {
         PbTableFragments {
-            table_id: self.stream_job_id.as_raw_id(),
+            table_id: self.stream_job_id,
             state: self.state as _,
             fragments: self
                 .fragments
@@ -327,7 +327,11 @@ impl StreamJobFragments {
                     )
                 })
                 .collect(),
-            actor_status: self.actor_status.clone().into_iter().collect(),
+            actor_status: self
+                .actor_status
+                .iter()
+                .map(|(actor_id, status)| (*actor_id, *status))
+                .collect(),
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),
@@ -419,11 +423,10 @@ impl StreamJobFragments {
     }
 
     /// Returns actor ids associated with this table.
-    pub fn actor_ids(&self) -> Vec<ActorId> {
+    pub fn actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.fragments
             .values()
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-            .collect()
     }
 
     pub fn actor_fragment_mapping(&self) -> HashMap<ActorId, FragmentId> {
@@ -543,7 +546,7 @@ impl StreamJobFragments {
             {
                 if let Some(source_id) = fragment.nodes.find_stream_source() {
                     source_fragments
-                        .entry(source_id as SourceId)
+                        .entry(source_id)
                         .or_insert(BTreeSet::new())
                         .insert(fragment.fragment_id as FragmentId);
                 }
@@ -577,7 +580,7 @@ impl StreamJobFragments {
                     fragment_node.find_source_backfill()
                 {
                     source_backfill_fragments
-                        .entry(source_id as SourceId)
+                        .entry(source_id)
                         .or_insert(BTreeSet::new())
                         .insert((fragment_id, upstream_source_fragment_id));
                 }
@@ -619,8 +622,8 @@ impl StreamJobFragments {
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
         let table_id = match stream_node.node_body.as_ref() {
-            Some(NodeBody::StreamScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
-            Some(NodeBody::StreamCdcScan(stream_scan)) => Some(TableId::new(stream_scan.table_id)),
+            Some(NodeBody::StreamScan(stream_scan)) => Some(stream_scan.table_id),
+            Some(NodeBody::StreamCdcScan(stream_scan)) => Some(stream_scan.table_id),
             _ => None,
         };
         if let Some(table_id) = table_id {
@@ -652,7 +655,7 @@ impl StreamJobFragments {
     pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.worker_id() as WorkerId;
+            let node_id = actor_status.worker_id();
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
@@ -672,11 +675,11 @@ impl StreamJobFragments {
                 fragment.fragment_id,
                 &fragment.nodes,
                 fragment.actors.iter().map(move |actor| {
-                    let worker_id = self
+                    let worker_id: WorkerId = self
                         .actor_status
                         .get(&actor.actor_id)
                         .expect("should exist")
-                        .worker_id() as WorkerId;
+                        .worker_id();
                     (actor, worker_id)
                 }),
             )
@@ -700,7 +703,7 @@ impl StreamJobFragments {
                 |table, _| {
                     let table_id = table.id;
                     tables
-                        .try_insert(table_id.into(), table.clone())
+                        .try_insert(table_id, table.clone())
                         .unwrap_or_else(|_| panic!("duplicated table id `{}`", table_id));
                 },
             );

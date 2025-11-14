@@ -47,6 +47,9 @@ echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
 
+echo "--- Run clippy check (dev, no connector)"
+cargo clippy --all-targets --features rw-static-link --no-default-features --locked -- -D warnings
+
 echo "--- Run clippy check (release)"
 cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
 
