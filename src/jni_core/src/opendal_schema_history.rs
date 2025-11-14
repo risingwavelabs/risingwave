@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use jni::objects::{JByteArray, JObject, JString};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
