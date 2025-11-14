@@ -34,6 +34,7 @@ use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
 use crate::config::streaming::JoinEncodingType;
+use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
 use crate::session_config::parallelism::ConfigParallelism;
 use crate::session_config::sink_decouple::SinkDecouple;
@@ -536,9 +537,17 @@ impl ConfigReporter for () {
     fn report_status(&mut self, _key: &str, _new_val: String) {}
 }
 
+def_anyhow_newtype! {
+    pub SessionConfigToOverrideError,
+    toml::ser::Error => "failed to serialize session config",
+    ConfigMergeError => transparent,
+}
+
 impl SessionConfig {
     /// Generate an initial override for the streaming config from the session config.
-    pub fn to_initial_streaming_config_override(&self) -> Result<String, toml::ser::Error> {
+    pub fn to_initial_streaming_config_override(
+        &self,
+    ) -> Result<String, SessionConfigToOverrideError> {
         type Map = toml::map::Map<String, toml::Value>;
         let mut map = Map::new();
 
@@ -553,7 +562,19 @@ impl SessionConfig {
             add(&mut map, "streaming.developer.stream_join_encoding_type", v)?;
         }
 
-        toml::to_string(&map)
+        let res = toml::to_string(&map)?;
+
+        // validate all fields are valid
+        if !res.is_empty() {
+            let merged = merge_streaming_config_section(&StreamingConfig::default(), res.as_str())?;
+            if let Some(s) = merged {
+                if !s.unrecognized.is_empty() {
+                    bail!("unrecognized config entries: {:?}", s.unrecognized);
+                }
+            }
+        }
+
+        Ok(res)
     }
 }
 
