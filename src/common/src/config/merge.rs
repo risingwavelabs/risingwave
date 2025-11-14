@@ -20,6 +20,8 @@ use serde::de::DeserializeOwned;
 use toml::map::Entry;
 use toml::{Table, Value};
 
+use crate::config::StreamingConfig;
+
 def_anyhow_newtype! { pub ConfigMergeError }
 
 /// Extract the section at `partial_path` from `partial`, merge it into `base` to override entries.
@@ -91,6 +93,16 @@ pub fn merge_config<C: Serialize + DeserializeOwned + Clone>(
         .context("failed to deserialize merged config")?;
 
     Ok(Some(merged))
+}
+
+/// Extract the `streaming` section from `partial`, merge it into `base` to override entries.
+///
+/// See [`merge_config`] for more details.
+pub fn merge_streaming_config_section(
+    base: &StreamingConfig,
+    partial: &str,
+) -> Result<Option<StreamingConfig>, ConfigMergeError> {
+    merge_config(base, partial, ["streaming"])
 }
 
 #[cfg(test)]

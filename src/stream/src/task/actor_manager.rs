@@ -21,7 +21,7 @@ use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::config::{MetricLevel, StreamingConfig, merge_config};
+use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_config_section};
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -406,7 +406,7 @@ impl StreamActorManager {
         self.config_override_cache
             .get_with_by_ref(config_override, || {
                 let global = self.env.global_config();
-                match merge_config(global.as_ref(), config_override, ["streaming"]) {
+                match merge_streaming_config_section(global.as_ref(), config_override) {
                     Ok(Some(config)) => {
                         tracing::info!(%actor_id, "applied configuration override");
                         Arc::new(config)
