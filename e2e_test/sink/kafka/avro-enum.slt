@@ -148,13 +148,21 @@ select * from from_nullable_enum order by id;
 
 # ===== Test 3: Illegal Enum Value Handling =====
 statement ok
-insert into t_basic_enum values
-  (6, 'ACTIVE'),
-  (7, 'INVALID_STATUS'),
-  (8, 'INACTIVE');
+insert into t_basic_enum values (5, 'INVALID_STATUS');
 
-# Under current impl, an invalid enum value will cause the entire sink to fail, triggering a recovery.
-# Records before the failure can still be successfully written, but subsequent records will not.
+sleep 5s
+
+# Should still only show the valid enum values
+query IT
+select * from from_basic_enum order by id;
+----
+1 ACTIVE
+2 INACTIVE
+3 PENDING
+
+statement ok
+insert into t_basic_enum values (6, 'ACTIVE');
+
 query IT retry 5 backoff 3s
 select * from from_basic_enum order by id;
 ----
@@ -163,15 +171,32 @@ select * from from_basic_enum order by id;
 3 PENDING
 6 ACTIVE
 
+# statement ok
+# insert into t_basic_enum values
+#   (6, 'ACTIVE'),
+#   (7, 'INVALID_STATUS'),
+#   (8, 'INACTIVE');
+
+# Under current impl, an invalid enum value will cause the entire sink to fail, triggering a recovery.
+# Records before the failure may still be successfully written, but subsequent records will not.
+# FIXME: it's not guaranteed that those writeen records can be acked, that's why we comment out.
+# query IT retry 5 backoff 3s
+# select * from from_basic_enum order by id;
+# ----
+# 1 ACTIVE
+# 2 INACTIVE
+# 3 PENDING
+# 6 ACTIVE
+
 # However, the entire insertion batch will be rolled back atomically.
 # So we can't find any of 6, 7, 8 in the source table.
 # FIXME: such breakage of exactly once semantics can be very confusing to users.
-query IT
-select * from t_basic_enum order by id;
-----
-1 ACTIVE
-2 INACTIVE
-3 PENDING
+# query IT
+# select * from t_basic_enum order by id;
+# ----
+# 1 ACTIVE
+# 2 INACTIVE
+# 3 PENDING
 
 # ===== Cleanup =====
 system ok
