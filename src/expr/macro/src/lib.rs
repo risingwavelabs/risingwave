@@ -229,7 +229,7 @@ mod utils;
 ///
 /// ## Writer Style Function
 ///
-/// For functions returning [`varchar`, `bytea`, `jsonb`], you can use a writer-style function signature to
+/// For functions returning `varchar`, `bytea` or `jsonb`, you can use a writer-style function signature to
 /// avoid extra memory allocations and copying.
 ///
 /// ```ignore
@@ -264,9 +264,9 @@ mod utils;
 /// ```
 ///
 /// Writer types:
-/// - For `varchar`: `impl std::fmt::Write`
-/// - For `bytea`: `impl std::io::Write`
-/// - For `jsonb`: `jsonbb::Builder`
+/// - For `varchar`: `&mut impl std::fmt::Write`
+/// - For `bytea`: `&mut impl std::io::Write`
+/// - For `jsonb`: `&mut jsonbb::Builder`
 ///
 /// Note: Use fully-qualified trait paths (for example, `impl std::io::Write` or `impl std::fmt::Write`).
 /// Partial or relative paths (such as `impl Write` or `impl ::std::fmt::Write`) are not recognized.

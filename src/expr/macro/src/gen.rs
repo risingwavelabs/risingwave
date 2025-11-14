@@ -459,7 +459,7 @@ impl FunctionAttr {
                 if #output.is_some() {
                     writer.finish();
                 } else {
-                    drop(writer);
+                    writer.rollback();
                     builder.append_null();
                 }
             }},
@@ -469,7 +469,7 @@ impl FunctionAttr {
                 if #output.is_some() {
                     writer_wrapper.finish();
                 } else {
-                    drop(writer_wrapper);
+                    writer_wrapper.rollback();
                     builder.append_null();
                 }
             }},

@@ -191,7 +191,7 @@ impl FromIterator<JsonbVal> for JsonbArray {
 /// leave the array in an inconsistent state.
 pub struct JsonbWriter<'a> {
     array_builder: &'a mut JsonbArrayBuilder,
-    checkpoint: jsonbb::CheckPoint,
+    checkpoint: jsonbb::Checkpoint,
 }
 
 impl JsonbWriter<'_> {
@@ -207,17 +207,25 @@ impl JsonbWriter<'_> {
         &mut self.array_builder.builder
     }
 
+    /// `finish` will be called when the entire record is successfully written.
+    /// The partial data was committed and the `builder` can no longer be used.
     pub fn finish(self) {
         self.array_builder.bitmap.append(true);
-        let _ = ManuallyDrop::new(self);
+        let _ = ManuallyDrop::new(self); // Prevent drop
+    }
+
+    /// `rollback` will be called while the entire record is abandoned.
+    /// The partial data was cleaned and the `builder` can be safely used.
+    pub fn rollback(self) {
+        self.array_builder.builder.rollback_to(&self.checkpoint);
+        let _ = ManuallyDrop::new(self); // Prevent drop
     }
 }
 
 impl Drop for JsonbWriter<'_> {
+    /// If the writer is dropped without calling `finish` or `rollback`,
+    /// we rollback the partial data by default.
     fn drop(&mut self) {
-        // The correctness should be guaranteed by the caller.
-        unsafe {
-            self.array_builder.builder.rollback_to(&self.checkpoint);
-        }
+        self.array_builder.builder.rollback_to(&self.checkpoint);
     }
 }
