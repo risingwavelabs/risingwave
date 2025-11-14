@@ -107,9 +107,11 @@ def _actor_busy_rate_expr(rate_interval: str):
         f") by (fragment_id)"
     )
     busy_rate_expr = (
-        f"1 - ("
-        f"  ({output_blocking_rate_expr}) > ({input_blocking_rate_expr}) or"
-        f"  ({input_blocking_rate_expr})"
+        f"clamp_min(0,"
+        f"  1 - ("
+        f"    ({output_blocking_rate_expr}) > ({input_blocking_rate_expr}) or"
+        f"    ({input_blocking_rate_expr})"
+        f"  )"
         f")"
     )
     return busy_rate_expr
