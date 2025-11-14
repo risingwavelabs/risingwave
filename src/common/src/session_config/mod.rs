@@ -231,6 +231,9 @@ pub struct SessionConfig {
     streaming_separate_sink: bool,
 
     /// Determine which encoding will be used to encode join rows in operator cache.
+    /// Take effect for new streaming jobs created in this session.
+    // Note: This will become an initial override of the config. If it's set to `None`, the value
+    // specified in the global config file will be used.
     #[parameter(default = None)]
     streaming_join_encoding: OptionConfig<JoinEncodingType>,
 
@@ -531,6 +534,27 @@ pub trait ConfigReporter {
 // Report nothing.
 impl ConfigReporter for () {
     fn report_status(&mut self, _key: &str, _new_val: String) {}
+}
+
+impl SessionConfig {
+    /// Generate an initial override for the streaming config from the session config.
+    pub fn to_initial_streaming_config_override(&self) -> Result<String, toml::ser::Error> {
+        type Map = toml::map::Map<String, toml::Value>;
+        let mut map = Map::new();
+
+        // TODO: make this more type safe.
+        fn add(map: &mut Map, key: &str, val: impl Serialize) -> Result<(), toml::ser::Error> {
+            toml::Value::try_from(val).map(|value| {
+                map.insert(key.to_owned(), value);
+            })
+        }
+
+        if let Some(v) = self.streaming_join_encoding.as_ref() {
+            add(&mut map, "streaming.developer.stream_join_encoding_type", v)?;
+        }
+
+        toml::to_string(&map)
+    }
 }
 
 #[cfg(test)]
