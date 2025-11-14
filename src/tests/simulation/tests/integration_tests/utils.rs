@@ -89,7 +89,7 @@ impl DatabaseRecoveryEvent {
 }
 
 #[derive(Debug)]
-struct DatabaseRecoveryInfo {
+pub(crate) struct DatabaseRecoveryInfo {
     id: u32,
     name: String,
     last_database_event: DatabaseRecoveryEvent,
@@ -217,13 +217,13 @@ fn derive_state(
     in_global_running: bool,
     in_global_recovering: bool,
 ) -> DatabaseRecoveryState {
-    if database_event.is_success() {
+    let global_running = matches!(global_event, GlobalRecoveryEvent::Running);
+
+    if database_event.is_success() || (global_running && in_global_running) {
         DatabaseRecoveryState::Running
-    } else if matches!(global_event, GlobalRecoveryEvent::Running) && in_global_running {
-        DatabaseRecoveryState::Running
-    } else if matches!(global_event, GlobalRecoveryEvent::Running) && in_global_recovering {
-        DatabaseRecoveryState::Recovering
-    } else if matches!(database_event, DatabaseRecoveryEvent::Start) {
+    } else if (global_running && in_global_recovering)
+        || matches!(database_event, DatabaseRecoveryEvent::Start)
+    {
         DatabaseRecoveryState::Recovering
     } else {
         DatabaseRecoveryState::Unknown

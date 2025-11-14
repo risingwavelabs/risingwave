@@ -44,7 +44,7 @@ last_global_event AS (
         info
     FROM rw_catalog.rw_event_logs
     WHERE event_type IN ('GLOBAL_RECOVERY_SUCCESS', 'GLOBAL_RECOVERY_FAILURE')
-    ORDER BY timestamp DESCa
+    ORDER BY timestamp DESC
     LIMIT 1
 ),
 global_flag AS (
