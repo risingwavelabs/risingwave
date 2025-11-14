@@ -54,7 +54,7 @@ use crate::hummock::block_stream::{
 use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
 use crate::hummock::vector::monitor::VectorStoreCacheStats;
-use crate::hummock::{BlockHolder, HummockError, HummockResult, RecentFilterTrait};
+use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, RecentFilterTrait};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 
 macro_rules! impl_vector_index_meta_file {
@@ -347,7 +347,6 @@ impl SstableStore {
                 None,
             )));
         }
-        stats.cache_data_block_total += 1;
         if let Some(entry) = self
             .block_cache
             .get(&SstableBlockIndex {
@@ -357,6 +356,10 @@ impl SstableStore {
             .await
             .map_err(HummockError::foyer_error)?
         {
+            stats.cache_data_block_total += 1;
+            if entry.source() == foyer::Source::Outer {
+                stats.cache_data_block_miss += 1;
+            }
             let block = BlockHolder::from_hybrid_cache_entry(entry);
             return Ok(Box::new(PrefetchBlockStream::new(
                 VecDeque::from([block]),
@@ -513,13 +516,11 @@ impl SstableStore {
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
-        stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
         let store = self.store.clone();
 
-        stats.cache_data_block_total += 1;
         let file_size = sst.meta.estimated_size;
         let data_path = Arc::new(self.get_sst_data_path(object_id));
 
@@ -605,19 +606,21 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        match self
-            .get_block_response(sst, block_index, policy, stats)
-            .await
+        let block_response = self.get_block_response(sst, block_index, policy).await?;
+        let block_holder = block_response.wait().await?;
+        stats.cache_data_block_total += 1;
+        if let BlockEntry::HybridCache(entry) = block_holder.entry()
+            && entry.source() == foyer::Source::Outer
         {
-            Ok(block_response) => block_response.wait().await,
-            Err(err) => Err(err),
+            stats.cache_data_block_miss += 1;
         }
+        Ok(block_holder)
     }
 
     pub async fn get_vector_file_meta(
         &self,
         vector_file: &VectorFileInfo,
-        _stats: &mut VectorStoreCacheStats,
+        stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<VectorFileHolder> {
         let store = self.store.clone();
         let path = self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
@@ -635,6 +638,10 @@ impl SstableStore {
             })
             .await
             .map_err(HummockError::other)?;
+        stats.file_meta_total += 1;
+        if entry.source() == foyer::Source::Outer {
+            stats.file_meta_miss += 1;
+        }
         VectorFileHolder::try_from_entry(entry, vector_file.object_id.as_raw())
     }
 
@@ -643,13 +650,14 @@ impl SstableStore {
         vector_file: &VectorFileInfo,
         block_idx: usize,
         block_meta: &VectorBlockMeta,
-        _stats: &mut VectorStoreCacheStats,
+        stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<VectorBlockHolder> {
         let store = self.store.clone();
         let path = self.get_object_data_path(HummockObjectId::VectorFile(vector_file.object_id));
         let start_offset = block_meta.offset;
         let end_offset = start_offset + block_meta.block_size;
-        self.vector_block_cache
+        let entry = self
+            .vector_block_cache
             .get_or_fetch(&(vector_file.object_id, block_idx), move |_| async move {
                 let encoded_block = store
                     .read(&path, start_offset..end_offset)
@@ -661,7 +669,13 @@ impl SstableStore {
             })
             .await
             .map_err(foyer::Error::from)
-            .map_err(HummockError::foyer_error)
+            .map_err(HummockError::foyer_error)?;
+
+        stats.file_meta_total += 1;
+        if entry.source() == foyer::Source::Outer {
+            stats.file_meta_miss += 1;
+        }
+        Ok(entry)
     }
 
     pub fn insert_vector_cache(

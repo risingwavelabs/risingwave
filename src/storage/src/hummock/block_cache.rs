@@ -24,7 +24,7 @@ use crate::hummock::HummockError;
 
 type HybridCachedBlockEntry = HybridCacheEntry<SstableBlockIndex, Box<Block>>;
 
-enum BlockEntry {
+pub enum BlockEntry {
     HybridCache(#[allow(dead_code)] HybridCachedBlockEntry),
     Owned(#[allow(dead_code)] Box<Block>),
     RefEntry(#[allow(dead_code)] Arc<Block>),
@@ -58,6 +58,10 @@ impl BlockHolder {
             _handle: BlockEntry::HybridCache(entry),
             block: ptr,
         }
+    }
+
+    pub fn entry(&self) -> &BlockEntry {
+        &self._handle
     }
 }
 
