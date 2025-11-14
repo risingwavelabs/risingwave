@@ -15,8 +15,9 @@
 use std::fmt::Debug;
 
 use anyhow::Context;
+use risingwave_connector_codec::kconnect::json::Cache;
 use simd_json::BorrowedValue;
-use simd_json::prelude::MutableObject;
+use simd_json::prelude::{MutableObject, ValueObjectAccess as _};
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
@@ -30,6 +31,7 @@ use crate::parser::{AccessBuilder, MongoProperties};
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
     value: Option<Vec<u8>>,
+    cache: Cache<BorrowedValue<'static>>,
     json_parse_options: JsonParseOptions,
 }
 
@@ -43,6 +45,7 @@ impl DebeziumJsonAccessBuilder {
     ) -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
+            cache: Cache::default(),
             json_parse_options: JsonParseOptions::new_for_debezium(
                 timestamptz_handling,
                 timestamp_handling,
@@ -56,6 +59,7 @@ impl DebeziumJsonAccessBuilder {
     pub fn new_for_schema_event() -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
+            cache: Cache::default(),
             json_parse_options: JsonParseOptions::default(),
         })
     }
@@ -72,6 +76,18 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
                 .context("failed to parse debezium json payload")?;
+
+        let _kconnect = match event.get("schema") {
+            Some(j) => self
+                .cache
+                .decode(j)
+                .inspect_err(|err| {
+                    tracing::warn!("failed to parse kconnect schema from debezium: {err}")
+                })
+                .ok()
+                .flatten(),
+            None => None,
+        };
 
         let payload = if let Some(payload) = event.get_mut("payload") {
             std::mem::take(payload)

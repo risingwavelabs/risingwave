@@ -16,4 +16,4 @@ mod constants;
 mod generic;
 mod to_connect;
 
-pub use to_connect::decode_schema_from_json;
+pub use to_connect::Cache;

@@ -13,12 +13,40 @@
 // limitations under the License.
 
 use super::constants::{field_name, type_name};
-use super::generic::JsonRead;
+use super::generic::{CacheKey, JsonRead};
 use crate::kconnect::data::schema::ConnectSchema;
 use crate::kconnect::errors::{DataException, bail_data_exception};
 
+#[derive(Default, Debug)]
+pub struct Cache<J> {
+    last: Option<(J, ConnectSchema)>,
+}
+
+impl<'a, J: CacheKey<'a>> Cache<J>
+where
+    J::Borrowed: JsonRead,
+{
+    pub fn decode(&mut self, j: &J::Borrowed) -> Result<Option<ConnectSchema>, DataException> {
+        if let Some((cached_j, cached_schema)) = &self.last
+            && cached_j.eq_borrowed(j)
+        {
+            return Ok(Some(cached_schema.clone()));
+        }
+        let start = std::time::Instant::now();
+        let schema = decode_schema_from_json(j)?;
+        if let Some(ref s) = schema {
+            self.last = Some((J::from_borrowed(j), s.clone()));
+            tracing::info!(
+                "kconnect schema parsed in {} seconds",
+                start.elapsed().as_secs_f64()
+            );
+        }
+        Ok(schema)
+    }
+}
+
 /// `JsonConverter::asConnectSchema`
-pub fn decode_schema_from_json(j: &impl JsonRead) -> Result<Option<ConnectSchema>, DataException> {
+fn decode_schema_from_json(j: &impl JsonRead) -> Result<Option<ConnectSchema>, DataException> {
     if j.is_null() {
         return Ok(None);
     }

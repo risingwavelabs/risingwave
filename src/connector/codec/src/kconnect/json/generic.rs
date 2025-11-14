@@ -134,3 +134,33 @@ impl JsonRead for simd_json::BorrowedValue<'_> {
         }
     }
 }
+
+pub trait CacheKey<'a> {
+    type Borrowed;
+    fn from_borrowed(b: &Self::Borrowed) -> Self;
+    fn eq_borrowed(&self, b: &Self::Borrowed) -> bool;
+}
+
+impl CacheKey<'_> for serde_json::Value {
+    type Borrowed = serde_json::Value;
+
+    fn from_borrowed(b: &Self::Borrowed) -> Self {
+        b.clone()
+    }
+
+    fn eq_borrowed(&self, b: &Self::Borrowed) -> bool {
+        self == b
+    }
+}
+
+impl<'a> CacheKey<'a> for simd_json::BorrowedValue<'static> {
+    type Borrowed = simd_json::BorrowedValue<'a>;
+
+    fn from_borrowed(b: &Self::Borrowed) -> Self {
+        b.clone_static()
+    }
+
+    fn eq_borrowed(&self, b: &Self::Borrowed) -> bool {
+        self == b
+    }
+}
