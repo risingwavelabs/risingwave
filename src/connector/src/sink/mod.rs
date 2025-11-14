@@ -11,21 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-pub mod big_query;
+
+feature_gated_sink_mod!(big_query, "bigquery");
 pub mod boxed;
 pub mod catalog;
-pub mod clickhouse;
+feature_gated_sink_mod!(clickhouse, ClickHouse, "clickhouse");
 pub mod coordinate;
 pub mod decouple_checkpoint_log_sink;
-pub mod deltalake;
-pub mod doris;
+feature_gated_sink_mod!(deltalake, DeltaLake, "deltalake");
+feature_gated_sink_mod!(doris, "doris");
+#[cfg(any(feature = "sink-doris", feature = "sink-starrocks"))]
 pub mod doris_starrocks_connector;
 pub mod dynamodb;
 pub mod elasticsearch_opensearch;
 pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
-pub mod google_pubsub;
+feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -42,7 +44,7 @@ pub mod redis;
 pub mod remote;
 pub mod snowflake_redshift;
 pub mod sqlserver;
-pub mod starrocks;
+feature_gated_sink_mod!(starrocks, "starrocks");
 pub mod test_sink;
 pub mod trivial;
 pub mod utils;
@@ -58,18 +60,14 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
-use ::clickhouse::error::Error as ClickHouseError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use clickhouse::CLICKHOUSE_SINK;
 use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
 };
-use deltalake::DELTALAKE_SINK;
 use futures::future::BoxFuture;
-use iceberg::ICEBERG_SINK;
 use opendal::Error as OpendalError;
 use prometheus::Registry;
 use risingwave_common::array::ArrayError;
@@ -93,14 +91,17 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
 use sea_orm::DatabaseConnection;
-use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use self::clickhouse::CLICKHOUSE_SINK;
+use self::deltalake::DELTALAKE_SINK;
+use self::iceberg::ICEBERG_SINK;
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
+use self::starrocks::STARROCKS_SINK;
 use crate::WithPropertiesExt;
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};
@@ -110,7 +111,7 @@ use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT
 use crate::sink::file_sink::fs::FsSink;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
-use crate::sink::writer::SinkWriter;
+use crate::sink::utils::feature_gated_sink_mod;
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
 #[macro_export]
@@ -1098,19 +1099,6 @@ impl From<ArrayError> for SinkError {
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
         SinkError::Remote(anyhow!(value))
-    }
-}
-
-impl From<ClickHouseError> for SinkError {
-    fn from(value: ClickHouseError) -> Self {
-        SinkError::ClickHouse(value.to_report_string())
-    }
-}
-
-#[cfg(feature = "sink-deltalake")]
-impl From<::deltalake::DeltaTableError> for SinkError {
-    fn from(value: ::deltalake::DeltaTableError) -> Self {
-        SinkError::DeltaLake(anyhow!(value))
     }
 }
 
