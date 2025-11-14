@@ -663,7 +663,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     let barrier_start_time = Instant::now();
                     let (left_post_commit, right_post_commit) =
                         self.flush_data(barrier.epoch).await?;
-
+                    barrier_join_match_duration_ns
+                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                     yield Message::Barrier(barrier);
 
@@ -689,9 +690,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     ] {
                         join_cached_entry_count.set(ht.entry_count() as i64);
                     }
-
-                    barrier_join_match_duration_ns
-                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                 }
             }
             start_time = Instant::now();
