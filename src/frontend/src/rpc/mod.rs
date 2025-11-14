@@ -110,7 +110,7 @@ async fn get_new_table_plan(
 
     let table_catalog = {
         let reader = session.env().catalog_reader().read_guard();
-        reader.get_any_table_by_id(&table_id)?.clone()
+        reader.get_any_table_by_id(table_id)?.clone()
     };
     let table_name = ObjectName::from(vec![table_catalog.name.as_str().into()]);
 

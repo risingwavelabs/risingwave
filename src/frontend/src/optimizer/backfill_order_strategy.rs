@@ -21,18 +21,20 @@ use crate::optimizer::backfill_order_strategy::fixed::plan_fixed_strategy;
 use crate::optimizer::plan_node::StreamPlanRef;
 use crate::session::SessionImpl;
 
+type ObjectId = u32;
+
 pub mod auto {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_common::catalog::ObjectId;
     use risingwave_pb::common::Uint32Vector;
 
+    use super::ObjectId;
     use crate::optimizer::backfill_order_strategy::common::has_cycle;
     use crate::optimizer::plan_node::{StreamPlanNodeType, StreamPlanRef};
     use crate::session::SessionImpl;
 
     #[derive(Debug)]
-    pub enum BackfillTreeNode {
+    pub(super) enum BackfillTreeNode {
         Join {
             lhs: Box<BackfillTreeNode>,
             rhs: Box<BackfillTreeNode>,
@@ -235,10 +237,10 @@ mod fixed {
     use std::collections::{HashMap, HashSet};
 
     use risingwave_common::bail;
-    use risingwave_common::catalog::ObjectId;
     use risingwave_pb::common::Uint32Vector;
     use risingwave_sqlparser::ast::ObjectName;
 
+    use super::ObjectId;
     use crate::error::Result;
     use crate::optimizer::backfill_order_strategy::common::{
         bind_backfill_relation_id_by_name, has_cycle,
@@ -318,10 +320,10 @@ mod fixed {
 mod common {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_common::catalog::ObjectId;
     use risingwave_pb::common::Uint32Vector;
     use risingwave_sqlparser::ast::ObjectName;
 
+    use super::ObjectId;
     use crate::Binder;
     use crate::catalog::CatalogError;
     use crate::catalog::root_catalog::SchemaPath;
@@ -414,14 +416,14 @@ mod common {
 }
 
 pub mod display {
-    use risingwave_common::catalog::ObjectId;
     use risingwave_pb::stream_plan::BackfillOrder;
 
+    use super::ObjectId;
     use crate::session::SessionImpl;
 
     fn get_table_name(session: &SessionImpl, id: ObjectId) -> crate::error::Result<String> {
         let catalog_reader = session.env().catalog_reader().read_guard();
-        let table_catalog = catalog_reader.get_any_table_by_id(&(id.into()))?;
+        let table_catalog = catalog_reader.get_any_table_by_id(id.into())?;
         let table_name = table_catalog.name();
         let db_id = table_catalog.database_id;
         let schema_id = table_catalog.schema_id;

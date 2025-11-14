@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
+use risingwave_common::id::ObjectId;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_common::util::epoch::Epoch;
@@ -629,7 +630,7 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| {
                 (
-                    s.id.as_raw_id(),
+                    s.id.into(),
                     (s.name, s.schema_id, s.definition, s.created_at_epoch),
                 )
             })
@@ -649,7 +650,7 @@ impl DiagnoseCommand {
             for (table_type, tables) in &grouped {
                 let tables = tables.into_iter().map(|t| {
                     (
-                        t.id.as_raw_id(),
+                        t.id.into(),
                         (t.name, t.schema_id, t.definition, t.created_at_epoch),
                     )
                 });
@@ -672,7 +673,7 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| {
                 (
-                    s.id.as_raw_id(),
+                    s.id.into(),
                     (s.name, s.schema_id, s.definition, s.created_at_epoch),
                 )
             })
@@ -685,7 +686,7 @@ impl DiagnoseCommand {
             ("SINK", sinks),
             ("INTERNAL TABLE", internal_tables),
         ];
-        let mut obj_id_to_name = HashMap::new();
+        let mut obj_id_to_name: HashMap<ObjectId, _> = HashMap::new();
         for (title, items) in catalogs {
             use comfy_table::{Row, Table};
             let mut table = Table::new();
@@ -734,10 +735,7 @@ impl DiagnoseCommand {
                         job_id,
                         schema_id,
                         obj_type,
-                        obj_id_to_name
-                            .get(&(job_id as _))
-                            .cloned()
-                            .unwrap_or_default(),
+                        obj_id_to_name.get(&job_id).cloned().unwrap_or_default(),
                     ),
                 )
             })

@@ -26,8 +26,8 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
-    ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID,
-    ROW_ID_COLUMN_NAME, TableId,
+    ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::Jvm;
@@ -1464,7 +1464,7 @@ pub async fn handle_create_table(
     );
 
     let dependencies = shared_source_id
-        .map(|id| HashSet::from([id.as_raw_id() as ObjectId]))
+        .map(|id| HashSet::from([id.as_object_id()]))
         .unwrap_or_default();
 
     // Handle engine
@@ -2470,7 +2470,7 @@ fn bind_webhook_info(
         let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
         (
             Some(PbSecretRef {
-                secret_id: secret_catalog.id.secret_id(),
+                secret_id: secret_catalog.id,
                 ref_as: match secret_ref.ref_as {
                     SecretRefAsType::Text => PbRefAsType::Text,
                     SecretRefAsType::File => PbRefAsType::File,

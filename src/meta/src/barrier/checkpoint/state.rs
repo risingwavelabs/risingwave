@@ -166,7 +166,7 @@ impl BarrierWorkerState {
             }) => {
                 self.inflight_graph_info.register_subscriber(
                     upstream_mv_table_id.as_job_id(),
-                    *subscription_id,
+                    subscription_id.as_raw_id(),
                     SubscriberType::Subscription(*retention_second),
                 );
             }
@@ -212,10 +212,13 @@ impl BarrierWorkerState {
             }) => {
                 if self
                     .inflight_graph_info
-                    .unregister_subscriber(upstream_mv_table_id.as_job_id(), *subscription_id)
+                    .unregister_subscriber(
+                        upstream_mv_table_id.as_job_id(),
+                        subscription_id.as_raw_id(),
+                    )
                     .is_none()
                 {
-                    warn!(subscription_id, %upstream_mv_table_id, "no subscription to drop");
+                    warn!(%subscription_id, %upstream_mv_table_id, "no subscription to drop");
                 }
             }
             Some(Command::MergeSnapshotBackfillStreamingJobs(snapshot_backfill_jobs)) => {

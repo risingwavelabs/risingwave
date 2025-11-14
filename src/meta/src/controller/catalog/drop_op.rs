@@ -25,9 +25,10 @@ impl CatalogController {
     pub async fn drop_object(
         &self,
         object_type: ObjectType,
-        object_id: ObjectId,
+        object_id: impl Into<ObjectId>,
         drop_mode: DropMode,
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
+        let object_id = object_id.into();
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -39,7 +40,7 @@ impl CatalogController {
         assert_eq!(obj.obj_type, object_type);
         let drop_database = object_type == ObjectType::Database;
         let database_id = if object_type == ObjectType::Database {
-            DatabaseId::new(object_id as _)
+            object_id.as_database_id()
         } else {
             obj.database_id
                 .ok_or_else(|| anyhow!("dropped object should have database_id"))?
@@ -47,7 +48,7 @@ impl CatalogController {
 
         // Check the cross-db dependency info to see if the subscription can be dropped.
         if obj.obj_type == ObjectType::Subscription {
-            validate_subscription_deletion(&txn, object_id).await?;
+            validate_subscription_deletion(&txn, object_id.as_subscription_id()).await?;
         }
 
         let mut removed_objects = match drop_mode {
@@ -55,7 +56,7 @@ impl CatalogController {
             DropMode::Restrict => match object_type {
                 ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
                 ObjectType::Schema => {
-                    ensure_schema_empty(SchemaId::new(object_id as _), &txn).await?;
+                    ensure_schema_empty(object_id.as_schema_id(), &txn).await?;
                     Default::default()
                 }
                 ObjectType::Table => {
@@ -96,7 +97,7 @@ impl CatalogController {
 
         // check iceberg source.
         if obj.obj_type == ObjectType::Table {
-            let table_name = Table::find_by_id(TableId::new(object_id as _))
+            let table_name = Table::find_by_id(object_id.as_table_id())
                 .select_only()
                 .column(table::Column::Name)
                 .into_tuple::<String>()
@@ -163,13 +164,13 @@ impl CatalogController {
 
         for obj in &removed_objects {
             if obj.obj_type == ObjectType::Sink {
-                let sink = Sink::find_by_id(SinkId::new(obj.oid as _))
+                let sink = Sink::find_by_id(obj.oid.as_sink_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
 
                 if let Some(target_table) = sink.target_table
-                    && !removed_object_ids.contains(&(target_table.as_raw_id() as _))
+                    && !removed_object_ids.contains(&target_table.as_object_id())
                     && !has_table_been_migrated(&txn, target_table).await?
                 {
                     return Err(anyhow::anyhow!(
@@ -186,7 +187,7 @@ impl CatalogController {
             for obj in &removed_objects {
                 // if the obj is iceberg engine table, bail out
                 if obj.obj_type == ObjectType::Table {
-                    let table = Table::find_by_id(TableId::new(obj.oid as _))
+                    let table = Table::find_by_id(obj.oid.as_table_id())
                         .one(&txn)
                         .await?
                         .ok_or_else(|| MetaError::catalog_id_not_found("table", obj.oid))?;
@@ -203,7 +204,7 @@ impl CatalogController {
         let removed_table_ids = removed_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
-            .map(|obj| TableId::new(obj.oid as _));
+            .map(|obj| obj.oid.as_table_id());
 
         let removed_iceberg_table_sinks: Vec<PbSink> = Sink::find()
             .find_also_related(Object)
@@ -273,13 +274,13 @@ impl CatalogController {
         let removed_source_ids: HashSet<_> = removed_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Source)
-            .map(|obj| SourceId::new(obj.oid as _))
+            .map(|obj| obj.oid.as_source_id())
             .collect();
 
         let removed_secret_ids = removed_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Secret)
-            .map(|obj| obj.oid)
+            .map(|obj| obj.oid.as_secret_id())
             .collect_vec();
 
         if !removed_streaming_job_ids.is_empty() {
@@ -300,7 +301,7 @@ impl CatalogController {
             removed_state_table_ids.extend(
                 removed_internal_table_objs
                     .iter()
-                    .map(|obj| TableId::new(obj.oid as _)),
+                    .map(|obj| obj.oid.as_table_id()),
             );
             removed_objects.extend(removed_internal_table_objs);
         }
@@ -453,7 +454,7 @@ impl CatalogController {
         let subscription = Subscription::find_by_id(subscription_id).one(&txn).await?;
         let Some(subscription) = subscription else {
             tracing::warn!(
-                subscription_id,
+                %subscription_id,
                 "subscription not found when aborting creation, might be cleaned by recovery"
             );
             return Ok(());
@@ -461,7 +462,7 @@ impl CatalogController {
 
         if subscription.subscription_state == PbSubscriptionState::Created as i32 {
             tracing::warn!(
-                subscription_id,
+                %subscription_id,
                 "subscription is already created when aborting creation"
             );
             return Ok(());
@@ -479,7 +480,7 @@ async fn report_drop_object(
 ) {
     let connector_name = {
         match object_type {
-            ObjectType::Sink => Sink::find_by_id(SinkId::new(object_id as _))
+            ObjectType::Sink => Sink::find_by_id(object_id.as_sink_id())
                 .select_only()
                 .column(sink::Column::Properties)
                 .into_tuple::<Property>()
@@ -488,7 +489,7 @@ async fn report_drop_object(
                 .ok()
                 .flatten()
                 .and_then(|properties| properties.inner_ref().get("connector").cloned()),
-            ObjectType::Source => Source::find_by_id(SourceId::new(object_id as _))
+            ObjectType::Source => Source::find_by_id(object_id.as_source_id())
                 .select_only()
                 .column(source::Column::WithProperties)
                 .into_tuple::<Property>()
@@ -504,7 +505,7 @@ async fn report_drop_object(
         report_event(
             PbTelemetryEventStage::DropStreamJob,
             "source",
-            object_id.into(),
+            object_id.as_raw_id() as _,
             Some(connector_name),
             Some(match object_type {
                 ObjectType::Source => PbTelemetryDatabaseObject::Source,

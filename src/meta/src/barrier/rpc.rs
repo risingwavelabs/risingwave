@@ -685,7 +685,10 @@ impl ControlStreamManager {
                             subscriptions
                                 .into_iter()
                                 .map(|(subscription_id, retention)| {
-                                    (subscription_id, SubscriberType::Subscription(retention))
+                                    (
+                                        subscription_id.as_raw_id(),
+                                        SubscriberType::Subscription(retention),
+                                    )
                                 })
                                 .collect(),
                         )
