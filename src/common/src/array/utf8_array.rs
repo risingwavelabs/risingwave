@@ -197,6 +197,12 @@ impl StringWriter<'_> {
     pub fn finish(self) {
         self.bytes.finish()
     }
+
+    /// `rollback` will be called while the entire record is abandoned.
+    /// The partial data was cleaned and the `builder` can be safely used.
+    pub fn rollback(self) {
+        self.bytes.rollback();
+    }
 }
 
 impl Write for StringWriter<'_> {
