@@ -23,6 +23,7 @@ mod transaction_isolation_level;
 mod visibility_mode;
 
 use chrono_tz::Tz;
+use itertools::Itertools;
 pub use opt::OptionConfig;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
@@ -552,10 +553,22 @@ impl SessionConfig {
         let mut map = Map::new();
 
         // TODO: make this more type safe.
-        fn add(map: &mut Map, key: &str, val: impl Serialize) -> Result<(), toml::ser::Error> {
-            toml::Value::try_from(val).map(|value| {
-                map.insert(key.to_owned(), value);
-            })
+        fn add(map: &mut Map, path: &str, val: impl Serialize) -> Result<(), toml::ser::Error> {
+            let value = toml::Value::try_from(val)?;
+            let segments = path.split('.').collect_vec();
+            let (key, segments) = segments.split_last().expect("empty path");
+
+            let mut map = map;
+            for segment in segments {
+                map = map
+                    .entry(segment.to_owned())
+                    .or_insert_with(|| toml::Value::Table(Map::new()))
+                    .as_table_mut()
+                    .expect("expect table");
+            }
+            map.insert(key.to_string(), value);
+
+            Ok(())
         }
 
         if let Some(v) = self.streaming_join_encoding.as_ref() {
@@ -564,12 +577,17 @@ impl SessionConfig {
 
         let res = toml::to_string(&map)?;
 
-        // validate all fields are valid
+        // Validate all fields are valid by trying to merge it to the default config.
         if !res.is_empty() {
-            let merged = merge_streaming_config_section(&StreamingConfig::default(), res.as_str())?;
-            if let Some(s) = merged {
-                if !s.unrecognized.is_empty() {
-                    bail!("unrecognized config entries: {:?}", s.unrecognized);
+            let merged =
+                merge_streaming_config_section(&StreamingConfig::default(), res.as_str())?.unwrap();
+
+            for u in [
+                merged.unrecognized.into_inner(),
+                merged.developer.unrecognized.into_inner(),
+            ] {
+                if !u.is_empty() {
+                    bail!("unrecognized config entries: {:?}", u);
                 }
             }
         }

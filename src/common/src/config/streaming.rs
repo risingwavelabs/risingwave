@@ -239,6 +239,10 @@ pub struct StreamingDeveloperConfig {
     /// Determine which encoding will be used to encode join rows in operator cache.
     #[serde(default)]
     pub join_encoding_type: JoinEncodingType,
+
+    #[serde(default, flatten)]
+    #[config_doc(omitted)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 pub mod default {
