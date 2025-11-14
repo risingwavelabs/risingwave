@@ -36,11 +36,6 @@ impl<T> Unrecognized<T> {
     pub fn into_inner(self) -> BTreeMap<String, Value> {
         self.inner
     }
-
-    /// Returns `true` if there are no unrecognized fields.
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
 }
 
 impl<'de, T> Deserialize<'de> for Unrecognized<T> {
