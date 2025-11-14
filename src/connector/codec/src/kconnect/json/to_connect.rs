@@ -37,6 +37,7 @@ where
                 .flatten(),
             None => None,
         };
+        tracing::info!("HERE {schema:#?}");
         let payload = match j.take_field("payload") {
             Some(payload_j) => payload_j,
             None => j,

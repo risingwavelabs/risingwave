@@ -71,6 +71,7 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
         payload: Vec<u8>,
         _: &crate::source::SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
+        tracing::info!("GenAcc {}", str::from_utf8(&payload).unwrap());
         self.value = Some(payload);
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(self.value.as_mut().unwrap())
             .context("failed to parse debezium json payload")?;
