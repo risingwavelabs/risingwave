@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::constants::{field_name, type_name};
-use super::generic::{CacheKey, JsonRead};
+use super::generic::{CacheKey, JsonRead, JsonTake};
 use crate::kconnect::data::schema::{ConnectSchema, SchemaBuilder};
 use crate::kconnect::errors::{DataException, bail_data_exception};
 
@@ -24,9 +24,27 @@ pub struct Cache<J> {
 
 impl<'a, J: CacheKey<'a>> Cache<J>
 where
-    J::Borrowed: JsonRead,
+    J::Borrowed: JsonRead + JsonTake,
 {
-    pub fn decode(&mut self, j: &J::Borrowed) -> Result<Option<ConnectSchema>, DataException> {
+    pub fn open_envelope(&mut self, mut j: J::Borrowed) -> (Option<ConnectSchema>, J::Borrowed) {
+        let schema = match j.get("schema") {
+            Some(schema_j) => self
+                .decode(schema_j)
+                .inspect_err(|e| {
+                    tracing::warn!("Failed to decode kconnect schema: {}", e);
+                })
+                .ok()
+                .flatten(),
+            None => None,
+        };
+        let payload = match j.take_field("payload") {
+            Some(payload_j) => payload_j,
+            None => j,
+        };
+        (schema, payload)
+    }
+
+    fn decode(&mut self, j: &J::Borrowed) -> Result<Option<ConnectSchema>, DataException> {
         if let Some((cached_j, cached_schema)) = &self.last
             && cached_j.eq_borrowed(j)
         {

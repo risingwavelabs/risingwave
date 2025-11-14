@@ -164,3 +164,15 @@ impl<'a> CacheKey<'a> for simd_json::BorrowedValue<'static> {
         self == b
     }
 }
+
+pub trait JsonTake: Sized {
+    fn take_field(&mut self, key: &str) -> Option<Self>;
+}
+impl JsonTake for simd_json::BorrowedValue<'_> {
+    fn take_field(&mut self, key: &str) -> Option<Self> {
+        match self {
+            Self::Object(map) => map.remove(key),
+            _ => None,
+        }
+    }
+}

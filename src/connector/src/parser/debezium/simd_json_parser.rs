@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use anyhow::Context;
 use risingwave_connector_codec::kconnect::json::Cache;
 use simd_json::BorrowedValue;
-use simd_json::prelude::{MutableObject, ValueObjectAccess as _};
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
@@ -73,27 +72,10 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
         _: &crate::source::SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
-        let mut event: BorrowedValue<'_> =
-            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
-                .context("failed to parse debezium json payload")?;
+        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+            .context("failed to parse debezium json payload")?;
 
-        let _kconnect = match event.get("schema") {
-            Some(j) => self
-                .cache
-                .decode(j)
-                .inspect_err(|err| {
-                    tracing::warn!("failed to parse kconnect schema from debezium: {err}")
-                })
-                .ok()
-                .flatten(),
-            None => None,
-        };
-
-        let payload = if let Some(payload) = event.get_mut("payload") {
-            std::mem::take(payload)
-        } else {
-            event
-        };
+        let (_, payload) = self.cache.open_envelope(event);
 
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             payload,
@@ -105,6 +87,7 @@ impl AccessBuilder for DebeziumJsonAccessBuilder {
 #[derive(Debug)]
 pub struct DebeziumMongoJsonAccessBuilder {
     value: Option<Vec<u8>>,
+    cache: Cache<BorrowedValue<'static>>,
     json_parse_options: JsonParseOptions,
     strong_schema: bool,
 }
@@ -113,6 +96,7 @@ impl DebeziumMongoJsonAccessBuilder {
     pub fn new(props: MongoProperties) -> anyhow::Result<Self> {
         Ok(Self {
             value: None,
+            cache: Cache::default(),
             json_parse_options: JsonParseOptions::new_for_debezium(
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
@@ -133,15 +117,10 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
         _: &crate::source::SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
-        let mut event: BorrowedValue<'_> =
-            simd_json::to_borrowed_value(self.value.as_mut().unwrap())
-                .context("failed to parse debezium mongo json payload")?;
+        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(self.value.as_mut().unwrap())
+            .context("failed to parse debezium mongo json payload")?;
 
-        let payload = if let Some(payload) = event.get_mut("payload") {
-            std::mem::take(payload)
-        } else {
-            event
-        };
+        let (_, payload) = self.cache.open_envelope(event);
 
         Ok(AccessImpl::MongoJson(MongoJsonAccess::new(
             JsonAccess::new_with_options(payload, &self.json_parse_options),
