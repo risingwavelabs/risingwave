@@ -41,7 +41,7 @@ mod tests {
             .await?
             .unwrap();
 
-        mgr.alter_name(ObjectType::Database, database_id.as_raw_id() as i32, "db2")
+        mgr.alter_name(ObjectType::Database, database_id, "db2")
             .await?;
         let database = Database::find_by_id(database_id)
             .one(&mgr.inner.read().await.db)
@@ -49,12 +49,8 @@ mod tests {
             .unwrap();
         assert_eq!(database.name, "db2");
 
-        mgr.drop_object(
-            ObjectType::Database,
-            database_id.as_raw_id() as i32,
-            DropMode::Cascade,
-        )
-        .await?;
+        mgr.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
+            .await?;
 
         Ok(())
     }
@@ -80,19 +76,15 @@ mod tests {
             .await?
             .unwrap();
 
-        mgr.alter_name(ObjectType::Schema, schema_id.as_raw_id() as i32, "schema2")
+        mgr.alter_name(ObjectType::Schema, schema_id, "schema2")
             .await?;
         let schema = Schema::find_by_id(schema_id)
             .one(&mgr.inner.read().await.db)
             .await?
             .unwrap();
         assert_eq!(schema.name, "schema2");
-        mgr.drop_object(
-            ObjectType::Schema,
-            schema_id.as_raw_id() as i32,
-            DropMode::Restrict,
-        )
-        .await?;
+        mgr.drop_object(ObjectType::Schema, schema_id, DropMode::Restrict)
+            .await?;
 
         Ok(())
     }
@@ -217,7 +209,8 @@ mod tests {
             sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_owned(),
             ..Default::default()
         };
-        mgr.create_view(pb_view, HashSet::from([source_id])).await?;
+        mgr.create_view(pb_view, HashSet::from([source_id.as_object_id()]))
+            .await?;
         let view_id: ViewId = View::find()
             .select_only()
             .column(view::Column::ViewId)

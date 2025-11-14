@@ -51,6 +51,8 @@ enum ReqCertPolicy {
     Try,
     Demand,
 }
+
+#[derive(Debug)]
 pub struct LdapTlsConfig {
     /// `LDAPTLS_CACERT` environment variable
     ca_cert: Option<String>,
@@ -148,12 +150,18 @@ impl LdapTlsConfig {
                     )
                 })?;
 
-            let mut private_keys = rustls_pemfile::pkcs8_private_keys(
-                &mut client_key_bytes.as_slice(),
-            )
-            .map_err(|e| {
-                PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
-            })?;
+            let mut reader = std::io::Cursor::new(&client_key_bytes);
+            let mut private_keys =
+                rustls_pemfile::pkcs8_private_keys(&mut reader).map_err(|e| {
+                    PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
+                })?;
+            if private_keys.is_empty() {
+                // Try RSA private keys as a fallback
+                reader.set_position(0);
+                private_keys = rustls_pemfile::rsa_private_keys(&mut reader).map_err(|e| {
+                    PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
+                })?;
+            }
             let client_private_key = private_keys.pop().ok_or_else(|| {
                 PsqlError::StartupError("No private key found in client key file".into())
             })?;
@@ -271,8 +279,6 @@ impl LdapConfig {
             LDAP_BASE_DN_KEY,
             LDAP_SEARCH_ATTRIBUTE_KEY,
             LDAP_SEARCH_FILTER_KEY,
-            LDAP_PREFIX_KEY,
-            LDAP_SUFFIX_KEY,
         ];
 
         for param in &conflicting_params {
@@ -349,10 +355,8 @@ impl LdapConfig {
 
         let bind_dn = options.get(LDAP_BIND_DN_KEY).cloned();
         let bind_passwd = options.get(LDAP_BIND_PASSWD_KEY).cloned();
-
-        // prefix and suffix are not allowed with ldapurl
-        let prefix = None;
-        let suffix = None;
+        let prefix = options.get(LDAP_PREFIX_KEY).cloned();
+        let suffix = options.get(LDAP_SUFFIX_KEY).cloned();
 
         Ok(Self {
             server,
@@ -444,6 +448,8 @@ impl LdapAuthenticator {
 
         if config.certs_required() {
             let tls_config = LdapTlsConfig::from_env();
+            tracing::debug!("fetched tls config from env: {:?}", tls_config);
+
             let client_config = tls_config.init_client_config()?;
             settings = settings.set_config(Arc::new(client_config));
 

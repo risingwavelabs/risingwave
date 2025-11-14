@@ -69,7 +69,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 .iter_source_with_acl(current_user)
                 .filter(|s| s.info.is_shared())
                 .for_each(|s| {
-                    job_ids.push(s.id.into());
+                    job_ids.push(s.id.as_share_source_job_id());
                 });
 
             schema_catalog
@@ -107,7 +107,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: t.owner as i32,
                         definition: t.create_sql(),
                         relationtype: "MATERIALIZED VIEW".into(),
-                        relationid: t.id.as_raw_id() as i32,
+                        relationid: t.id.as_i32_id(),
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -128,7 +128,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: t.owner as i32,
                         definition: t.create_sql_purified(),
                         relationtype: "TABLE".into(),
-                        relationid: t.id.as_raw_id() as i32,
+                        relationid: t.id.as_i32_id(),
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -149,7 +149,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: t.owner.user_id as i32,
                         definition: t.definition.clone(),
                         relationtype: "SINK".into(),
-                        relationid: t.id.as_raw_id() as i32,
+                        relationid: t.id.as_i32_id(),
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -171,7 +171,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                         relationowner: index_table.owner as i32,
                         definition: index_table.create_sql(),
                         relationtype: "INDEX".into(),
-                        relationid: index_table.id.as_raw_id() as i32,
+                        relationid: index_table.id.as_i32_id(),
                         relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
                         fragments: Some(json!(fragments.get_fragments()).to_string()),
                         initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -187,7 +187,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             .iter_source_with_acl(current_user)
             .for_each(|t| {
                 let (timezone, fragments) = if t.info.is_shared()
-                    && let Some(fragments) = table_fragments.get(&t.id.into())
+                    && let Some(fragments) = table_fragments.get(&t.id.as_share_source_job_id())
                 {
                     (
                         fragments.get_ctx().unwrap().get_timezone().clone(),
@@ -203,7 +203,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     relationowner: t.owner as i32,
                     definition: t.create_sql_purified(),
                     relationtype: "SOURCE".into(),
-                    relationid: t.id as i32,
+                    relationid: t.id.as_i32_id(),
                     relationtimezone: timezone,
                     fragments,
                     initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -222,7 +222,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     relationowner: t.owner.user_id as i32,
                     definition: t.definition.clone(),
                     relationtype: "SUBSCRIPTION".into(),
-                    relationid: t.id.subscription_id as i32,
+                    relationid: t.id.as_i32_id(),
                     relationtimezone: "".into(),
                     fragments: None,
                     initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),

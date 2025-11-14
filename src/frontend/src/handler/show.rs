@@ -650,7 +650,7 @@ pub async fn handle_show_object(
                         .get_source_ids_by_connection(c.id)
                         .unwrap_or_default()
                         .into_iter()
-                        .filter_map(|sid| schema.get_source_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .filter_map(|sid| schema.get_source_by_id(sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let sink_names = schema
                         .get_sink_ids_by_connection(c.id)
@@ -710,7 +710,7 @@ pub async fn handle_show_object(
                 let addr: HostAddr = worker.host.as_ref().unwrap().into();
                 let property = worker.property.as_ref();
                 ShowClusterRow {
-                    id: worker.id.as_raw_id() as i32,
+                    id: worker.id.as_i32_id(),
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_owned(),
@@ -862,8 +862,7 @@ pub fn handle_show_create_object(
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
-                                t.is_mview()
-                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
+                                t.is_mview() && has_access_to_object(current_user, t.id, t.owner)
                             }),
                     )
                 })?
@@ -887,7 +886,7 @@ pub fn handle_show_create_object(
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
                                 t.is_user_table()
-                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
+                                    && has_access_to_object(current_user, t.id, t.owner)
                             }),
                     )
                 })?
@@ -898,7 +897,7 @@ pub fn handle_show_create_object(
         ShowCreateType::Sink => {
             let (sink, schema) =
                 catalog_reader.get_any_sink_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(current_user, sink.id.as_raw_id(), sink.owner.user_id) {
+            if !has_access_to_object(current_user, sink.id, sink.owner.user_id) {
                 return Err(CatalogError::NotFound("sink", name.to_string()).into());
             }
             (sink.create_sql(), schema)
@@ -927,8 +926,7 @@ pub fn handle_show_create_object(
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
-                                t.is_index()
-                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
+                                t.is_index() && has_access_to_object(current_user, t.id, t.owner)
                             }),
                     )
                 })?
@@ -941,11 +939,7 @@ pub fn handle_show_create_object(
         ShowCreateType::Subscription => {
             let (subscription, schema) =
                 catalog_reader.get_subscription_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(
-                current_user,
-                subscription.id.subscription_id,
-                subscription.owner.user_id,
-            ) {
+            if !has_access_to_object(current_user, subscription.id, subscription.owner.user_id) {
                 return Err(CatalogError::NotFound("subscription", name.to_string()).into());
             }
             (subscription.create_sql(), schema)

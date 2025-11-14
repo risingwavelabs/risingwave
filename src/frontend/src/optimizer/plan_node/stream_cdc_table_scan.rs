@@ -210,7 +210,7 @@ impl StreamCdcTableScan {
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(Box::new(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
-                upstream_source_id: upstream_source_id.as_raw_id(),
+                upstream_source_id,
             }))),
         };
 
@@ -270,7 +270,7 @@ impl StreamCdcTableScan {
 
         let options = self.core.options.to_proto();
         let stream_scan_body = PbNodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
-            table_id: upstream_source_id,
+            table_id: upstream_source_id.as_cdc_table_id(),
             upstream_column_ids,
             output_indices,
             // The table desc used by backfill executor

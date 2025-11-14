@@ -210,7 +210,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(Box::new(SourceNode {
             source_inner: Some(StreamSource {
-                source_id: 1,
+                source_id: 1.into(),
                 state_table: Some(make_source_internal_table(0)),
                 columns,
                 ..Default::default()

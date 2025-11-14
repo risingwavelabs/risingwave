@@ -447,7 +447,7 @@ fn build_fragment(
                 // memorize upstream source id for later use
                 state
                     .dependent_table_ids
-                    .insert(node.upstream_source_id.into());
+                    .insert(node.upstream_source_id.as_cdc_table_id());
             }
             NodeBody::SourceBackfill(node) => {
                 current_fragment
@@ -455,7 +455,9 @@ fn build_fragment(
                     .add(FragmentTypeFlag::SourceScan);
                 // memorize upstream source id for later use
                 let source_id = node.upstream_source_id;
-                state.dependent_table_ids.insert(source_id.into());
+                state
+                    .dependent_table_ids
+                    .insert(source_id.as_cdc_table_id());
                 state.has_source_backfill = true;
             }
 

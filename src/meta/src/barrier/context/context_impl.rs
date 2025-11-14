@@ -18,10 +18,10 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
-use risingwave_meta_model::ActorId;
 use risingwave_meta_model::table::RefreshState;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::{ActorId, SourceId};
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
@@ -122,11 +122,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         list_finished: Vec<PbListFinishedSource>,
     ) -> MetaResult<()> {
-        let mut list_finished_info: HashMap<(TableId, TableId), HashSet<ActorId>> = HashMap::new();
+        let mut list_finished_info: HashMap<(TableId, SourceId), HashSet<ActorId>> = HashMap::new();
 
         for list_finished in list_finished {
             let table_id = list_finished.table_id;
-            let associated_source_id = TableId::new(list_finished.associated_source_id);
+            let associated_source_id = list_finished.associated_source_id;
             list_finished_info
                 .entry((table_id, associated_source_id))
                 .or_default()
@@ -154,7 +154,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             let database_id = self
                 .metadata_manager
                 .catalog_controller
-                .get_object_database_id(associated_source_id.as_raw_id() as _)
+                .get_object_database_id(associated_source_id)
                 .await
                 .context("Failed to get database id for table")?;
 
@@ -182,11 +182,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         load_finished: Vec<PbLoadFinishedSource>,
     ) -> MetaResult<()> {
-        let mut load_finished_info: HashMap<(TableId, TableId), HashSet<ActorId>> = HashMap::new();
+        let mut load_finished_info: HashMap<(TableId, SourceId), HashSet<ActorId>> = HashMap::new();
 
         for load_finished in load_finished {
             let table_id = load_finished.table_id;
-            let associated_source_id = TableId::new(load_finished.associated_source_id);
+            let associated_source_id = load_finished.associated_source_id;
             load_finished_info
                 .entry((table_id, associated_source_id))
                 .or_default()
@@ -214,7 +214,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             let database_id = self
                 .metadata_manager
                 .catalog_controller
-                .get_object_database_id(associated_source_id.as_raw_id() as _)
+                .get_object_database_id(associated_source_id)
                 .await
                 .context("Failed to get database id for table")?;
 
@@ -327,7 +327,10 @@ impl CommandContext {
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(SourceChange::UpdateSourceProps {
-                        source_id_map_new_props: obj_id_map_props.clone(),
+                        source_id_map_new_props: obj_id_map_props
+                            .iter()
+                            .map(|(source_id, props)| (source_id.as_source_id(), props.clone()))
+                            .collect(),
                     })
                     .await;
             }

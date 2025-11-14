@@ -349,7 +349,10 @@ impl FunctionAttr {
         };
         let variadic_args = variadic.then(|| quote! { &variadic_row, });
         let context = user_fn.context.then(|| quote! { &self.context, });
-        let writer = user_fn.write.then(|| quote! { &mut writer, });
+        let writer = user_fn
+            .writer_type_kind
+            .is_some()
+            .then(|| quote! { &mut writer, });
         let await_ = user_fn.async_.then(|| quote! { .await });
 
         let record_error = {
@@ -450,9 +453,9 @@ impl FunctionAttr {
             };
         };
         // now the `output` is: Option<impl ScalarRef or Scalar>
-        let append_output = match user_fn.write {
-            true => quote! {{
-                let mut writer = builder.writer().begin();
+        let append_output = match user_fn.writer_type_kind {
+            Some(WriterTypeKind::FmtWrite) | Some(WriterTypeKind::IoWrite) => quote! {{
+                let mut writer = builder.writer();
                 if #output.is_some() {
                     writer.finish();
                 } else {
@@ -460,24 +463,28 @@ impl FunctionAttr {
                     builder.append_null();
                 }
             }},
-            false if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+            None if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 builder.append(#output.as_ref().map(|s| s.as_ref()));
             },
-            false => quote! {
+            None => quote! {
                 let output #annotation = #output;
                 builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
             },
         };
         // the output expression in `eval_row`
-        let row_output = match user_fn.write {
-            true => quote! {{
+        let row_output = match user_fn.writer_type_kind {
+            Some(WriterTypeKind::FmtWrite) => quote! {{
                 let mut writer = String::new();
                 #output.map(|_| writer.into())
             }},
-            false if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+            Some(WriterTypeKind::IoWrite) => quote! {{
+                let mut writer = Vec::new();
+                #output.map(|_| writer.into())
+            }},
+            None if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 #output.map(|s| s.as_ref().into())
             },
-            false => quote! {{
+            None => quote! {{
                 let output #annotation = #output;
                 output.map(|s| s.into())
             }},

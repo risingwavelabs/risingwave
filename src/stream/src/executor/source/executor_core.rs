@@ -14,7 +14,8 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::{BatchSourceSplitImpl, SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::StateStore;
@@ -24,7 +25,7 @@ use super::SourceStateTableHandler;
 /// [`StreamSourceCore`] stores the necessary information for the source executor to execute on the
 /// external connector.
 pub struct StreamSourceCore<S: StateStore> {
-    pub(crate) source_id: TableId,
+    pub(crate) source_id: SourceId,
     pub(crate) source_name: String,
 
     pub(crate) column_ids: Vec<ColumnId>,
@@ -53,7 +54,7 @@ where
     S: StateStore,
 {
     pub fn new(
-        source_id: TableId,
+        source_id: SourceId,
         source_name: String,
         column_ids: Vec<ColumnId>,
         source_desc_builder: SourceDescBuilder,

@@ -26,7 +26,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{FragmentId, ObjectId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{FragmentId, StreamingParallelism};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
@@ -114,7 +114,7 @@ impl StreamManagerService for StreamServiceImpl {
         let actor_to_apply = match request.kind() {
             ThrottleTarget::Source | ThrottleTarget::TableWithSource => {
                 self.metadata_manager
-                    .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
+                    .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
                     .await?
             }
             ThrottleTarget::Mv => {
@@ -147,19 +147,19 @@ impl StreamManagerService for StreamServiceImpl {
             }
         };
 
-        let request_id = if request.kind() == ThrottleTarget::Fragment {
+        let job_id = if request.kind() == ThrottleTarget::Fragment {
             self.metadata_manager
                 .catalog_controller
                 .get_fragment_streaming_job_id(request.id.into())
                 .await?
         } else {
-            request.id as _
+            request.id.into()
         };
 
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(request_id as ObjectId)
+            .get_object_database_id(job_id)
             .await?;
         // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
@@ -194,7 +194,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .find_creating_streaming_job_ids(infos.infos)
                 .await?
                 .into_iter()
-                .map(|id| JobId::new(id as _))
+                .map(|id| id.as_job_id())
                 .collect(),
             Jobs::Ids(jobs) => jobs.job_ids,
         };
@@ -555,7 +555,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .into_iter()
                     .map(move |split| list_actor_splits_response::ActorSplit {
                         actor_id,
-                        source_id: source_id as _,
+                        source_id,
                         fragment_id,
                         split_id: split.id().to_string(),
                         fragment_type: fragment_type.into(),
@@ -615,7 +615,7 @@ impl StreamManagerService for StreamServiceImpl {
                             request.changed_props.clone().into_iter().collect(),
                         )
                         .await?,
-                    request.object_id,
+                    request.object_id.into(),
                 ),
                 Ok(AlterConnectorPropsObject::IcebergTable) => {
                     let (prop, sink_id) = self
@@ -626,7 +626,7 @@ impl StreamManagerService for StreamServiceImpl {
                             request.extra_options,
                         )
                         .await?;
-                    (prop, sink_id.as_raw_id())
+                    (prop, sink_id.as_object_id())
                 }
 
                 Ok(AlterConnectorPropsObject::Source) => {
@@ -640,7 +640,7 @@ impl StreamManagerService for StreamServiceImpl {
                         .metadata_manager
                         .catalog_controller
                         .update_source_props_by_source_id(
-                            request.object_id as SourceId,
+                            request.object_id.into(),
                             request.changed_props.clone().into_iter().collect(),
                             request.changed_secret_refs.clone().into_iter().collect(),
                         )
@@ -648,7 +648,7 @@ impl StreamManagerService for StreamServiceImpl {
 
                     self.stream_manager
                         .source_manager
-                        .validate_source_once(request.object_id, options_with_secret.clone())
+                        .validate_source_once(request.object_id.into(), options_with_secret.clone())
                         .await?;
 
                     let (options, secret_refs) = options_with_secret.into_parts();
@@ -658,7 +658,7 @@ impl StreamManagerService for StreamServiceImpl {
                             .map_err(MetaError::from)?
                             .into_iter()
                             .collect(),
-                        request.object_id,
+                        request.object_id.into(),
                     )
                 }
 
@@ -673,7 +673,7 @@ impl StreamManagerService for StreamServiceImpl {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(object_id as ObjectId)
+            .get_object_database_id(object_id)
             .await?;
 
         let mut mutation = HashMap::default();

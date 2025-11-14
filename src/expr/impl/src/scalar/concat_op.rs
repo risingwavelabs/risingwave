@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::function;
 
 #[function("concat_op(varchar, varchar) -> varchar")]
-pub fn concat_op(left: &str, right: &str, writer: &mut impl Write) {
+pub fn concat_op(left: &str, right: &str, writer: &mut impl std::fmt::Write) {
     writer.write_str(left).unwrap();
     writer.write_str(right).unwrap();
 }
@@ -43,11 +41,9 @@ pub fn concat_op(left: &str, right: &str, writer: &mut impl Write) {
 /// \x123456
 /// ```
 #[function("bytea_concat_op(bytea, bytea) -> bytea")]
-pub fn bytea_concat_op(left: &[u8], right: &[u8]) -> Box<[u8]> {
-    let mut result = Vec::with_capacity(left.len() + right.len());
-    result.extend_from_slice(left);
-    result.extend_from_slice(right);
-    result.into_boxed_slice()
+pub fn bytea_concat_op(left: &[u8], right: &[u8], writer: &mut impl std::io::Write) {
+    writer.write_all(left).unwrap();
+    writer.write_all(right).unwrap();
 }
 
 #[cfg(test)]
@@ -65,7 +61,8 @@ mod tests {
     fn test_bytea_concat_op() {
         let left = b"\x01\x02\x03";
         let right = b"\x04\x05";
-        let result = bytea_concat_op(left, right);
-        assert_eq!(&*result, b"\x01\x02\x03\x04\x05");
+        let mut result = Vec::new();
+        bytea_concat_op(left, right, &mut result);
+        assert_eq!(&result, b"\x01\x02\x03\x04\x05");
     }
 }

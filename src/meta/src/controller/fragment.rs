@@ -420,9 +420,9 @@ impl CatalogController {
         Ok(result)
     }
 
-    pub async fn fragment_job_mapping(&self) -> MetaResult<HashMap<FragmentId, ObjectId>> {
+    pub async fn fragment_job_mapping(&self) -> MetaResult<HashMap<FragmentId, JobId>> {
         let inner = self.inner.read().await;
-        let fragment_jobs: Vec<(FragmentId, ObjectId)> = FragmentModel::find()
+        let fragment_jobs: Vec<(FragmentId, JobId)> = FragmentModel::find()
             .select_only()
             .columns([fragment::Column::FragmentId, fragment::Column::JobId])
             .into_tuple()
@@ -722,7 +722,7 @@ impl CatalogController {
 
     pub async fn get_job_fragment_backfill_scan_type(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
     ) -> MetaResult<HashMap<crate::model::FragmentId, PbStreamScanType>> {
         let inner = self.inner.read().await;
         let fragments: Vec<_> = FragmentModel::find()
@@ -1656,7 +1656,7 @@ impl CatalogController {
         for (fragment_id, stream_node) in fragments {
             if let Some(source_id) = stream_node.to_protobuf().find_stream_source() {
                 source_fragment_ids
-                    .entry(source_id as SourceId)
+                    .entry(source_id)
                     .or_insert_with(BTreeSet::new)
                     .insert(fragment_id);
             }
@@ -1682,7 +1682,7 @@ impl CatalogController {
                 stream_node.to_protobuf().find_source_backfill()
             {
                 source_fragment_ids
-                    .entry(source_id as SourceId)
+                    .entry(source_id)
                     .or_insert_with(BTreeSet::new)
                     .insert((fragment_id, upstream_source_fragment_id));
             }

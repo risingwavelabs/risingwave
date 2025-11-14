@@ -36,7 +36,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
-use crate::id::{FragmentId, WorkerId};
+use crate::id::{FragmentId, SourceId, WorkerId};
 use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
 
@@ -402,7 +402,7 @@ impl stream_plan::StreamNode {
     /// Find the external stream source info inside the stream node, if any.
     ///
     /// Returns `source_id`.
-    pub fn find_stream_source(&self) -> Option<u32> {
+    pub fn find_stream_source(&self) -> Option<SourceId> {
         if let Some(crate::stream_plan::stream_node::NodeBody::Source(source)) =
             self.node_body.as_ref()
             && let Some(inner) = &source.source_inner
@@ -426,7 +426,7 @@ impl stream_plan::StreamNode {
     /// Note: we must get upstream fragment id from the merge node, not from the fragment's
     /// `upstream_fragment_ids`. e.g., DynamicFilter may have 2 upstream fragments, but only
     /// one is the upstream source fragment.
-    pub fn find_source_backfill(&self) -> Option<(u32, FragmentId)> {
+    pub fn find_source_backfill(&self) -> Option<(SourceId, FragmentId)> {
         if let Some(crate::stream_plan::stream_node::NodeBody::SourceBackfill(source)) =
             self.node_body.as_ref()
         {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Write};
+use std::fmt::Debug;
 use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
@@ -189,7 +189,7 @@ impl ChronoPattern {
     "to_char(timestamp, varchar) -> varchar",
     prebuild = "ChronoPattern::compile($1)"
 )]
-fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
+fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl std::fmt::Write) {
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
     write!(writer, "{}", format).unwrap();
 }
@@ -205,7 +205,7 @@ fn timestamptz_to_char3(
     data: Timestamptz,
     zone: &str,
     tmpl: &ChronoPattern,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     let format = data
         .to_datetime_in_zone(Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?)
@@ -221,7 +221,7 @@ fn timestamptz_to_char3(
 fn interval_to_char(
     interval: Interval,
     pattern: &ChronoPattern,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     for iter in pattern.borrow_dependent() {
         format_inner(writer, interval, iter)?;
@@ -241,7 +241,7 @@ fn adjust_to_iso_year(interval: Interval) -> Result<i32> {
     Ok(date.0.iso_week().year())
 }
 
-fn format_inner(w: &mut impl Write, interval: Interval, item: &Item<'_>) -> Result<()> {
+fn format_inner(w: &mut impl std::fmt::Write, interval: Interval, item: &Item<'_>) -> Result<()> {
     match *item {
         Item::Literal(s) | Item::Space(s) => {
             w.write_str(s).unwrap();

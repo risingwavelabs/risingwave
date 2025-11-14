@@ -18,17 +18,16 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, Schema,
-    StreamJobStatus, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, ICEBERG_SINK_PREFIX,
+    ICEBERG_SOURCE_PREFIX, Schema, StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_pb::catalog::table::{
-    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
-    PbTableVersion,
+    CdcTableType as PbCdcTableType, PbEngine, PbTableType, PbTableVersion,
 };
 use risingwave_pb::catalog::{
     PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
@@ -88,7 +87,7 @@ pub struct TableCatalog {
 
     pub database_id: DatabaseId,
 
-    pub associated_source_id: Option<TableId>, // TODO: use SourceId
+    pub associated_source_id: Option<SourceId>, // TODO: use SourceId
 
     pub name: String,
 
@@ -210,9 +209,6 @@ pub struct TableCatalog {
 
     pub cdc_table_type: Option<ExternalCdcTableType>,
 }
-
-pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
-pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -408,7 +404,7 @@ impl TableCatalog {
 
     /// Get the table catalog's associated source id.
     #[must_use]
-    pub fn associated_source_id(&self) -> Option<TableId> {
+    pub fn associated_source_id(&self) -> Option<SourceId> {
         self.associated_source_id
     }
 
@@ -578,9 +574,7 @@ impl TableCatalog {
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key().iter().map(|x| *x as _).collect(),
-            optional_associated_source_id: self.associated_source_id.map(|source_id| {
-                OptionalAssociatedSourceId::AssociatedSourceId(source_id.as_raw_id())
-            }),
+            optional_associated_source_id: self.associated_source_id.map(Into::into),
             table_type: self.table_type.to_prost() as i32,
             distribution_key: self
                 .distribution_key
@@ -763,9 +757,7 @@ impl From<PbTable> for TableCatalog {
             .get_stream_job_status()
             .unwrap_or(PbStreamJobStatus::Created);
         let create_type = tb.get_create_type().unwrap_or(PbCreateType::Foreground);
-        let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
-            OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
-        });
+        let associated_source_id = tb.optional_associated_source_id.map(Into::into);
         let name = tb.name.clone();
 
         let vnode_count = tb.vnode_count_inner();
@@ -811,7 +803,7 @@ impl From<PbTable> for TableCatalog {
             id,
             schema_id: tb.schema_id,
             database_id: tb.database_id,
-            associated_source_id: associated_source_id.map(Into::into),
+            associated_source_id,
             name,
             pk,
             columns,
@@ -917,8 +909,7 @@ mod tests {
             pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
             distribution_key: vec![0],
-            optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
-                .into(),
+            optional_associated_source_id: Some(SourceId::new(233).into()),
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
@@ -968,7 +959,7 @@ mod tests {
                 id: TableId::new(0),
                 schema_id: 0.into(),
                 database_id: 0.into(),
-                associated_source_id: Some(TableId::new(233)),
+                associated_source_id: Some(SourceId::new(233)),
                 name: "test".to_owned(),
                 table_type: TableType::Table,
                 columns: vec![

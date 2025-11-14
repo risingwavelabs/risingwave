@@ -17,9 +17,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SubscriptionId};
 use risingwave_common::types::Datum;
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
@@ -30,11 +30,11 @@ use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
-    ActorId, ColumnCatalogArray, DataTypeArray, DatabaseId, DispatcherType, FragmentId, JobStatus,
-    ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo, TableId,
-    TableIdArray, UserId, WorkerId, connection, database, fragment, fragment_relation, function,
-    index, object, object_dependency, schema, secret, sink, source, streaming_job, subscription,
-    table, user, user_default_privilege, user_privilege, view,
+    ActorId, ColumnCatalogArray, CreateType, DataTypeArray, DatabaseId, DispatcherType, FragmentId,
+    JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
+    TableId, TableIdArray, UserId, WorkerId, connection, database, fragment, fragment_relation,
+    function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
+    subscription, table, user, user_default_privilege, user_privilege, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -80,7 +80,7 @@ use crate::{MetaError, MetaResult};
 /// use sea_orm::sea_query::*;
 /// use sea_orm::*;
 ///
-/// let query = construct_obj_dependency_query(1);
+/// let query = construct_obj_dependency_query(1.into());
 ///
 /// assert_eq!(
 ///     query.to_string(MysqlQueryBuilder),
@@ -168,7 +168,7 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
 /// use sea_orm::sea_query::*;
 /// use sea_orm::*;
 ///
-/// let query = construct_sink_cycle_check_query(1, vec![2, 3]);
+/// let query = construct_sink_cycle_check_query(1.into(), vec![2.into(), 3.into()]);
 ///
 /// assert_eq!(
 ///     query.to_string(MysqlQueryBuilder),
@@ -351,12 +351,13 @@ where
 /// `ensure_object_id` ensures the existence of target object in the cluster.
 pub async fn ensure_object_id<C>(
     object_type: ObjectType,
-    obj_id: ObjectId,
+    obj_id: impl Into<ObjectId>,
     db: &C,
 ) -> MetaResult<()>
 where
     C: ConnectionTrait,
 {
+    let obj_id = obj_id.into();
     let count = Object::find_by_id(obj_id).count(db).await?;
     if count == 0 {
         return Err(MetaError::catalog_id_not_found(
@@ -371,9 +372,7 @@ pub async fn ensure_job_not_canceled<C>(job_id: JobId, db: &C) -> MetaResult<()>
 where
     C: ConnectionTrait,
 {
-    let count = Object::find_by_id(job_id.as_raw_id() as ObjectId)
-        .count(db)
-        .await?;
+    let count = Object::find_by_id(job_id).count(db).await?;
     if count == 0 {
         return Err(MetaError::cancelled(format!(
             "job {} might be cancelled manually or by recovery",
@@ -561,7 +560,7 @@ where
                 let check_creation = if $obj_type == ObjectType::View {
                     false
                 } else if $obj_type == ObjectType::Source {
-                    let source_info = Source::find_by_id(oid)
+                    let source_info = Source::find_by_id(oid.as_source_id())
                         .select_only()
                         .column(source::Column::SourceInfo)
                         .into_tuple::<Option<StreamSourceInfo>>()
@@ -572,7 +571,7 @@ where
                 } else {
                     true
                 };
-                let job_id = JobId::new(oid as u32);
+                let job_id = oid.as_job_id();
                 return if check_creation
                     && !matches!(
                         StreamingJob::find_by_id(job_id)
@@ -700,6 +699,17 @@ where
                         .into_tuple()
                         .all(db)
                         .await?;
+                    if object_type == ObjectType::Table {
+                        let engine = Table::find_by_id(object_id.as_table_id())
+                            .select_only()
+                            .column(table::Column::Engine)
+                            .into_tuple::<table::Engine>()
+                            .one(db)
+                            .await?;
+                        if engine == Some(table::Engine::Iceberg) && sinks.len() == 1 {
+                            continue;
+                        }
+                    }
                     details.extend(sinks.into_iter().map(|(schema_name, sink_name)| {
                         format!("sink {}.{} depends on it", schema_name, sink_name)
                     }));
@@ -777,12 +787,15 @@ where
                 _ => bail!("unexpected referring object type: {}", obj_type.as_str()),
             }
         }
+        if details.is_empty() {
+            return Ok(());
+        }
 
         return Err(MetaError::permission_denied(format!(
             "{} used by {} other objects. \nDETAIL: {}\n\
             {}",
             object_type.as_str(),
-            count,
+            details.len(),
             details.join("\n"),
             match object_type {
                 ObjectType::Function | ObjectType::Connection | ObjectType::Secret =>
@@ -1045,7 +1058,7 @@ where
         .into_iter()
         .map(|(privilege, object)| {
             let object = object.unwrap();
-            let oid = object.oid as _;
+            let oid = object.oid.as_raw_id();
             let obj = match object.obj_type {
                 ObjectType::Database => PbGrantObject::DatabaseId(oid),
                 ObjectType::Schema => PbGrantObject::SchemaId(oid),
@@ -1088,11 +1101,12 @@ pub async fn get_table_columns(
 /// for the given new object. It returns the list of user infos whose privileges are updated.
 pub async fn grant_default_privileges_automatically<C>(
     db: &C,
-    object_id: ObjectId,
+    object_id: impl Into<ObjectId>,
 ) -> MetaResult<Vec<PbUserInfo>>
 where
     C: ConnectionTrait,
 {
+    let object_id = object_id.into();
     let object = Object::find_by_id(object_id)
         .one(db)
         .await?
@@ -1100,7 +1114,7 @@ where
     assert_ne!(object.obj_type, ObjectType::Database);
 
     let for_mview_filter = if object.obj_type == ObjectType::Table {
-        let table_type = Table::find_by_id(TableId::new(object_id as _))
+        let table_type = Table::find_by_id(object_id.as_table_id())
             .select_only()
             .column(table::Column::TableType)
             .into_tuple::<TableType>()
@@ -1146,7 +1160,7 @@ where
         .map(|(grantee, _, _, _)| *grantee)
         .collect::<HashSet<_>>();
 
-    let internal_table_ids = get_internal_tables_by_id(JobId::new(object_id as _), db).await?;
+    let internal_table_ids = get_internal_tables_by_id(object_id.as_job_id(), db).await?;
 
     for (grantee, granted_by, action, with_grant_option) in default_privileges {
         UserPrivilege::insert(user_privilege::ActiveModel {
@@ -1164,7 +1178,7 @@ where
             for internal_table_id in &internal_table_ids {
                 UserPrivilege::insert(user_privilege::ActiveModel {
                     user_id: Set(grantee),
-                    oid: Set(internal_table_id.as_raw_id() as _),
+                    oid: Set(internal_table_id.as_object_id()),
                     granted_by: Set(granted_by),
                     action: Set(Action::Select),
                     with_grant_option: Set(with_grant_option),
@@ -1192,7 +1206,7 @@ pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
         | PbGrantObject::FunctionId(id)
         | PbGrantObject::SubscriptionId(id)
         | PbGrantObject::ConnectionId(id)
-        | PbGrantObject::SecretId(id) => *id as _,
+        | PbGrantObject::SecretId(id) => (*id).into(),
     }
 }
 
@@ -1491,7 +1505,7 @@ where
             && let Some(source_id) = stream_node.to_protobuf().find_stream_source()
         {
             source_fragment_ids
-                .entry(source_id as _)
+                .entry(source_id)
                 .or_default()
                 .insert(fragment_id);
         }
@@ -1520,20 +1534,20 @@ pub(crate) fn build_object_group_for_delete(
         match obj.obj_type {
             ObjectType::Database => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Database(PbDatabase {
-                    id: (obj.oid as u32).into(),
+                    id: obj.oid.as_database_id(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Schema => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Schema(PbSchema {
-                    id: (obj.oid as u32).into(),
+                    id: obj.oid.as_schema_id(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
                 })),
             }),
             ObjectType::Table => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Table(PbTable {
-                    id: (obj.oid as u32).into(),
+                    id: obj.oid.as_table_id(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1541,7 +1555,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Source => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Source(PbSource {
-                    id: obj.oid as _,
+                    id: obj.oid.as_source_id(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1549,7 +1563,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Sink => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Sink(PbSink {
-                    id: (obj.oid as u32).into(),
+                    id: obj.oid.as_sink_id(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1557,7 +1571,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Subscription => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Subscription(PbSubscription {
-                    id: obj.oid as _,
+                    id: obj.oid.as_subscription_id(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1565,7 +1579,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::View => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::View(PbView {
-                    id: obj.oid as _,
+                    id: obj.oid.as_view_id(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1574,7 +1588,7 @@ pub(crate) fn build_object_group_for_delete(
             ObjectType::Index => {
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Index(PbIndex {
-                        id: obj.oid as _,
+                        id: obj.oid.as_index_id(),
                         schema_id: obj.schema_id.unwrap(),
                         database_id: obj.database_id.unwrap(),
                         ..Default::default()
@@ -1582,7 +1596,7 @@ pub(crate) fn build_object_group_for_delete(
                 });
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Table(PbTable {
-                        id: (obj.oid as u32).into(),
+                        id: obj.oid.as_table_id(),
                         schema_id: obj.schema_id.unwrap(),
                         database_id: obj.database_id.unwrap(),
                         ..Default::default()
@@ -1591,7 +1605,7 @@ pub(crate) fn build_object_group_for_delete(
             }
             ObjectType::Function => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Function(PbFunction {
-                    id: obj.oid as _,
+                    id: obj.oid.as_function_id(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1599,7 +1613,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Connection => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Connection(PbConnection {
-                    id: obj.oid as _,
+                    id: obj.oid.as_connection_id(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1607,7 +1621,7 @@ pub(crate) fn build_object_group_for_delete(
             }),
             ObjectType::Secret => objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Secret(PbSecret {
-                    id: obj.oid as _,
+                    id: obj.oid.as_secret_id(),
                     schema_id: obj.schema_id.unwrap(),
                     database_id: obj.database_id.unwrap(),
                     ..Default::default()
@@ -1692,16 +1706,23 @@ pub async fn rename_relation(
             if let Some(source_id) = associated_source_id {
                 rename_relation!(Source, source, source_id, source_id);
             }
-            rename_relation!(Table, table, table_id, TableId::new(object_id as _))
+            rename_relation!(Table, table, table_id, object_id.as_table_id())
         }
-        ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
-        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, SinkId::new(object_id as _)),
+        ObjectType::Source => {
+            rename_relation!(Source, source, source_id, object_id.as_source_id())
+        }
+        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id.as_sink_id()),
         ObjectType::Subscription => {
-            rename_relation!(Subscription, subscription, subscription_id, object_id)
+            rename_relation!(
+                Subscription,
+                subscription,
+                subscription_id,
+                object_id.as_subscription_id()
+            )
         }
-        ObjectType::View => rename_relation!(View, view, view_id, object_id),
+        ObjectType::View => rename_relation!(View, view, view_id, object_id.as_view_id()),
         ObjectType::Index => {
-            let (mut index, obj) = Index::find_by_id(object_id)
+            let (mut index, obj) = Index::find_by_id(object_id.as_index_id())
                 .find_also_related(Object)
                 .one(txn)
                 .await?
@@ -1830,7 +1851,7 @@ pub async fn rename_relation_refer(
             .await?;
 
         objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
-            oid: id.as_raw_id() as _,
+            oid: id.as_object_id(),
             obj_type: ObjectType::Sink,
             schema_id: None,
             database_id: None,
@@ -1840,17 +1861,22 @@ pub async fn rename_relation_refer(
     for obj in objs {
         match obj.obj_type {
             ObjectType::Table => {
-                rename_relation_ref!(Table, table, table_id, TableId::new(obj.oid as _))
+                rename_relation_ref!(Table, table, table_id, obj.oid.as_table_id())
             }
             ObjectType::Sink => {
-                rename_relation_ref!(Sink, sink, sink_id, SinkId::new(obj.oid as _))
+                rename_relation_ref!(Sink, sink, sink_id, obj.oid.as_sink_id())
             }
             ObjectType::Subscription => {
-                rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
+                rename_relation_ref!(
+                    Subscription,
+                    subscription,
+                    subscription_id,
+                    obj.oid.as_subscription_id()
+                )
             }
-            ObjectType::View => rename_relation_ref!(View, view, view_id, obj.oid),
+            ObjectType::View => rename_relation_ref!(View, view, view_id, obj.oid.as_view_id()),
             ObjectType::Index => {
-                let index_table_id: Option<TableId> = Index::find_by_id(obj.oid)
+                let index_table_id: Option<TableId> = Index::find_by_id(obj.oid.as_index_id())
                     .select_only()
                     .column(index::Column::IndexTableId)
                     .into_tuple()
@@ -1872,7 +1898,10 @@ pub async fn rename_relation_refer(
 /// Validate that subscription can be safely deleted, meeting any of the following conditions:
 /// 1. The upstream table is not referred to by any cross-db mv.
 /// 2. After deleting the subscription, the upstream table still has at least one subscription.
-pub async fn validate_subscription_deletion<C>(txn: &C, subscription_id: ObjectId) -> MetaResult<()>
+pub async fn validate_subscription_deletion<C>(
+    txn: &C,
+    subscription_id: SubscriptionId,
+) -> MetaResult<()>
 where
     C: ConnectionTrait,
 {
@@ -2015,6 +2044,113 @@ where
         FragmentTypeMask::from(mview_fragment).contains(FragmentTypeFlag::UpstreamSinkUnion);
 
     Ok(migrated)
+}
+
+pub async fn try_get_iceberg_table_by_downstream_sink<C>(
+    txn: &C,
+    sink_id: SinkId,
+) -> MetaResult<Option<TableId>>
+where
+    C: ConnectionTrait,
+{
+    let sink = Sink::find_by_id(sink_id).one(txn).await?;
+    let Some(sink) = sink else {
+        return Ok(None);
+    };
+
+    if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
+        let object_ids: Vec<ObjectId> = ObjectDependency::find()
+            .select_only()
+            .column(object_dependency::Column::Oid)
+            .filter(object_dependency::Column::UsedBy.eq(sink_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        let mut iceberg_table_ids = vec![];
+        for object_id in object_ids {
+            let table_id = object_id.as_table_id();
+            if let Some(table_engine) = Table::find_by_id(table_id)
+                .select_only()
+                .column(table::Column::Engine)
+                .into_tuple::<table::Engine>()
+                .one(txn)
+                .await?
+                && table_engine == table::Engine::Iceberg
+            {
+                iceberg_table_ids.push(table_id);
+            }
+        }
+        if iceberg_table_ids.len() == 1 {
+            return Ok(Some(iceberg_table_ids[0]));
+        }
+    }
+    Ok(None)
+}
+
+pub async fn check_if_belongs_to_iceberg_table<C>(txn: &C, job_id: JobId) -> MetaResult<bool>
+where
+    C: ConnectionTrait,
+{
+    if let Some(engine) = Table::find_by_id(job_id.as_mv_table_id())
+        .select_only()
+        .column(table::Column::Engine)
+        .into_tuple::<table::Engine>()
+        .one(txn)
+        .await?
+        && engine == table::Engine::Iceberg
+    {
+        return Ok(true);
+    }
+    if let Some(sink_name) = Sink::find_by_id(job_id.as_sink_id())
+        .select_only()
+        .column(sink::Column::Name)
+        .into_tuple::<String>()
+        .one(txn)
+        .await?
+        && sink_name.starts_with(ICEBERG_SINK_PREFIX)
+    {
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+pub async fn find_dirty_iceberg_table_jobs<C>(
+    txn: &C,
+    database_id: Option<DatabaseId>,
+) -> MetaResult<Vec<PartialObject>>
+where
+    C: ConnectionTrait,
+{
+    let mut filter_condition = streaming_job::Column::JobStatus
+        .ne(JobStatus::Created)
+        .and(object::Column::ObjType.is_in([ObjectType::Table, ObjectType::Sink]))
+        .and(streaming_job::Column::CreateType.eq(CreateType::Background));
+    if let Some(database_id) = database_id {
+        filter_condition = filter_condition.and(object::Column::DatabaseId.eq(database_id));
+    }
+    let creating_table_sink_jobs: Vec<PartialObject> = StreamingJob::find()
+        .select_only()
+        .columns([
+            object::Column::Oid,
+            object::Column::ObjType,
+            object::Column::SchemaId,
+            object::Column::DatabaseId,
+        ])
+        .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+        .filter(filter_condition)
+        .into_partial_model()
+        .all(txn)
+        .await?;
+
+    let mut dirty_iceberg_table_jobs = vec![];
+    for job in creating_table_sink_jobs {
+        if check_if_belongs_to_iceberg_table(txn, job.oid.as_job_id()).await? {
+            tracing::info!("Found dirty iceberg job with id: {}", job.oid);
+            dirty_iceberg_table_jobs.push(job);
+        }
+    }
+
+    Ok(dirty_iceberg_table_jobs)
 }
 
 pub fn build_select_node_list(

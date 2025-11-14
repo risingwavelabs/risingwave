@@ -177,11 +177,6 @@ impl CreatingStreamingJobInfo {
 
         Ok((receivers, background_job_ids))
     }
-
-    async fn check_job_exists(&self, job_id: JobId) -> bool {
-        let jobs = self.streaming_jobs.lock().await;
-        jobs.contains_key(&job_id)
-    }
 }
 
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
@@ -594,23 +589,10 @@ impl GlobalStreamManager {
         database_id: DatabaseId,
         removed_actors: Vec<ActorId>,
         streaming_job_ids: Vec<JobId>,
-        state_table_ids: Vec<risingwave_meta_model::TableId>,
+        state_table_ids: Vec<TableId>,
         fragment_ids: HashSet<FragmentId>,
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
-        // TODO(august): This is a workaround for canceling SITT via drop, remove it after refactoring SITT.
-        for &job_id in &streaming_job_ids {
-            if self.creating_job_info.check_job_exists(job_id).await {
-                tracing::info!(
-                    ?job_id,
-                    "streaming job is creating, cancel it with drop directly"
-                );
-                self.metadata_manager
-                    .notify_cancelled(database_id, job_id)
-                    .await;
-            }
-        }
-
         if !removed_actors.is_empty()
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()
@@ -670,6 +652,13 @@ impl GlobalStreamManager {
         let futures = background_job_ids.into_iter().map(|id| async move {
             let fragment = self.metadata_manager.get_job_fragments_by_id(id).await?;
             if fragment.is_created() {
+                tracing::warn!(
+                    "streaming job {} is already created, ignore cancel request",
+                    id
+                );
+                return Ok(None);
+            }
+            if fragment.is_created() {
                 Err(MetaError::invalid_parameter(format!(
                     "streaming job {} is already created",
                     id
@@ -694,15 +683,15 @@ impl GlobalStreamManager {
                     .await?;
             }
 
-            tracing::info!(?id, "cancelled recovered streaming job");
-            Ok(id)
+            tracing::info!(?id, "cancelled background streaming job");
+            Ok(Some(id))
         });
         let cancelled_recovered_ids = join_all(futures)
             .await
             .into_iter()
             .collect::<MetaResult<Vec<_>>>()?;
 
-        cancelled_ids.extend(cancelled_recovered_ids);
+        cancelled_ids.extend(cancelled_recovered_ids.into_iter().flatten());
         Ok(cancelled_ids)
     }
 
