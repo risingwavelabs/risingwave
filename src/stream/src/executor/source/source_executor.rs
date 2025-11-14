@@ -779,6 +779,9 @@ impl<S: StateStore> SourceExecutor<S> {
                         .extend(latest_state);
 
                     let card = chunk.cardinality();
+                    if card == 0 {
+                        continue;
+                    }
                     source_output_row_count.inc_by(card as u64);
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
