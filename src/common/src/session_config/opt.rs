@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::fmt::Display;
+use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// A config wrapper that represents unset (`None`) as empty string.
+/// A session config wrapper that represents unset (`None`) as empty string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct OptionConfig<T>(pub Option<T>);
@@ -47,5 +48,25 @@ impl<T: Display> Display for OptionConfig<T> {
 impl<T> From<Option<T>> for OptionConfig<T> {
     fn from(v: Option<T>) -> Self {
         Self(v)
+    }
+}
+
+impl<T> From<OptionConfig<T>> for Option<T> {
+    fn from(v: OptionConfig<T>) -> Self {
+        v.0
+    }
+}
+
+impl<T> Deref for OptionConfig<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for OptionConfig<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }

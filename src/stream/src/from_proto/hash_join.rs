@@ -15,8 +15,8 @@
 use std::cmp::min;
 use std::sync::Arc;
 
+use risingwave_common::config::streaming::JoinEncodingType;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::session_config::join_encoding_type::JoinEncodingType;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{
     InputRefExpression, NonStrictExpression, build_func_non_strict, build_non_strict_from_prost,

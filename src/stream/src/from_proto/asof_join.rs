@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
+use risingwave_common::config::streaming::JoinEncodingType;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::session_config::join_encoding_type::JoinEncodingType;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::AsOfJoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::AsOfJoinNode;
