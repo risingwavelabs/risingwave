@@ -14,7 +14,7 @@
 
 use super::constants::{field_name, type_name};
 use super::generic::{CacheKey, JsonRead};
-use crate::kconnect::data::schema::ConnectSchema;
+use crate::kconnect::data::schema::{ConnectSchema, SchemaBuilder};
 use crate::kconnect::errors::{DataException, bail_data_exception};
 
 #[derive(Default, Debug)]
@@ -58,15 +58,15 @@ fn decode_schema_from_json(j: &impl JsonRead) -> Result<Option<ConnectSchema>, D
     };
 
     let mut builder = match type_ {
-        type_name::BOOLEAN => ConnectSchema::bool(),
-        type_name::INT8 => ConnectSchema::int8(),
-        type_name::INT16 => ConnectSchema::int16(),
-        type_name::INT32 => ConnectSchema::int32(),
-        type_name::INT64 => ConnectSchema::int64(),
-        type_name::FLOAT => ConnectSchema::float32(),
-        type_name::DOUBLE => ConnectSchema::float64(),
-        type_name::BYTES => ConnectSchema::bytes(),
-        type_name::STRING => ConnectSchema::string(),
+        type_name::BOOLEAN => SchemaBuilder::bool(),
+        type_name::INT8 => SchemaBuilder::int8(),
+        type_name::INT16 => SchemaBuilder::int16(),
+        type_name::INT32 => SchemaBuilder::int32(),
+        type_name::INT64 => SchemaBuilder::int64(),
+        type_name::FLOAT => SchemaBuilder::float32(),
+        type_name::DOUBLE => SchemaBuilder::float64(),
+        type_name::BYTES => SchemaBuilder::bytes(),
+        type_name::STRING => SchemaBuilder::string(),
         type_name::ARRAY => {
             let Some(elem_schema) = j.get(field_name::ARRAY_ITEMS) else {
                 bail_data_exception!("Array schema did not specify the element type");
@@ -75,7 +75,7 @@ fn decode_schema_from_json(j: &impl JsonRead) -> Result<Option<ConnectSchema>, D
                 // from ArrayBuilder.array
                 bail_data_exception!("element schema cannot be null.");
             };
-            ConnectSchema::array(elem_schema)
+            SchemaBuilder::array(elem_schema)
         }
         type_name::MAP => {
             let Some(key_schema) = j.get(field_name::MAP_KEY) else {
@@ -90,10 +90,10 @@ fn decode_schema_from_json(j: &impl JsonRead) -> Result<Option<ConnectSchema>, D
             let Some(value_schema) = decode_schema_from_json(value_schema)? else {
                 bail_data_exception!("value schema cannot be null.");
             };
-            ConnectSchema::map(key_schema, value_schema)
+            SchemaBuilder::map(key_schema, value_schema)
         }
         type_name::STRUCT => {
-            let mut b = ConnectSchema::struct_builder();
+            let mut b = SchemaBuilder::struct_builder();
             let Some(fields) = j.get_array(field_name::STRUCT_FIELDS) else {
                 bail_data_exception!("Struct schema's \"fields\" argument is not an array.",);
             };
@@ -145,7 +145,7 @@ fn decode_schema_from_json(j: &impl JsonRead) -> Result<Option<ConnectSchema>, D
         tracing::info!("Schema default value is not supported yet.");
     }
 
-    let result = builder;
+    let result = builder.build();
     // cache.insert(j.clone(), result.clone());
     Ok(Some(result))
 }

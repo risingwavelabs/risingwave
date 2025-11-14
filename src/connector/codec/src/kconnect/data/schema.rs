@@ -17,7 +17,10 @@ use indexmap::IndexMap;
 use crate::kconnect::errors::{SchemaBuilderException, bail_schema_builder_exception};
 
 #[derive(Debug, Clone)]
-pub enum ConnectSchema {
+pub struct ConnectSchema(std::sync::Arc<SchemaBuilder>);
+
+#[derive(Debug)]
+pub enum SchemaBuilder {
     Primitive(PrimitiveSchema),
     Array(ArraySchema),
     Map(MapSchema),
@@ -41,7 +44,7 @@ macro_rules! readonly_field {
     };
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SchemaBase {
     type_: SchemaType,
     pub optional: bool,
@@ -54,35 +57,35 @@ pub struct SchemaBase {
 }
 readonly_field!(SchemaBase, type_, SchemaType);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PrimitiveSchema {
     base: SchemaBase,
 }
 readonly_field!(PrimitiveSchema, base, SchemaBase);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ArraySchema {
     base: SchemaBase,
-    pub val_schema: Box<ConnectSchema>,
+    pub val_schema: ConnectSchema,
 }
 readonly_field!(ArraySchema, base, SchemaBase);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MapSchema {
     base: SchemaBase,
-    pub key_schema: Box<ConnectSchema>,
-    pub val_schema: Box<ConnectSchema>,
+    pub key_schema: ConnectSchema,
+    pub val_schema: ConnectSchema,
 }
 readonly_field!(MapSchema, base, SchemaBase);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StructSchema {
     base: SchemaBase,
     pub fields: IndexMap<Box<str>, Field>,
 }
 readonly_field!(StructSchema, base, SchemaBase);
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Field {
     index: usize,
     pub name: Box<str>,
@@ -147,7 +150,7 @@ macro_rules! primitive_constructor {
     };
 }
 
-impl ConnectSchema {
+impl SchemaBuilder {
     primitive_constructor!(int8, Int8);
 
     primitive_constructor!(int16, Int16);
@@ -169,15 +172,15 @@ impl ConnectSchema {
     pub fn array(val_schema: ConnectSchema) -> Self {
         Self::Array(ArraySchema {
             base: SchemaBase::new(SchemaType::Array),
-            val_schema: Box::new(val_schema),
+            val_schema,
         })
     }
 
     pub fn map(key_schema: ConnectSchema, val_schema: ConnectSchema) -> Self {
         Self::Map(MapSchema {
             base: SchemaBase::new(SchemaType::Map),
-            key_schema: Box::new(key_schema),
-            val_schema: Box::new(val_schema),
+            key_schema,
+            val_schema,
         })
     }
 
@@ -212,27 +215,33 @@ impl StructSchema {
         Ok(self)
     }
 
-    pub fn build(self) -> ConnectSchema {
-        ConnectSchema::Struct(self)
+    pub fn build(self) -> SchemaBuilder {
+        SchemaBuilder::Struct(self)
     }
 }
 
 impl ConnectSchema {
     pub fn base(&self) -> &SchemaBase {
+        match self.0.as_ref() {
+            SchemaBuilder::Primitive(s) => s.base(),
+            SchemaBuilder::Array(s) => s.base(),
+            SchemaBuilder::Map(s) => s.base(),
+            SchemaBuilder::Struct(s) => s.base(),
+        }
+    }
+}
+
+impl SchemaBuilder {
+    pub fn base_mut(&mut self) -> &mut SchemaBase {
         match self {
-            ConnectSchema::Primitive(s) => s.base(),
-            ConnectSchema::Array(s) => s.base(),
-            ConnectSchema::Map(s) => s.base(),
-            ConnectSchema::Struct(s) => s.base(),
+            Self::Primitive(s) => &mut s.base,
+            Self::Array(s) => &mut s.base,
+            Self::Map(s) => &mut s.base,
+            Self::Struct(s) => &mut s.base,
         }
     }
 
-    pub fn base_mut(&mut self) -> &mut SchemaBase {
-        match self {
-            ConnectSchema::Primitive(s) => &mut s.base,
-            ConnectSchema::Array(s) => &mut s.base,
-            ConnectSchema::Map(s) => &mut s.base,
-            ConnectSchema::Struct(s) => &mut s.base,
-        }
+    pub fn build(self) -> ConnectSchema {
+        ConnectSchema(std::sync::Arc::new(self))
     }
 }
