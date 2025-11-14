@@ -14,11 +14,10 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::session_config::join_encoding_type::JoinEncodingType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType};
-use risingwave_pb::stream_plan::AsOfJoinNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{AsOfJoinNode, PbJoinEncodingType};
 
 use super::stream::prelude::*;
 use super::utils::{
@@ -31,7 +30,6 @@ use super::{
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
@@ -53,9 +51,6 @@ pub struct StreamAsOfJoin {
 
     /// inequality description
     inequality_desc: AsOfJoinDesc,
-
-    /// Determine which encoding will be used to encode join rows in operator cache.
-    join_encoding_type: JoinEncodingType,
 }
 
 impl StreamAsOfJoin {
@@ -64,8 +59,6 @@ impl StreamAsOfJoin {
         eq_join_predicate: EqJoinPredicate,
         inequality_desc: AsOfJoinDesc,
     ) -> Result<Self> {
-        let ctx = core.ctx();
-
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
         let stream_kind = core.stream_kind()?;
@@ -95,7 +88,6 @@ impl StreamAsOfJoin {
             eq_join_predicate,
             is_append_only: stream_kind.is_append_only(),
             inequality_desc,
-            join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
         })
     }
 
@@ -284,7 +276,9 @@ impl StreamNode for StreamAsOfJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             asof_desc: Some(self.inequality_desc),
-            join_encoding_type: self.join_encoding_type as i32,
+            // Join encoding type is now defined in per-job config override, allowing altering after job creation.
+            #[allow(deprecated)]
+            join_encoding_type: PbJoinEncodingType::Unspecified as _,
         }))
     }
 }
