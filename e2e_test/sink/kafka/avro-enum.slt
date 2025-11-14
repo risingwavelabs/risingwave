@@ -150,7 +150,10 @@ select * from from_nullable_enum order by id;
 statement ok
 insert into t_basic_enum values (5, 'INVALID_STATUS');
 
-sleep 5s
+# Under current impl, an invalid enum value will cause the entire sink to fail, triggering a recovery.
+# Let's wait for the recovery to complete by calling `FLUSH`.
+statement ok retry 5 backoff 3s
+flush
 
 # Should still only show the valid enum values
 query IT
