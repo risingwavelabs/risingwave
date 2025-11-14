@@ -11962,6 +11962,7 @@ dependencies = [
  "risingwave_pb",
  "rust_decimal",
  "serde_json",
+ "simd-json",
  "strum 0.27.1",
  "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
