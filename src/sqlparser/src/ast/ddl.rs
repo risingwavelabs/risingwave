@@ -202,6 +202,10 @@ pub enum AlterSinkOperation {
     SetStreamingEnableUnalignedJoin {
         enable: bool,
     },
+    /// `SET BACKFILL_RATE_LIMIT TO <rate_limit>`
+    SetBackfillRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -495,6 +499,9 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
