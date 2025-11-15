@@ -688,23 +688,28 @@ impl<S: StateStore> GapFillExecutor<S> {
             prev_row.datum_at(config.time_column_index),
             curr_row.datum_at(config.time_column_index),
         ) else {
-            return Err(StreamExecutorError::from(ExprError::InvalidParam {
-                name: "time_column",
-                reason: "Time column contains NULL values".into(),
-            }));
+            tracing::error!(
+                "Gap fill skipped: time column contains NULL values. prev_row: {:?}, curr_row: {:?}",
+                prev_row,
+                curr_row
+            );
+            return Ok(());
         };
 
         let prev_time = match prev_time_scalar {
             ScalarRefImpl::Timestamp(ts) => ts,
-            ScalarRefImpl::Timestamptz(ts) => risingwave_common::types::Timestamp::with_micros(
-                ts.timestamp_micros(),
-            )
-            .map_err(|_| {
-                StreamExecutorError::from(ExprError::InvalidParam {
-                    name: "time_column",
-                    reason: format!("Failed to convert timestamptz to timestamp: {:?}", ts).into(),
-                })
-            })?,
+            ScalarRefImpl::Timestamptz(ts) => {
+                match risingwave_common::types::Timestamp::with_micros(ts.timestamp_micros()) {
+                    Ok(t) => t,
+                    Err(_) => {
+                        tracing::error!(
+                            "Gap fill skipped: failed to convert prev timestamptz to timestamp: {:?}",
+                            ts
+                        );
+                        return Ok(());
+                    }
+                }
+            }
             _ => {
                 return Err(StreamExecutorError::from(ExprError::InvalidParam {
                     name: "time_column",
@@ -719,15 +724,18 @@ impl<S: StateStore> GapFillExecutor<S> {
 
         let curr_time = match curr_time_scalar {
             ScalarRefImpl::Timestamp(ts) => ts,
-            ScalarRefImpl::Timestamptz(ts) => risingwave_common::types::Timestamp::with_micros(
-                ts.timestamp_micros(),
-            )
-            .map_err(|_| {
-                StreamExecutorError::from(ExprError::InvalidParam {
-                    name: "time_column",
-                    reason: format!("Failed to convert timestamptz to timestamp: {:?}", ts).into(),
-                })
-            })?,
+            ScalarRefImpl::Timestamptz(ts) => {
+                match risingwave_common::types::Timestamp::with_micros(ts.timestamp_micros()) {
+                    Ok(t) => t,
+                    Err(_) => {
+                        tracing::error!(
+                            "Gap fill skipped: failed to convert curr timestamptz to timestamp: {:?}",
+                            ts
+                        );
+                        return Ok(());
+                    }
+                }
+            }
             _ => {
                 return Err(StreamExecutorError::from(ExprError::InvalidParam {
                     name: "time_column",
