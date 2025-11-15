@@ -2154,9 +2154,9 @@ dependencies = [
 
 [[package]]
 name = "bytemuck"
-version = "1.23.0"
+version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9134a6ef01ce4b366b50689c94f82c14bc72bc5d0386829828a2e2752ef7958c"
+checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
 
 [[package]]
 name = "byteorder"
@@ -7308,9 +7308,9 @@ dependencies = [
 
 [[package]]
 name = "jsonbb"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08074a5ad6e383dfd928869e5bc201318554c72be460d0367203f1f6c9c9c8fd"
+checksum = "ae8b46684788e8fce542d6ee3cde00ffbe31818a19d605d6d292f24f38c5a41c"
 dependencies = [
  "bytes",
  "serde",
