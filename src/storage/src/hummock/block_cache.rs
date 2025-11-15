@@ -15,6 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use await_tree::{InstrumentAwait, SpanExt};
 use foyer::{HybridCacheEntry, HybridGetOrFetch};
 use risingwave_common::config::EvictionConfig;
 
@@ -93,25 +94,14 @@ impl BlockResponse {
             BlockResponse::Block(block) => return Ok(block),
             BlockResponse::Fetch(fetch) => fetch,
         };
+        let fetch = match fetch.try_unwrap() {
+            Ok(entry) => return Ok(BlockHolder::from_hybrid_cache_entry(entry)),
+            Err(fetch) => fetch,
+        };
         fetch
+            .instrument_await("wait_pending_fetch_block".verbose())
             .await
             .map(BlockHolder::from_hybrid_cache_entry)
             .map_err(HummockError::foyer_error)
-        // match fetch.state() {
-        //     FetchState::Hit => fetch
-        //         .await
-        //         .map(BlockHolder::from_hybrid_cache_entry)
-        //         .map_err(HummockError::foyer_error),
-        //     _ if fetch.is_leader() => fetch
-        //         .instrument_await("fetch_block".verbose())
-        //         .await
-        //         .map(BlockHolder::from_hybrid_cache_entry)
-        //         .map_err(HummockError::foyer_error),
-        //     _ => fetch
-        //         .instrument_await("wait_pending_fetch_block".verbose())
-        //         .await
-        //         .map(BlockHolder::from_hybrid_cache_entry)
-        //         .map_err(HummockError::foyer_error),
-        // }
     }
 }
