@@ -119,8 +119,11 @@ fn make_interval(
     let mins_in_usecs = mins as i64 * Interval::USECS_PER_MINUTE;
     let hours_mins_in_usecs = hours_in_usecs + mins_in_usecs;
 
-    let secs_in_usecs = secs.0.round_ties_even() as i64 * Interval::USECS_PER_SEC;
+    // secs -> usecs
+    let secs_in_usecs = (secs.0 * (Interval::USECS_PER_SEC as f64)).round_ties_even();
+    let secs_in_usecs = try_into_i64(secs_in_usecs)?;
 
+    // hours and mins and secs -> usecs
     let usecs = hours_mins_in_usecs
         .checked_add(secs_in_usecs)
         .ok_or(ExprError::NumericOutOfRange)?;
@@ -130,4 +133,12 @@ fn make_interval(
         total_days,
         usecs,
     ))
+}
+
+fn try_into_i64(value: f64) -> Result<i64> {
+    if (value.is_finite() && value >= i64::MIN as f64 && value <= i64::MAX as f64) {
+        Ok(value as i64)
+    } else {
+        Err(ExprError::NumericOutOfRange)
+    }
 }
