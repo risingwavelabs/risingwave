@@ -54,6 +54,7 @@ const USECS_PER_MINUTE: i64 = 60 * USECS_PER_SEC;
 const USECS_PER_HOUR: i64 = 3600 * USECS_PER_SEC;
 const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
 const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
+
 impl Interval {
     /// Smallest interval value.
     pub const MIN: Self = Self {
