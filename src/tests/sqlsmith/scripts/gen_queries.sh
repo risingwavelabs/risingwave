@@ -350,7 +350,8 @@ validate() {
 sync_queries() {
   pushd $OUTDIR
   git stash
-  git checkout main
+  CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)  
+  git checkout "$CURRENT_BRANCH"  
   git pull
   set +e
   git branch -D old-main
@@ -375,7 +376,8 @@ upload_queries() {
   pushd "$OUTDIR"
   git add .
   git commit -m 'update queries'
-  git push origin main
+  CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) 
+  git push origin "$CURRENT_BRANCH"
   popd
   set -x
 }
