@@ -136,7 +136,7 @@ fn make_interval(
 }
 
 fn try_into_i64(value: f64) -> Result<i64> {
-    if (value.is_finite() && value >= i64::MIN as f64 && value <= i64::MAX as f64) {
+    if value.is_finite() && value >= i64::MIN as f64 && value <= i64::MAX as f64 {
         Ok(value as i64)
     } else {
         Err(ExprError::NumericOutOfRange)
