@@ -21,7 +21,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::{JobId, SubscriptionId};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
@@ -2167,15 +2167,19 @@ pub fn build_select_node_list(
 
     for to_col in to {
         let to_col = to_col.column_desc.as_ref().unwrap();
-        let to_col_type = to_col.column_type.clone();
+        let to_col_type_ref = to_col.column_type.as_ref().unwrap();
+        let to_col_type = DataType::from(to_col_type_ref);
         if let Some(from_idx) = idx_by_col_id.get(&to_col.column_id) {
-            let from_col_type = from[*from_idx]
-                .column_desc
-                .as_ref()
-                .unwrap()
-                .column_type
-                .clone();
-            if to_col_type != from_col_type {
+            let from_col_type = DataType::from(
+                from[*from_idx]
+                    .column_desc
+                    .as_ref()
+                    .unwrap()
+                    .column_type
+                    .as_ref()
+                    .unwrap(),
+            );
+            if !to_col_type.equals_datatype(&from_col_type) {
                 return Err(anyhow!(
                     "Column type mismatch: {:?} != {:?}",
                     from_col_type,
@@ -2185,7 +2189,7 @@ pub fn build_select_node_list(
             }
             exprs.push(PbExprNode {
                 function_type: expr_node::Type::Unspecified.into(),
-                return_type: to_col_type,
+                return_type: Some(to_col_type_ref.clone()),
                 rex_node: Some(expr_node::RexNode::InputRef(*from_idx as _)),
             });
         } else {
@@ -2200,7 +2204,7 @@ pub fn build_select_node_list(
                     let null = Datum::None.to_protobuf();
                     PbExprNode {
                         function_type: expr_node::Type::Unspecified.into(),
-                        return_type: to_col_type,
+                        return_type: Some(to_col_type_ref.clone()),
                         rex_node: Some(expr_node::RexNode::Constant(null)),
                     }
                 };
