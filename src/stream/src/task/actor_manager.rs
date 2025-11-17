@@ -436,9 +436,7 @@ impl StreamActorManager {
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         let actor_id = actor.actor_id;
-
-        // TODO(config): use user specified real config override value.
-        let actor_config = self.get_overridden_config("", actor_id);
+        let actor_config = self.get_overridden_config(&actor.config_override, actor_id);
 
         let actor_context = ActorContext::create(
             &actor,
