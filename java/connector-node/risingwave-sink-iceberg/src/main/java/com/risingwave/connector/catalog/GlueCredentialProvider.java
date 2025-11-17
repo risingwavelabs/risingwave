@@ -66,7 +66,7 @@ public class GlueCredentialProvider implements AwsCredentialsProvider {
                         baseCredentials,
                         assumeRoleArn,
                         config.get("glue.iam-role-session-name"),
-                        config.get("client.region"));
+                        config.get("glue.region"));
         return new GlueCredentialProvider(assumed);
     }
 

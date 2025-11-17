@@ -70,6 +70,8 @@ pub struct IcebergCommon {
     pub glue_secret_key: Option<String>,
     #[serde(rename = "glue.iam_role_arn")]
     pub glue_iam_role_arn: Option<String>,
+    #[serde(rename = "glue.region")]
+    pub glue_region: Option<String>,
 
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
@@ -236,6 +238,12 @@ impl IcebergCommon {
         self.glue_secret_key
             .as_deref()
             .or(self.secret_key.as_deref())
+    }
+
+    fn glue_region(&self) -> Option<&str> {
+        self.glue_region
+            .as_deref()
+            .or(self.region.as_deref())
     }
 
     pub fn catalog_name(&self) -> String {
@@ -501,6 +509,12 @@ impl IcebergCommon {
                             "client.credentials-provider".to_owned(),
                             "com.risingwave.connector.catalog.GlueCredentialProvider".to_owned(),
                         );
+                        if let Some(region) = self.glue_region() {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.region".to_owned(),
+                                region.to_owned(),
+                            );
+                        }
                         if let Some(access_key) = self.glue_access_key() {
                             java_catalog_configs.insert(
                                 "client.credentials-provider.glue.access-key-id".to_owned(),
@@ -521,8 +535,8 @@ impl IcebergCommon {
                         }
                     }
 
-                    if let Some(region) = &self.region {
-                        java_catalog_configs.insert("client.region".to_owned(), region.clone());
+                    if let Some(region) = self.glue_region() {
+                        java_catalog_configs.insert("client.region".to_owned(), region.to_owned());
                         java_catalog_configs.insert(
                             "glue.endpoint".to_owned(),
                             format!("https://glue.{}.amazonaws.com", region),
@@ -654,8 +668,8 @@ impl IcebergCommon {
             "glue_rust" => {
                 let mut iceberg_configs = HashMap::new();
                 // glue
-                if let Some(region) = &self.region {
-                    iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.clone());
+                if let Some(region) = self.glue_region() {
+                    iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.to_owned());
                 }
                 if let Some(access_key) = self.glue_access_key() {
                     iceberg_configs.insert(AWS_ACCESS_KEY_ID.to_owned(), access_key.to_owned());
