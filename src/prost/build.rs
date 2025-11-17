@@ -702,6 +702,7 @@ for_all_wrapped_id_fields! (
         }
         BarrierCompleteResponse.CreateMviewProgress {
             backfill_actor_id: ActorId,
+            fragment_id: FragmentId,
         }
         BarrierCompleteResponse.ListFinishedSource {
             reporter_actor_id: ActorId,
