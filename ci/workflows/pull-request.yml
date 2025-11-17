@@ -27,7 +27,7 @@ anchors:
         nienbo/cache#v2.4.21:
           id: maven
           key: >-
-            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java/pom.xml' }}-{{ checksum 'java/common-utils/pom.xml' }}-{{ checksum 'java/connector-node/assembly/pom.xml' }}-{{ checksum 'java/connector-node/connector-api/pom.xml' }}-{{ checksum 'java/connector-node/risingwave-connector-service/pom.xml' }}-{{ checksum 'java/connector-node/risingwave-jdbc-runner/pom.xml' }}-{{ checksum 'java/connector-node/risingwave-sink-cassandra/pom.xml' }}-{{ checksum 'java/connector-node/risingwave-sink-es-7/pom.xml' }}-{{ checksum 'java/connector-node/risingwave-sink-iceberg/pom.xml' }}-{{ checksum 'java/connector-node/risingwave-sink-jdbc/pom.xml' }}-{{ checksum 'java/connector-node/risingwave-source-cdc/pom.xml' }}-{{ checksum 'java/connector-node/risingwave-source-cdc-test/pom.xml' }}-{{ checksum 'java/connector-node/s3-common/pom.xml' }}-{{ checksum 'java/connector-node/tracing/pom.xml' }}-{{ checksum 'java/java-binding/pom.xml' }}-{{ checksum 'java/java-binding-benchmark/pom.xml' }}-{{ checksum 'java/java-binding-integration-test/pom.xml' }}-{{ checksum 'java/proto/pom.xml' }}
+            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java' }}-{{ checksum 'e2e_test/udf/remote_java' }}
           restore-keys:
             - "v1-cache-maven-{{ runner.os }}-"
             - "v1-cache-maven-"
