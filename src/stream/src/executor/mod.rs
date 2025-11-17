@@ -720,8 +720,9 @@ impl Mutation {
 
     #[cfg(test)]
     fn to_protobuf(&self) -> PbMutation {
-        use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
-        use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+        use risingwave_pb::source::{
+            ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
+        };
         use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
         use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
         use risingwave_pb::stream_plan::{
@@ -781,11 +782,14 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                actor_cdc_table_snapshot_splits:
-                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
-                        actor_cdc_table_snapshot_splits.clone(),
-                    )
-                    .into(),
+                actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
+                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
+                        (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
+                            splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
+                            generation: *generation,
+                        })
+                    }).collect()
+                }),
                 sink_add_columns: sink_add_columns
                     .iter()
                     .map(|(sink_id, add_columns)| {
@@ -831,10 +835,14 @@ impl Mutation {
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
                 actor_cdc_table_snapshot_splits:
-                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
-                        actor_cdc_table_snapshot_splits.clone(),
-                    )
-                    .into(),
+                Some(PbCdcTableSnapshotSplitsWithGeneration {
+                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
+                        (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
+                            splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
+                            generation: *generation,
+                        })
+                    }).collect()
+                }),
                 new_upstream_sinks: new_upstream_sinks
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
