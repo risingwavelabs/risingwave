@@ -19,26 +19,33 @@ use risingwave_simulation::cluster::{Cluster, KillOpts};
 use serde::Deserialize;
 use tokio::time::{Instant, sleep};
 
-pub(crate) async fn kill_cn_and_wait_recover(cluster: &mut Cluster) {
+pub(crate) async fn kill_cn_and_wait_recover(cluster: &Cluster) {
     cluster
         .kill_nodes(["compute-1", "compute-2", "compute-3"], 0)
         .await;
-    wait_all_database_recovered(cluster).await;
+    sleep(Duration::from_secs(10)).await;
 }
 
-pub(crate) async fn kill_cn_and_meta_and_wait_recover(cluster: &mut Cluster) {
+pub(crate) async fn kill_cn_and_meta_and_wait_recover(cluster: &Cluster) {
     cluster
         .kill_nodes(["compute-1", "compute-2", "compute-3", "meta-1"], 0)
         .await;
-    wait_all_database_recovered(cluster).await;
+    sleep(Duration::from_secs(10)).await;
 }
 
-pub(crate) async fn kill_random_and_wait_recover(cluster: &mut Cluster) {
+pub(crate) async fn kill_random_and_wait_recover(cluster: &Cluster) {
     // Kill it again
     for _ in 0..3 {
         sleep(Duration::from_secs(2)).await;
         cluster.kill_node(&KillOpts::ALL_FAST).await;
     }
+    sleep(Duration::from_secs(10)).await;
+}
+
+pub(crate) async fn kill_cn_meta_and_wait_full_recovery(cluster: &mut Cluster) {
+    cluster
+        .kill_nodes(["compute-1", "compute-2", "compute-3", "meta-1"], 0)
+        .await;
     wait_all_database_recovered(cluster).await;
 }
 
