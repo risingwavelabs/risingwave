@@ -185,7 +185,10 @@ impl Ident {
     pub fn from_real_value(value: &str) -> Self {
         let needs_quotes = value
             .chars()
-            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
+            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'))
+            // Also need quotes if the identifier starts with a digit, as it would be
+            // tokenized as a number instead of an identifier (e.g., "2000000")
+            || value.chars().next().is_some_and(|c| c.is_ascii_digit());
 
         if needs_quotes {
             Self::with_quote_unchecked('"', value.replace('"', "\"\""))
@@ -3267,7 +3270,13 @@ impl TryFrom<(&String, &String)> for SqlOption {
     type Error = ParserError;
 
     fn try_from((name, value): (&String, &String)) -> Result<Self, Self::Error> {
-        let query = format!("{} = {}", name, value);
+        // Use from_real_value to properly escape the name, which handles cases like
+        // "debezium.column.truncate.to.2000000.chars" where "2000000" would be
+        // tokenized as a number instead of an identifier if not properly quoted.
+        let name_parts: Vec<&str> = name.split('.').collect();
+        let object_name = ObjectName(name_parts.into_iter().map(Ident::from_real_value).collect());
+
+        let query = format!("{} = {}", object_name, value);
         let mut tokenizer = Tokenizer::new(query.as_str());
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser(&tokens);
