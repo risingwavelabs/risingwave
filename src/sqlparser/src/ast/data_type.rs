@@ -10,18 +10,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
-use core::fmt;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use std::fmt;
 
 use crate::ast::{Ident, ObjectName, display_comma_separated};
 
 /// SQL data types
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DataType {
     /// Fixed-length character type e.g. CHAR(10)
     Char(Option<u64>),
@@ -145,7 +139,6 @@ fn format_type_with_optional_length(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StructField {
     pub name: Ident,
     pub data_type: DataType,

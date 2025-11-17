@@ -221,7 +221,7 @@ pub(super) mod handlers {
             wait_for_persistence: webhook_source_info.wait_for_persistence,
         };
 
-        let compute_client = choose_fast_insert_client(&table_id, frontend_env, request_id)
+        let compute_client = choose_fast_insert_client(table_id, frontend_env, request_id)
             .await
             .unwrap();
 

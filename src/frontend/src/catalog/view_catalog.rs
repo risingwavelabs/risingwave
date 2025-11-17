@@ -77,7 +77,7 @@ impl ViewCatalog {
 
     /// Returns true if this view is a system view.
     pub fn is_system_view(&self) -> bool {
-        self.id >= SYS_CATALOG_START_ID as u32
+        self.id.as_raw_id() >= SYS_CATALOG_START_ID as u32
     }
 }
 

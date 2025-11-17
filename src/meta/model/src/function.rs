@@ -105,7 +105,7 @@ impl From<PbFunction> for ActiveModel {
             options.insert("async".to_string(), b.to_string());
         }
         Self {
-            function_id: Set(function.id as _),
+            function_id: Set(function.id),
             name: Set(function.name),
             arg_names: Set(function.arg_names.join(",")),
             arg_types: Set(DataTypeArray::from(function.arg_types)),

@@ -47,25 +47,22 @@ use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
-use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, ConnectorPropsChangeMutation, Dispatchers,
-    DropSubscriptionsMutation, PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation,
-    PbDispatcher, PbSinkAddColumns, PbStopMutation, PbStreamMessageBatch, PbUpdateMutation,
-    PbWatermark, ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation,
+    PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch, PbWatermark,
+    SubscriptionUpstreamInfo,
 };
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
 
 use crate::error::StreamResult;
 use crate::executor::exchange::input::{
     BoxedActorInput, BoxedInput, apply_dispatcher_barrier, assert_equal_dispatcher_barrier,
     new_input,
 };
+use crate::executor::monitor::ActorInputMetrics;
 use crate::executor::prelude::StreamingMetrics;
 use crate::executor::watermark::BufferedWatermarks;
 use crate::task::{ActorId, FragmentId, LocalBarrierManager};
@@ -169,7 +166,7 @@ pub use now::*;
 pub use over_window::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
-use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
@@ -199,10 +196,8 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
-    build_pb_actor_cdc_table_snapshot_splits_with_generation,
 };
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
-use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
 pub trait MessageStream = Stream<Item = MessageStreamItem> + Send;
@@ -368,7 +363,6 @@ pub enum Mutation {
     Pause,
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
-    AddAndUpdate(AddMutation, UpdateMutation),
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
@@ -379,13 +373,13 @@ pub enum Mutation {
     },
     RefreshStart {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     ListFinish {
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     LoadFinish {
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
 }
 
@@ -481,7 +475,6 @@ impl Barrier {
     ///
     /// - `Add` mutation when it's a new streaming job, or recovery.
     /// - `Update` mutation when it's created for scaling.
-    /// - `AddAndUpdate` mutation when it's created for sink-into-table.
     ///
     /// Note that `SourceChangeSplit` is **not** included, because it's only used for changing splits
     /// of existing executors.
@@ -492,20 +485,6 @@ impl Barrier {
                 splits: actor_splits,
                 ..
             }) => actor_splits.get(&actor_id),
-
-            Mutation::AddAndUpdate(
-                AddMutation {
-                    splits: add_actor_splits,
-                    ..
-                },
-                UpdateMutation {
-                    actor_splits: update_actor_splits,
-                    ..
-                },
-            ) => add_actor_splits
-                .get(&actor_id)
-                // `Add` and `Update` should apply to different fragments, so we don't need to merge them.
-                .or_else(|| update_actor_splits.get(&actor_id)),
 
             _ => {
                 if cfg!(debug_assertions) {
@@ -524,10 +503,7 @@ impl Barrier {
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self.mutation.as_deref() {
             Some(Mutation::Stop(StopMutation { dropped_actors, .. })) => Some(dropped_actors),
-            Some(Mutation::Update(UpdateMutation { dropped_actors, .. }))
-            | Some(Mutation::AddAndUpdate(_, UpdateMutation { dropped_actors, .. })) => {
-                Some(dropped_actors)
-            }
+            Some(Mutation::Update(UpdateMutation { dropped_actors, .. })) => Some(dropped_actors),
             _ => None,
         }
     }
@@ -539,8 +515,7 @@ impl Barrier {
     /// added for scaling are not included.
     pub fn is_newly_added(&self, actor_id: ActorId) -> bool {
         match self.mutation.as_deref() {
-            Some(Mutation::Add(AddMutation { added_actors, .. }))
-            | Some(Mutation::AddAndUpdate(AddMutation { added_actors, .. }, _)) => {
+            Some(Mutation::Add(AddMutation { added_actors, .. })) => {
                 added_actors.contains(&actor_id)
             }
             _ => false,
@@ -579,19 +554,6 @@ impl Barrier {
         match mutation {
             // Add is for mv, index and sink creation.
             Mutation::Add(AddMutation { adds, .. }) => adds.get(&upstream_actor_id).is_some(),
-            // AddAndUpdate is for sink-into-table.
-            Mutation::AddAndUpdate(
-                AddMutation { adds, .. },
-                UpdateMutation {
-                    dispatchers,
-                    actor_new_dispatchers,
-                    ..
-                },
-            ) => {
-                adds.get(&upstream_actor_id).is_some()
-                    || actor_new_dispatchers.get(&upstream_actor_id).is_some()
-                    || dispatchers.get(&upstream_actor_id).is_some()
-            }
             Mutation::Update(_)
             | Mutation::Stop(_)
             | Mutation::Pause
@@ -610,8 +572,7 @@ impl Barrier {
     /// Whether this barrier requires the executor to pause its data stream on startup.
     pub fn is_pause_on_startup(&self) -> bool {
         match self.mutation.as_deref() {
-            Some(Mutation::Add(AddMutation { pause, .. }))
-            | Some(Mutation::AddAndUpdate(AddMutation { pause, .. }, _)) => *pause,
+            Some(Mutation::Add(AddMutation { pause, .. })) => *pause,
             _ => false,
         }
     }
@@ -621,17 +582,14 @@ impl Barrier {
             Some(Mutation::Add(AddMutation {
                 backfill_nodes_to_pause,
                 ..
-            }))
-            | Some(Mutation::AddAndUpdate(
-                AddMutation {
-                    backfill_nodes_to_pause,
-                    ..
-                },
-                _,
-            )) => backfill_nodes_to_pause.contains(&backfill_fragment_id),
+            })) => backfill_nodes_to_pause.contains(&backfill_fragment_id),
+            Some(Mutation::Update(_)) => false,
             _ => {
-                tracing::warn!("expected an AddMutation on Startup, instead got {:?}", self);
-                true
+                tracing::warn!(
+                    "expected an AddMutation or UpdateMutation on Startup, instead got {:?}",
+                    self
+                );
+                false
             }
         }
     }
@@ -651,8 +609,7 @@ impl Barrier {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
-                Mutation::Update(UpdateMutation { merges, .. })
-                | Mutation::AddAndUpdate(_, UpdateMutation { merges, .. }) => {
+                Mutation::Update(UpdateMutation { merges, .. }) => {
                     merges.get(&(actor_id, upstream_fragment_id))
                 }
                 _ => None,
@@ -694,8 +651,7 @@ impl Barrier {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
-                Mutation::Update(UpdateMutation { vnode_bitmaps, .. })
-                | Mutation::AddAndUpdate(_, UpdateMutation { vnode_bitmaps, .. }) => {
+                Mutation::Update(UpdateMutation { vnode_bitmaps, .. }) => {
                     vnode_bitmaps.get(&actor_id).cloned()
                 }
                 _ => None,
@@ -708,13 +664,7 @@ impl Barrier {
             .and_then(|mutation| match mutation {
                 Mutation::Update(UpdateMutation {
                     sink_add_columns, ..
-                })
-                | Mutation::AddAndUpdate(
-                    _,
-                    UpdateMutation {
-                        sink_add_columns, ..
-                    },
-                ) => sink_add_columns.get(&sink_id).cloned(),
+                }) => sink_add_columns.get(&sink_id).cloned(),
                 _ => None,
             })
     }
@@ -732,9 +682,7 @@ impl Barrier {
         &self,
         mv_table_id: TableId,
     ) -> impl Iterator<Item = u32> + '_ {
-        if let Some(Mutation::Add(add)) | Some(Mutation::AddAndUpdate(add, _)) =
-            self.mutation.as_deref()
-        {
+        if let Some(Mutation::Add(add)) = self.mutation.as_deref() {
             Some(add)
         } else {
             None
@@ -769,7 +717,18 @@ impl Mutation {
         matches!(self, Mutation::Stop(_))
     }
 
+    #[cfg(test)]
     fn to_protobuf(&self) -> PbMutation {
+        use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
+        use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+        use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
+        use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
+        use risingwave_pb::stream_plan::{
+            PbAddMutation, PbConnectorPropsChangeMutation, PbDispatchers,
+            PbDropSubscriptionsMutation, PbPauseMutation, PbResumeMutation, PbSinkAddColumns,
+            PbSourceChangeSplitMutation, PbStartFragmentBackfillMutation, PbStopMutation,
+            PbThrottleMutation, PbUpdateMutation,
+        };
         let actor_splits_to_protobuf = |actor_splits: &SplitAssignments| {
             actor_splits
                 .iter()
@@ -815,7 +774,7 @@ impl Mutation {
                     .map(|(&actor_id, dispatchers)| {
                         (
                             actor_id,
-                            Dispatchers {
+                            PbDispatchers {
                                 dispatchers: dispatchers.clone(),
                             },
                         )
@@ -830,7 +789,7 @@ impl Mutation {
                     .iter()
                     .map(|(sink_id, add_columns)| {
                         (
-                            sink_id.sink_id,
+                            *sink_id,
                             PbSinkAddColumns {
                                 fields: add_columns.iter().map(|field| field.to_prost()).collect(),
                             },
@@ -853,7 +812,7 @@ impl Mutation {
                     .map(|(&actor_id, dispatchers)| {
                         (
                             actor_id,
-                            Dispatchers {
+                            PbDispatchers {
                                 dispatchers: dispatchers.clone(),
                             },
                         )
@@ -880,41 +839,36 @@ impl Mutation {
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
             }),
-            Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
-                actor_splits: changes
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            ConnectorSplits {
-                                splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
-                    .collect(),
-            }),
-            Mutation::Pause => PbMutation::Pause(PauseMutation {}),
-            Mutation::Resume => PbMutation::Resume(ResumeMutation {}),
-            Mutation::Throttle(changes) => PbMutation::Throttle(ThrottleMutation {
+            Mutation::SourceChangeSplit(changes) => {
+                PbMutation::Splits(PbSourceChangeSplitMutation {
+                    actor_splits: changes
+                        .iter()
+                        .map(|(&actor_id, splits)| {
+                            (
+                                actor_id,
+                                ConnectorSplits {
+                                    splits: splits
+                                        .clone()
+                                        .iter()
+                                        .map(ConnectorSplit::from)
+                                        .collect(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })
+            }
+            Mutation::Pause => PbMutation::Pause(PbPauseMutation {}),
+            Mutation::Resume => PbMutation::Resume(PbResumeMutation {}),
+            Mutation::Throttle(changes) => PbMutation::Throttle(PbThrottleMutation {
                 actor_throttle: changes
                     .iter()
                     .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
                     .collect(),
             }),
-
-            Mutation::AddAndUpdate(add, update) => PbMutation::Combined(CombinedMutation {
-                mutations: vec![
-                    BarrierMutation {
-                        mutation: Some(Mutation::Add(add.clone()).to_protobuf()),
-                    },
-                    BarrierMutation {
-                        mutation: Some(Mutation::Update(update.clone()).to_protobuf()),
-                    },
-                ],
-            }),
             Mutation::DropSubscriptions {
                 subscriptions_to_drop,
-            } => PbMutation::DropSubscriptions(DropSubscriptionsMutation {
+            } => PbMutation::DropSubscriptions(PbDropSubscriptionsMutation {
                 info: subscriptions_to_drop
                     .iter()
                     .map(
@@ -926,7 +880,7 @@ impl Mutation {
                     .collect(),
             }),
             Mutation::ConnectorPropsChange(map) => {
-                PbMutation::ConnectorPropsChange(ConnectorPropsChangeMutation {
+                PbMutation::ConnectorPropsChange(PbConnectorPropsChangeMutation {
                     connector_props_infos: map
                         .iter()
                         .map(|(actor_id, options)| {
@@ -944,7 +898,7 @@ impl Mutation {
                 })
             }
             Mutation::StartFragmentBackfill { fragment_ids } => {
-                PbMutation::StartFragmentBackfill(StartFragmentBackfillMutation {
+                PbMutation::StartFragmentBackfill(PbStartFragmentBackfillMutation {
                     fragment_ids: fragment_ids.iter().copied().collect(),
                 })
             }
@@ -953,17 +907,17 @@ impl Mutation {
                 associated_source_id,
             } => PbMutation::RefreshStart(risingwave_pb::stream_plan::RefreshStartMutation {
                 table_id: *table_id,
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
             Mutation::ListFinish {
                 associated_source_id,
             } => PbMutation::ListFinish(risingwave_pb::stream_plan::ListFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
             Mutation::LoadFinish {
                 associated_source_id,
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             }),
         }
     }
@@ -1023,7 +977,7 @@ impl Mutation {
                     .iter()
                     .map(|(sink_id, add_columns)| {
                         (
-                            SinkId::new(*sink_id),
+                            *sink_id,
                             add_columns.fields.iter().map(Field::from_prost).collect(),
                         )
                     })
@@ -1140,35 +1094,13 @@ impl Mutation {
             }
             PbMutation::RefreshStart(refresh_start) => Mutation::RefreshStart {
                 table_id: refresh_start.table_id,
-                associated_source_id: TableId::new(refresh_start.associated_source_id),
+                associated_source_id: refresh_start.associated_source_id,
             },
             PbMutation::ListFinish(list_finish) => Mutation::ListFinish {
-                associated_source_id: TableId::new(list_finish.associated_source_id),
+                associated_source_id: list_finish.associated_source_id,
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
-                associated_source_id: TableId::new(load_finish.associated_source_id),
-            },
-            PbMutation::Combined(CombinedMutation { mutations }) => match &mutations[..] {
-                [
-                    BarrierMutation {
-                        mutation: Some(add),
-                    },
-                    BarrierMutation {
-                        mutation: Some(update),
-                    },
-                ] => {
-                    let Mutation::Add(add_mutation) = Mutation::from_protobuf(add)? else {
-                        unreachable!();
-                    };
-
-                    let Mutation::Update(update_mutation) = Mutation::from_protobuf(update)? else {
-                        unreachable!();
-                    };
-
-                    Mutation::AddAndUpdate(add_mutation, update_mutation)
-                }
-
-                _ => unreachable!(),
+                associated_source_id: load_finish.associated_source_id,
             },
         };
         Ok(mutation)
@@ -1238,6 +1170,7 @@ impl DispatcherBarrier {
 }
 
 impl Barrier {
+    #[cfg(test)]
     pub fn to_protobuf(&self) -> PbBarrier {
         self.to_protobuf_inner(|mutation| mutation.as_ref().map(|mutation| mutation.to_protobuf()))
     }
@@ -1803,18 +1736,34 @@ impl DispatchBarrierBuffer {
     pub async fn await_next_message(
         &mut self,
         stream: &mut (impl Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin),
+        metrics: &ActorInputMetrics,
     ) -> StreamExecutorResult<DispatcherMessage> {
-        tokio::select! {
-            biased;
+        let mut start_time = Instant::now();
+        let interval_duration = Duration::from_secs(15);
+        let mut interval =
+            tokio::time::interval_at(start_time + interval_duration, interval_duration);
 
-            msg = stream.try_next() => {
-                msg?.ok_or_else(
-                    || StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
-                )
-            }
+        loop {
+            tokio::select! {
+                biased;
+                msg = stream.try_next() => {
+                    metrics
+                        .actor_input_buffer_blocking_duration_ns
+                        .inc_by(start_time.elapsed().as_nanos() as u64);
+                    return msg?.ok_or_else(
+                        || StreamExecutorError::channel_closed("upstream executor closed unexpectedly")
+                    );
+                }
 
-            e = self.continuously_fetch_barrier_rx() => {
-                Err(e)
+                e = self.continuously_fetch_barrier_rx() => {
+                    return Err(e);
+                }
+
+                _ = interval.tick() => {
+                    start_time = Instant::now();
+                    metrics.actor_input_buffer_blocking_duration_ns.inc_by(interval_duration.as_nanos() as u64);
+                    continue;
+                }
             }
         }
     }

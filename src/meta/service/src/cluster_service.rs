@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
@@ -64,7 +64,7 @@ impl ClusterService for ClusterServiceImpl {
         let cluster_id = self.metadata_manager.cluster_id().to_string();
 
         Ok(Response::new(AddWorkerNodeResponse {
-            node_id: Some(worker_id as _),
+            node_id: Some(worker_id),
             cluster_id,
         }))
     }
@@ -81,10 +81,7 @@ impl ClusterService for ClusterServiceImpl {
 
         self.metadata_manager
             .cluster_controller
-            .update_schedulability(
-                worker_ids.into_iter().map(|id| id as WorkerId).collect(),
-                schedulability,
-            )
+            .update_schedulability(worker_ids.into_iter().map_into().collect(), schedulability)
             .await?;
 
         Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
@@ -110,7 +107,7 @@ impl ClusterService for ClusterServiceImpl {
         }
         self.metadata_manager
             .cluster_controller
-            .activate_worker(req.node_id as _)
+            .activate_worker(req.node_id)
             .await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
@@ -129,7 +126,7 @@ impl ClusterService for ClusterServiceImpl {
             .await?;
         tracing::info!(
             host = ?worker_node.host,
-            id = worker_node.id,
+            id = %worker_node.id,
             r#type = ?worker_node.r#type(),
             "deleted worker node",
         );

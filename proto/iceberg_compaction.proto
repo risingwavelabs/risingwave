@@ -39,6 +39,8 @@ message IcebergCompactionTask {
 
     // Small data file compaction task.
     SMALL_FILES = 2;
+
+    FILES_WITH_DELETE = 3;
   }
 
   TaskType task_type = 3;

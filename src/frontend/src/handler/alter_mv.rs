@@ -18,12 +18,12 @@ use std::sync::Arc;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConflictBehavior, FunctionId};
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::id::ObjectId;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::TableCatalog;
 use crate::binder::{Binder, BoundQuery};
-use crate::catalog::TableId;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
@@ -133,7 +133,7 @@ async fn handle_alter_mv_bound(
     handler_args: HandlerArgs,
     name: ObjectName,
     query: BoundQuery,
-    dependent_relations: HashSet<TableId>,
+    dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,

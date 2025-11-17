@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::mem::replace;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -26,14 +27,18 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use tracing::warn;
+use risingwave_pb::stream_service::BarrierCompleteResponse;
+use tracing::{info, warn};
 
 use crate::MetaResult;
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
+use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -371,11 +376,19 @@ pub enum SubscriberType {
     SnapshotBackfill,
 }
 
-#[derive(Clone, Debug)]
-pub struct InflightStreamingJobInfo {
+#[derive(Debug, Clone)]
+pub(super) enum CreateStreamingJobStatus {
+    Init,
+    Creating(CreateMviewProgressTracker),
+    Created,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct InflightStreamingJobInfo {
     pub job_id: JobId,
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     pub subscribers: HashMap<u32, SubscriberType>,
+    pub status: CreateStreamingJobStatus,
 }
 
 impl InflightStreamingJobInfo {
@@ -383,12 +396,10 @@ impl InflightStreamingJobInfo {
         self.fragment_infos.values()
     }
 
-    pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
-        InflightFragmentInfo::existing_table_ids(self.fragment_infos())
-    }
-
-    pub fn snapshot_backfill_actor_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
-        self.fragment_infos
+    pub fn snapshot_backfill_actor_ids(
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+    ) -> impl Iterator<Item = ActorId> + '_ {
+        fragment_infos
             .values()
             .filter(|fragment| {
                 fragment
@@ -398,9 +409,11 @@ impl InflightStreamingJobInfo {
             .flat_map(|fragment| fragment.actors.keys().copied())
     }
 
-    pub fn tracking_progress_actor_ids(&self) -> Vec<(ActorId, BackfillUpstreamType)> {
+    pub fn tracking_progress_actor_ids(
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+    ) -> Vec<(ActorId, BackfillUpstreamType)> {
         StreamJobFragments::tracking_progress_actor_ids_impl(
-            self.fragment_infos
+            fragment_infos
                 .values()
                 .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
         )
@@ -417,7 +430,7 @@ impl<'a> IntoIterator for &'a InflightStreamingJobInfo {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct InflightDatabaseInfo {
     database_id: DatabaseId,
     jobs: HashMap<JobId, InflightStreamingJobInfo>,
@@ -442,6 +455,118 @@ impl InflightDatabaseInfo {
             .fragment_infos
             .get(&fragment_id)
             .expect("should exist")
+    }
+
+    pub fn gen_ddl_progress(&self) -> impl Iterator<Item = (JobId, DdlProgress)> + '_ {
+        self.jobs
+            .iter()
+            .filter_map(|(job_id, job)| match &job.status {
+                CreateStreamingJobStatus::Init => None,
+                CreateStreamingJobStatus::Creating(tracker) => {
+                    Some((*job_id, tracker.gen_ddl_progress()))
+                }
+                CreateStreamingJobStatus::Created => None,
+            })
+    }
+
+    pub(super) fn apply_collected_command(
+        &mut self,
+        command: Option<&Command>,
+        resps: impl Iterator<Item = &BarrierCompleteResponse>,
+        version_stats: &HummockVersionStats,
+    ) {
+        if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
+            match job_type {
+                CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
+                    let job_id = info.streaming_job.id();
+                    if let Some(job_info) = self.jobs.get_mut(&job_id) {
+                        let CreateStreamingJobStatus::Init = replace(
+                            &mut job_info.status,
+                            CreateStreamingJobStatus::Creating(CreateMviewProgressTracker::new(
+                                info,
+                                version_stats,
+                            )),
+                        ) else {
+                            unreachable!("should be init before collect the first barrier")
+                        };
+                    } else {
+                        info!(%job_id, "newly create job get cancelled before first barrier is collected")
+                    }
+                }
+                CreateStreamingJobType::SnapshotBackfill(_) => {
+                    // The progress of SnapshotBackfill won't be tracked here
+                }
+            }
+        }
+        for progress in resps.flat_map(|resp| &resp.create_mview_progress) {
+            let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
+                warn!(
+                    "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
+                );
+                continue;
+            };
+            let CreateStreamingJobStatus::Creating(tracker) =
+                &mut self.jobs.get_mut(job_id).expect("should exist").status
+            else {
+                warn!("update the progress of an created streaming job: {progress:?}");
+                continue;
+            };
+            tracker.apply_progress(progress, version_stats);
+        }
+    }
+
+    fn iter_creating_job_tracker(&self) -> impl Iterator<Item = &CreateMviewProgressTracker> {
+        self.jobs.values().filter_map(|job| match &job.status {
+            CreateStreamingJobStatus::Init => None,
+            CreateStreamingJobStatus::Creating(tracker) => Some(tracker),
+            CreateStreamingJobStatus::Created => None,
+        })
+    }
+
+    fn iter_mut_creating_job_tracker(
+        &mut self,
+    ) -> impl Iterator<Item = &mut CreateMviewProgressTracker> {
+        self.jobs
+            .values_mut()
+            .filter_map(|job| match &mut job.status {
+                CreateStreamingJobStatus::Init => None,
+                CreateStreamingJobStatus::Creating(tracker) => Some(tracker),
+                CreateStreamingJobStatus::Created => None,
+            })
+    }
+
+    pub(super) fn has_pending_finished_jobs(&self) -> bool {
+        self.iter_creating_job_tracker()
+            .any(|tracker| tracker.is_finished())
+    }
+
+    pub(super) fn take_pending_backfill_nodes(&mut self) -> Vec<FragmentId> {
+        self.iter_mut_creating_job_tracker()
+            .flat_map(|tracker| tracker.take_pending_backfill_nodes())
+            .collect()
+    }
+
+    pub(super) fn take_staging_commit_info(&mut self) -> StagingCommitInfo {
+        let mut finished_jobs = vec![];
+        let mut table_ids_to_truncate = vec![];
+        for job in self.jobs.values_mut() {
+            if let CreateStreamingJobStatus::Creating(tracker) = &mut job.status {
+                let (is_finished, truncate_table_ids) = tracker.collect_staging_commit_info();
+                table_ids_to_truncate.extend(truncate_table_ids);
+                if is_finished {
+                    let CreateStreamingJobStatus::Creating(tracker) =
+                        replace(&mut job.status, CreateStreamingJobStatus::Created)
+                    else {
+                        unreachable!()
+                    };
+                    finished_jobs.push(tracker.into_tracking_job());
+                }
+            }
+        }
+        StagingCommitInfo {
+            finished_jobs,
+            table_ids_to_truncate,
+        }
     }
 
     pub fn fragment_subscribers(&self, fragment_id: FragmentId) -> impl Iterator<Item = u32> + '_ {
@@ -539,17 +664,24 @@ impl InflightDatabaseInfo {
     }
 
     pub fn add_existing(&mut self, job: InflightStreamingJobInfo) {
+        let InflightStreamingJobInfo {
+            job_id,
+            fragment_infos,
+            subscribers,
+            status,
+        } = job;
         self.jobs
             .try_insert(
                 job.job_id,
                 InflightStreamingJobInfo {
-                    job_id: job.job_id,
-                    subscribers: job.subscribers,
+                    job_id,
+                    subscribers,
                     fragment_infos: Default::default(), // fill in later in apply_add
+                    status,
                 },
             )
             .expect("non-duplicate");
-        self.apply_add(job.fragment_infos.into_iter().map(|(fragment_id, info)| {
+        self.apply_add(fragment_infos.into_iter().map(|(fragment_id, info)| {
             (
                 fragment_id,
                 CommandFragmentChanges::NewFragment {
@@ -576,6 +708,7 @@ impl InflightDatabaseInfo {
                         job_id,
                         fragment_infos: Default::default(),
                         subscribers: Default::default(), // no subscriber for newly create job
+                        status: CreateStreamingJobStatus::Init,
                     },
                 )
                 .expect("non-duplicate");

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
 use std::sync::Arc;
 
 use risingwave_expr::{Result, capture_context, function};
@@ -21,7 +20,7 @@ use super::context::META_CLIENT;
 use crate::meta_client::FrontendMetaClient;
 
 #[function("rw_cluster_id() -> varchar", volatile)]
-async fn rw_cluster_id(writer: &mut impl Write) -> Result<()> {
+async fn rw_cluster_id(writer: &mut impl std::fmt::Write) -> Result<()> {
     writer
         .write_str(&rw_cluster_id_impl_captured().await?)
         .unwrap();

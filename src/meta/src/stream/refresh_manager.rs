@@ -20,7 +20,7 @@ use parking_lot::Mutex;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::table::RefreshState;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
 
@@ -134,7 +134,7 @@ impl RefreshManager {
         shared_actor_infos: &SharedActorInfos,
     ) -> MetaResult<RefreshResponse> {
         let table_id = request.table_id;
-        let associated_source_id = TableId::new(request.associated_source_id);
+        let associated_source_id = request.associated_source_id;
 
         // Validate that the table exists and is refreshable
         self.validate_refreshable_table(table_id, associated_source_id)
@@ -146,7 +146,7 @@ impl RefreshManager {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(table_id.as_raw_id() as _)
+            .get_object_database_id(table_id)
             .await?;
 
         // load actor info for refresh
@@ -257,7 +257,7 @@ impl RefreshManager {
     async fn validate_refreshable_table(
         &self,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     ) -> MetaResult<()> {
         // Check if table exists in catalog
         let table = self
@@ -274,11 +274,7 @@ impl RefreshManager {
             )));
         }
 
-        if table.optional_associated_source_id
-            != Some(OptionalAssociatedSourceId::AssociatedSourceId(
-                associated_source_id.as_raw_id(),
-            ))
-        {
+        if table.optional_associated_source_id != Some(associated_source_id.into()) {
             return Err(MetaError::invalid_parameter(format!(
                 "Table '{}' is not associated with source '{}'. table.optional_associated_source_id: {:?}",
                 table.name, associated_source_id, table.optional_associated_source_id

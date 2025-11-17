@@ -22,6 +22,7 @@ use parking_lot::RwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use prost::Message;
 use risingwave_pb::catalog::PbSecret;
+use risingwave_pb::id::WorkerId;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::RefAsType;
 use thiserror_ext::AsReport;
@@ -45,7 +46,7 @@ impl LocalSecretManager {
     /// Initialize the secret manager with the given temp file path, cluster id, and encryption key.
     /// # Panics
     /// Panics if fail to create the secret file directory.
-    pub fn init(temp_file_dir: String, cluster_id: String, worker_id: u32) {
+    pub fn init(temp_file_dir: String, cluster_id: String, worker_id: WorkerId) {
         // use `get_or_init` to handle concurrent initialization in single node mode.
         INSTANCE.get_or_init(|| {
             let secret_file_dir = PathBuf::from(temp_file_dir)
@@ -71,7 +72,7 @@ impl LocalSecretManager {
     pub fn global() -> &'static LocalSecretManager {
         // Initialize the secret manager for unit tests.
         #[cfg(debug_assertions)]
-        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0);
+        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0.into());
 
         INSTANCE.get().unwrap()
     }
@@ -80,7 +81,7 @@ impl LocalSecretManager {
         let mut secret_guard = self.secrets.write();
         if secret_guard.insert(secret_id, secret).is_some() {
             tracing::error!(
-                secret_id = secret_id,
+                secret_id = %secret_id,
                 "adding a secret but it already exists, overwriting it"
             );
         };
@@ -90,7 +91,7 @@ impl LocalSecretManager {
         let mut secret_guard = self.secrets.write();
         if secret_guard.insert(secret_id, secret).is_none() {
             tracing::error!(
-                secret_id = secret_id,
+                secret_id = %secret_id,
                 "updating a secret but it does not exist, adding it"
             );
         }
@@ -145,7 +146,7 @@ impl LocalSecretManager {
     }
 
     pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
-        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>> =
+        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>> =
             self.secrets.read();
         self.fill_secret_inner(secret_ref, &secret_guard)
     }
@@ -153,7 +154,7 @@ impl LocalSecretManager {
     fn fill_secret_inner(
         &self,
         secret_ref: PbSecretRef,
-        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>>,
+        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>>,
     ) -> SecretResult<String> {
         let secret_id = secret_ref.secret_id;
         let pb_secret_bytes = secret_guard

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::{ExprError, Result, function};
 
 /// Replaces a substring of the given string with a new substring.
@@ -25,7 +23,12 @@ use risingwave_expr::{ExprError, Result, function};
 /// αβ💯δεζ
 /// ```
 #[function("overlay(varchar, varchar, int4) -> varchar")]
-pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut impl Write) -> Result<()> {
+pub fn overlay(
+    s: &str,
+    new_sub_str: &str,
+    start: i32,
+    writer: &mut impl std::fmt::Write,
+) -> Result<()> {
     let sub_len = new_sub_str
         .chars()
         .count()
@@ -86,7 +89,7 @@ pub fn overlay_for(
     new_sub_str: &str,
     start: i32,
     count: i32,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     if start <= 0 {
         return Err(ExprError::InvalidParam {
@@ -134,12 +137,17 @@ pub fn overlay_for(
 /// \x616299996566
 /// ```
 #[function("overlay(bytea, bytea, int4) -> bytea")]
-pub fn overlay_bytea(s: &[u8], new_sub_str: &[u8], start: i32) -> Result<Box<[u8]>> {
+pub fn overlay_bytea(
+    s: &[u8],
+    new_sub_str: &[u8],
+    start: i32,
+    writer: &mut impl std::io::Write,
+) -> Result<()> {
     let count = new_sub_str
         .len()
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)?;
-    overlay_for_bytea(s, new_sub_str, start, count)
+    overlay_for_bytea(s, new_sub_str, start, count, writer)
 }
 
 /// Replaces a range of bytes in a bytea value with another bytea.
@@ -194,7 +202,8 @@ pub fn overlay_for_bytea(
     new_sub_str: &[u8],
     start: i32,
     count: i32,
-) -> Result<Box<[u8]>> {
+    writer: &mut impl std::io::Write,
+) -> Result<()> {
     if start <= 0 {
         return Err(ExprError::InvalidParam {
             name: "start",
@@ -204,32 +213,31 @@ pub fn overlay_for_bytea(
 
     // write the substring_bytea before the overlay.
     let start_idx = (start - 1) as usize;
-    let mut result = Vec::with_capacity(s.len() + new_sub_str.len());
     if start_idx >= s.len() {
-        result.extend_from_slice(s);
+        writer.write_all(s).unwrap();
     } else {
-        result.extend_from_slice(&s[..start_idx]);
+        writer.write_all(&s[..start_idx]).unwrap();
     }
 
     // write the new substring_bytea.
-    result.extend_from_slice(new_sub_str);
+    writer.write_all(new_sub_str).unwrap();
 
     if count < 0 {
         // For negative `count`, which is rare in practice, we hand over to `substr_bytea`
         let start_right = start
             .checked_add(count)
             .ok_or(ExprError::NumericOutOfRange)?;
-        result.extend_from_slice(&super::substr::substr_start_bytea(s, start_right));
-        return Ok(result.into_boxed_slice());
+        super::substr::substr_start_bytea(s, start_right, writer);
+        return Ok(());
     };
 
     // write the substring_bytea after the overlay.
     let count = count as usize;
     let skip_end = start_idx.saturating_add(count);
     if skip_end <= s.len() {
-        result.extend_from_slice(&s[skip_end..]);
+        writer.write_all(&s[skip_end..]).unwrap();
     }
-    Ok(result.into_boxed_slice())
+    Ok(())
 }
 
 #[cfg(test)]
@@ -351,13 +359,14 @@ mod tests {
 
         #[track_caller]
         fn case(s: &[u8], new_sub_str: &[u8], start: i32, count: Option<i32>, expected: &[u8]) {
-            let result: Box<[u8]> = match count {
-                None => overlay_bytea(s, new_sub_str, start),
-                Some(count) => overlay_for_bytea(s, new_sub_str, start, count),
+            let mut result = Vec::new();
+            match count {
+                None => overlay_bytea(s, new_sub_str, start, &mut result).unwrap(),
+                Some(count) => {
+                    overlay_for_bytea(s, new_sub_str, start, count, &mut result).unwrap()
+                }
             }
-            .unwrap();
-            let expected_boxed: Box<[u8]> = expected.into();
-            assert_eq!(result, expected_boxed);
+            assert_eq!(&result, expected);
         }
     }
 }

@@ -392,9 +392,9 @@ mod tests {
         let mut context_info = ContextInfo::default();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
         context_info.pinned_versions.insert(
-            1,
+            1.into(),
             HummockPinnedVersion {
-                context_id: 1,
+                context_id: 1.into(),
                 min_pinned_id: 10,
             },
         );

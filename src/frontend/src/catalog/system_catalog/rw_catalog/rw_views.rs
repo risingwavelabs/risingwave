@@ -14,7 +14,6 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -44,12 +43,12 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
     Ok(schemas
         .flat_map(|schema| {
             schema.iter_view_with_acl(current_user).map(|view| RwView {
-                id: view.id as i32,
+                id: view.id.as_i32_id(),
                 name: view.name().to_owned(),
-                schema_id: schema.id().as_raw_id() as i32,
+                schema_id: schema.id().as_i32_id(),
                 owner: view.owner as i32,
                 definition: view.create_sql(schema.name()),
-                acl: get_acl_items(Object::ViewId(view.id), false, &users, username_map),
+                acl: get_acl_items(view.id, false, &users, username_map),
             })
         })
         .collect())

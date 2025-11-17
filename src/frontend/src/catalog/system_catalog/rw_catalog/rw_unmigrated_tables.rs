@@ -34,7 +34,7 @@ async fn read_rw_unmigrated_tables_info(
     Ok(tables
         .into_iter()
         .map(|(id, name)| RwUnmigratedTable {
-            id: id.as_raw_id() as i32,
+            id: id.as_i32_id(),
             name,
         })
         .collect())

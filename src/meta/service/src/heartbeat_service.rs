@@ -39,7 +39,7 @@ impl HeartbeatService for HeartbeatServiceImpl {
         let result = self
             .metadata_manager
             .cluster_controller
-            .heartbeat(req.node_id as _)
+            .heartbeat(req.node_id)
             .await;
 
         match result {

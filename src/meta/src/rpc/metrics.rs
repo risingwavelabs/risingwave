@@ -1066,7 +1066,7 @@ pub async fn refresh_fragment_info_metrics(
                 Some(host) => format!("{}:{}", host.host, host.port),
                 None => "".to_owned(),
             };
-            (worker_node.id as WorkerId, addr)
+            (worker_node.id, addr)
         })
         .collect();
     let table_compaction_group_id_mapping = hummock_manager

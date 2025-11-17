@@ -633,7 +633,7 @@ mod tests {
             Some(barrier_rx),
         );
         let input = SinkHandlerInput::new(
-            FragmentId::new(actor_id.as_raw_id() as _),
+            FragmentId::new(actor_id.as_raw_id()),
             Box::new(merge),
             vec![],
         )

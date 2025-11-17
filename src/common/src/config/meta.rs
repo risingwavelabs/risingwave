@@ -355,6 +355,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::cdc_table_split_init_insert_batch_size")]
     pub cdc_table_split_init_insert_batch_size: u64,
 
+    /// Whether to automatically migrate legacy table fragments when meta starts.
+    #[serde(default = "default::meta::enable_legacy_table_migration")]
+    pub enable_legacy_table_migration: bool,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub meta_store_config: MetaStoreConfig,
@@ -726,6 +730,10 @@ pub mod default {
 
         pub fn cdc_table_split_init_insert_batch_size() -> u64 {
             100
+        }
+
+        pub fn enable_legacy_table_migration() -> bool {
+            true
         }
     }
 

@@ -410,3 +410,262 @@ alter table t1 add column v2 int default 100;
 
 statement ok
 drop table t1 cascade;
+
+# multiple sinks exist before alter: no default
+statement ok
+create table t_multi_a1 (v1 int);
+
+statement ok
+create table t_multi_a2 (v1 int);
+
+statement ok
+create table m_multi_a (v1 int primary key);
+
+statement ok
+create sink s_multi_a1 into m_multi_a as select v1 from t_multi_a1;
+
+statement ok
+create sink s_multi_a2 into m_multi_a as select v1 from t_multi_a2;
+
+statement ok
+insert into t_multi_a1 values (1), (2);
+
+statement ok
+insert into t_multi_a2 values (100), (200);
+
+statement ok
+flush;
+
+query I rowsort
+select * from m_multi_a;
+----
+1
+100
+2
+200
+
+statement ok
+alter table m_multi_a add column v2 int;
+
+statement ok
+insert into t_multi_a1 values (3);
+
+statement ok
+insert into t_multi_a2 values (300);
+
+statement ok
+flush;
+
+query II rowsort
+select * from m_multi_a;
+----
+1	NULL
+100	NULL
+2	NULL
+200	NULL
+3	NULL
+300	NULL
+
+statement ok
+drop sink s_multi_a1;
+
+statement ok
+drop sink s_multi_a2;
+
+statement ok
+drop table t_multi_a1;
+
+statement ok
+drop table t_multi_a2;
+
+statement ok
+drop table m_multi_a;
+
+# multiple sinks exist before alter: with default, then add a new sink using new column, then alter again
+statement ok
+create table t_multi_b1 (v1 int);
+
+statement ok
+create table t_multi_b2 (v1 int);
+
+statement ok
+create table m_multi_b (v1 int primary key);
+
+statement ok
+create sink s_multi_b1 into m_multi_b as select v1 from t_multi_b1;
+
+statement ok
+create sink s_multi_b2 into m_multi_b as select v1 from t_multi_b2;
+
+statement ok
+insert into t_multi_b1 values (1), (2);
+
+statement ok
+insert into t_multi_b2 values (10), (20);
+
+statement ok
+flush;
+
+query I rowsort
+select * from m_multi_b;
+----
+1
+10
+2
+20
+
+statement ok
+alter table m_multi_b add column v2 int default 1000;
+
+query II rowsort
+select * from m_multi_b;
+----
+1 1000
+10 1000
+2 1000
+20 1000
+
+# add a new sink that sinks the newly added column as well
+statement ok
+create table t_multi_b3 (v1 int, v2 int);
+
+statement ok
+create sink s_multi_b3 into m_multi_b as select v1, v2 from t_multi_b3;
+
+statement ok
+insert into t_multi_b1 values (3);
+
+statement ok
+insert into t_multi_b2 values (30);
+
+statement ok
+insert into t_multi_b3 values (5, 50), (6, 60);
+
+statement ok
+flush;
+
+query II rowsort
+select * from m_multi_b;
+----
+1 1000
+10 1000
+2 1000
+20 1000
+3 1000
+30 1000
+5 50
+6 60
+
+statement ok
+alter table m_multi_b add column v3 int default 2000;
+
+query III rowsort
+select v1, v2, v3 from m_multi_b;
+----
+1 1000 2000
+10 1000 2000
+2 1000 2000
+20 1000 2000
+3 1000 2000
+30 1000 2000
+5 50 2000
+6 60 2000
+
+statement ok
+drop sink s_multi_b1;
+
+statement ok
+drop sink s_multi_b2;
+
+statement ok
+drop sink s_multi_b3;
+
+statement ok
+drop table t_multi_b1;
+
+statement ok
+drop table t_multi_b2;
+
+statement ok
+drop table t_multi_b3;
+
+statement ok
+drop table m_multi_b;
+
+# append-only target with two sinks
+statement ok
+create table t_multi_c1 (v1 int);
+
+statement ok
+create table t_multi_c2 (v1 int);
+
+statement ok
+create table m_multi_c (v1 int) append only;
+
+statement ok
+create sink s_multi_c1 into m_multi_c as select v1 from t_multi_c1 with (type = 'append-only', force_append_only = 'true');
+
+statement ok
+create sink s_multi_c2 into m_multi_c as select v1 from t_multi_c2 with (type = 'append-only', force_append_only = 'true');
+
+statement ok
+insert into t_multi_c1 values (1), (2);
+
+statement ok
+insert into t_multi_c2 values (100), (200);
+
+statement ok
+flush;
+
+query I rowsort
+select * from m_multi_c;
+----
+1
+100
+2
+200
+
+statement ok
+alter table m_multi_c add column v2 int default 777;
+
+query II rowsort
+select * from m_multi_c;
+----
+1	777
+100	777
+2	777
+200	777
+
+statement ok
+insert into t_multi_c1 values (3);
+
+statement ok
+insert into t_multi_c2 values (300);
+
+statement ok
+flush;
+
+query II rowsort
+select * from m_multi_c;
+----
+1	777
+100	777
+2	777
+200	777
+3	777
+300	777
+
+statement ok
+drop sink s_multi_c1;
+
+statement ok
+drop sink s_multi_c2;
+
+statement ok
+drop table t_multi_c1;
+
+statement ok
+drop table t_multi_c2;
+
+statement ok
+drop table m_multi_c;

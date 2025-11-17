@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
 use risingwave_expr::{ExprError, Result, function};
 use thiserror_ext::AsReport;
@@ -36,7 +34,7 @@ const PARSE_BASE64_ALPHABET_DECODE_TABLE: [u8; 123] = [
 ];
 
 #[function("encode(bytea, varchar) -> varchar")]
-pub fn encode(data: &[u8], format: &str, writer: &mut impl Write) -> Result<()> {
+pub fn encode(data: &[u8], format: &str, writer: &mut impl std::fmt::Write) -> Result<()> {
     match format {
         "base64" => {
             encode_bytes_base64(data, writer)?;
@@ -58,15 +56,13 @@ pub fn encode(data: &[u8], format: &str, writer: &mut impl Write) -> Result<()> 
 }
 
 #[function("decode(varchar, varchar) -> bytea")]
-pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
+pub fn decode(data: &str, format: &str, writer: &mut impl std::io::Write) -> Result<()> {
     match format {
-        "base64" => Ok(parse_bytes_base64(data)?.into()),
-        "hex" => Ok(parse_bytes_hex(data)
-            .map_err(|err| ExprError::Parse(err.into()))?
-            .into()),
-        "escape" => Ok(parse_bytes_traditional(data)
-            .map_err(|err| ExprError::Parse(err.into()))?
-            .into()),
+        "base64" => parse_bytes_base64(data, writer),
+        "hex" => parse_bytes_hex(data, writer).map_err(|err| ExprError::Parse(err.into())),
+        "escape" => {
+            parse_bytes_traditional(data, writer).map_err(|err| ExprError::Parse(err.into()))
+        }
         _ => Err(ExprError::InvalidParam {
             name: "format",
             reason: format!("unrecognized encoding: \"{}\"", format).into(),
@@ -91,7 +87,11 @@ impl CharacterSet {
 }
 
 #[function("convert_from(bytea, varchar) -> varchar")]
-pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) -> Result<()> {
+pub fn convert_from(
+    data: &[u8],
+    src_encoding: &str,
+    writer: &mut impl std::fmt::Write,
+) -> Result<()> {
     match CharacterSet::recognize(src_encoding)? {
         CharacterSet::Utf8 => {
             let text = String::from_utf8(data.to_vec()).map_err(|e| ExprError::InvalidParam {
@@ -105,15 +105,22 @@ pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) ->
 }
 
 #[function("convert_to(varchar, varchar) -> bytea")]
-pub fn convert_to(string: &str, dest_encoding: &str) -> Result<Box<[u8]>> {
+pub fn convert_to(
+    string: &str,
+    dest_encoding: &str,
+    writer: &mut impl std::io::Write,
+) -> Result<()> {
     match CharacterSet::recognize(dest_encoding)? {
-        CharacterSet::Utf8 => Ok(string.as_bytes().into()),
+        CharacterSet::Utf8 => {
+            writer.write_all(string.as_bytes()).unwrap();
+            Ok(())
+        }
     }
 }
 
 // According to https://www.postgresql.org/docs/current/functions-binarystring.html#ENCODE-FORMAT-BASE64
 // We need to split newlines when the output length is greater than or equal to 76
-fn encode_bytes_base64(data: &[u8], writer: &mut impl Write) -> Result<()> {
+fn encode_bytes_base64(data: &[u8], writer: &mut impl std::fmt::Write) -> Result<()> {
     let mut idx: usize = 0;
     let len = data.len();
     let mut written = 0;
@@ -174,8 +181,7 @@ fn encode_bytes_base64(data: &[u8], writer: &mut impl Write) -> Result<()> {
 // According to https://www.postgresql.org/docs/current/functions-binarystring.html#ENCODE-FORMAT-BASE64
 // parse_bytes_base64 need ignores carriage-return[0x0D], newline[0x0A], space[0x20], and tab[0x09].
 // When decode is supplied invalid base64 data, including incorrect trailing padding, return error.
-fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
-    let mut out = Vec::new();
+fn parse_bytes_base64(data: &str, writer: &mut impl std::io::Write) -> Result<()> {
     let data_bytes = data.as_bytes();
 
     let mut idx: usize = 0;
@@ -186,18 +192,19 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
             next(&mut idx, data_bytes),
             next(&mut idx, data_bytes),
         ) {
-            (None, None, None, None) => return Ok(out),
+            (None, None, None, None) => return Ok(()),
             (Some(d1), Some(d2), Some(b'='), Some(b'=')) => {
                 let s1 = alphabet_decode(d1)?;
                 let s2 = alphabet_decode(d2)?;
-                out.push(s1 << 2 | s2 >> 4);
+                writer.write_all(&[s1 << 2 | s2 >> 4]).unwrap();
             }
             (Some(d1), Some(d2), Some(d3), Some(b'=')) => {
                 let s1 = alphabet_decode(d1)?;
                 let s2 = alphabet_decode(d2)?;
                 let s3 = alphabet_decode(d3)?;
-                out.push(s1 << 2 | s2 >> 4);
-                out.push(s2 << 4 | s3 >> 2);
+                writer
+                    .write_all(&[s1 << 2 | s2 >> 4, s2 << 4 | s3 >> 2])
+                    .unwrap();
             }
             (Some(b'='), _, _, _) => {
                 return Err(ExprError::Parse(PARSE_BASE64_INVALID_PADDING.into()));
@@ -216,9 +223,9 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
                 let s2 = alphabet_decode(d2)?;
                 let s3 = alphabet_decode(d3)?;
                 let s4 = alphabet_decode(d4)?;
-                out.push(s1 << 2 | s2 >> 4);
-                out.push(s2 << 4 | s3 >> 2);
-                out.push(s3 << 6 | s4);
+                writer
+                    .write_all(&[s1 << 2 | s2 >> 4, s2 << 4 | s3 >> 2, s3 << 6 | s4])
+                    .unwrap();
             }
             (Some(d1), None, None, None) => {
                 alphabet_decode(d1)?;
@@ -240,7 +247,7 @@ fn parse_bytes_base64(data: &str) -> Result<Vec<u8>> {
             }
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 #[inline]
@@ -286,7 +293,7 @@ fn next(idx: &mut usize, data: &[u8]) -> Option<u8> {
 // According to https://www.postgresql.org/docs/current/functions-binarystring.html#ENCODE-FORMAT-ESCAPE
 // The escape format converts \0 and bytes with the high bit set into octal escape sequences (\nnn).
 // And doubles backslashes.
-fn encode_bytes_escape(data: &[u8], writer: &mut impl Write) -> std::fmt::Result {
+fn encode_bytes_escape(data: &[u8], writer: &mut impl std::fmt::Write) -> std::fmt::Result {
     for b in data {
         match b {
             b'\0' | (b'\x80'..=b'\xff') => {
@@ -327,8 +334,9 @@ mod tests {
             assert!(encode(ori, format, &mut w).is_ok());
             println!("{}", w);
             assert_eq!(w.as_bytes(), encoded);
-            let res = decode(w.as_str(), format).unwrap();
-            assert_eq!(ori, res.as_ref());
+            let mut res = Vec::new();
+            decode(w.as_str(), format, &mut res).unwrap();
+            assert_eq!(ori, &res);
         }
     }
 }

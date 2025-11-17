@@ -53,10 +53,7 @@ impl From<WorkerReschedulePlan> for PbWorkerReschedule {
         let WorkerReschedulePlan { actor_count_diff } = value;
 
         PbWorkerReschedule {
-            worker_actor_diff: actor_count_diff
-                .into_iter()
-                .map(|(k, v)| (k as _, v as _))
-                .collect(),
+            worker_actor_diff: actor_count_diff,
         }
     }
 }
@@ -70,7 +67,7 @@ impl From<PbWorkerReschedule> for WorkerReschedulePlan {
         WorkerReschedulePlan {
             actor_count_diff: actor_count_diff
                 .into_iter()
-                .map(|(k, v)| (k as _, v as _))
+                .map(|(k, v)| (k, v as _))
                 .collect(),
         }
     }
@@ -165,13 +162,11 @@ fn parse_plan(mut plan: String) -> Result<HashMap<u32, PbWorkerReschedule>> {
 
         let mut worker_actor_diff = HashMap::new();
         for worker_change in &worker_changes {
-            let (worker_id, count) = worker_change
-                .split(':')
-                .map(|v| v.parse::<i32>().unwrap())
-                .collect_tuple::<(_, _)>()
-                .unwrap();
+            let (worker_id, count) = worker_change.split(':').collect_tuple::<(_, _)>().unwrap();
+            let worker_id = worker_id.parse().unwrap();
+            let count = count.parse().unwrap();
 
-            if let Some(dup_change) = worker_actor_diff.insert(worker_id as u32, count) {
+            if let Some(dup_change) = worker_actor_diff.insert(worker_id, count) {
                 anyhow::bail!(
                     "duplicate worker id {worker_id} in plan, prev {worker_id} -> {dup_change}",
                 );
@@ -220,7 +215,7 @@ pub async fn unregister_workers(
 
     for worker in workers {
         let worker_id = worker
-            .parse::<u32>()
+            .parse::<WorkerId>()
             .ok()
             .or_else(|| worker_index_by_host.get(&worker).cloned());
 

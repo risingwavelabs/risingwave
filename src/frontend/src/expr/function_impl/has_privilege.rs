@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use risingwave_common::id::{FunctionId, ObjectId};
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{ExprError, Result, capture_context, function};
 use risingwave_pb::user::Action;
@@ -47,7 +48,8 @@ fn has_table_privilege(user_id: i32, table_oid: i32, privileges: &str) -> Result
 fn has_table_privilege_1(user_name: &str, table_oid: i32, privileges: &str) -> Result<bool> {
     let allowed_actions = HashSet::new();
     let actions = parse_privilege(privileges, &allowed_actions)?;
-    if is_system_catalog(table_oid as _) {
+    let table_oid = ObjectId::new(table_oid as _);
+    if is_system_catalog(table_oid) {
         return Ok(true);
     }
     has_privilege_impl_captured(
@@ -70,7 +72,7 @@ fn has_any_column_privilege_1(user_name: &str, table_oid: i32, privileges: &str)
     let actions = parse_privilege(privileges, &allowed_actions)?;
     has_privilege_impl_captured(
         user_name,
-        &get_grant_object_by_oid_captured(table_oid)?,
+        &get_grant_object_by_oid_captured(ObjectId::new(table_oid as _))?,
         &actions,
     )
 }
@@ -167,8 +169,16 @@ fn has_schema_privilege_3(user_name: &str, schema_name: &str, privileges: &str) 
 
 #[function("has_function_privilege(varchar, int4, varchar) -> boolean")]
 fn has_function_privilege(user_name: &str, function_oid: i32, privileges: &str) -> Result<bool> {
+    has_function_privilege_impl(user_name, FunctionId::new(function_oid as _), privileges)
+}
+
+fn has_function_privilege_impl(
+    user_name: &str,
+    function_oid: FunctionId,
+    privileges: &str,
+) -> Result<bool> {
     // does user have privilege for function
-    let func_obj = get_grant_object_by_oid_captured(function_oid)?;
+    let func_obj = get_grant_object_by_oid_captured(function_oid.as_object_id())?;
     let allowed_actions = HashSet::from_iter([Action::Execute]);
     let actions = parse_privilege(privileges, &allowed_actions)?;
     has_privilege_impl_captured(user_name, &func_obj, &actions)
@@ -177,7 +187,11 @@ fn has_function_privilege(user_name: &str, function_oid: i32, privileges: &str) 
 #[function("has_function_privilege(int4, int4, varchar) -> boolean")]
 fn has_function_privilege_1(user_id: i32, function_oid: i32, privileges: &str) -> Result<bool> {
     let user_name = get_user_name_by_id_captured(user_id)?;
-    has_function_privilege(user_name.as_str(), function_oid, privileges)
+    has_function_privilege_impl(
+        user_name.as_str(),
+        FunctionId::new(function_oid as _),
+        privileges,
+    )
 }
 
 #[function("has_function_privilege(varchar, varchar, varchar) -> boolean")]
@@ -187,14 +201,14 @@ fn has_function_privilege_2(
     privileges: &str,
 ) -> Result<bool> {
     let function_oid = get_function_id_by_name_captured(function_name)?;
-    has_function_privilege(user_name, function_oid, privileges)
+    has_function_privilege_impl(user_name, function_oid, privileges)
 }
 
 #[function("has_function_privilege(int4, varchar, varchar) -> boolean")]
 fn has_function_privilege_3(user_id: i32, function_name: &str, privileges: &str) -> Result<bool> {
     let user_name = get_user_name_by_id_captured(user_id)?;
     let function_oid = get_function_id_by_name_captured(function_name)?;
-    has_function_privilege(user_name.as_str(), function_oid, privileges)
+    has_function_privilege_impl(user_name.as_str(), function_oid, privileges)
 }
 
 #[capture_context(USER_INFO_READER)]
@@ -231,7 +245,7 @@ fn get_user_name_by_id(user_info_reader: &UserInfoReader, user_id: i32) -> Resul
 fn get_grant_object_by_oid(
     catalog_reader: &CatalogReader,
     db_name: &str,
-    oid: i32,
+    oid: ObjectId,
 ) -> Result<OwnedGrantObject> {
     catalog_reader
         .read_guard()
@@ -240,7 +254,7 @@ fn get_grant_object_by_oid(
             name: "oid",
             reason: e.to_report_string().into(),
         })?
-        .get_grant_object_by_oid(oid as u32)
+        .get_grant_object_by_oid(oid)
         .ok_or(ExprError::InvalidParam {
             name: "oid",
             reason: format!("Table {} not found", oid).as_str().into(),
@@ -320,7 +334,7 @@ fn get_function_id_by_name(
     auth_context: &AuthContext,
     search_path: &SearchPath,
     function_name: &str,
-) -> Result<i32> {
+) -> Result<FunctionId> {
     let desc =
         Parser::parse_function_desc_str(function_name).map_err(|e| ExprError::InvalidParam {
             name: "function",
@@ -355,8 +369,7 @@ fn get_function_id_by_name(
             reason: e.to_report_string().into(),
         })?
         .0
-        .id
-        .function_id() as i32)
+        .id)
 }
 
 fn parse_privilege(

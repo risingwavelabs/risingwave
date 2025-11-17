@@ -67,7 +67,8 @@ use crate::barrier::checkpoint::{
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{
-    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, SubscriberType,
+    BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
+    SubscriberType,
 };
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
@@ -132,18 +133,18 @@ impl ControlStreamManager {
         term_id: String,
         context: &impl GlobalBarrierWorkerContext,
     ) {
-        let node_id = node.id as WorkerId;
+        let node_id = node.id;
         if let Entry::Occupied(entry) = self.workers.entry(node_id) {
             let (existing_node, worker_state) = entry.get();
             assert_eq!(existing_node.host, node.host);
-            warn!(id = node.id, host = ?node.host, "node already exists");
+            warn!(id = %node.id, host = ?node.host, "node already exists");
             match worker_state {
                 WorkerNodeState::Connected { .. } => {
-                    warn!(id = node.id, host = ?node.host, "new node already connected");
+                    warn!(id = %node.id, host = ?node.host, "new node already connected");
                     return;
                 }
                 WorkerNodeState::Reconnecting(_) => {
-                    warn!(id = node.id, host = ?node.host, "remove previous pending worker connect request and reconnect");
+                    warn!(id = %node.id, host = ?node.host, "remove previous pending worker connect request and reconnect");
                     entry.remove();
                 }
             }
@@ -203,15 +204,15 @@ impl ControlStreamManager {
     }
 
     pub(super) fn remove_worker(&mut self, node: WorkerNode) {
-        if let Entry::Occupied(mut entry) = self.workers.entry(node.id as _) {
+        if let Entry::Occupied(mut entry) = self.workers.entry(node.id) {
             let (_, worker_state) = entry.get_mut();
             match worker_state {
                 WorkerNodeState::Connected { removed, .. } => {
-                    info!(worker_id = node.id, "mark connected worker as removed");
+                    info!(worker_id = %node.id, "mark connected worker as removed");
                     *removed = true;
                 }
                 WorkerNodeState::Reconnecting(_) => {
-                    info!(worker_id = node.id, "remove worker");
+                    info!(worker_id = %node.id, "remove worker");
                     entry.remove();
                 }
             }
@@ -267,7 +268,7 @@ impl ControlStreamManager {
             match result {
                 Ok(handle) => {
                     let control_stream = ControlStreamNode {
-                        worker_id: node.id as _,
+                        worker_id: node.id,
                         host: node.host.clone().unwrap(),
                         handle,
                     };
@@ -290,7 +291,7 @@ impl ControlStreamManager {
                     unconnected_workers.insert(worker_id);
                     warn!(
                         e = %e.as_report(),
-                        worker_id,
+                        %worker_id,
                         ?node,
                         "failed to connect to node"
                     );
@@ -373,10 +374,10 @@ impl ControlStreamManager {
                     WorkerNodeState::Reconnecting(join_handle) => {
                         match join_handle.poll_unpin(cx) {
                             Poll::Ready(handle) => {
-                                info!(id=node.id, host=?node.host, "reconnected to worker");
+                                info!(id=%node.id, host=?node.host, "reconnected to worker");
                                 *worker_state = WorkerNodeState::Connected {
                                     control_stream: ControlStreamNode {
-                                        worker_id: node.id as _,
+                                        worker_id: node.id,
                                         host: node.host.clone().unwrap(),
                                         handle,
                                     },
@@ -425,7 +426,7 @@ impl ControlStreamManager {
                                             }
                                             resp => {
                                                 if let streaming_control_stream_response::Response::CompleteBarrier(barrier_resp) = &resp {
-                                                    assert_eq!(worker_id, barrier_resp.worker_id as WorkerId);
+                                                    assert_eq!(worker_id, barrier_resp.worker_id);
                                                 }
                                                 Ok(resp)
                                             },
@@ -435,7 +436,7 @@ impl ControlStreamManager {
                             let result = match result {
                                 Ok(resp) => Ok(resp),
                                 Err((shutdown, err)) => {
-                                    warn!(worker_id = node.id, host = ?node.host, err = %err.as_report(), "get error from response stream");
+                                    warn!(worker_id = %node.id, host = ?node.host, err = %err.as_report(), "get error from response stream");
                                     let WorkerNodeState::Connected { removed, .. } = worker_state
                                     else {
                                         unreachable!("checked connected")
@@ -520,7 +521,6 @@ pub(super) struct DatabaseInitialBarrierCollector {
     database_id: DatabaseId,
     node_to_collect: NodeToCollect,
     database_state: BarrierWorkerState,
-    create_mview_tracker: CreateMviewProgressTracker,
     creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl>,
     committed_epoch: u64,
     cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
@@ -562,11 +562,7 @@ impl DatabaseInitialBarrierCollector {
                 .collect(resp);
         } else {
             assert_eq!(resp.epoch, self.committed_epoch);
-            assert!(
-                self.node_to_collect
-                    .remove(&(resp.worker_id as _))
-                    .is_some()
-            );
+            assert!(self.node_to_collect.remove(&resp.worker_id).is_some());
         }
     }
 
@@ -574,7 +570,6 @@ impl DatabaseInitialBarrierCollector {
         assert!(self.is_collected());
         DatabaseCheckpointControl::recovery(
             self.database_id,
-            self.create_mview_tracker,
             self.database_state,
             self.committed_epoch,
             self.creating_streaming_job_controls,
@@ -689,7 +684,10 @@ impl ControlStreamManager {
                             subscriptions
                                 .into_iter()
                                 .map(|(subscription_id, retention)| {
-                                    (subscription_id, SubscriberType::Subscription(retention))
+                                    (
+                                        subscription_id.as_raw_id(),
+                                        SubscriberType::Subscription(retention),
+                                    )
                                 })
                                 .collect(),
                         )
@@ -699,7 +697,6 @@ impl ControlStreamManager {
 
         let mut database_jobs = HashMap::new();
         let mut snapshot_backfill_jobs = HashMap::new();
-        let mut background_mviews = HashMap::new();
 
         for (job_id, job_fragments) in jobs {
             if let Some(definition) = background_jobs.remove(&job_id) {
@@ -711,11 +708,10 @@ impl ControlStreamManager {
                     debug!(%job_id, definition, "recovered snapshot backfill job");
                     snapshot_backfill_jobs.insert(job_id, (job_fragments, definition));
                 } else {
-                    database_jobs.insert(job_id, job_fragments);
-                    background_mviews.insert(job_id, definition);
+                    database_jobs.insert(job_id, (job_fragments, Some(definition)));
                 }
             } else {
-                database_jobs.insert(job_id, job_fragments);
+                database_jobs.insert(job_id, (job_fragments, None));
             }
         }
 
@@ -730,7 +726,7 @@ impl ControlStreamManager {
 
         let prev_epoch = resolve_jobs_committed_epoch(
             state_table_committed_epochs,
-            database_jobs.values().flat_map(|job| job.values()),
+            database_jobs.values().flat_map(|(job, _)| job.values()),
         );
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
@@ -750,21 +746,14 @@ impl ControlStreamManager {
                     "recovered creating snapshot backfill job {} catch up with upstream already",
                     job_id
                 );
-                background_mviews
-                    .try_insert(job_id, definition)
-                    .expect("non-duplicate");
                 database_jobs
-                    .try_insert(job_id, fragment_infos)
+                    .try_insert(job_id, (fragment_infos, Some(definition)))
                     .expect("non-duplicate");
                 continue;
             }
-            let info = InflightStreamingJobInfo {
-                job_id,
-                fragment_infos,
-                subscribers: Default::default(), /* no subscriber for ongoing snapshot backfill jobs */
-            };
             let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
-                info.fragment_infos()
+                fragment_infos
+                    .values()
                     .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
             )?
             .0
@@ -806,7 +795,7 @@ impl ControlStreamManager {
                 .try_insert(
                     job_id,
                     (
-                        info,
+                        fragment_infos,
                         definition,
                         upstream_table_ids,
                         committed_epoch,
@@ -819,7 +808,18 @@ impl ControlStreamManager {
         let database_jobs: HashMap<JobId, InflightStreamingJobInfo> = {
             database_jobs
                 .into_iter()
-                .map(|(job_id, fragment_infos)| {
+                .map(|(job_id, (fragment_infos, background_job_definition))| {
+                    let status = if let Some(definition) = background_job_definition {
+                        CreateStreamingJobStatus::Creating(CreateMviewProgressTracker::recover(
+                            job_id,
+                            definition,
+                            &fragment_infos,
+                            Default::default(),
+                            hummock_version_stats,
+                        ))
+                    } else {
+                        CreateStreamingJobStatus::Created
+                    };
                     (
                         job_id,
                         InflightStreamingJobInfo {
@@ -828,6 +828,7 @@ impl ControlStreamManager {
                             subscribers: subscribers
                                 .remove(&job_id.as_mv_table_id())
                                 .unwrap_or_default(),
+                            status,
                         },
                     )
                 })
@@ -869,39 +870,24 @@ impl ControlStreamManager {
             node_to_collect
         };
 
-        let tracker = CreateMviewProgressTracker::recover(
-            background_mviews.iter().map(|(table_id, definition)| {
-                (
-                    *table_id,
-                    (
-                        definition.clone(),
-                        &database_jobs[table_id],
-                        Default::default(),
-                    ),
-                )
-            }),
-            hummock_version_stats,
-        );
-
         let mut creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl> =
             HashMap::new();
         for (job_id, (info, definition, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
         {
-            let node_actors =
-                edges.collect_actors_to_create(info.fragment_infos().map(|fragment_info| {
-                    (
-                        fragment_info.fragment_id,
-                        &fragment_info.nodes,
-                        fragment_info.actors.iter().map(move |(actor_id, actor)| {
-                            (
-                                stream_actors.get(actor_id).expect("should exist"),
-                                actor.worker_id,
-                            )
-                        }),
-                        info.subscribers.keys().copied(),
-                    )
-                }));
+            let node_actors = edges.collect_actors_to_create(info.values().map(|fragment_info| {
+                (
+                    fragment_info.fragment_id,
+                    &fragment_info.nodes,
+                    fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                        (
+                            stream_actors.get(actor_id).expect("should exist"),
+                            actor.worker_id,
+                        )
+                    }),
+                    vec![], // no subscribers for backfilling jobs,
+                )
+            }));
 
             creating_streaming_job_controls.insert(
                 job_id,
@@ -927,15 +913,19 @@ impl ControlStreamManager {
             database_id,
             database_jobs
                 .values()
-                .chain(
-                    creating_streaming_job_controls
-                        .values()
-                        .map(|job| job.graph_info()),
-                )
                 .flat_map(|info| {
                     info.fragment_infos()
                         .map(move |fragment| (fragment, info.job_id))
-                }),
+                })
+                .chain(
+                    creating_streaming_job_controls
+                        .iter()
+                        .flat_map(|(job_id, job)| {
+                            job.graph_info()
+                                .values()
+                                .map(|fragment| (fragment, *job_id))
+                        }),
+                ),
         );
 
         let committed_epoch = barrier_info.prev_epoch();
@@ -952,7 +942,6 @@ impl ControlStreamManager {
             database_id,
             node_to_collect,
             database_state,
-            create_mview_tracker: tracker,
             creating_streaming_job_controls,
             committed_epoch,
             cdc_table_backfill_tracker,
@@ -1097,6 +1086,7 @@ impl ControlStreamManager {
                                                                 vnode_bitmap: actor.vnode_bitmap.map(|bitmap| bitmap.to_protobuf()),
                                                                 mview_definition: actor.mview_definition,
                                                                 expr_context: actor.expr_context,
+                                                                config_override: actor.config_override.to_string(),
                                                                 initial_subscriber_ids: initial_subscriber_ids.iter().copied().collect(),
                                                             }
                                                         })
@@ -1155,7 +1145,7 @@ impl ControlStreamManager {
                         ),
                     ),
                 }).is_err() {
-                warn!(%database_id, ?creating_job_id, worker_id = node.worker_id, "fail to add partial graph to worker")
+                warn!(%database_id, ?creating_job_id, worker_id = %node.worker_id, "fail to add partial graph to worker")
             }
         });
     }
@@ -1187,7 +1177,7 @@ impl ControlStreamManager {
                 })
                 .is_err()
             {
-                warn!(worker_id = node.worker_id,node = ?node.host,"failed to send remove partial graph request");
+                warn!(worker_id = %node.worker_id,node = ?node.host,"failed to send remove partial graph request");
             }
         })
     }
@@ -1212,7 +1202,7 @@ impl ControlStreamManager {
                     })
                     .is_err()
                 {
-                    warn!(worker_id, node = ?node.host,"failed to send reset database request");
+                    warn!(%worker_id, node = ?node.host,"failed to send reset database request");
                     None
                 } else {
                     Some(worker_id)

@@ -90,34 +90,6 @@ DROP TABLE full_type_t;
 
 # test connector
 
-statement error
-create table datagen_t (
-  id BIGINT,
-  item_name VARCHAR,
-  description VARCHAR,
-  initial_bid BIGINT,
-  reserve BIGINT,
-  date_time TIMESTAMP,
-  expires TIMESTAMP,
-  seller BIGINT,
-  category BIGINT,
-  extra VARCHAR)
-with (
-  connector = 'datagen',
-  fields.id.kind = 'sequence',
-  fields.id.start = '1',
-  commit_checkpoint_interval = 1,
-  source_rate_limit = 1000
-) engine = iceberg;
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Not supported: source_rate_limit for iceberg table engine during table creation
-HINT: Please remove source_rate_limit from WITH options.
-
-
-
 statement ok
 create table datagen_t (
   id BIGINT,

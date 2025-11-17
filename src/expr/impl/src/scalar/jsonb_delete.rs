@@ -14,8 +14,8 @@
 
 use std::collections::HashSet;
 
-use jsonbb::{Value, ValueRef};
-use risingwave_common::types::{JsonbRef, JsonbVal, ListRef};
+use jsonbb::ValueRef;
+use risingwave_common::types::{JsonbRef, ListRef};
 use risingwave_expr::{ExprError, Result, function};
 
 /// Removes a key (and its value) from a JSON object, or matching string value(s) from a JSON array.
@@ -39,14 +39,29 @@ use risingwave_expr::{ExprError, Result, function};
 /// SELECT '1'::jsonb - 'b';
 /// ```
 #[function("subtract(jsonb, varchar) -> jsonb")]
-fn jsonb_remove(v: JsonbRef<'_>, key: &str) -> Result<JsonbVal> {
+fn jsonb_remove(v: JsonbRef<'_>, key: &str, writer: &mut jsonbb::Builder) -> Result<()> {
     match v.into() {
-        ValueRef::Object(obj) => Ok(JsonbVal::from(Value::object(
-            obj.iter().filter(|(k, _)| *k != key),
-        ))),
-        ValueRef::Array(arr) => Ok(JsonbVal::from(Value::array(
-            arr.iter().filter(|value| value.as_str() != Some(key)),
-        ))),
+        ValueRef::Object(obj) => {
+            writer.begin_object();
+            for (k, v) in obj.iter() {
+                if k != key {
+                    writer.add_string(k);
+                    writer.add_value(v);
+                }
+            }
+            writer.end_object();
+            Ok(())
+        }
+        ValueRef::Array(arr) => {
+            writer.begin_array();
+            for value in arr.iter() {
+                if value.as_str() != Some(key) {
+                    writer.add_value(value);
+                }
+            }
+            writer.end_array();
+            Ok(())
+        }
         _ => Err(ExprError::InvalidParam {
             name: "jsonb",
             reason: "cannot delete from scalar".into(),
@@ -68,20 +83,37 @@ fn jsonb_remove(v: JsonbRef<'_>, key: &str) -> Result<JsonbVal> {
 /// SELECT '1'::jsonb - '{a,c}'::text[];
 /// ```
 #[function("subtract(jsonb, varchar[]) -> jsonb")]
-fn jsonb_remove_keys(v: JsonbRef<'_>, keys: ListRef<'_>) -> Result<JsonbVal> {
+fn jsonb_remove_keys(
+    v: JsonbRef<'_>,
+    keys: ListRef<'_>,
+    writer: &mut jsonbb::Builder,
+) -> Result<()> {
     let keys_set: HashSet<&str> = keys.iter().flatten().map(|s| s.into_utf8()).collect();
 
     match v.into() {
-        ValueRef::Object(obj) => Ok(JsonbVal::from(Value::object(
-            obj.iter().filter(|(k, _)| !keys_set.contains(*k)),
-        ))),
+        ValueRef::Object(obj) => {
+            writer.begin_object();
+            for (k, v) in obj.iter() {
+                if !keys_set.contains(k) {
+                    writer.add_string(k);
+                    writer.add_value(v);
+                }
+            }
+            writer.end_object();
+            Ok(())
+        }
         ValueRef::Array(arr) => {
-            Ok(JsonbVal::from(Value::array(arr.iter().filter(
-                |value| match value.as_str() {
-                    Some(s) => !keys_set.contains(s),
-                    None => true,
-                },
-            ))))
+            writer.begin_array();
+            for value in arr.iter() {
+                if let Some(s) = value.as_str()
+                    && keys_set.contains(s)
+                {
+                    continue;
+                }
+                writer.add_value(value);
+            }
+            writer.end_array();
+            Ok(())
         }
         _ => Err(ExprError::InvalidParam {
             name: "jsonb",
@@ -123,7 +155,7 @@ fn jsonb_remove_keys(v: JsonbRef<'_>, keys: ListRef<'_>) -> Result<JsonbVal> {
 /// SELECT '{"a": 1}'::jsonb - 1;
 /// ```
 #[function("subtract(jsonb, int4) -> jsonb")]
-fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
+fn jsonb_remove_index(v: JsonbRef<'_>, index: i32, writer: &mut jsonbb::Builder) -> Result<()> {
     let array = match v.into() {
         ValueRef::Array(array) => array,
         ValueRef::Object(_) => {
@@ -141,15 +173,18 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
     };
     let Some(idx) = normalize_array_index(array.len(), index) else {
         // out of bounds index returns original value
-        return Ok(JsonbVal::from(v));
+        writer.add_value(v.into());
+        return Ok(());
     };
-    Ok(JsonbVal::from(Value::array(
-        array
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| i != idx)
-            .map(|(_, v)| v),
-    )))
+
+    writer.begin_array();
+    for (i, value) in array.iter().enumerate() {
+        if i != idx {
+            writer.add_value(value);
+        }
+    }
+    writer.end_array();
+    Ok(())
 }
 
 /// Deletes the field or array element at the specified path, where path elements can be
@@ -248,7 +283,11 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
 /// SELECT '1'::jsonb #- '{}';
 /// ```
 #[function("jsonb_delete_path(jsonb, varchar[]) -> jsonb")]
-fn jsonb_delete_path(v: JsonbRef<'_>, path: ListRef<'_>) -> Result<JsonbVal> {
+fn jsonb_delete_path(
+    v: JsonbRef<'_>,
+    path: ListRef<'_>,
+    writer: &mut jsonbb::Builder,
+) -> Result<()> {
     if v.is_scalar() {
         return Err(ExprError::InvalidParam {
             name: "jsonb",
@@ -256,12 +295,11 @@ fn jsonb_delete_path(v: JsonbRef<'_>, path: ListRef<'_>) -> Result<JsonbVal> {
         });
     }
     if path.is_empty() {
-        return Ok(JsonbVal::from(v));
+        writer.add_value(v.into());
+        return Ok(());
     }
-    let jsonb: ValueRef<'_> = v.into();
-    let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(jsonb.capacity());
-    jsonbb_remove_path(jsonb, path, 0, &mut builder)?;
-    Ok(JsonbVal::from(builder.finish()))
+    jsonbb_remove_path(v.into(), path, 0, writer)?;
+    Ok(())
 }
 
 // Recursively remove `path[i..]` from `jsonb` and write the result to `builder`.
@@ -380,11 +418,8 @@ fn normalize_array_index(len: usize, index: i32) -> Option<usize> {
 /// [{"f1": 1}, 2, null, 3]
 /// ```
 #[function("jsonb_strip_nulls(jsonb) -> jsonb")]
-fn jsonb_strip_nulls(v: JsonbRef<'_>) -> JsonbVal {
-    let jsonb: ValueRef<'_> = v.into();
-    let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(jsonb.capacity());
-    jsonbb_strip_nulls(jsonb, &mut builder);
-    JsonbVal::from(builder.finish())
+fn jsonb_strip_nulls(v: JsonbRef<'_>, writer: &mut jsonbb::Builder) {
+    jsonbb_strip_nulls(v.into(), writer);
 }
 
 /// Recursively removes all object fields that have null values from the given JSON value.

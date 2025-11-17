@@ -26,6 +26,7 @@ use super::bitmap::VnodeBitmapExt;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::hash::VirtualNode;
 pub use crate::id::ActorId;
+use crate::id::WorkerId;
 use crate::util::compress::compress_data;
 use crate::util::iter_util::ZipEqDebug;
 
@@ -33,19 +34,19 @@ use crate::util::iter_util::ZipEqDebug;
 pub struct ActorAlignmentId(u64);
 
 impl ActorAlignmentId {
-    pub fn worker_id(&self) -> u32 {
-        (self.0 >> 32) as u32
+    pub fn worker_id(&self) -> WorkerId {
+        ((self.0 >> 32) as u32).into()
     }
 
     pub fn actor_idx(&self) -> u32 {
         self.0 as u32
     }
 
-    pub fn new(worker_id: u32, actor_idx: usize) -> Self {
-        Self((worker_id as u64) << 32 | actor_idx as u64)
+    pub fn new(worker_id: WorkerId, actor_idx: usize) -> Self {
+        Self((worker_id.as_raw_id() as u64) << 32 | actor_idx as u64)
     }
 
-    pub fn new_single(worker_id: u32) -> Self {
+    pub fn new_single(worker_id: WorkerId) -> Self {
         Self::new(worker_id, 0)
     }
 }
@@ -78,16 +79,16 @@ impl Debug for ActorAlignmentId {
 pub struct WorkerSlotId(u64);
 
 impl WorkerSlotId {
-    pub fn worker_id(&self) -> u32 {
-        (self.0 >> 32) as u32
+    pub fn worker_id(&self) -> WorkerId {
+        WorkerId::new((self.0 >> 32) as u32)
     }
 
     pub fn slot_idx(&self) -> u32 {
         self.0 as u32
     }
 
-    pub fn new(worker_id: u32, slot_idx: usize) -> Self {
-        Self((worker_id as u64) << 32 | slot_idx as u64)
+    pub fn new(worker_id: WorkerId, slot_idx: usize) -> Self {
+        Self((worker_id.as_raw_id() as u64) << 32 | slot_idx as u64)
     }
 }
 
@@ -367,7 +368,10 @@ pub type ExpandedActorAlignment = ExpandedMapping<marker::ActorAlignment>;
 
 impl ActorMapping {
     /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
-    pub fn to_worker_slot(&self, actor_to_worker: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
+    pub fn to_worker_slot(
+        &self,
+        actor_to_worker: &HashMap<ActorId, WorkerId>,
+    ) -> WorkerSlotMapping {
         let mut worker_actors = HashMap::new();
         for actor_id in self.iter_unique() {
             let worker_id = actor_to_worker
@@ -394,7 +398,7 @@ impl ActorMapping {
     /// Transform the actor mapping to the actor alignment mapping. Note that the parameter is a mapping from actor to worker.
     pub fn to_actor_alignment(
         &self,
-        actor_to_worker: &HashMap<ActorId, u32>,
+        actor_to_worker: &HashMap<ActorId, WorkerId>,
     ) -> ActorAlignmentMapping {
         let mut worker_actors = HashMap::new();
 
@@ -471,7 +475,7 @@ impl WorkerSlotMapping {
 
 impl ActorAlignmentMapping {
     pub fn from_assignment(
-        assignment: BTreeMap<u32, BTreeMap<usize, Vec<usize>>>,
+        assignment: BTreeMap<WorkerId, BTreeMap<usize, Vec<usize>>>,
         vnode_size: usize,
     ) -> Self {
         let mut all_bitmaps = HashMap::new();

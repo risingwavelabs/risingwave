@@ -148,7 +148,7 @@ impl ContextInfo {
         metadata_manager: &MetadataManager,
     ) -> Result<bool> {
         Ok(metadata_manager
-            .get_worker_by_id(context_id as _)
+            .get_worker_by_id(context_id)
             .await
             .map_err(|err| Error::MetaStore(err.into()))?
             .is_some())
@@ -272,7 +272,7 @@ impl HummockManager {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context
                         .iter()
-                        .map(|(object_id, worker_id)| (object_id.inner(), *worker_id))
+                        .map(|(object_id, worker_id)| (object_id.inner(), worker_id.as_raw_id()))
                         .collect(),
                 }))
                 .is_err()

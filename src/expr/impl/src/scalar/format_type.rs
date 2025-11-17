@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_common::types::DataType;
 use risingwave_expr::function;
 
 #[function("format_type(int4, int4) -> varchar")]
-pub fn format_type(oid: i32, _typemod: Option<i32>, writer: &mut impl Write) {
+pub fn format_type(oid: i32, _typemod: Option<i32>, writer: &mut impl std::fmt::Write) {
     // since we don't support type modifier, ignore it.
     match DataType::from_oid(oid) {
         Ok(dt) => write!(writer, "{}", dt).unwrap(),

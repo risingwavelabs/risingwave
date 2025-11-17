@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{OBJECT_ID_PLACEHOLDER, TableId, UserId};
+use risingwave_common::catalog::{TableId, UserId};
+pub use risingwave_common::id::SubscriptionId;
 use risingwave_common::id::{DatabaseId, SchemaId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbSubscription;
@@ -66,28 +67,6 @@ pub enum SubscriptionState {
     Created,
 }
 
-#[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct SubscriptionId {
-    pub subscription_id: u32,
-}
-
-impl SubscriptionId {
-    pub const fn new(subscription_id: u32) -> Self {
-        SubscriptionId { subscription_id }
-    }
-
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        SubscriptionId {
-            subscription_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn subscription_id(&self) -> u32 {
-        self.subscription_id
-    }
-}
-
 impl SubscriptionCatalog {
     pub fn set_retention_seconds(&mut self, properties: &WithOptions) -> Result<()> {
         let retention_seconds_str = properties.get("retention").ok_or_else(|| {
@@ -104,7 +83,7 @@ impl SubscriptionCatalog {
 
     pub fn to_proto(&self) -> PbSubscription {
         PbSubscription {
-            id: self.id.subscription_id,
+            id: self.id,
             name: self.name.clone(),
             definition: self.definition.clone(),
             retention_seconds: self.retention_seconds,
@@ -127,7 +106,7 @@ impl SubscriptionCatalog {
 impl From<&PbSubscription> for SubscriptionCatalog {
     fn from(prost: &PbSubscription) -> Self {
         Self {
-            id: SubscriptionId::new(prost.id),
+            id: prost.id,
             name: prost.name.clone(),
             definition: prost.definition.clone(),
             retention_seconds: prost.retention_seconds,

@@ -49,7 +49,7 @@ pub fn get_bit(bytes: &[u8], n: i64) -> Result<i32> {
 /// \x1234563890
 /// ```
 #[function("set_bit(bytea, int8, int4) -> bytea")]
-pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
+pub fn set_bit(bytes: &[u8], n: i64, value: i32, writer: &mut impl std::io::Write) -> Result<()> {
     let max_sz = (bytes.len() * 8) as i64;
     if n < 0 || n >= max_sz {
         return Err(ExprError::InvalidParam {
@@ -65,16 +65,24 @@ pub fn set_bit(bytes: &[u8], n: i64, value: i32) -> Result<Box<[u8]>> {
         });
     }
 
-    let mut buf = bytes.to_vec();
     let index = (n / 8) as usize;
-    let bit_pos = (n % 8) as u8;
-
-    if value != 0 {
-        buf[index] |= 1 << bit_pos;
+    let bit_pos = (n % 8) as u32;
+    let orig = bytes[index];
+    let mask = 1u8 << bit_pos;
+    let new_byte = if value != 0 {
+        orig | mask
     } else {
-        buf[index] &= !(1 << bit_pos);
+        orig & !mask
+    };
+
+    if index > 0 {
+        writer.write_all(&bytes[..index]).unwrap();
     }
-    Ok(buf.into_boxed_slice())
+    writer.write_all(&[new_byte]).unwrap();
+    if index + 1 < bytes.len() {
+        writer.write_all(&bytes[index + 1..]).unwrap();
+    }
+    Ok(())
 }
 
 /// Extracts n'th byte from binary string.
@@ -110,7 +118,7 @@ pub fn get_byte(bytes: &[u8], n: i32) -> Result<i32> {
 /// \x1234567840
 /// ```
 #[function("set_byte(bytea, int4, int4) -> bytea")]
-pub fn set_byte(bytes: &[u8], n: i32, value: i32) -> Result<Box<[u8]>> {
+pub fn set_byte(bytes: &[u8], n: i32, value: i32, writer: &mut impl std::io::Write) -> Result<()> {
     let max_sz = bytes.len() as i32;
     if n < 0 || n >= max_sz {
         return Err(ExprError::InvalidParam {
@@ -118,9 +126,16 @@ pub fn set_byte(bytes: &[u8], n: i32, value: i32) -> Result<Box<[u8]>> {
             reason: format!("index {} out of valid range, 0..{}", n, max_sz - 1).into(),
         });
     }
-    let mut buf = bytes.to_vec();
-    buf[n as usize] = value as u8;
-    Ok(buf.into_boxed_slice())
+
+    let index = n as usize;
+    if index > 0 {
+        writer.write_all(&bytes[..index]).unwrap();
+    }
+    writer.write_all(&[value as u8]).unwrap();
+    if index + 1 < bytes.len() {
+        writer.write_all(&bytes[index + 1..]).unwrap();
+    }
+    Ok(())
 }
 
 /// Returns the number of bits set in the binary string
@@ -153,11 +168,8 @@ pub fn bit_count(bytes: &[u8]) -> i64 {
 /// \x9078563412
 /// ```
 #[function("reverse(bytea) -> bytea")]
-pub fn reverse_bytea(bytes: &[u8]) -> Box<[u8]> {
-    bytes
-        .iter()
-        .rev()
-        .copied()
-        .collect::<Vec<_>>()
-        .into_boxed_slice()
+pub fn reverse_bytea(bytes: &[u8], writer: &mut impl std::io::Write) {
+    for byte in bytes.iter().rev() {
+        writer.write_all(&[*byte]).unwrap();
+    }
 }

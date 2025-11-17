@@ -25,7 +25,7 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 use crate::session::FrontendEnv;
 
 pub async fn choose_fast_insert_client(
-    table_id: &TableId,
+    table_id: TableId,
     frontend_env: &FrontendEnv,
     request_id: u32,
 ) -> SchedulerResult<ComputeClient> {
@@ -35,7 +35,7 @@ pub async fn choose_fast_insert_client(
 }
 
 fn get_table_dml_vnode_mapping(
-    table_id: &TableId,
+    table_id: TableId,
     frontend_env: &FrontendEnv,
     worker_node_manager: &WorkerNodeSelector,
 ) -> SchedulerResult<WorkerSlotMapping> {
@@ -58,7 +58,7 @@ fn get_table_dml_vnode_mapping(
 }
 
 fn choose_worker(
-    table_id: &TableId,
+    table_id: TableId,
     frontend_env: &FrontendEnv,
     request_id: u32,
 ) -> SchedulerResult<WorkerNode> {

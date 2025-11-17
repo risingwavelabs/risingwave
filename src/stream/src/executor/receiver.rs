@@ -14,7 +14,6 @@
 
 use itertools::Itertools;
 use tokio::sync::mpsc;
-use tokio::time::Instant;
 
 use super::exchange::input::BoxedActorInput;
 use crate::executor::prelude::*;
@@ -117,13 +116,10 @@ impl Execute for ReceiverExecutor {
                 self.metrics.clone(),
                 self.fragment_id,
             );
-            let mut start_time = Instant::now();
             loop {
-                let msg = barrier_buffer.await_next_message(&mut self.input).await?;
-                metrics
-                    .actor_input_buffer_blocking_duration_ns
-                    .inc_by(start_time.elapsed().as_nanos() as u64);
-
+                let msg = barrier_buffer
+                    .await_next_message(&mut self.input, &metrics)
+                    .await?;
                 let msg = match msg {
                     DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
                     DispatcherMessage::Chunk(chunk) => {
@@ -188,7 +184,6 @@ impl Execute for ReceiverExecutor {
                 };
 
                 yield msg;
-                start_time = Instant::now();
             }
         };
 

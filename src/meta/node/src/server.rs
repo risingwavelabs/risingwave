@@ -558,10 +558,13 @@ pub async fn start_service_as_election_leader(
         sink_manager.clone(),
         meta_metrics.clone(),
         iceberg_compaction_mgr.clone(),
+        barrier_scheduler.clone(),
     )
     .await;
 
-    sub_tasks.push(ddl_srv.start_migrate_table_fragments());
+    if env.opts.enable_legacy_table_migration {
+        sub_tasks.push(ddl_srv.start_migrate_table_fragments());
+    }
 
     let user_srv = UserServiceImpl::new(metadata_manager.clone());
 

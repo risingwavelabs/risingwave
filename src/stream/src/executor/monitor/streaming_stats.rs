@@ -91,7 +91,7 @@ pub struct StreamingMetrics {
 
     // Backpressure
     pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
-    actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec,
+    actor_input_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
 
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec,
@@ -352,7 +352,9 @@ impl StreamingMetrics {
                 &["actor_id", "fragment_id", "upstream_fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            // mask the first label `actor_id` if the level is less verbose than `Debug`
+            .relabel_debug_1(level);
 
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",

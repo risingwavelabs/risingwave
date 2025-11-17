@@ -30,15 +30,11 @@
 //! println!("AST: {:?}", ast);
 //! ```
 
-#![cfg_attr(not(feature = "std"), no_std)]
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![allow(rw::format_error)] // external crate
-
-#[cfg(not(feature = "std"))]
-extern crate alloc;
 
 pub mod ast;
 pub mod keywords;

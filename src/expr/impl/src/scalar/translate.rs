@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::Write;
 
 use risingwave_expr::function;
 
 #[function("translate(varchar, varchar, varchar) -> varchar")]
-pub fn translate(s: &str, match_str: &str, replace_str: &str, writer: &mut impl Write) {
+pub fn translate(s: &str, match_str: &str, replace_str: &str, writer: &mut impl std::fmt::Write) {
     let mut char_map = HashMap::new();
     let mut match_chars = match_str.chars();
     let mut replace_chars = replace_str.chars();

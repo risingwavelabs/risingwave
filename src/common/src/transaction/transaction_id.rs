@@ -14,6 +14,8 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use risingwave_common::id::WorkerId;
+
 use crate::util::worker_util::WorkerNodeId;
 
 const WORKER_ID_SHIFT_BITS: u8 = 32;
@@ -28,7 +30,7 @@ const WORKER_ID_SHIFT_BITS: u8 = 32;
 /// It doesn't matter, even if the sequence starts from zero after recovery.
 #[derive(Debug)]
 pub struct TxnIdGenerator {
-    worker_id: u32,
+    worker_id: WorkerId,
     sequence: AtomicU32,
 }
 
@@ -44,6 +46,6 @@ impl TxnIdGenerator {
 
     pub fn gen_txn_id(&self) -> TxnId {
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
-        (self.worker_id as u64) << WORKER_ID_SHIFT_BITS | sequence as u64
+        (self.worker_id.as_raw_id() as u64) << WORKER_ID_SHIFT_BITS | sequence as u64
     }
 }
