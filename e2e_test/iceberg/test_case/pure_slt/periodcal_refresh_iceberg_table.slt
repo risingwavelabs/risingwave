@@ -173,14 +173,14 @@ select id from iceberg_batch_table order by id;
 
 # Cleanup
 
-# statement ok
-# drop table iceberg_batch_table;
+statement ok
+drop table iceberg_batch_table;
 
-# statement ok
-# drop table t_refresh;
+statement ok
+drop table t_refresh;
 
-# statement ok
-# drop connection my_conn;
+statement ok
+drop connection my_conn;
 
-# statement ok
-# drop secret my_secret;
+statement ok
+drop secret my_secret;
