@@ -531,6 +531,21 @@ impl CatalogController {
             .exec(&txn)
             .await?;
         }
+        
+        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
+        let res = Object::update_many()
+            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
+            .col_expr(
+                object::Column::CreatedAtClusterVersion,
+                current_cluster_version().into(),
+            )
+            .filter(object::Column::Oid.eq(view_obj.oid))
+            .exec(&txn)
+            .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("view", view_obj.oid));
+        }
+
         let updated_user_info = grant_default_privileges_automatically(&txn, view_obj.oid).await?;
 
         txn.commit().await?;
