@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -58,7 +58,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightDatabaseInfo, InflightStreamingJobInfo};
+use super::info::{CommandFragmentChanges, InflightDatabaseInfo};
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
@@ -70,7 +70,7 @@ use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
     FragmentId, FragmentReplaceUpstream, StreamActorWithDispatchers, StreamJobActorsToCreate,
-    StreamJobFragments, StreamJobFragmentsToCreate,
+    StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
@@ -175,7 +175,7 @@ impl ReplaceStreamJobPlan {
         if let Some(sinks) = &self.auto_refresh_schema_sinks {
             for sink in sinks {
                 let fragment_change = CommandFragmentChanges::NewFragment {
-                    job_id: JobId::new(sink.original_sink.id as _),
+                    job_id: sink.original_sink.id.as_job_id(),
                     info: sink.new_fragment_info(),
                     is_existing: false,
                 };
@@ -260,8 +260,7 @@ impl StreamJobFragments {
                                         .actor_status
                                         .get(&actor.actor_id)
                                         .expect("should exist")
-                                        .worker_id()
-                                        as WorkerId,
+                                        .worker_id(),
                                     vnode_bitmap: actor.vnode_bitmap.clone(),
                                     splits: fragment_splits
                                         .remove(&actor.actor_id)
@@ -342,7 +341,7 @@ pub enum Command {
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
     MergeSnapshotBackfillStreamingJobs(
-        HashMap<JobId, (HashSet<TableId>, InflightStreamingJobInfo)>,
+        HashMap<JobId, (HashSet<TableId>, HashMap<FragmentId, InflightFragmentInfo>)>,
     ),
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
@@ -375,7 +374,7 @@ pub enum Command {
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
     /// materialize executor to start storing old value for subscription.
     CreateSubscription {
-        subscription_id: u32,
+        subscription_id: SubscriptionId,
         upstream_mv_table_id: TableId,
         retention_second: u64,
     },
@@ -384,7 +383,7 @@ pub enum Command {
     /// materialize executor to stop storing old value when there is no
     /// subscription depending on it.
     DropSubscription {
-        subscription_id: u32,
+        subscription_id: SubscriptionId,
         upstream_mv_table_id: TableId,
     },
 
@@ -399,15 +398,15 @@ pub enum Command {
     /// and reloading data from source.
     Refresh {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     ListFinish {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
     LoadFinish {
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     },
 }
 
@@ -830,7 +829,7 @@ impl CommandContext {
                             assert_eq!(index_table.table_type, PbTableType::VectorIndex as i32);
                             info.vector_index_delta
                                 .try_insert(
-                                    index_table.id.into(),
+                                    index_table.id,
                                     VectorIndexDelta::Init(PbVectorIndexInit {
                                         info: Some(index_table.vector_index_info.unwrap()),
                                     }),
@@ -935,7 +934,7 @@ impl Command {
                 ..
             } => {
                 let edges = edges.as_mut().expect("should exist");
-                let added_actors = table_fragments.actor_ids();
+                let added_actors = table_fragments.actor_ids().collect();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
@@ -949,7 +948,7 @@ impl Command {
                             .keys()
                             .map(|table_id| SubscriptionUpstreamInfo {
                                 subscriber_id: table_fragments.stream_job_id().as_raw_id(),
-                                upstream_mv_table_id: table_id.as_raw_id(),
+                                upstream_mv_table_id: *table_id,
                             })
                             .collect()
                     } else {
@@ -1030,7 +1029,7 @@ impl Command {
                                 .iter()
                                 .map(move |upstream_table_id| SubscriptionUpstreamInfo {
                                     subscriber_id: table_id.as_raw_id(),
-                                    upstream_mv_table_id: upstream_table_id.as_raw_id(),
+                                    upstream_mv_table_id: *upstream_table_id,
                                 })
                         })
                         .collect(),
@@ -1070,7 +1069,7 @@ impl Command {
                         )
                     };
                 Self::generate_update_mutation_for_replace_table(
-                    old_fragments.actor_ids().into_iter().chain(
+                    old_fragments.actor_ids().chain(
                         auto_refresh_schema_sinks
                             .as_ref()
                             .into_iter()
@@ -1190,8 +1189,8 @@ impl Command {
                                             .flat_map(|(worker_id, actors)| {
                                                 let host =
                                                     control_stream_manager.host_addr(*worker_id);
-                                                actors.iter().map(move |actor_id| PbActorInfo {
-                                                    actor_id: *actor_id,
+                                                actors.iter().map(move |&actor_id| PbActorInfo {
+                                                    actor_id,
                                                     host: Some(host.clone()),
                                                 })
                                             })
@@ -1229,7 +1228,7 @@ impl Command {
                 for reschedule in reschedules.values() {
                     for (actor_id, splits) in &reschedule.actor_splits {
                         actor_splits.insert(
-                            *actor_id as ActorId,
+                            *actor_id,
                             ConnectorSplits {
                                 splits: splits.iter().map(ConnectorSplit::from).collect(),
                             },
@@ -1287,8 +1286,8 @@ impl Command {
                 actor_splits: Default::default(),
                 pause: false,
                 subscriptions_to_add: vec![SubscriptionUpstreamInfo {
-                    upstream_mv_table_id: upstream_mv_table_id.as_raw_id(),
-                    subscriber_id: *subscription_id,
+                    upstream_mv_table_id: *upstream_mv_table_id,
+                    subscriber_id: subscription_id.as_raw_id(),
                 }],
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: Default::default(),
@@ -1299,15 +1298,15 @@ impl Command {
                 subscription_id,
             } => Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
                 info: vec![SubscriptionUpstreamInfo {
-                    subscriber_id: *subscription_id,
-                    upstream_mv_table_id: upstream_mv_table_id.as_raw_id(),
+                    subscriber_id: subscription_id.as_raw_id(),
+                    upstream_mv_table_id: *upstream_mv_table_id,
                 }],
             })),
             Command::ConnectorPropsChange(config) => {
                 let mut connector_props_infos = HashMap::default();
                 for (k, v) in config {
                     connector_props_infos.insert(
-                        *k,
+                        k.as_raw_id(),
                         ConnectorPropsInfo {
                             connector_props_info: v.clone(),
                         },
@@ -1329,21 +1328,21 @@ impl Command {
                 associated_source_id,
             } => Some(Mutation::RefreshStart(
                 risingwave_pb::stream_plan::RefreshStartMutation {
-                    table_id: table_id.as_raw_id(),
-                    associated_source_id: associated_source_id.as_raw_id(),
+                    table_id: *table_id,
+                    associated_source_id: *associated_source_id,
                 },
             )),
             Command::ListFinish {
                 table_id: _,
                 associated_source_id,
             } => Some(Mutation::ListFinish(ListFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             })),
             Command::LoadFinish {
                 table_id: _,
                 associated_source_id,
             } => Some(Mutation::LoadFinish(LoadFinishMutation {
-                associated_source_id: associated_source_id.as_raw_id(),
+                associated_source_id: *associated_source_id,
             })),
         }
     }
@@ -1444,10 +1443,10 @@ impl Command {
                                         .location
                                         .as_ref()
                                         .unwrap()
-                                        .worker_node_id as _,
+                                        .worker_node_id,
                                 )
                             }),
-                            graph_info.job_subscribers(sink.original_sink.id.into()),
+                            graph_info.job_subscribers(sink.original_sink.id.as_job_id()),
                         )
                     }));
                     for (worker_id, fragment_actors) in sink_actors {

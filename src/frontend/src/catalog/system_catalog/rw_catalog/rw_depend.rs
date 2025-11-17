@@ -34,8 +34,8 @@ async fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> 
     Ok(dependencies
         .into_iter()
         .map(|depend| RwDepend {
-            objid: depend.object_id as i32,
-            refobjid: depend.referenced_object_id as i32,
+            objid: depend.object_id.as_i32_id(),
+            refobjid: depend.referenced_object_id.as_i32_id(),
         })
         .collect())
 }

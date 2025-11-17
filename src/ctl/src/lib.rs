@@ -18,6 +18,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
@@ -616,7 +617,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
-                table_id,
+                table_id.into(),
                 level,
                 sst_ids,
             )
@@ -712,7 +713,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::split_compaction_group(
                 context,
                 compaction_group_id,
-                &table_ids,
+                &table_ids.into_iter().map_into().collect_vec(),
                 partition_vnode_count,
             )
             .await?;

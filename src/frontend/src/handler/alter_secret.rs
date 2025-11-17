@@ -41,7 +41,7 @@ pub async fn handle_alter_secret(
     {
         let AlterSecretOperation::ChangeCredential { new_credential } = operation;
 
-        let secret_id = secret_catalog.id.secret_id();
+        let secret_id = secret_catalog.id;
         let secret_payload = if sql_options.is_empty() {
             let original_pb_secret_bytes = LocalSecretManager::global()
                 .get_secret(secret_id)

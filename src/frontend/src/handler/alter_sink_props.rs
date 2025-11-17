@@ -51,11 +51,11 @@ pub async fn handle_alter_sink_props(
         ensure_alter_props_not_set_by_connection(
             &reader,
             db_name,
-            sink.connection_id.map(|id| id.connection_id()),
+            sink.connection_id,
             &changed_props,
         )?;
 
-        sink.id.sink_id
+        sink.id
     };
 
     let meta_client = session.env().meta_client();

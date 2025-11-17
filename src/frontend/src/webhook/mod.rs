@@ -211,7 +211,7 @@ pub(super) mod handlers {
         };
 
         let fast_insert_request = FastInsertRequest {
-            table_id: table_id.as_raw_id(),
+            table_id,
             table_version_id: version_id,
             column_indices: vec![0],
             // leave the data_chunk empty for now
@@ -221,7 +221,7 @@ pub(super) mod handlers {
             wait_for_persistence: webhook_source_info.wait_for_persistence,
         };
 
-        let compute_client = choose_fast_insert_client(&table_id, frontend_env, request_id)
+        let compute_client = choose_fast_insert_client(table_id, frontend_env, request_id)
             .await
             .unwrap();
 

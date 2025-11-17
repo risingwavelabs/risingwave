@@ -41,6 +41,7 @@ use risingwave_pb::hummock::{
     compact_task,
 };
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
+use risingwave_pb::id::{JobId, TableId};
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
@@ -73,7 +74,7 @@ impl MockHummockMetaClient {
         MockHummockMetaClient {
             hummock_manager,
             context_id,
-            compact_context_id: AtomicU32::new(context_id),
+            compact_context_id: AtomicU32::new(context_id.as_raw_id()),
             sst_offset: 0,
         }
     }
@@ -86,7 +87,7 @@ impl MockHummockMetaClient {
         Self {
             hummock_manager,
             context_id,
-            compact_context_id: AtomicU32::new(context_id),
+            compact_context_id: AtomicU32::new(context_id.as_raw_id()),
             sst_offset,
         }
     }
@@ -226,7 +227,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn trigger_manual_compaction(
         &self,
         _compaction_group_id: u64,
-        _table_id: u32,
+        _table_id: JobId,
         _level: u32,
         _sst_ids: Vec<u64>,
     ) -> Result<()> {
@@ -265,13 +266,13 @@ impl HummockMetaClient for MockHummockMetaClient {
             .hummock_manager
             .compactor_manager
             .clone()
-            .add_compactor(context_id as _);
+            .add_compactor(context_id);
 
         let (request_sender, mut request_receiver) =
             unbounded_channel::<SubscribeCompactionEventRequest>();
 
         self.compact_context_id
-            .store(context_id as _, Ordering::Release);
+            .store(context_id.as_raw_id(), Ordering::Release);
 
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -381,7 +382,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn get_version_by_epoch(
         &self,
         _epoch: HummockEpoch,
-        _table_id: u32,
+        _table_id: TableId,
     ) -> Result<PbHummockVersion> {
         unimplemented!()
     }

@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG};
-use risingwave_common::id::{JobId, TableId};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{Object, User, UserDefaultPrivilege, UserPrivilege};
 use risingwave_meta_model::user_privilege::Action;
@@ -237,9 +236,9 @@ impl CatalogController {
         let mut privileges = vec![];
         for gp in new_grant_privileges {
             let id = extract_grant_obj_id(gp.get_object()?);
-            let internal_table_ids = get_internal_tables_by_id(JobId::new(id as _), &txn).await?;
+            let internal_table_ids = get_internal_tables_by_id(id.as_job_id(), &txn).await?;
             let index_state_table_ids =
-                get_index_state_tables_by_table_id(TableId::new(id as _), &txn).await?;
+                get_index_state_tables_by_table_id(id.as_table_id(), &txn).await?;
             for action_with_opt in &gp.action_with_opts {
                 let action = action_with_opt.get_action()?.into();
                 privileges.push(user_privilege::ActiveModel {
@@ -255,7 +254,7 @@ impl CatalogController {
                             .iter()
                             .chain(index_state_table_ids.iter())
                             .map(|&tid| user_privilege::ActiveModel {
-                                oid: Set(tid.as_raw_id() as _),
+                                oid: Set(tid.as_object_id()),
                                 granted_by: Set(grantor),
                                 action: Set(Action::Select),
                                 with_grant_option: Set(with_grant_option),
@@ -383,9 +382,9 @@ impl CatalogController {
         let mut revoke_items = HashMap::new();
         for privilege in revoke_grant_privileges {
             let obj = extract_grant_obj_id(privilege.get_object()?);
-            let internal_table_ids = get_internal_tables_by_id(JobId::new(obj as _), &txn).await?;
+            let internal_table_ids = get_internal_tables_by_id(obj.as_job_id(), &txn).await?;
             let index_state_table_ids =
-                get_index_state_tables_by_table_id(TableId::new(obj as _), &txn).await?;
+                get_index_state_tables_by_table_id(obj.as_table_id(), &txn).await?;
             let mut include_select = false;
             let actions = privilege
                 .action_with_opts
@@ -404,7 +403,7 @@ impl CatalogController {
                     internal_table_ids
                         .iter()
                         .chain(index_state_table_ids.iter())
-                        .map(|&tid| (tid.as_raw_id() as _, vec![Action::Select])),
+                        .map(|&tid| (tid.as_object_id(), vec![Action::Select])),
                 );
             }
         }
@@ -542,9 +541,9 @@ impl CatalogController {
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
-        ensure_object_id(ObjectType::Database, database_id.as_raw_id() as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, database_id, &txn).await?;
         for schema_id in &schema_ids {
-            ensure_object_id(ObjectType::Schema, schema_id.as_raw_id() as _, &txn).await?;
+            ensure_object_id(ObjectType::Schema, *schema_id, &txn).await?;
         }
         for grantee in &grantees {
             ensure_user_id(*grantee, &txn).await?;

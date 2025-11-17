@@ -18,7 +18,8 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::id::SourceId;
 use risingwave_common::types::DataType;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::parser::SpecificParserConfig;
@@ -39,7 +40,7 @@ pub struct SourceExecutor {
     // used to create reader
     column_ids: Vec<ColumnId>,
     metrics: Arc<SourceMetrics>,
-    source_id: TableId,
+    source_id: SourceId,
     split_list: Vec<SplitImpl>,
 
     schema: Schema,
@@ -116,7 +117,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             source: source_reader,
             column_ids,
             metrics: source.context().source_metrics(),
-            source_id: TableId::new(source_node.source_id),
+            source_id: source_node.source_id,
             split_list,
             schema,
             identity: source.plan_node().get_identity().clone(),
@@ -143,9 +144,9 @@ impl SourceExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let source_ctx = Arc::new(SourceContext::new(
-            u32::MAX,
+            u32::MAX.into(),
             self.source_id,
-            u32::MAX,
+            u32::MAX.into(),
             "NA".to_owned(), // source name was not passed in batch plan
             self.metrics,
             SourceCtrlOpts {

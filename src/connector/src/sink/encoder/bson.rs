@@ -19,7 +19,7 @@ use mongodb::bson::spec::BinarySubtype;
 use mongodb::bson::{Binary, Bson, DateTime, Document};
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, JsonbVal, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -28,7 +28,7 @@ use thiserror_ext::AsReport;
 use super::{Result as SinkResult, RowEncoder, SerTo};
 use crate::sink::SinkError;
 
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
 pub struct BsonEncoder {
     schema: Schema,
@@ -125,7 +125,7 @@ fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {
             match converted {
                 Ok(v) => Bson::Decimal128(v),
                 Err(err) => {
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         tracing::warn!(
                             suppressed_count,
                             error = %err.as_report(),
@@ -152,7 +152,7 @@ fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {
             match jsonb_val.take().try_into() {
                 Ok(doc) => doc,
                 Err(err) => {
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         tracing::warn!(
                             suppressed_count,
                             error = %err.as_report(),
@@ -190,7 +190,7 @@ fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {
         }),
         // TODO(map): support map
         _ => {
-            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+            if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                 tracing::warn!(
                     suppressed_count,
                     ?field,

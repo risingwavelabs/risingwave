@@ -844,8 +844,8 @@ mod test {
     use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
     use tokio::sync::mpsc;
 
-    use crate::sink::SinkWriter;
     use crate::sink::remote::CoordinatedRemoteSinkWriter;
+    use crate::sink::writer::SinkWriter;
 
     #[tokio::test]
     async fn test_epoch_check() {

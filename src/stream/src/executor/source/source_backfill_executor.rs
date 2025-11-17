@@ -21,7 +21,8 @@ use either::Either;
 use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -90,7 +91,7 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     /// Streaming source for external
-    source_id: TableId,
+    source_id: SourceId,
     source_name: String,
     column_ids: Vec<ColumnId>,
     source_desc_builder: Option<SourceDescBuilder>,
@@ -358,7 +359,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+
+        // source backfill only applies to kafka, so we don't need to get pulsar's `message_id_data_idx`.
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };

@@ -52,6 +52,7 @@ use risingwave_common::config::{
     AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
     StreamingConfig, UdfConfig, load_config,
 };
+use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
@@ -76,7 +77,6 @@ use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
 };
@@ -1189,7 +1189,7 @@ impl SessionImpl {
             connection.owner(),
             AclMode::Usage,
             connection.name.clone(),
-            Object::ConnectionId(connection.id),
+            connection.id,
         )])?;
 
         Ok(connection.clone())
@@ -1232,7 +1232,7 @@ impl SessionImpl {
         Ok(subscription.clone())
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
+    pub fn get_table_by_id(&self, table_id: TableId) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
         Ok(catalog_reader.get_any_table_by_id(table_id)?.clone())
     }
@@ -1281,7 +1281,7 @@ impl SessionImpl {
             secret.owner(),
             AclMode::Usage,
             secret.name.clone(),
-            Object::SecretId(secret.id.secret_id()),
+            secret.id,
         )])?;
 
         Ok(secret.clone())
@@ -1942,12 +1942,12 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
 }
 
 pub struct WorkerProcessId {
-    pub worker_id: u32,
+    pub worker_id: WorkerId,
     pub process_id: i32,
 }
 
 impl WorkerProcessId {
-    pub fn new(worker_id: u32, process_id: i32) -> Self {
+    pub fn new(worker_id: WorkerId, process_id: i32) -> Self {
         Self {
             worker_id,
             process_id,
@@ -1976,7 +1976,7 @@ impl TryFrom<String> for WorkerProcessId {
         let Ok(process_id) = splits[1].parse::<i32>() else {
             return Err(INVALID.to_owned());
         };
-        Ok(WorkerProcessId::new(worker_id, process_id))
+        Ok(WorkerProcessId::new(worker_id.into(), process_id))
     }
 }
 

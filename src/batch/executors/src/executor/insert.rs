@@ -211,7 +211,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             NodeBody::Insert
         )?;
 
-        let table_id = TableId::new(insert_node.table_id);
+        let table_id = insert_node.table_id;
         let column_indices = insert_node
             .column_indices
             .iter()

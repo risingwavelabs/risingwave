@@ -31,9 +31,10 @@ use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState, WaitCheckpointTask,
+    StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::id::SourceId;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -203,10 +204,7 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
-        self.actor_ctx
-            .streaming_config
-            .developer
-            .enable_auto_schema_change
+        self.actor_ctx.config.developer.enable_auto_schema_change
     }
 
     /// `source_id | source_name | actor_id | fragment_id`
@@ -325,7 +323,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if split_changed {
             tracing::info!(
-                actor_id = self.actor_ctx.id,
+                actor_id = %self.actor_ctx.id,
                 state = ?target_state,
                 "apply split change"
             );
@@ -360,7 +358,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let core = &mut self.stream_source_core;
         tracing::error!(
             error = ?e.as_report(),
-            actor_id = self.actor_ctx.id,
+            actor_id = %self.actor_ctx.id,
             source_id = %core.source_id,
             "stream source reader error",
         );
@@ -510,7 +508,8 @@ impl<S: StateStore> SourceExecutor<S> {
         )
         .await?;
 
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        let (Some(split_idx), Some(offset_idx), pulsar_message_id_idx) =
+            get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -632,7 +631,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
-                                    actor_id = self.actor_ctx.id,
+                                    actor_id = %self.actor_ctx.id,
                                     actor_splits = ?actor_splits,
                                     "source change split received"
                                 );
@@ -737,8 +736,21 @@ impl<S: StateStore> SourceExecutor<S> {
 
                 Either::Right((chunk, latest_state)) => {
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
-                        let offset_col = chunk.column_at(offset_idx);
-                        task_builder.update_task_on_chunk(offset_col.clone());
+                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                            let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
+                            task_builder.update_task_on_chunk(
+                                source_id,
+                                &latest_state,
+                                pulsar_message_id_col.clone(),
+                            );
+                        } else {
+                            let offset_col = chunk.column_at(offset_idx);
+                            task_builder.update_task_on_chunk(
+                                source_id,
+                                &latest_state,
+                                offset_col.clone(),
+                            );
+                        }
                     }
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused.
@@ -774,9 +786,18 @@ impl<S: StateStore> SourceExecutor<S> {
                         .extend(latest_state);
 
                     let card = chunk.cardinality();
+                    if card == 0 {
+                        continue;
+                    }
                     source_output_row_count.inc_by(card as u64);
+                    let to_remove_col_indices =
+                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                            vec![split_idx, offset_idx, pulsar_message_id_idx]
+                        } else {
+                            vec![split_idx, offset_idx]
+                        };
                     let chunk =
-                        prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
+                        prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns);
                     yield Message::Chunk(chunk);
                     self.try_flush_data().await?;
                 }
@@ -785,7 +806,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // The source executor should only be stopped by the actor when finding a `Stop` mutation.
         tracing::error!(
-            actor_id = self.actor_ctx.id,
+            actor_id = %self.actor_ctx.id,
             "source executor exited unexpectedly"
         )
     }
@@ -823,13 +844,24 @@ struct WaitCheckpointTaskBuilder {
 }
 
 impl WaitCheckpointTaskBuilder {
-    fn update_task_on_chunk(&mut self, offset_col: ArrayRef) {
+    fn update_task_on_chunk(
+        &mut self,
+        source_id: SourceId,
+        latest_state: &HashMap<SplitId, SplitImpl>,
+        offset_col: ArrayRef,
+    ) {
         match &mut self.building_task {
             WaitCheckpointTask::AckPubsubMessage(_, arrays) => {
                 arrays.push(offset_col);
             }
             WaitCheckpointTask::AckNatsJetStream(_, arrays, _) => {
                 arrays.push(offset_col);
+            }
+            WaitCheckpointTask::AckPulsarMessage(arrays) => {
+                // each pulsar chunk will only contain one split
+                let split_id = latest_state.keys().next().unwrap();
+                let pulsar_ack_channel_id = build_pulsar_ack_channel_id(source_id, split_id);
+                arrays.push((pulsar_ack_channel_id, offset_col));
             }
             WaitCheckpointTask::CommitCdcOffset(_) => {}
         }
@@ -956,7 +988,8 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 #[cfg(test)]
 mod tests {
     use maplit::{btreemap, convert_args, hashmap};
-    use risingwave_common::catalog::{ColumnId, Field, TableId};
+    use risingwave_common::catalog::{ColumnId, Field};
+    use risingwave_common::id::SourceId;
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -977,7 +1010,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_source_executor() {
-        let table_id = TableId::default();
+        let source_id = 0.into();
         let schema = Schema {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
@@ -1005,7 +1038,7 @@ mod tests {
         )
         .await;
         let core = StreamSourceCore::<MemoryStateStore> {
-            source_id: table_id,
+            source_id,
             column_ids,
             source_desc_builder: Some(source_desc_builder),
             latest_split_info: HashMap::new(),
@@ -1064,7 +1097,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_split_change_mutation() {
-        let table_id = TableId::default();
+        let source_id = SourceId::new(0);
         let schema = Schema {
             fields: vec![Field::with_name(DataType::Int32, "v1")],
         };
@@ -1093,7 +1126,7 @@ mod tests {
         .await;
 
         let core = StreamSourceCore::<MemoryStateStore> {
-            source_id: table_id,
+            source_id,
             column_ids: column_ids.clone(),
             source_desc_builder: Some(source_desc_builder),
             latest_split_info: HashMap::new(),

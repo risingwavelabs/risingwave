@@ -21,7 +21,7 @@ use futures::{StreamExt, pin_mut};
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -93,9 +93,9 @@ impl Ord for PostgresOffset {
             }
             _ => {
                 // Fall back to lsn comparison when either lsn_commit or lsn_proc is missing
-                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                    LazyLock::new(LogSuppresser::default);
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(LogSuppressor::default);
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                     tracing::warn!(
                         suppressed_count,
                         self_lsn = self.lsn,
