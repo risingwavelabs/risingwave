@@ -38,6 +38,7 @@ use risingwave_sqlparser::ast::{
     CreateSourceStatement, CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption,
     SqlOptionValue, Statement, Value,
 };
+use thiserror_ext::AsReport;
 
 use super::OverwriteOptions;
 use crate::Binder;
@@ -51,6 +52,7 @@ pub mod options {
 }
 
 pub const SOURCE_REFRESH_MODE_KEY: &str = "refresh_mode";
+pub const SOURCE_REFRESH_INTERVAL_SEC_KEY: &str = "refresh_interval_sec";
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
@@ -408,17 +410,48 @@ fn resolve_secret_refs_inner(
 pub(crate) fn resolve_source_refresh_mode_in_with_option(
     with_options: &mut WithOptions,
 ) -> RwResult<Option<SourceRefreshMode>> {
+    let source_refresh_interval_sec = {
+        if let Some(maybe_int) = with_options.remove(SOURCE_REFRESH_INTERVAL_SEC_KEY) {
+            let maybe_pos_int = maybe_int.parse::<i64>();
+            let expect_err = |e: Option<String>| {
+                RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "`{}` must be a positive integer and larger than 10, but got: {}: error: {:?}",
+                    SOURCE_REFRESH_INTERVAL_SEC_KEY, maybe_int, e
+                )))
+            };
+            if let Err(e) = maybe_pos_int {
+                return Err(expect_err(Some(e.to_report_string())));
+            }
+            if let Ok(some_int) = maybe_pos_int
+                && some_int < 10
+            {
+                return Err(expect_err(None));
+            }
+            Some(maybe_pos_int.unwrap())
+        } else {
+            None
+        }
+    };
+
     let source_refresh_mode = if let Some(source_refresh_mode_str) =
         with_options.remove(SOURCE_REFRESH_MODE_KEY)
     {
         match source_refresh_mode_str.to_uppercase().as_str() {
-            "STREAMING" => SourceRefreshMode {
-                refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
-            },
+            "STREAMING" => {
+                if source_refresh_interval_sec.is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` is not allowed when `{}` is 'STREAMING'",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                    ))));
+                }
+                SourceRefreshMode {
+                    refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+                }
+            }
             "FULL_RECOMPUTE" => SourceRefreshMode {
-                refresh_mode: Some(RefreshMode::FullRecompute(
-                    SourceRefreshModeFullRecompute {},
-                )),
+                refresh_mode: Some(RefreshMode::FullRecompute(SourceRefreshModeFullRecompute {
+                    refresh_interval_sec: source_refresh_interval_sec,
+                })),
             },
             _ => {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
