@@ -461,6 +461,13 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             }
         }
     } else {
+        // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
+        if source_refresh_interval_sec.is_some() {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "`{}` is not allowed when `{}` is not 'FULL_RECOMPUTE'",
+                SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+            ))));
+        }
         return Ok(None);
     };
     Ok(Some(source_refresh_mode))

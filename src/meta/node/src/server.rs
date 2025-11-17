@@ -506,10 +506,12 @@ pub async fn start_service_as_election_leader(
         env.opts.iceberg_gc_interval_sec,
     ));
 
+    let refresh_scheduler_interval = Duration::from_secs(env.opts.refresh_scheduler_interval_sec);
     let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
         metadata_manager.clone(),
         barrier_scheduler.clone(),
         env.shared_actor_infos().clone(),
+        refresh_scheduler_interval,
     )
     .await?;
     sub_tasks.push((refresh_handle, refresh_shutdown));

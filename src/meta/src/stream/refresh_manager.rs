@@ -34,8 +34,6 @@ use crate::barrier::{BarrierScheduler, Command, SharedActorInfos};
 use crate::manager::MetadataManager;
 use crate::{MetaError, MetaResult};
 
-const REFRESH_SCHEDULER_INTERVAL: Duration = Duration::from_secs(60);
-
 pub type GlobalRefreshManagerRef = Arc<GlobalRefreshManager>;
 
 pub struct GlobalRefreshManager {
@@ -44,6 +42,7 @@ pub struct GlobalRefreshManager {
     shared_actor_infos: SharedActorInfos,
     progress_trackers: Mutex<GlobalRefreshTableProgressTracker>,
     scheduler_notify: Notify,
+    scheduler_interval: Duration,
 }
 
 impl GlobalRefreshManager {
@@ -51,6 +50,7 @@ impl GlobalRefreshManager {
         metadata_manager: MetadataManager,
         barrier_scheduler: BarrierScheduler,
         shared_actor_infos: SharedActorInfos,
+        scheduler_interval: Duration,
     ) -> MetaResult<(GlobalRefreshManagerRef, JoinHandle<()>, oneshot::Sender<()>)> {
         let manager = Arc::new(Self {
             metadata_manager: metadata_manager.clone(),
@@ -58,6 +58,7 @@ impl GlobalRefreshManager {
             shared_actor_infos,
             progress_trackers: Mutex::new(GlobalRefreshTableProgressTracker::default()),
             scheduler_notify: Notify::new(),
+            scheduler_interval,
         });
 
         manager
@@ -76,8 +77,9 @@ impl GlobalRefreshManager {
         manager: GlobalRefreshManagerRef,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) -> JoinHandle<()> {
+        let scheduler_interval = manager.scheduler_interval;
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(REFRESH_SCHEDULER_INTERVAL);
+            let mut interval = tokio::time::interval(scheduler_interval);
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
