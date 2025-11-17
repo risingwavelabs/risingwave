@@ -588,8 +588,8 @@ message View {
   repeated plan_common.Field columns = 9;
   optional uint64 initialized_at_epoch = 10;
   optional uint64 created_at_epoch = 11;
-  optional string initialized_at_cluster_version = 13;
-  optional string created_at_cluster_version = 14;
+  optional string initialized_at_cluster_version = 12;
+  optional string created_at_cluster_version = 13;
 }
 
 message Schema {
