@@ -241,9 +241,7 @@ impl IcebergCommon {
     }
 
     fn glue_region(&self) -> Option<&str> {
-        self.glue_region
-            .as_deref()
-            .or(self.region.as_deref())
+        self.glue_region.as_deref().or(self.region.as_deref())
     }
 
     pub fn catalog_name(&self) -> String {
