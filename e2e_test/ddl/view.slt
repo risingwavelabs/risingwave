@@ -1,0 +1,19 @@
+# Test created_at and initialized_at for rw_views
+statement ok
+CREATE TABLE t1 (a int, b int, c int);
+
+statement ok
+INSERT INTO t1 VALUES (115, 1, 8), (585, 2, 3), (601, 3, 7);
+
+statement ok
+CREATE VIEW IF NOT EXISTS v1 (a1, b1) AS SELECT a, b FROM t1;
+
+query ok
+SELECT created_at, initialized_at, created_at_cluster_version, initialized_at_cluster_version
+FROM rw_views
+WHERE
+  created_at >= now() - interval '10' minute AND
+  initialized_at >= now() - interval '10' minute AND
+  created_at_cluster_version = (SELECT version()) AND
+  initialized_at_cluster_version = (SELECT version());
+----
