@@ -64,7 +64,6 @@ use sea_orm::{
     QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
@@ -1329,7 +1328,7 @@ impl CatalogController {
         )
         .await?;
 
-        debug!(?database_fragment_infos, "reload all actors");
+        tracing::trace!(?database_fragment_infos, "reload all actors");
 
         Ok(database_fragment_infos)
     }
