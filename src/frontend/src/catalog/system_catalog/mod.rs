@@ -187,6 +187,10 @@ impl From<&BuiltinView> for ViewCatalog {
             sql: val.sql.clone(),
             owner: DEFAULT_SUPER_USER_ID,
             properties: Default::default(),
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
         }
     }
 }

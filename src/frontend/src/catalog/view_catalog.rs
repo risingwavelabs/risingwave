@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Field, SYS_CATALOG_START_ID};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbView;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
@@ -32,6 +33,10 @@ pub struct ViewCatalog {
     pub properties: WithOptions,
     pub sql: String,
     pub columns: Vec<Field>,
+    pub created_at_epoch: Option<Epoch>,
+    pub initialized_at_epoch: Option<Epoch>,
+    pub created_at_cluster_version: Option<String>,
+    pub initialized_at_cluster_version: Option<String>,
 }
 
 impl From<&PbView> for ViewCatalog {
@@ -45,6 +50,10 @@ impl From<&PbView> for ViewCatalog {
             properties: WithOptions::new_with_options(view.properties.clone()),
             sql: view.sql.clone(),
             columns: view.columns.iter().map(|f| f.into()).collect(),
+            created_at_epoch: view.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: view.initialized_at_epoch.map(Epoch::from),
+            created_at_cluster_version: view.created_at_cluster_version.clone(),
+            initialized_at_cluster_version: view.initialized_at_cluster_version.clone(),
         }
     }
 }
