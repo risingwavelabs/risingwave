@@ -28,9 +28,6 @@ anchors:
           id: maven
           key: >-
             v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java' }}-{{ checksum 'e2e_test/udf/remote_java' }}
-          restore-keys:
-            - "v1-cache-maven-{{ runner.os }}-"
-            - "v1-cache-maven-"
           backend: s3
           s3:
             bucket: rw-ci-cache-bucket
