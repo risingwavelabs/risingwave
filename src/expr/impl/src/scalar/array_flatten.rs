@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListRef, ListValue};
+use risingwave_common::array::ListRef;
 use risingwave_expr::expr::Context;
 use risingwave_expr::{ExprError, Result, function};
 
@@ -64,7 +64,11 @@ use risingwave_expr::{ExprError, Result, function};
 /// NULL
 /// ```
 #[function("array_flatten(anyarray) -> anyarray")]
-fn array_flatten(array: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
+fn array_flatten(
+    array: ListRef<'_>,
+    ctx: &Context,
+    writer: &mut impl risingwave_common::array::ListWrite,
+) -> Result<()> {
     // The elements of the array must be arrays themselves
     let outer_type = &ctx.arg_types[0];
     let inner_type = if outer_type.is_array() {
@@ -81,16 +85,14 @@ fn array_flatten(array: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
             reason: Box::from("expected the argument to be an array of arrays"),
         });
     }
-    let inner_elem_type = inner_type.as_list_elem();
 
-    // Collect all inner array elements and flatten them into a single array
-    Ok(ListValue::from_datum_iter(
-        inner_elem_type,
+    writer.write_iter(
         array
             .iter()
             // Filter out NULL inner arrays
             .flatten()
             // Flatten all inner arrays
             .flat_map(|inner_array| inner_array.into_list().iter()),
-    ))
+    );
+    Ok(())
 }

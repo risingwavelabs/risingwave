@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use auto_enums::auto_enum;
-use risingwave_common::array::{ListValue, Utf8Array};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::function;
 
 #[auto_enum(Iterator)]
@@ -34,19 +34,29 @@ fn string_to_array_inner<'a>(s: &'a str, sep: Option<&'a str>) -> impl Iterator<
 
 // Use cases shown in `e2e_test/batch/functions/string_to_array.slt.part`
 #[function("string_to_array(varchar, varchar) -> varchar[]")]
-pub fn string_to_array2(s: &str, sep: Option<&str>) -> ListValue {
-    ListValue::new(string_to_array_inner(s, sep).collect::<Utf8Array>().into())
+pub fn string_to_array2(
+    s: &str,
+    sep: Option<&str>,
+    writer: &mut impl risingwave_common::array::ListWrite,
+) {
+    writer.write_iter(string_to_array_inner(s, sep).map(|s| Some(ScalarRefImpl::Utf8(s))));
 }
 
 #[function("string_to_array(varchar, varchar, varchar) -> varchar[]")]
-pub fn string_to_array3(s: &str, sep: Option<&str>, null: Option<&str>) -> ListValue {
-    let Some(null) = null else {
-        return string_to_array2(s, sep);
-    };
-    ListValue::new(
-        string_to_array_inner(s, sep)
-            .map(|x| if x == null { None } else { Some(x) })
-            .collect::<Utf8Array>()
-            .into(),
-    )
+pub fn string_to_array3(
+    s: &str,
+    sep: Option<&str>,
+    null: Option<&str>,
+    writer: &mut impl risingwave_common::array::ListWrite,
+) {
+    match null {
+        Some(null) => {
+            let iter = string_to_array_inner(s, sep)
+                .map(|x| (x != null).then_some(ScalarRefImpl::Utf8(x)));
+            writer.write_iter(iter);
+        }
+        None => {
+            string_to_array2(s, sep, writer);
+        }
+    }
 }

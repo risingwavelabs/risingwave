@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, JsonbRef, ListValue, ScalarRefImpl};
+use risingwave_common::types::{JsonbRef, ScalarRefImpl};
 use risingwave_expr::{ExprError, Result, function};
 
 /// Extracts JSON object field with the given key.
@@ -255,7 +255,10 @@ pub fn jsonb_extract_path_text(
 /// select jsonb_to_array('{"a": 1}');
 /// ```
 #[function("jsonb_to_array(jsonb) -> jsonb[]")]
-fn jsonb_to_array(v: JsonbRef<'_>) -> Result<ListValue> {
+fn jsonb_to_array(
+    v: JsonbRef<'_>,
+    writer: &mut impl risingwave_common::array::ListWrite,
+) -> Result<()> {
     let iter = v
         .array_elements()
         .map_err(|e| ExprError::InvalidParam {
@@ -263,5 +266,6 @@ fn jsonb_to_array(v: JsonbRef<'_>) -> Result<ListValue> {
             reason: e.into(),
         })?
         .map(|elem| Some(ScalarRefImpl::Jsonb(elem)));
-    Ok(ListValue::from_datum_iter(&DataType::Jsonb, iter))
+    writer.write_iter(iter);
+    Ok(())
 }

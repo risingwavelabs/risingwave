@@ -28,7 +28,7 @@ use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
 use risingwave_expr::aggregate::{AggCall, PbAggKind, build_append_only};
 use risingwave_expr::expr::*;
-use risingwave_expr::sig::FUNCTION_REGISTRY;
+use risingwave_expr::sig::{FUNCTION_REGISTRY, SigDataType};
 use risingwave_pb::expr::expr_node::PbType;
 use thiserror_ext::AsReport;
 
@@ -40,208 +40,213 @@ const CHUNK_SIZE: usize = 1024;
 fn bench_expr(c: &mut Criterion) {
     use itertools::Itertools;
 
-    let input = StreamChunk::from(DataChunk::new(
-        vec![
-            BoolArray::from_iter((1..=CHUNK_SIZE).map(|i| i % 2 == 0)).into_ref(),
-            I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
-            I32Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
-            I64Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
-            F32Array::from_iter((1..=CHUNK_SIZE).map(|i| i as f32)).into_ref(),
-            F64Array::from_iter((1..=CHUNK_SIZE).map(|i| i as f64)).into_ref(),
-            DecimalArray::from_iter((1..=CHUNK_SIZE).map(Decimal::from)).into_ref(),
-            DateArray::from_iter((1..=CHUNK_SIZE).map(|_| Date::default())).into_ref(),
-            TimeArray::from_iter((1..=CHUNK_SIZE).map(|_| Time::default())).into_ref(),
-            TimestampArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamp::default())).into_ref(),
-            TimestamptzArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamptz::default()))
-                .into_ref(),
-            IntervalArray::from_iter((1..=CHUNK_SIZE).map(|i| Interval::from_days(i as _)))
-                .into_ref(),
-            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into_ref(),
-            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some))
-                .into_bytes_array()
-                .into_ref(),
-            // special varchar arrays
-            // 14: timezone
-            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(|_| Some("Australia/Sydney")))
-                .into_ref(),
-            // 15: time field
-            Utf8Array::from_iter_display(
-                [
-                    "microseconds",
-                    "milliseconds",
-                    "second",
-                    "minute",
-                    "hour",
-                    "day",
-                    // "week",
-                    "month",
-                    "quarter",
-                    "year",
-                    "decade",
-                    "century",
-                    "millennium",
-                ]
+    let columns = vec![
+        BoolArray::from_iter((1..=CHUNK_SIZE).map(|i| i % 2 == 0)).into_ref(),
+        I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
+        I32Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
+        I64Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
+        F32Array::from_iter((1..=CHUNK_SIZE).map(|i| i as f32)).into_ref(),
+        F64Array::from_iter((1..=CHUNK_SIZE).map(|i| i as f64)).into_ref(),
+        DecimalArray::from_iter((1..=CHUNK_SIZE).map(Decimal::from)).into_ref(),
+        DateArray::from_iter((1..=CHUNK_SIZE).map(|_| Date::default())).into_ref(),
+        TimeArray::from_iter((1..=CHUNK_SIZE).map(|_| Time::default())).into_ref(),
+        TimestampArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamp::default())).into_ref(),
+        TimestamptzArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamptz::default())).into_ref(),
+        IntervalArray::from_iter((1..=CHUNK_SIZE).map(|i| Interval::from_days(i as _))).into_ref(),
+        Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into_ref(),
+        Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some))
+            .into_bytes_array()
+            .into_ref(),
+        // special varchar arrays
+        // 14: timezone
+        Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(|_| Some("Australia/Sydney"))).into_ref(),
+        // 15: time field
+        Utf8Array::from_iter_display(
+            [
+                "microseconds",
+                "milliseconds",
+                "second",
+                "minute",
+                "hour",
+                "day",
+                // "week",
+                "month",
+                "quarter",
+                "year",
+                "decade",
+                "century",
+                "millennium",
+            ]
+            .into_iter()
+            .cycle()
+            .take(CHUNK_SIZE)
+            .map(Some),
+        )
+        .into_ref(),
+        // 16: extract field for date
+        Utf8Array::from_iter_display(
+            [
+                "DAY",
+                "MONTH",
+                "YEAR",
+                "DOW",
+                "DOY",
+                "MILLENNIUM",
+                "CENTURY",
+                "DECADE",
+                "ISOYEAR",
+                "QUARTER",
+                "WEEK",
+                "ISODOW",
+                "EPOCH",
+                "JULIAN",
+            ]
+            .into_iter()
+            .cycle()
+            .take(CHUNK_SIZE)
+            .map(Some),
+        )
+        .into_ref(),
+        // 17: extract field for time
+        Utf8Array::from_iter_display(
+            [
+                "Hour",
+                "Minute",
+                "Second",
+                "Millisecond",
+                "Microsecond",
+                "Epoch",
+            ]
+            .into_iter()
+            .cycle()
+            .take(CHUNK_SIZE)
+            .map(Some),
+        )
+        .into_ref(),
+        // 18: extract field for timestamptz
+        Utf8Array::from_iter_display(["EPOCH"].into_iter().cycle().take(CHUNK_SIZE).map(Some))
+            .into_ref(),
+        // 19: boolean string
+        Utf8Array::from_iter_display([Some(true)].into_iter().cycle().take(CHUNK_SIZE)).into_ref(),
+        // 20: date string
+        Utf8Array::from_iter_display([Some(Date::default())].into_iter().cycle().take(CHUNK_SIZE))
+            .into_ref(),
+        // 21: time string
+        Utf8Array::from_iter_display([Some(Time::default())].into_iter().cycle().take(CHUNK_SIZE))
+            .into_ref(),
+        // 22: timestamp string
+        Utf8Array::from_iter_display(
+            [Some(Timestamp::default())]
                 .into_iter()
                 .cycle()
-                .take(CHUNK_SIZE)
-                .map(Some),
-            )
-            .into_ref(),
-            // 16: extract field for date
-            Utf8Array::from_iter_display(
-                [
-                    "DAY",
-                    "MONTH",
-                    "YEAR",
-                    "DOW",
-                    "DOY",
-                    "MILLENNIUM",
-                    "CENTURY",
-                    "DECADE",
-                    "ISOYEAR",
-                    "QUARTER",
-                    "WEEK",
-                    "ISODOW",
-                    "EPOCH",
-                    "JULIAN",
-                ]
+                .take(CHUNK_SIZE),
+        )
+        .into_ref(),
+        // 23: timestamptz string
+        Utf8Array::from_iter_display(
+            [Some("2021-04-01 00:00:00+00:00")]
                 .into_iter()
                 .cycle()
-                .take(CHUNK_SIZE)
-                .map(Some),
-            )
-            .into_ref(),
-            // 17: extract field for time
-            Utf8Array::from_iter_display(
-                [
-                    "Hour",
-                    "Minute",
-                    "Second",
-                    "Millisecond",
-                    "Microsecond",
-                    "Epoch",
-                ]
+                .take(CHUNK_SIZE),
+        )
+        .into_ref(),
+        // 24: interval string
+        Utf8Array::from_iter_display(
+            [Some(Interval::default())]
                 .into_iter()
                 .cycle()
-                .take(CHUNK_SIZE)
-                .map(Some),
-            )
-            .into_ref(),
-            // 18: extract field for timestamptz
-            Utf8Array::from_iter_display(["EPOCH"].into_iter().cycle().take(CHUNK_SIZE).map(Some))
-                .into_ref(),
-            // 19: boolean string
-            Utf8Array::from_iter_display([Some(true)].into_iter().cycle().take(CHUNK_SIZE))
-                .into_ref(),
-            // 20: date string
-            Utf8Array::from_iter_display(
-                [Some(Date::default())].into_iter().cycle().take(CHUNK_SIZE),
-            )
-            .into_ref(),
-            // 21: time string
-            Utf8Array::from_iter_display(
-                [Some(Time::default())].into_iter().cycle().take(CHUNK_SIZE),
-            )
-            .into_ref(),
-            // 22: timestamp string
-            Utf8Array::from_iter_display(
-                [Some(Timestamp::default())]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE),
-            )
-            .into_ref(),
-            // 23: timestamptz string
-            Utf8Array::from_iter_display(
-                [Some("2021-04-01 00:00:00+00:00")]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE),
-            )
-            .into_ref(),
-            // 24: interval string
-            Utf8Array::from_iter_display(
-                [Some(Interval::default())]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE),
-            )
-            .into_ref(),
-            // 25: serial array
-            SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
-            // 26: jsonb array
-            JsonbArray::from_iter((1..=CHUNK_SIZE).map(|i| JsonbVal::from(i as f64))).into_ref(),
-            // 27: int256 array
-            Int256Array::from_iter((1..=CHUNK_SIZE).map(|_| Int256::from(1))).into_ref(),
-            // 28: extract field for interval
-            Utf8Array::from_iter_display(
-                [
-                    "Millennium",
-                    "Century",
-                    "Decade",
-                    "Year",
-                    "Month",
-                    "Day",
-                    "Hour",
-                    "Minute",
-                    "Second",
-                    "Millisecond",
-                    "Microsecond",
-                    "Epoch",
-                ]
+                .take(CHUNK_SIZE),
+        )
+        .into_ref(),
+        // 25: serial array
+        SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
+        // 26: jsonb array
+        JsonbArray::from_iter((1..=CHUNK_SIZE).map(|i| JsonbVal::from(i as f64))).into_ref(),
+        // 27: int256 array
+        Int256Array::from_iter((1..=CHUNK_SIZE).map(|_| Int256::from(1))).into_ref(),
+        // 28: extract field for interval
+        Utf8Array::from_iter_display(
+            [
+                "Millennium",
+                "Century",
+                "Decade",
+                "Year",
+                "Month",
+                "Day",
+                "Hour",
+                "Minute",
+                "Second",
+                "Millisecond",
+                "Microsecond",
+                "Epoch",
+            ]
+            .into_iter()
+            .cycle()
+            .take(CHUNK_SIZE)
+            .map(Some),
+        )
+        .into_ref(),
+        // 29: timestamp string for to_timestamp
+        Utf8Array::from_iter_display(
+            [Some("2021/04/01 00:00:00")]
                 .into_iter()
                 .cycle()
-                .take(CHUNK_SIZE)
-                .map(Some),
-            )
+                .take(CHUNK_SIZE),
+        )
+        .into_ref(),
+        // 30: position sub
+        Utf8Array::from_iter_display(
+            // One success, one fail
+            [Some("hawaii"), Some("datum")]
+                .into_iter()
+                .cycle()
+                .take(CHUNK_SIZE),
+        )
+        .into_ref(),
+        // 31: position target
+        Utf8Array::from_iter_display(
+            [Some("hello, hawaii guitar"), Some("Here are some data")]
+                .into_iter()
+                .cycle()
+                .take(CHUNK_SIZE),
+        )
+        .into_ref(),
+        // int32[]
+        ListArray::from_iter((1..=CHUNK_SIZE).map(|_| Some((1..=CHUNK_SIZE).map(|_| 1i32))))
             .into_ref(),
-            // 29: timestamp string for to_timestamp
-            Utf8Array::from_iter_display(
-                [Some("2021/04/01 00:00:00")]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE),
-            )
-            .into_ref(),
-            // 30: position sub
-            Utf8Array::from_iter_display(
-                // One success, one fail
-                [Some("hawaii"), Some("datum")]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE),
-            )
-            .into_ref(),
-            // 31: position target
-            Utf8Array::from_iter_display(
-                [Some("hello, hawaii guitar"), Some("Here are some data")]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE),
-            )
-            .into_ref(),
-        ],
-        CHUNK_SIZE,
-    ));
-    let input_refs = [
-        InputRefExpression::new(DataType::Boolean, 0),
-        InputRefExpression::new(DataType::Int16, 1),
-        InputRefExpression::new(DataType::Int32, 2),
-        InputRefExpression::new(DataType::Int64, 3),
-        InputRefExpression::new(DataType::Serial, 25),
-        InputRefExpression::new(DataType::Float32, 4),
-        InputRefExpression::new(DataType::Float64, 5),
-        InputRefExpression::new(DataType::Decimal, 6),
-        InputRefExpression::new(DataType::Date, 7),
-        InputRefExpression::new(DataType::Time, 8),
-        InputRefExpression::new(DataType::Timestamp, 9),
-        InputRefExpression::new(DataType::Timestamptz, 10),
-        InputRefExpression::new(DataType::Interval, 11),
-        InputRefExpression::new(DataType::Varchar, 12),
-        InputRefExpression::new(DataType::Bytea, 13),
-        InputRefExpression::new(DataType::Jsonb, 26),
-        InputRefExpression::new(DataType::Int256, 27),
+        // float32[]
+        ListArray::from_iter(
+            (1..=CHUNK_SIZE).map(|_| Some((1..=CHUNK_SIZE).map(|_| F32::from(1f32)))),
+        )
+        .into_ref(),
+        // varchar[]
+        {
+            let string_array =
+                ListValue::new(Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into());
+            ListArray::from_iter((1..=CHUNK_SIZE).map(|_| string_array.clone())).into_ref()
+        },
+        // bytea[]
+        {
+            let bytes_array = ListValue::new(
+                Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some))
+                    .into_bytes_array()
+                    .into(),
+            );
+            ListArray::from_iter((1..=CHUNK_SIZE).map(|_| bytes_array.clone())).into_ref()
+        },
     ];
+    let concrete_array_type = [
+        DataType::Int32,
+        DataType::Float32,
+        DataType::Varchar,
+        DataType::Bytea,
+    ];
+    let input_refs = columns
+        .iter()
+        .enumerate()
+        .map(|(idx, array)| InputRefExpression::new(array.data_type(), idx))
+        .collect_vec();
+    let input = StreamChunk::from(DataChunk::new(columns, CHUNK_SIZE));
     let input_index_for_type = |ty: &DataType| {
         input_refs
             .iter()
@@ -289,26 +294,91 @@ fn bench_expr(c: &mut Criterion) {
             .iter(|| extract.eval(&input))
     });
 
-    let sigs = FUNCTION_REGISTRY
+    let mut sigs = FUNCTION_REGISTRY
         .iter_scalars()
-        .sorted_by_cached_key(|sig| format!("{sig:?}"));
-    'sig: for sig in sigs {
-        if (sig.inputs_type.iter())
-            .chain([&sig.ret_type])
-            .any(|t| !t.is_exact() || t.as_exact().is_array())
-        {
-            // TODO: support struct and array
+        .sorted_by_cached_key(|sig| format!("{sig:?}"))
+        .cloned()
+        .rev()
+        .collect::<Vec<_>>();
+    'sig: while let Some(sig) = sigs.pop() {
+        if sig.deprecated {
+            println!("ignore deprecated: {sig:?}");
+            continue;
+        }
+        let mut unsupported = sig.inputs_type.iter().any(|t| match t {
+            SigDataType::Exact(ty) => {
+                ty.is_array()
+                    && concrete_array_type
+                        .iter()
+                        .all(|cty| cty != ty.as_list_elem())
+            }
+            SigDataType::Any | SigDataType::AnyArray => false,
+            _ => true,
+        });
+        unsupported = unsupported
+            || !matches!(
+                &sig.ret_type,
+                SigDataType::Exact(_) | SigDataType::Any | SigDataType::AnyArray
+            );
+        if unsupported {
             println!("todo: {sig:?}");
             continue;
         }
+
         if [
             "date_trunc(character varying, timestamp with time zone) -> timestamp with time zone",
             "char_to_timestamptz(character varying, character varying) -> timestamp with time zone",
             "to_char(timestamp with time zone, character varying) -> character varying",
+            "vnode_user(...) -> smallint", // cannot accpect empty input
+            "openai_embedding(jsonb, character varying) -> real[]", // missing config
+            "cast(anyarray) -> anyarray",
+            "iceberg_transform(character varying, any) -> any",
         ]
         .contains(&format!("{sig:?}").as_str())
         {
             println!("ignore: {sig:?}");
+            continue;
+        }
+
+        if (sig.inputs_type.iter()).any(|t| matches!(t, SigDataType::Any | SigDataType::AnyArray)) {
+            // replace any/anyarray with concrete types for benching
+            for ty in concrete_array_type.iter().rev() {
+                let mut concrete_sig = sig.clone();
+                for arg in &mut concrete_sig.inputs_type {
+                    match arg {
+                        SigDataType::Any => {
+                            *arg = SigDataType::Exact(ty.clone());
+                        }
+                        SigDataType::AnyArray => {
+                            *arg = SigDataType::Exact(DataType::List(ListType::new(ty.clone())));
+                        }
+                        _ => {}
+                    }
+                }
+                let infer_args = concrete_sig
+                    .inputs_type
+                    .iter()
+                    .map(|ty| ty.as_exact())
+                    .cloned()
+                    .collect_vec();
+                match (concrete_sig.type_infer)(&infer_args) {
+                    Ok(ret) => {
+                        concrete_sig.ret_type = SigDataType::Exact(ret);
+                    }
+                    Err(e) => {
+                        println!(
+                            "error inferring type for {concrete_sig:?}: {}",
+                            e.as_report()
+                        );
+                        continue;
+                    }
+                }
+                sigs.push(concrete_sig);
+            }
+            continue;
+        }
+        if !sig.ret_type.is_exact() {
+            println!("todo: {sig:?}");
             continue;
         }
 
@@ -394,6 +464,14 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {sig:?}");
             continue;
         }
+
+        if [
+            "approx_percentile(double precision) -> double precision"  // cannot accept empty AggCall.direct_args
+        ].contains(&format!("{sig:?}").as_str()) {
+            println!("ignore: {sig:?}");
+            continue;
+        }
+
         let agg = match build_append_only(&AggCall {
             agg_type: sig.name.as_aggregate().into(),
             args: sig

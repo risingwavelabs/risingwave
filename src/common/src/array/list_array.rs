@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display};
 use std::future::Future;
-use std::mem::size_of;
+use std::mem::{ManuallyDrop, size_of};
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
@@ -142,6 +142,10 @@ impl ListArrayBuilder {
         for v in row.iter() {
             self.value.append(v);
         }
+    }
+
+    pub fn writer(&mut self) -> ListWriter<'_> {
+        ListWriter::new(self)
     }
 }
 
@@ -954,6 +958,70 @@ impl ListValue {
         let array = parser.parse_array()?;
         parser.expect_end()?;
         Ok(array)
+    }
+}
+
+pub struct ListWriter<'a> {
+    builder: &'a mut ListArrayBuilder,
+}
+
+impl<'a> ListWriter<'a> {
+    pub fn new(builder: &'a mut ListArrayBuilder) -> Self {
+        Self { builder }
+    }
+
+    /// `finish` will be called when the entire record is successfully written.
+    /// The partial data was committed and the `builder` can no longer be used.
+    pub fn finish(self) {
+        self.builder.offsets.push(
+            self.builder
+                .value
+                .len()
+                .try_into()
+                .expect("offset overflow"),
+        );
+        self.builder.bitmap.append(true);
+        let _ = ManuallyDrop::new(self); // prevent drop
+    }
+
+    /// `rollback` will be called while the entire record is abandoned.
+    /// The partial data was cleaned and the `builder` can be safely used.
+    pub fn rollback(self) {
+        // just drop self, the drop impl will rollback the partial data
+    }
+}
+
+impl Drop for ListWriter<'_> {
+    /// If the writer is dropped without calling `finish` or `rollback`,
+    /// we rollback the partial data by default.
+    fn drop(&mut self) {
+        let last = *self.builder.offsets.last().unwrap() as usize;
+        let cur = self.builder.value.len();
+        for _ in last..cur {
+            self.builder.value.pop().unwrap();
+        }
+    }
+}
+
+pub trait ListWrite {
+    fn write(&mut self, value: impl ToDatumRef);
+
+    fn write_iter(&mut self, values: impl IntoIterator<Item = impl ToDatumRef>) {
+        for v in values {
+            self.write(v);
+        }
+    }
+}
+
+impl<'a> ListWrite for ListWriter<'a> {
+    fn write(&mut self, value: impl ToDatumRef) {
+        self.builder.value.append(value);
+    }
+}
+
+impl ListWrite for ArrayBuilderImpl {
+    fn write(&mut self, value: impl ToDatumRef) {
+        self.append(value);
     }
 }
 

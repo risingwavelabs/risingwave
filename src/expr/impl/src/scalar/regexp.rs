@@ -17,7 +17,7 @@
 use std::str::FromStr;
 
 use fancy_regex::{Regex, RegexBuilder};
-use risingwave_common::array::{ArrayBuilder, ListValue, Utf8Array, Utf8ArrayBuilder};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::{ExprError, Result, bail, function};
 use thiserror_ext::AsReport;
 
@@ -153,17 +153,21 @@ fn regexp_eq(text: &str, regex: &RegexpContext) -> bool {
     "regexp_match(varchar, varchar, varchar) -> varchar[]",
     prebuild = "RegexpContext::from_pattern_flags($1, $2)?"
 )]
-fn regexp_match(text: &str, regex: &RegexpContext) -> Option<ListValue> {
+fn regexp_match(
+    text: &str,
+    regex: &RegexpContext,
+    writer: &mut impl risingwave_common::array::ListWrite,
+) -> Option<()> {
     // If there are multiple captures, then the first one is the whole match, and should be
     // ignored in PostgreSQL's behavior.
     let skip_first = regex.regex.captures_len() > 1;
     let capture = regex.regex.captures(text).unwrap()?;
-    let list = capture
+    let iter = capture
         .iter()
         .skip(if skip_first { 1 } else { 0 })
-        .map(|mat| mat.map(|m| m.as_str()))
-        .collect::<Utf8Array>();
-    Some(ListValue::new(list.into()))
+        .map(|mat| mat.map(|m| ScalarRefImpl::Utf8(m.as_str())));
+    writer.write_iter(iter);
+    Some(())
 }
 
 #[function(
@@ -459,10 +463,13 @@ fn regexp_replace(
     "regexp_split_to_array(varchar, varchar, varchar) -> varchar[]",
     prebuild = "RegexpContext::from_pattern_flags($1, $2)?"
 )]
-fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue> {
+fn regexp_split_to_array(
+    text: &str,
+    regex: &RegexpContext,
+    writer: &mut impl risingwave_common::array::ListWrite,
+) -> Option<()> {
     let n = text.len();
     let mut start = 0;
-    let mut builder = Utf8ArrayBuilder::new(0);
     let mut empty_flag = false;
 
     loop {
@@ -492,7 +499,7 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
                 start = begin;
                 break;
             }
-            builder.append(Some(&text[start..begin + 1]));
+            writer.write(Some(ScalarRefImpl::Utf8(&text[start..begin + 1])));
             start = end + 1;
             continue;
         }
@@ -502,7 +509,7 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
             if !empty_flag {
                 // We'll push an empty string to conform with postgres
                 // If there does not exists a empty match before
-                builder.append(Some(""));
+                writer.write(Some(ScalarRefImpl::Utf8("")));
             }
             start = end;
             continue;
@@ -510,7 +517,7 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
 
         if begin != 0 {
             // Normal case
-            builder.append(Some(&text[start..begin]));
+            writer.write(Some(ScalarRefImpl::Utf8(&text[start..begin])));
         }
 
         // We should update the `start` no matter `begin` is zero or not
@@ -521,12 +528,12 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
         // Push the extra text to the list
         // Note that this will implicitly push the entire text to the list
         // If there is no match, which is the expected behavior
-        builder.append(Some(&text[start..]));
+        writer.write(Some(ScalarRefImpl::Utf8(&text[start..])));
     }
 
     if start == n && !empty_flag {
-        builder.append(Some(""));
+        writer.write(Some(ScalarRefImpl::Utf8("")));
     }
 
-    Some(ListValue::new(builder.finish().into()))
+    Some(())
 }

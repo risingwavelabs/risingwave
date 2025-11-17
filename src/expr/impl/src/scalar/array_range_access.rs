@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListRef, ListValue};
+use risingwave_common::array::ListRef;
 use risingwave_expr::function;
 
 /// If the case is `array[1,2,3][:2]`, then start will be 0 set by the frontend
 /// If the case is `array[1,2,3][1:]`, then end will be `i32::MAX` set by the frontend
 #[function("array_range_access(anyarray, int4, int4) -> anyarray")]
-pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Option<ListValue> {
-    let list_all_values = list.iter();
+pub fn array_range_access(
+    list: ListRef<'_>,
+    start: i32,
+    end: i32,
+    writer: &mut impl risingwave_common::array::ListWrite,
+) {
     let start = std::cmp::max(start, 1) as usize;
-    let end = std::cmp::min(std::cmp::max(0, end), list_all_values.len() as i32) as usize;
-    if start > end {
-        return Some(ListValue::empty(&list.elem_type()));
+    let end = std::cmp::min(std::cmp::max(0, end), list.len() as i32) as usize;
+    if start <= end {
+        writer.write_iter(list.iter().take(end).skip(start - 1));
     }
-    Some(ListValue::from_datum_iter(
-        &list.elem_type(),
-        list_all_values.take(end).skip(start - 1),
-    ))
 }
