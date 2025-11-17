@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::PbSource;
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -89,9 +88,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<PbSource> for ActiveModel {
     fn from(source: PbSource) -> Self {
-        let optional_associated_table_id = source.optional_associated_table_id.map(|x| match x {
-            OptionalAssociatedTableId::AssociatedTableId(id) => id.into(),
-        });
+        let optional_associated_table_id = source.optional_associated_table_id.map(Into::into);
         Self {
             source_id: Set(source.id),
             name: Set(source.name),
@@ -103,7 +100,7 @@ impl From<PbSource> for ActiveModel {
             source_info: Set(source.info.as_ref().map(StreamSourceInfo::from)),
             watermark_descs: Set(WatermarkDescArray::from(source.watermark_descs)),
             optional_associated_table_id: Set(optional_associated_table_id),
-            connection_id: Set(source.connection_id.map(|id| id as _)),
+            connection_id: Set(source.connection_id),
             version: Set(source.version as _),
             secret_ref: Set(Some(SecretRef::from(source.secret_refs))),
             rate_limit: Set(source.rate_limit.map(|id| id as _)),

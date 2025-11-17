@@ -70,7 +70,7 @@ use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
     FragmentId, FragmentReplaceUpstream, StreamActorWithDispatchers, StreamJobActorsToCreate,
-    StreamJobFragments, StreamJobFragmentsToCreate,
+    StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
@@ -374,7 +374,7 @@ pub enum Command {
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
     /// materialize executor to start storing old value for subscription.
     CreateSubscription {
-        subscription_id: u32,
+        subscription_id: SubscriptionId,
         upstream_mv_table_id: TableId,
         retention_second: u64,
     },
@@ -383,7 +383,7 @@ pub enum Command {
     /// materialize executor to stop storing old value when there is no
     /// subscription depending on it.
     DropSubscription {
-        subscription_id: u32,
+        subscription_id: SubscriptionId,
         upstream_mv_table_id: TableId,
     },
 
@@ -1287,7 +1287,7 @@ impl Command {
                 pause: false,
                 subscriptions_to_add: vec![SubscriptionUpstreamInfo {
                     upstream_mv_table_id: *upstream_mv_table_id,
-                    subscriber_id: *subscription_id,
+                    subscriber_id: subscription_id.as_raw_id(),
                 }],
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: Default::default(),
@@ -1298,7 +1298,7 @@ impl Command {
                 subscription_id,
             } => Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
                 info: vec![SubscriptionUpstreamInfo {
-                    subscriber_id: *subscription_id,
+                    subscriber_id: subscription_id.as_raw_id(),
                     upstream_mv_table_id: *upstream_mv_table_id,
                 }],
             })),
@@ -1306,7 +1306,7 @@ impl Command {
                 let mut connector_props_infos = HashMap::default();
                 for (k, v) in config {
                     connector_props_infos.insert(
-                        *k,
+                        k.as_raw_id(),
                         ConnectorPropsInfo {
                             connector_props_info: v.clone(),
                         },

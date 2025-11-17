@@ -146,7 +146,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             let database_id = self
                 .metadata_manager
                 .catalog_controller
-                .get_object_database_id(associated_source_id.as_raw_id() as _)
+                .get_object_database_id(associated_source_id)
                 .await
                 .context("Failed to get database id for table")?;
 
@@ -198,7 +198,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             let database_id = self
                 .metadata_manager
                 .catalog_controller
-                .get_object_database_id(associated_source_id.as_raw_id() as _)
+                .get_object_database_id(associated_source_id)
                 .await
                 .context("Failed to get database id for table")?;
 
@@ -300,7 +300,7 @@ impl CommandContext {
                     .apply_source_change(SourceChange::UpdateSourceProps {
                         source_id_map_new_props: obj_id_map_props
                             .iter()
-                            .map(|(&source_id, props)| (source_id.into(), props.clone()))
+                            .map(|(source_id, props)| (source_id.as_source_id(), props.clone()))
                             .collect(),
                     })
                     .await;

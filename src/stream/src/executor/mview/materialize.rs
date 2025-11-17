@@ -35,7 +35,8 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::catalog::table::{Engine, OptionalAssociatedSourceId};
+use risingwave_pb::catalog::table::Engine;
+use risingwave_pb::id::SourceId;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
@@ -774,15 +775,15 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 associated_source_id: load_finish_source_id,
                             }) => {
                                 // Get associated source id from table catalog
-                                let associated_source_id = match refresh_args
+                                let associated_source_id: SourceId = match refresh_args
                                     .table_catalog
                                     .optional_associated_source_id
                                 {
-                                    Some(OptionalAssociatedSourceId::AssociatedSourceId(id)) => id,
+                                    Some(id) => id.into(),
                                     None => unreachable!("associated_source_id is not set"),
                                 };
 
-                                if load_finish_source_id.as_raw_id() == associated_source_id {
+                                if *load_finish_source_id == associated_source_id {
                                     tracing::info!(
                                         %load_finish_source_id,
                                         "LoadFinish received, starting data replacement"

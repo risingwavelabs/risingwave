@@ -135,7 +135,7 @@ impl StreamingJobId {
     fn id(&self) -> JobId {
         match self {
             StreamingJobId::MaterializedView(id) | StreamingJobId::Table(_, id) => id.as_job_id(),
-            StreamingJobId::Index(id) => (*id as u32).into(),
+            StreamingJobId::Index(id) => id.as_job_id(),
             StreamingJobId::Sink(id) => id.as_job_id(),
         }
     }
@@ -194,17 +194,17 @@ impl DdlCommand {
         use Either::*;
         match self {
             DdlCommand::CreateDatabase(database) => Left(database.name.clone()),
-            DdlCommand::DropDatabase(id) => Right(id.as_raw_id() as ObjectId),
+            DdlCommand::DropDatabase(id) => Right(id.as_object_id()),
             DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
-            DdlCommand::DropSchema(id, _) => Right(id.as_raw_id() as ObjectId),
+            DdlCommand::DropSchema(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
-            DdlCommand::DropSource(id, _) => Right(id.as_raw_id() as ObjectId),
+            DdlCommand::DropSource(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
-            DdlCommand::DropFunction(id, _) => Right(*id),
+            DdlCommand::DropFunction(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
-            DdlCommand::DropView(id, _) => Right(*id),
+            DdlCommand::DropView(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
-            DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id().as_raw_id() as _),
+            DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id().as_object_id()),
             DdlCommand::AlterName(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSwapRename(object) => Left(format!("{object:?}")),
             DdlCommand::ReplaceStreamJob(info) => Left(info.streaming_job.name()),
@@ -212,14 +212,14 @@ impl DdlCommand {
             DdlCommand::AlterObjectOwner(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSetSchema(object, _) => Left(format!("{object:?}")),
             DdlCommand::CreateConnection(connection) => Left(connection.name.clone()),
-            DdlCommand::DropConnection(id, _) => Right(*id),
+            DdlCommand::DropConnection(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
-            DdlCommand::DropSecret(id) => Right(*id),
-            DdlCommand::CommentOn(comment) => Right(comment.table_id.as_raw_id() as _),
+            DdlCommand::DropSecret(id) => Right(id.as_object_id()),
+            DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
-            DdlCommand::DropSubscription(id, _) => Right(*id),
-            DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_raw_id() as _),
+            DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
         }
     }
 
@@ -539,12 +539,8 @@ impl DdlController {
     }
 
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
-        self.drop_object(
-            ObjectType::Database,
-            database_id.as_raw_id() as ObjectId,
-            DropMode::Cascade,
-        )
-        .await
+        self.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
+            .await
     }
 
     async fn create_schema(&self, schema: Schema) -> MetaResult<NotificationVersion> {
@@ -559,7 +555,7 @@ impl DdlController {
         schema_id: SchemaId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Schema, schema_id.as_raw_id() as _, drop_mode)
+        self.drop_object(ObjectType::Schema, schema_id, drop_mode)
             .await
     }
 
@@ -585,7 +581,7 @@ impl DdlController {
         source_id: SourceId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Source, source_id.as_raw_id() as _, drop_mode)
+        self.drop_object(ObjectType::Source, source_id, drop_mode)
             .await
     }
 
@@ -610,7 +606,7 @@ impl DdlController {
         function_id: FunctionId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Function, function_id as _, drop_mode)
+        self.drop_object(ObjectType::Function, function_id, drop_mode)
             .await
     }
 
@@ -630,8 +626,7 @@ impl DdlController {
         view_id: ViewId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::View, view_id as _, drop_mode)
-            .await
+        self.drop_object(ObjectType::View, view_id, drop_mode).await
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
@@ -647,7 +642,7 @@ impl DdlController {
         connection_id: ConnectionId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Connection, connection_id as _, drop_mode)
+        self.drop_object(ObjectType::Connection, connection_id, drop_mode)
             .await
     }
 
@@ -706,7 +701,7 @@ impl DdlController {
     }
 
     async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Secret, secret_id as _, DropMode::Restrict)
+        self.drop_object(ObjectType::Secret, secret_id, DropMode::Restrict)
             .await
     }
 
@@ -741,7 +736,7 @@ impl DdlController {
             let _ = self
                 .metadata_manager
                 .catalog_controller
-                .try_abort_creating_subscription(subscription.id as _)
+                .try_abort_creating_subscription(subscription.id)
                 .await
                 .inspect_err(|e| {
                     tracing::error!(
@@ -778,10 +773,10 @@ impl DdlController {
         let (_, version) = self
             .metadata_manager
             .catalog_controller
-            .drop_object(ObjectType::Subscription, subscription_id as _, drop_mode)
+            .drop_object(ObjectType::Subscription, subscription_id, drop_mode)
             .await?;
         self.stream_manager
-            .drop_subscription(database_id, subscription_id as _, table_id)
+            .drop_subscription(database_id, subscription_id, table_id)
             .await;
         tracing::debug!("finish drop subscription");
         Ok(version)
@@ -1152,9 +1147,10 @@ impl DdlController {
     pub async fn drop_object(
         &self,
         object_type: ObjectType,
-        object_id: ObjectId,
+        object_id: impl Into<ObjectId>,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
+        let object_id = object_id.into();
         let (release_ctx, version) = self
             .metadata_manager
             .catalog_controller
@@ -1242,7 +1238,7 @@ impl DdlController {
 
         // remove secrets.
         for secret in secret_ids {
-            LocalSecretManager::global().remove_secret(secret as _);
+            LocalSecretManager::global().remove_secret(secret);
         }
         Ok(version)
     }
@@ -1410,7 +1406,7 @@ impl DdlController {
         let tmp_sink_ids = auto_refresh_schema_sinks.as_ref().map(|sinks| {
             sinks
                 .iter()
-                .map(|sink| sink.tmp_sink_id.as_raw_id() as ObjectId)
+                .map(|sink| sink.tmp_sink_id.as_object_id())
                 .collect_vec()
         });
 
@@ -1544,10 +1540,10 @@ impl DdlController {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let (object_id, object_type) = match job_id {
-            StreamingJobId::MaterializedView(id) => (id.as_raw_id() as _, ObjectType::Table),
-            StreamingJobId::Sink(id) => (id.as_raw_id() as _, ObjectType::Sink),
-            StreamingJobId::Table(_, id) => (id.as_raw_id() as _, ObjectType::Table),
-            StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
+            StreamingJobId::MaterializedView(id) => (id.as_object_id(), ObjectType::Table),
+            StreamingJobId::Sink(id) => (id.as_object_id(), ObjectType::Sink),
+            StreamingJobId::Table(_, id) => (id.as_object_id(), ObjectType::Table),
+            StreamingJobId::Index(idx) => (idx.as_object_id(), ObjectType::Index),
         };
 
         let job_status = self
@@ -2107,16 +2103,14 @@ impl DdlController {
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
         let (obj_type, id) = match relation {
-            alter_name_request::Object::TableId(id) => (ObjectType::Table, id as ObjectId),
-            alter_name_request::Object::ViewId(id) => (ObjectType::View, id as ObjectId),
-            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id as ObjectId),
-            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
-            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id as ObjectId),
-            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
-            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
-            alter_name_request::Object::SubscriptionId(id) => {
-                (ObjectType::Subscription, id as ObjectId)
-            }
+            alter_name_request::Object::TableId(id) => (ObjectType::Table, id),
+            alter_name_request::Object::ViewId(id) => (ObjectType::View, id),
+            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id),
+            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id),
+            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id),
+            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id),
+            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id),
+            alter_name_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
         };
         self.metadata_manager
             .catalog_controller
@@ -2131,38 +2125,23 @@ impl DdlController {
         let (obj_type, src_id, dst_id) = match object {
             alter_swap_rename_request::Object::Schema(_) => unimplemented!("schema swap"),
             alter_swap_rename_request::Object::Table(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::Table, src_id, dst_id)
             }
             alter_swap_rename_request::Object::View(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::View, src_id, dst_id)
             }
             alter_swap_rename_request::Object::Source(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::Source, src_id, dst_id)
             }
             alter_swap_rename_request::Object::Sink(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::Sink, src_id, dst_id)
             }
             alter_swap_rename_request::Object::Subscription(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::Subscription, src_id, dst_id)
             }
         };
@@ -2179,18 +2158,18 @@ impl DdlController {
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
         let (obj_type, id) = match object {
-            Object::TableId(id) => (ObjectType::Table, id as ObjectId),
-            Object::ViewId(id) => (ObjectType::View, id as ObjectId),
-            Object::SourceId(id) => (ObjectType::Source, id as ObjectId),
-            Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
-            Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
-            Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
-            Object::SubscriptionId(id) => (ObjectType::Subscription, id as ObjectId),
-            Object::ConnectionId(id) => (ObjectType::Connection, id as ObjectId),
+            Object::TableId(id) => (ObjectType::Table, id),
+            Object::ViewId(id) => (ObjectType::View, id),
+            Object::SourceId(id) => (ObjectType::Source, id),
+            Object::SinkId(id) => (ObjectType::Sink, id),
+            Object::SchemaId(id) => (ObjectType::Schema, id),
+            Object::DatabaseId(id) => (ObjectType::Database, id),
+            Object::SubscriptionId(id) => (ObjectType::Subscription, id),
+            Object::ConnectionId(id) => (ObjectType::Connection, id),
         };
         self.metadata_manager
             .catalog_controller
-            .alter_owner(obj_type, id, owner_id as _)
+            .alter_owner(obj_type, id.into(), owner_id as _)
             .await
     }
 
@@ -2200,23 +2179,17 @@ impl DdlController {
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
         let (obj_type, id) = match object {
-            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id as ObjectId),
-            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id as ObjectId),
-            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id as ObjectId),
-            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
-            alter_set_schema_request::Object::FunctionId(id) => {
-                (ObjectType::Function, id as ObjectId)
-            }
-            alter_set_schema_request::Object::ConnectionId(id) => {
-                (ObjectType::Connection, id as ObjectId)
-            }
-            alter_set_schema_request::Object::SubscriptionId(id) => {
-                (ObjectType::Subscription, id as ObjectId)
-            }
+            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id),
+            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id),
+            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id),
+            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id),
+            alter_set_schema_request::Object::FunctionId(id) => (ObjectType::Function, id),
+            alter_set_schema_request::Object::ConnectionId(id) => (ObjectType::Connection, id),
+            alter_set_schema_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
         };
         self.metadata_manager
             .catalog_controller
-            .alter_schema(obj_type, id, new_schema_id as _)
+            .alter_schema(obj_type, id.into(), new_schema_id as _)
             .await
     }
 

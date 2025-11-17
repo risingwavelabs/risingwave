@@ -34,6 +34,7 @@ pub use metadata::*;
 pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
 use risingwave_common::id::WorkerId;
 pub use risingwave_meta_model::prelude;
+use risingwave_meta_model::{ConnectionId, SecretId};
 use risingwave_pb::catalog::{PbSink, PbSource};
 use risingwave_pb::common::PbHostAddress;
 pub use streaming_job::*;
@@ -61,7 +62,7 @@ impl Hash for WorkerKey {
 /// The id preserved for the meta node. Note that there's no such entry in cluster manager.
 pub const META_NODE_ID: WorkerId = WorkerId::new(0);
 
-pub fn get_referred_secret_ids_from_source(source: &PbSource) -> MetaResult<HashSet<u32>> {
+pub fn get_referred_secret_ids_from_source(source: &PbSource) -> MetaResult<HashSet<SecretId>> {
     let mut secret_ids = HashSet::new();
     for secret_ref in source.get_secret_refs().values() {
         secret_ids.insert(secret_ref.secret_id);
@@ -73,7 +74,7 @@ pub fn get_referred_secret_ids_from_source(source: &PbSource) -> MetaResult<Hash
     Ok(secret_ids)
 }
 
-pub fn get_referred_connection_ids_from_source(source: &PbSource) -> HashSet<u32> {
+pub fn get_referred_connection_ids_from_source(source: &PbSource) -> HashSet<ConnectionId> {
     let mut connection_ids = HashSet::new();
     if let Some(conn_id) = source.connection_id {
         connection_ids.insert(conn_id);
@@ -86,7 +87,7 @@ pub fn get_referred_connection_ids_from_source(source: &PbSource) -> HashSet<u32
     connection_ids
 }
 
-pub fn get_referred_connection_ids_from_sink(sink: &PbSink) -> HashSet<u32> {
+pub fn get_referred_connection_ids_from_sink(sink: &PbSink) -> HashSet<ConnectionId> {
     let mut connection_ids = HashSet::new();
     if let Some(format_desc) = &sink.format_desc
         && let Some(conn_id) = format_desc.connection_id
@@ -99,7 +100,7 @@ pub fn get_referred_connection_ids_from_sink(sink: &PbSink) -> HashSet<u32> {
     connection_ids
 }
 
-pub fn get_referred_secret_ids_from_sink(sink: &PbSink) -> HashSet<u32> {
+pub fn get_referred_secret_ids_from_sink(sink: &PbSink) -> HashSet<SecretId> {
     let mut secret_ids = HashSet::new();
     for secret_ref in sink.get_secret_refs().values() {
         secret_ids.insert(secret_ref.secret_id);

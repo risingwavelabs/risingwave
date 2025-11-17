@@ -195,6 +195,13 @@ fn arg_writer_type(arg: &syn::FnArg) -> Option<WriterTypeKind> {
             note = "`function!` macro can only recognize fully-qualified type.";
             help = "Please use `std::fmt::Write` or `std::io::Write` instead."
         };
+    } else if elem == &parse_quote!(jsonbb::Builder) {
+        Some(WriterTypeKind::JsonbbBuilder)
+    } else if elem == &parse_quote!(Builder) {
+        abort! { elem, "use of ambiguous `Builder` type.";
+            note = "`function!` macro can only recognize fully-qualified type.";
+            help = "Please use `jsonbb::Builder` instead."
+        };
     } else {
         None
     }

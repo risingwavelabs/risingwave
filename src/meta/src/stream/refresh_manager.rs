@@ -260,7 +260,7 @@ impl GlobalRefreshManager {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(table_id.as_raw_id() as _)
+            .get_object_database_id(table_id)
             .await?;
 
         let job_fragments = self
@@ -355,11 +355,7 @@ impl GlobalRefreshManager {
             )));
         }
 
-        if table.optional_associated_source_id
-            != Some(OptionalAssociatedSourceId::AssociatedSourceId(
-                associated_source_id.as_raw_id(),
-            ))
-        {
+        if table.optional_associated_source_id != Some(associated_source_id.into()) {
             return Err(MetaError::invalid_parameter(format!(
                 "Table '{}' is not associated with source '{}'. table.optional_associated_source_id: {:?}",
                 table.name, associated_source_id, table.optional_associated_source_id

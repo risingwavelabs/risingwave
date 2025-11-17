@@ -207,7 +207,7 @@ impl IndexCatalog {
         };
 
         IndexCatalog {
-            id: index_prost.id.into(),
+            id: index_prost.id,
             name: index_prost.name.clone(),
             index_item,
             index_type,

@@ -24,7 +24,6 @@ use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
@@ -394,7 +393,7 @@ impl GlobalBarrierWorkerContextImpl {
                         for job_id in background_streaming_jobs {
                             let scan_types = self
                                 .metadata_manager
-                                .get_job_backfill_scan_types(job_id.as_raw_id() as ObjectId)
+                                .get_job_backfill_scan_types(job_id)
                                 .await?;
 
                             if scan_types

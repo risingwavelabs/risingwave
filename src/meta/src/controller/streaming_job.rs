@@ -39,8 +39,6 @@ use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
-use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
@@ -100,7 +98,7 @@ impl CatalogController {
         specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
     ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
-        let job_id = (obj.oid as u32).into();
+        let job_id = obj.oid.as_job_id();
         let job = streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
@@ -141,18 +139,8 @@ impl CatalogController {
         };
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            streaming_job.database_id().as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(
-            ObjectType::Schema,
-            streaming_job.schema_id().as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
+        ensure_object_id(ObjectType::Schema, streaming_job.schema_id(), &txn).await?;
         check_relation_name_duplicate(
             &streaming_job.name(),
             streaming_job.database_id(),
@@ -215,7 +203,7 @@ impl CatalogController {
             StreamingJob::Sink(sink) => {
                 if let Some(target_table_id) = sink.target_table
                     && check_sink_into_table_cycle(
-                        target_table_id.as_raw_id() as ObjectId,
+                        target_table_id.into(),
                         dependencies.iter().cloned().collect(),
                         &txn,
                     )
@@ -265,13 +253,9 @@ impl CatalogController {
                         Some(src.schema_id),
                     )
                     .await?;
-                    src.id = (src_obj.oid as u32).into();
-                    src.optional_associated_table_id = Some(
-                        PbOptionalAssociatedTableId::AssociatedTableId(job_id.as_raw_id() as _),
-                    );
-                    table.optional_associated_source_id = Some(
-                        PbOptionalAssociatedSourceId::AssociatedSourceId(src_obj.oid as _),
-                    );
+                    src.id = src_obj.oid.as_source_id();
+                    src.optional_associated_table_id = Some(job_id.as_mv_table_id().into());
+                    table.optional_associated_source_id = Some(src_obj.oid.as_source_id().into());
                     let source: source::ActiveModel = src.clone().into();
                     Source::insert(source).exec(&txn).await?;
                 }
@@ -290,12 +274,7 @@ impl CatalogController {
                 }
             }
             StreamingJob::Index(index, table) => {
-                ensure_object_id(
-                    ObjectType::Table,
-                    index.primary_table_id.as_raw_id() as ObjectId,
-                    &txn,
-                )
-                .await?;
+                ensure_object_id(ObjectType::Table, index.primary_table_id, &txn).await?;
                 let job_id = Self::create_streaming_job_obj(
                     &txn,
                     ObjectType::Index,
@@ -310,13 +289,13 @@ impl CatalogController {
                 )
                 .await?;
                 // to be compatible with old implementation.
-                index.id = job_id.as_raw_id();
+                index.id = job_id.as_index_id();
                 index.index_table_id = job_id.as_mv_table_id();
                 table.id = job_id.as_mv_table_id();
 
                 ObjectDependency::insert(object_dependency::ActiveModel {
-                    oid: Set(index.primary_table_id.as_raw_id() as ObjectId),
-                    used_by: Set(table.id.as_raw_id() as ObjectId),
+                    oid: Set(index.primary_table_id.into()),
+                    used_by: Set(table.id.into()),
                     ..Default::default()
                 })
                 .exec(&txn)
@@ -352,14 +331,14 @@ impl CatalogController {
             streaming_job
                 .dependent_secret_ids()?
                 .into_iter()
-                .map(|secret_id| secret_id as ObjectId),
+                .map(|id| id.as_object_id()),
         );
         // collect dependent connection
         dependencies.extend(
             streaming_job
                 .dependent_connection_ids()?
                 .into_iter()
-                .map(|conn_id| conn_id as ObjectId),
+                .map(|id| id.as_object_id()),
         );
 
         // record object dependency.
@@ -367,7 +346,7 @@ impl CatalogController {
             ObjectDependency::insert_many(dependencies.into_iter().map(|oid| {
                 object_dependency::ActiveModel {
                     oid: Set(oid),
-                    used_by: Set(streaming_job.id().as_raw_id() as _),
+                    used_by: Set(streaming_job.id().as_object_id()),
                     ..Default::default()
                 }
             }))
@@ -391,7 +370,7 @@ impl CatalogController {
         &self,
         job: &StreamingJob,
         mut incomplete_internal_tables: Vec<PbTable>,
-    ) -> MetaResult<HashMap<TableId, u32>> {
+    ) -> MetaResult<HashMap<TableId, TableId>> {
         let job_id = job.id();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -409,13 +388,14 @@ impl CatalogController {
                 Some(table.schema_id),
             )
             .await?
-            .oid;
-            table_id_map.insert(table.id, table_id as u32);
-            table.id = (table_id as u32).into();
+            .oid
+            .as_table_id();
+            table_id_map.insert(table.id, table_id);
+            table.id = table_id;
             table.job_id = Some(job_id);
 
             let table_model = table::ActiveModel {
-                table_id: Set((table_id as u32).into()),
+                table_id: Set(table_id),
                 belongs_to_job_id: Set(Some(job_id)),
                 fragment_id: NotSet,
                 ..table.clone().into()
@@ -621,9 +601,7 @@ impl CatalogController {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let obj = Object::find_by_id(job_id.as_raw_id() as ObjectId)
-            .one(&txn)
-            .await?;
+        let obj = Object::find_by_id(job_id).one(&txn).await?;
         let Some(obj) = obj else {
             tracing::warn!(
                 id = %job_id,
@@ -709,7 +687,7 @@ impl CatalogController {
         }
 
         if need_notify {
-            let obj: Option<PartialObject> = Object::find_by_id(job_id.as_raw_id() as ObjectId)
+            let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
                 .columns([
                     object::Column::Oid,
@@ -767,7 +745,7 @@ impl CatalogController {
                 .await?;
             if let Some(tmp_id) = tmp_id {
                 tracing::warn!(
-                    id = tmp_id,
+                    id = %tmp_id,
                     "aborting temp streaming job for sink into table"
                 );
 
@@ -775,9 +753,7 @@ impl CatalogController {
             }
         }
 
-        Object::delete_by_id(job_id.as_raw_id() as ObjectId)
-            .exec(&txn)
-            .await?;
+        Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
             Object::delete_many()
                 .filter(object::Column::Oid.is_in(internal_table_ids))
@@ -787,9 +763,7 @@ impl CatalogController {
         if let Some(t) = &table_obj
             && let Some(source_id) = t.optional_associated_source_id
         {
-            Object::delete_by_id(source_id.as_raw_id() as ObjectId)
-                .exec(&txn)
-                .await?;
+            Object::delete_by_id(source_id).exec(&txn).await?;
         }
 
         let err = if is_cancelled {
@@ -886,7 +860,7 @@ impl CatalogController {
             .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
             .filter(
                 object_dependency::Column::Oid
-                    .eq(id.as_raw_id() as ObjectId)
+                    .eq(id)
                     .and(object::Column::ObjType.eq(ObjectType::Table))
                     .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
             )
@@ -948,8 +922,8 @@ impl CatalogController {
 
         // 5. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
-            oid: Set(id.as_raw_id() as _),
-            used_by: Set(new_obj_id.as_raw_id() as _),
+            oid: Set(id.as_object_id()),
+            used_by: Set(new_obj_id.as_object_id()),
             ..Default::default()
         })
         .exec(&txn)
@@ -1010,7 +984,7 @@ impl CatalogController {
         txn: &DatabaseTransaction,
         job_id: JobId,
     ) -> MetaResult<(Operation, Vec<risingwave_pb::meta::Object>, Vec<PbUserInfo>)> {
-        let job_type = Object::find_by_id(job_id.as_raw_id() as ObjectId)
+        let job_type = Object::find_by_id(job_id)
             .select_only()
             .column(object::Column::ObjType)
             .into_tuple()
@@ -1107,7 +1081,7 @@ impl CatalogController {
                 });
             }
             ObjectType::Index => {
-                let (index, obj) = Index::find_by_id(job_id.as_raw_id() as ObjectId)
+                let (index, obj) = Index::find_by_id(job_id.as_index_id())
                     .find_also_related(Object)
                     .one(txn)
                     .await?
@@ -1154,7 +1128,7 @@ impl CatalogController {
                         for state_table_id in &index_state_table_ids {
                             new_privileges.push(user_privilege::ActiveModel {
                                 id: Default::default(),
-                                oid: Set(state_table_id.as_raw_id() as ObjectId),
+                                oid: Set(state_table_id.as_object_id()),
                                 user_id: Set(privilege.user_id),
                                 action: Set(Action::Select),
                                 dependent_id: Set(privilege.dependent_id),
@@ -1192,8 +1166,7 @@ impl CatalogController {
         }
 
         if job_type != ObjectType::Index {
-            updated_user_info =
-                grant_default_privileges_automatically(txn, job_id.as_raw_id() as ObjectId).await?;
+            updated_user_info = grant_default_privileges_automatically(txn, job_id).await?;
         }
 
         Ok((notification_op, objects, updated_user_info))
@@ -1398,9 +1371,7 @@ impl CatalogController {
             }
 
             // 3. remove dummy object.
-            Object::delete_by_id(tmp_id.as_raw_id() as ObjectId)
-                .exec(txn)
-                .await?;
+            Object::delete_by_id(tmp_id).exec(txn).await?;
 
             Ok(())
         }
@@ -1543,9 +1514,7 @@ impl CatalogController {
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        Object::delete_by_id(tmp_job_id.as_raw_id() as ObjectId)
-            .exec(&txn)
-            .await?;
+        Object::delete_by_id(tmp_job_id).exec(&txn).await?;
         if let Some(tmp_sink_ids) = tmp_sink_ids {
             for tmp_sink_id in tmp_sink_ids {
                 Object::delete_by_id(tmp_sink_id).exec(&txn).await?;
@@ -1995,7 +1964,7 @@ impl CatalogController {
         // can be source_id or table_id
         // if updating an associated source, the preferred_id is the table_id
         // otherwise, it is the source_id
-        let mut preferred_id: i32 = source_id.as_raw_id() as _;
+        let mut preferred_id = source_id.as_object_id();
         let rewrite_sql = {
             let definition = source.definition.clone();
 
@@ -2032,9 +2001,7 @@ impl CatalogController {
                     options.push(sql_option);
                 }
                 for (k, v) in options_with_secret.as_secret() {
-                    if let Some(secret_model) =
-                        Secret::find_by_id(v.secret_id as i32).one(txn).await?
-                    {
+                    if let Some(secret_model) = Secret::find_by_id(v.secret_id).one(txn).await? {
                         let sql_option =
                             SqlOption::try_from((k, &format!("SECRET {}", secret_model.name)))
                                 .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
@@ -2055,7 +2022,7 @@ impl CatalogController {
                     *with_options =
                         format_with_option_secret_resolved(&txn, &options_with_secret).await?;
                     associate_table_id = source.optional_associated_table_id;
-                    preferred_id = associate_table_id.unwrap().as_raw_id() as _;
+                    preferred_id = associate_table_id.unwrap().as_object_id();
                 }
                 _ => unreachable!(),
             }
@@ -2068,8 +2035,8 @@ impl CatalogController {
             if !to_add_secret_dep.is_empty() {
                 ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
-                        oid: Set(secret_id as _),
-                        used_by: Set(preferred_id as _),
+                        oid: Set(secret_id.into()),
+                        used_by: Set(preferred_id),
                         ..Default::default()
                     }
                 }))
@@ -2082,9 +2049,7 @@ impl CatalogController {
                     .filter(
                         object_dependency::Column::Oid
                             .is_in(to_remove_secret_dep)
-                            .and(
-                                object_dependency::Column::UsedBy.eq::<ObjectId>(preferred_id as _),
-                            ),
+                            .and(object_dependency::Column::UsedBy.eq(preferred_id)),
                     )
                     .exec(&txn)
                     .await?;

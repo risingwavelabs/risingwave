@@ -39,7 +39,7 @@ impl CatalogController {
         };
         let database = active_model.update(&txn).await?;
 
-        let obj = Object::find_by_id(database_id.as_raw_id() as ObjectId)
+        let obj = Object::find_by_id(database_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
@@ -63,7 +63,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let obj = Object::find_by_id(schema_id.as_raw_id() as ObjectId)
+        let obj = Object::find_by_id(schema_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
@@ -89,16 +89,17 @@ impl CatalogController {
     pub async fn alter_name(
         &self,
         object_type: ObjectType,
-        object_id: ObjectId,
+        object_id: impl Into<ObjectId>,
         object_name: &str,
     ) -> MetaResult<NotificationVersion> {
+        let object_id = object_id.into();
         if object_type == ObjectType::Database {
             return self
-                .alter_database_name(DatabaseId::new(object_id as _), object_name)
+                .alter_database_name(object_id.as_database_id(), object_name)
                 .await;
         } else if object_type == ObjectType::Schema {
             return self
-                .alter_schema_name(SchemaId::new(object_id as _), object_name)
+                .alter_schema_name(object_id.as_schema_id(), object_name)
                 .await;
         }
 
@@ -149,7 +150,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let dst_name: String = match object_type {
-            ObjectType::Table => Table::find_by_id(TableId::new(dst_object_id as _))
+            ObjectType::Table => Table::find_by_id(dst_object_id.as_table_id())
                 .select_only()
                 .column(table::Column::Name)
                 .into_tuple()
@@ -158,7 +159,7 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::Source => Source::find_by_id(SourceId::new(dst_object_id as _))
+            ObjectType::Source => Source::find_by_id(dst_object_id.as_source_id())
                 .select_only()
                 .column(source::Column::Name)
                 .into_tuple()
@@ -167,7 +168,7 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::Sink => Sink::find_by_id(SinkId::new(dst_object_id as _))
+            ObjectType::Sink => Sink::find_by_id(dst_object_id.as_sink_id())
                 .select_only()
                 .column(sink::Column::Name)
                 .into_tuple()
@@ -176,7 +177,7 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::View => View::find_by_id(dst_object_id)
+            ObjectType::View => View::find_by_id(dst_object_id.as_view_id())
                 .select_only()
                 .column(view::Column::Name)
                 .into_tuple()
@@ -185,15 +186,17 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::Subscription => Subscription::find_by_id(dst_object_id)
-                .select_only()
-                .column(subscription::Column::Name)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| {
-                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
-                })?,
+            ObjectType::Subscription => {
+                Subscription::find_by_id(dst_object_id.as_subscription_id())
+                    .select_only()
+                    .column(subscription::Column::Name)
+                    .into_tuple()
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| {
+                        MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                    })?
+            }
             _ => {
                 return Err(MetaError::permission_denied(format!(
                     "swap rename not supported for object type: {:?}",
@@ -288,7 +291,7 @@ impl CatalogController {
         let mut objects = vec![];
         match object_type {
             ObjectType::Database => {
-                let db = Database::find_by_id(DatabaseId::new(object_id as _))
+                let db = Database::find_by_id(object_id.as_database_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("database", object_id))?;
@@ -304,7 +307,7 @@ impl CatalogController {
                 return Ok(version);
             }
             ObjectType::Schema => {
-                let schema = Schema::find_by_id(SchemaId::new(object_id as _))
+                let schema = Schema::find_by_id(object_id.as_schema_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("schema", object_id))?;
@@ -320,7 +323,7 @@ impl CatalogController {
                 return Ok(version);
             }
             ObjectType::Table => {
-                let table = Table::find_by_id(TableId::new(object_id as _))
+                let table = Table::find_by_id(object_id.as_table_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
@@ -328,7 +331,7 @@ impl CatalogController {
                 // associated source.
                 if let Some(associated_source_id) = table.optional_associated_source_id {
                     let src_obj = object::ActiveModel {
-                        oid: Set(associated_source_id.as_raw_id() as _),
+                        oid: Set(associated_source_id.as_object_id()),
                         owner_id: Set(new_owner),
                         ..Default::default()
                     }
@@ -364,7 +367,7 @@ impl CatalogController {
                             table_ids
                                 .iter()
                                 .cloned()
-                                .chain(std::iter::once(TableId::new(object_id as _))),
+                                .chain(std::iter::once(object_id.as_table_id())),
                         ),
                     )
                     .into_tuple()
@@ -379,10 +382,12 @@ impl CatalogController {
                             SimpleExpr::Value(Value::Int(Some(new_owner))),
                         )
                         .filter(
-                            object::Column::Oid.is_in(
-                                index_ids.iter().cloned().chain(
-                                    table_ids.iter().map(|table_id| table_id.as_raw_id() as _),
-                                ),
+                            object::Column::Oid.is_in::<ObjectId, _>(
+                                index_ids
+                                    .iter()
+                                    .copied()
+                                    .map_into()
+                                    .chain(table_ids.iter().copied().map_into()),
                             ),
                         )
                         .exec(&txn)
@@ -416,7 +421,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Source => {
-                let source = Source::find_by_id(SourceId::new(object_id as _))
+                let source = Source::find_by_id(object_id.as_source_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
@@ -437,7 +442,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Sink => {
-                let sink = Sink::find_by_id(SinkId::new(object_id as _))
+                let sink = Sink::find_by_id(object_id.as_sink_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
@@ -453,7 +458,7 @@ impl CatalogController {
                 .await?;
             }
             ObjectType::Subscription => {
-                let subscription = Subscription::find_by_id(object_id)
+                let subscription = Subscription::find_by_id(object_id.as_subscription_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
@@ -462,14 +467,14 @@ impl CatalogController {
                 ));
             }
             ObjectType::View => {
-                let view = View::find_by_id(object_id)
+                let view = View::find_by_id(object_id.as_view_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
                 objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
             }
             ObjectType::Connection => {
-                let connection = Connection::find_by_id(object_id)
+                let connection = Connection::find_by_id(object_id.as_connection_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
@@ -506,7 +511,7 @@ impl CatalogController {
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        ensure_object_id(ObjectType::Schema, new_schema.as_raw_id() as ObjectId, &txn).await?;
+        ensure_object_id(ObjectType::Schema, new_schema, &txn).await?;
 
         let obj = Object::find_by_id(object_id)
             .one(&txn)
@@ -520,7 +525,7 @@ impl CatalogController {
         let mut objects = vec![];
         match object_type {
             ObjectType::Table => {
-                let table = Table::find_by_id(TableId::new(object_id as _))
+                let table = Table::find_by_id(object_id.as_table_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
@@ -535,7 +540,7 @@ impl CatalogController {
                 // associated source.
                 if let Some(associated_source_id) = associated_src_id {
                     let src_obj = object::ActiveModel {
-                        oid: Set(associated_source_id.as_raw_id() as _),
+                        oid: Set(associated_source_id.as_object_id()),
                         schema_id: Set(Some(new_schema)),
                         ..Default::default()
                     }
@@ -578,7 +583,7 @@ impl CatalogController {
                             table_ids
                                 .iter()
                                 .map(|table_id| table_id.as_job_id())
-                                .chain(std::iter::once(JobId::new(object_id as _))),
+                                .chain(std::iter::once(object_id.as_job_id())),
                         ),
                     )
                     .into_tuple()
@@ -595,10 +600,12 @@ impl CatalogController {
                     Object::update_many()
                         .col_expr(object::Column::SchemaId, new_schema.into())
                         .filter(
-                            object::Column::Oid.is_in(
-                                index_ids.iter().cloned().chain(
-                                    table_ids.iter().map(|table_id| table_id.as_raw_id() as _),
-                                ),
+                            object::Column::Oid.is_in::<ObjectId, _>(
+                                index_ids
+                                    .iter()
+                                    .copied()
+                                    .map_into()
+                                    .chain(table_ids.iter().copied().map_into()),
                             ),
                         )
                         .exec(&txn)
@@ -631,7 +638,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Source => {
-                let source = Source::find_by_id(SourceId::new(object_id as _))
+                let source = Source::find_by_id(object_id.as_source_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
@@ -657,7 +664,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Sink => {
-                let sink = Sink::find_by_id(SinkId::new(object_id as _))
+                let sink = Sink::find_by_id(object_id.as_sink_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
@@ -678,7 +685,7 @@ impl CatalogController {
                 .await?;
             }
             ObjectType::Subscription => {
-                let subscription = Subscription::find_by_id(object_id)
+                let subscription = Subscription::find_by_id(object_id.as_subscription_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
@@ -693,7 +700,7 @@ impl CatalogController {
                 ));
             }
             ObjectType::View => {
-                let view = View::find_by_id(object_id)
+                let view = View::find_by_id(object_id.as_view_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
@@ -705,7 +712,7 @@ impl CatalogController {
                 objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
             }
             ObjectType::Function => {
-                let function = Function::find_by_id(object_id)
+                let function = Function::find_by_id(object_id.as_function_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("function", object_id))?;
@@ -732,7 +739,7 @@ impl CatalogController {
                 return Ok(version);
             }
             ObjectType::Connection => {
-                let connection = Connection::find_by_id(object_id)
+                let connection = Connection::find_by_id(object_id.as_connection_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
@@ -787,20 +794,10 @@ impl CatalogController {
         let owner_id = pb_secret.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            pb_secret.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(
-            ObjectType::Schema,
-            pb_secret.schema_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id, &txn).await?;
 
-        ensure_object_id(ObjectType::Secret, pb_secret.id as _, &txn).await?;
+        ensure_object_id(ObjectType::Secret, pb_secret.id, &txn).await?;
         let secret: secret::ActiveModel = pb_secret.clone().into();
         Secret::update(secret).exec(&txn).await?;
 
@@ -908,7 +905,7 @@ impl CatalogController {
         }
         let database = database.update(&txn).await?;
 
-        let obj = Object::find_by_id(database_id.as_raw_id() as ObjectId)
+        let obj = Object::find_by_id(database_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;

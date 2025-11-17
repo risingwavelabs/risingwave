@@ -32,7 +32,11 @@ impl CatalogController {
         Ok(ObjectModel(secret, obj.unwrap()).into())
     }
 
-    pub async fn get_object_database_id(&self, object_id: ObjectId) -> MetaResult<DatabaseId> {
+    pub async fn get_object_database_id(
+        &self,
+        object_id: impl Into<ObjectId>,
+    ) -> MetaResult<DatabaseId> {
+        let object_id = object_id.into();
         let inner = self.inner.read().await;
         let (database_id,): (Option<DatabaseId>,) = Object::find_by_id(object_id)
             .select_only()
@@ -504,9 +508,9 @@ impl CatalogController {
     pub async fn get_fragment_streaming_job_id(
         &self,
         fragment_id: FragmentId,
-    ) -> MetaResult<ObjectId> {
+    ) -> MetaResult<JobId> {
         let inner = self.inner.read().await;
-        let job_id: ObjectId = Fragment::find_by_id(fragment_id)
+        let job_id: JobId = Fragment::find_by_id(fragment_id)
             .select_only()
             .column(fragment::Column::JobId)
             .into_tuple()
