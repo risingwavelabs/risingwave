@@ -325,7 +325,10 @@ impl ControlStreamManager {
             "xxk control_stream recover connected {:?} unconnected {:?}",
             workers
                 .iter()
-                .filter_map(|(id, (_, state))| matches!(state, WorkerNodeState::Connected { .. }).then_some(*id))
+                .filter_map(
+                    |(id, (_, state))| matches!(state, WorkerNodeState::Connected { .. })
+                        .then_some(*id)
+                )
                 .collect::<Vec<_>>(),
             unconnected_workers
         );

@@ -216,10 +216,7 @@ impl SharedActorInfos {
         database_id: DatabaseId,
         fragments: impl Iterator<Item = (&InflightFragmentInfo, JobId)>,
     ) {
-        println!(
-            "xxk recover_database start db {}",
-            database_id
-        );
+        println!("xxk recover_database start db {}", database_id);
         let mut remaining_fragments: HashMap<_, _> = fragments
             .map(|info @ (fragment, _)| (fragment.fragment_id, info))
             .collect();

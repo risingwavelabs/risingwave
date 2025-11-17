@@ -115,7 +115,6 @@ pub async fn load_fragment_info<C>(
 where
     C: ConnectionTrait,
 {
-
     println!("xxk load database frag info {:?}", database_id);
     let mut query = StreamingJob::find()
         .select_only()

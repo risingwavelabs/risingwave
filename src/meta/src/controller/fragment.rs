@@ -894,15 +894,14 @@ impl CatalogController {
                 println!(
                     "xxk collect_fragment_actor_map missing fragment {} existing {:?}",
                     fragment_id,
-                    guard
-                        .iter_over_fragments()
-                        .map(|(id, _)| *id)
-                        .collect_vec()
+                    guard.iter_over_fragments().map(|(id, _)| *id).collect_vec()
                 );
                 // keep panic to surface bug quickly
                 guard
                     .get_fragment(*fragment_id as _)
-                    .ok_or_else(|| anyhow!("fragment {} not found in shared actor info", fragment_id))
+                    .ok_or_else(|| {
+                        anyhow!("fragment {} not found in shared actor info", fragment_id)
+                    })
                     .unwrap()
             });
 
@@ -1554,7 +1553,7 @@ impl CatalogController {
 
         for fragment in root_fragment_to_jobs.keys() {
             let fragment_info = info.get_fragment(*fragment).context(format!(
-                "fragment {} not found in shared actor info",
+                "root fragment {} not found in shared actor info",
                 fragment
             ))?;
 
