@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
@@ -21,6 +22,7 @@ use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta_model::{CreateType, DatabaseId};
 use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::id::JobId;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{mpsc, oneshot};
@@ -28,6 +30,7 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
+use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule};
 use crate::hummock::HummockManagerRef;
@@ -74,6 +77,14 @@ impl GlobalBarrierManager {
         }
 
         Ok(ddl_progress.into_values().collect())
+    }
+
+    pub async fn get_cdc_progress(&self) -> MetaResult<HashMap<JobId, CdcProgress>> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::GetCdcProgress(tx))
+            .context("failed to send get ddl progress request")?;
+        Ok(rx.await.context("failed to receive get ddl progress")?)
     }
 
     pub async fn adhoc_recovery(&self) -> MetaResult<()> {

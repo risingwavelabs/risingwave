@@ -432,7 +432,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             fragment_relations,
             mut source_splits,
             mut background_jobs,
-            mut cdc_table_snapshot_split_assignment,
+            mut cdc_table_snapshot_splits,
         } = runtime_info;
         let result: MetaResult<_> = try {
             let mut builder = FragmentEdgeBuilder::new(
@@ -455,7 +455,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &mut mv_depended_subscriptions,
                 false,
                 &self.control.hummock_version_stats,
-                &mut cdc_table_snapshot_split_assignment,
+                &mut cdc_table_snapshot_splits,
             )?
         };
         match result {

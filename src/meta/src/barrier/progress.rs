@@ -359,6 +359,7 @@ pub(super) struct StagingCommitInfo {
     pub finished_jobs: Vec<TrackingJob>,
     /// Table IDs whose locality provider state tables need to be truncated
     pub table_ids_to_truncate: Vec<TableId>,
+    pub finished_cdc_table_backfill: Vec<JobId>,
 }
 
 pub(super) enum UpdateProgressResult {
