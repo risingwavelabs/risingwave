@@ -671,9 +671,9 @@ impl SstableStore {
             .map_err(foyer::Error::from)
             .map_err(HummockError::foyer_error)?;
 
-        stats.file_meta_total += 1;
+        stats.file_block_total += 1;
         if entry.source() == foyer::Source::Outer {
-            stats.file_meta_miss += 1;
+            stats.file_block_miss += 1;
         }
         Ok(entry)
     }
@@ -700,7 +700,7 @@ impl SstableStore {
     pub async fn get_hnsw_graph(
         &self,
         graph_file: &HnswGraphFileInfo,
-        _stats: &mut VectorStoreCacheStats,
+        stats: &mut VectorStoreCacheStats,
     ) -> HummockResult<HnswGraphFileHolder> {
         let store = self.store.clone();
         let graph_file_path =
@@ -719,6 +719,10 @@ impl SstableStore {
             .await
             .map_err(foyer::Error::from)
             .map_err(HummockError::foyer_error)?;
+        stats.hnsw_graph_total += 1;
+        if entry.source() == foyer::Source::Outer {
+            stats.hnsw_graph_miss += 1;
+        }
         HnswGraphFileHolder::try_from_entry(entry, graph_file.object_id.as_raw())
     }
 
