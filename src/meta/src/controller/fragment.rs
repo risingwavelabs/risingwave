@@ -63,7 +63,6 @@ use sea_orm::{
     QueryFilter, QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
@@ -1177,7 +1176,7 @@ impl CatalogController {
             }
         }
 
-        debug!(?database_fragment_infos, "reload all actors");
+        tracing::trace!(?database_fragment_infos, "reload all actors");
 
         Ok(database_fragment_infos)
     }
