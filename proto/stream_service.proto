@@ -34,6 +34,7 @@ message InjectBarrierRequest {
     common.Buffer vnode_bitmap = 4;
     string mview_definition = 5;
     plan_common.ExprContext expr_context = 6;
+    string config_override = 9;
     repeated uint32 initial_subscriber_ids = 7;
   }
 

@@ -91,7 +91,7 @@ impl CatalogController {
         database_id: Option<DatabaseId>,
         schema_id: Option<SchemaId>,
         create_type: PbCreateType,
-        timezone: Option<String>,
+        ctx: StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
         specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
@@ -102,7 +102,8 @@ impl CatalogController {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
             create_type: Set(create_type.into()),
-            timezone: Set(timezone),
+            timezone: Set(ctx.timezone),
+            config_override: Set(Some(ctx.config_override.to_string())),
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
@@ -189,7 +190,7 @@ impl CatalogController {
                     Some(table.database_id),
                     Some(table.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -218,7 +219,7 @@ impl CatalogController {
                     Some(sink.database_id),
                     Some(sink.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -236,7 +237,7 @@ impl CatalogController {
                     Some(table.database_id),
                     Some(table.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -270,7 +271,7 @@ impl CatalogController {
                     Some(index.database_id),
                     Some(index.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -302,7 +303,7 @@ impl CatalogController {
                     Some(src.database_id),
                     Some(src.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -861,15 +862,19 @@ impl CatalogController {
         }
 
         // 3. check parallelism.
-        let (original_max_parallelism, original_timezone): (i32, Option<String>) =
-            StreamingJobModel::find_by_id(id)
-                .select_only()
-                .column(streaming_job::Column::MaxParallelism)
-                .column(streaming_job::Column::Timezone)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
+        let (original_max_parallelism, original_timezone, original_config_override): (
+            i32,
+            Option<String>,
+            Option<String>,
+        ) = StreamingJobModel::find_by_id(id)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .column(streaming_job::Column::Timezone)
+            .column(streaming_job::Column::ConfigOverride)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
         if let Some(max_parallelism) = expected_original_max_parallelism
             && original_max_parallelism != max_parallelism as i32
@@ -889,9 +894,15 @@ impl CatalogController {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
-        let timezone = ctx
-            .map(|ctx| ctx.timezone.clone())
-            .unwrap_or(original_timezone);
+
+        let ctx = StreamContext {
+            timezone: ctx
+                .map(|ctx| ctx.timezone.clone())
+                .unwrap_or(original_timezone),
+            // We don't expect replacing a job with a different config override.
+            // Thus always use the original config override.
+            config_override: original_config_override.unwrap_or_default().into(),
+        };
 
         // 4. create streaming object for new replace table.
         let new_obj_id = Self::create_streaming_job_obj(
@@ -901,7 +912,7 @@ impl CatalogController {
             Some(streaming_job.database_id() as _),
             Some(streaming_job.schema_id() as _),
             streaming_job.create_type(),
-            timezone,
+            ctx,
             parallelism,
             original_max_parallelism as _,
             None,

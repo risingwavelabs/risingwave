@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
@@ -68,7 +69,7 @@ use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::scale::resolve_streaming_job_definition;
-use crate::model::FragmentDownstreamRelation;
+use crate::model::{FragmentDownstreamRelation, StreamContext};
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -2213,7 +2214,17 @@ pub fn build_select_node_list(
 #[derive(Clone, Debug, Default)]
 pub struct StreamingJobExtraInfo {
     pub timezone: Option<String>,
+    pub config_override: Arc<str>,
     pub job_definition: String,
+}
+
+impl StreamingJobExtraInfo {
+    pub fn stream_context(&self) -> StreamContext {
+        StreamContext {
+            timezone: self.timezone.clone(),
+            config_override: self.config_override.clone(),
+        }
+    }
 }
 
 pub async fn get_streaming_job_extra_info<C>(
@@ -2223,11 +2234,12 @@ pub async fn get_streaming_job_extra_info<C>(
 where
     C: ConnectionTrait,
 {
-    let timezone_pairs: Vec<(JobId, Option<String>)> = StreamingJob::find()
+    let pairs: Vec<(JobId, Option<String>, Option<String>)> = StreamingJob::find()
         .select_only()
         .columns([
             streaming_job::Column::JobId,
             streaming_job::Column::Timezone,
+            streaming_job::Column::ConfigOverride,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .into_tuple()
@@ -2238,14 +2250,15 @@ where
 
     let mut definitions = resolve_streaming_job_definition(txn, &job_ids).await?;
 
-    let result = timezone_pairs
+    let result = pairs
         .into_iter()
-        .map(|(job_id, timezone)| {
+        .map(|(job_id, timezone, config_override)| {
             let job_definition = definitions.remove(&job_id).unwrap_or_default();
             (
                 job_id,
                 StreamingJobExtraInfo {
                     timezone,
+                    config_override: config_override.unwrap_or_default().into(),
                     job_definition,
                 },
             )
