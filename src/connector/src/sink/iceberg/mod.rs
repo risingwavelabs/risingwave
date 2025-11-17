@@ -2692,7 +2692,7 @@ mod test {
                 gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
                 glue_id: None,
-                glue_region: Some("us-east-1".to_owned()),
+                glue_region: None,
                 glue_access_key: None,
                 glue_secret_key: None,
                 glue_iam_role_arn: None,
