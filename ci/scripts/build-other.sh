@@ -5,6 +5,10 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+MAVEN_REPO_LOCAL="${MAVEN_REPO_LOCAL:-$PWD/.m2/repository}"
+mkdir -p "${MAVEN_REPO_LOCAL}"
+MVN_CMD=(mvn -Dmaven.repo.local="${MAVEN_REPO_LOCAL}")
+
 echo "--- Build Rust UDF"
 cd e2e_test/udf/embedded_wasm
 rustup target add wasm32-wasip1
@@ -13,14 +17,14 @@ cd ../../..
 
 echo "--- Build Java packages"
 cd java
-mvn -B package -Dmaven.test.skip=true
-mvn -B install -Dmaven.test.skip=true --pl java-binding-integration-test --am
-mvn dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test
+"${MVN_CMD[@]}" -B package -Dmaven.test.skip=true
+"${MVN_CMD[@]}" -B install -Dmaven.test.skip=true --pl java-binding-integration-test --am
+"${MVN_CMD[@]}" dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test
 cd ..
 
 echo "--- Build Java UDF"
 cd e2e_test/udf/remote_java
-mvn -B package
+"${MVN_CMD[@]}" -B package
 cd ../../..
 
 echo "--- Build rust binary for java binding integration test"
