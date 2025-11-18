@@ -212,10 +212,8 @@ impl<S: StateStore> IcebergListExecutor<S> {
             })
         };
 
-        let mut stream = StreamReaderWithPause::<true, _>::new(
-            barrier_stream,
-            build_incremental_stream(),
-        );
+        let mut stream =
+            StreamReaderWithPause::<true, _>::new(barrier_stream, build_incremental_stream());
 
         // TODO: support pause (incl. pause on startup)/resume/rate limit
 
