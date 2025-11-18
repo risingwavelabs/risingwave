@@ -109,7 +109,6 @@ impl<S: StateStore> IcebergListExecutor<S> {
         let ConnectorProperties::Iceberg(iceberg_properties) = config else {
             unreachable!()
         };
-        let iceberg_properties = (*iceberg_properties).clone();
 
         // Get consistent column names for schema stability across snapshots
         let downstream_columns = self.downstream_columns.map(|columns| {
@@ -185,14 +184,13 @@ impl<S: StateStore> IcebergListExecutor<S> {
         }
 
         let last_snapshot = Arc::new(Mutex::new(last_snapshot));
-        let downstream_columns_for_incremental = downstream_columns.clone();
         let iceberg_list_interval_sec = self.streaming_config.developer.iceberg_list_interval_sec;
         let build_incremental_stream = || {
             incremental_scan_stream(
-                iceberg_properties.clone(),
+                (*iceberg_properties).clone(),
                 last_snapshot.clone(),
                 iceberg_list_interval_sec,
-                downstream_columns_for_incremental.clone(),
+                downstream_columns.clone(),
             )
             .map(|res| match res {
                 Ok(scan_task) => {
