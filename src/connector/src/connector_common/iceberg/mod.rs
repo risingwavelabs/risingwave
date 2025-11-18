@@ -502,7 +502,15 @@ impl IcebergCommon {
                     }
                 }
                 "glue" => {
-                    if !enable_config_load {
+                    let glue_access_key = self.glue_access_key();
+                    let glue_secret_key = self.glue_secret_key();
+                    let has_glue_credentials =
+                        glue_access_key.is_some() && glue_secret_key.is_some();
+                    let should_configure_glue_provider = !enable_config_load
+                        || has_glue_credentials
+                        || self.glue_iam_role_arn.is_some();
+
+                    if should_configure_glue_provider {
                         java_catalog_configs.insert(
                             "client.credentials-provider".to_owned(),
                             "com.risingwave.connector.catalog.GlueCredentialProvider".to_owned(),
@@ -513,13 +521,13 @@ impl IcebergCommon {
                                 region.to_owned(),
                             );
                         }
-                        if let Some(access_key) = self.glue_access_key() {
+                        if let Some(access_key) = glue_access_key {
                             java_catalog_configs.insert(
                                 "client.credentials-provider.glue.access-key-id".to_owned(),
                                 access_key.to_owned(),
                             );
                         }
-                        if let Some(secret_key) = self.glue_secret_key() {
+                        if let Some(secret_key) = glue_secret_key {
                             java_catalog_configs.insert(
                                 "client.credentials-provider.glue.secret-access-key".to_owned(),
                                 secret_key.to_owned(),
@@ -529,6 +537,13 @@ impl IcebergCommon {
                             java_catalog_configs.insert(
                                 "client.credentials-provider.glue.iam-role-arn".to_owned(),
                                 role_arn.to_owned(),
+                            );
+                        }
+                        if enable_config_load && !has_glue_credentials {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.use-default-credential-chain"
+                                    .to_owned(),
+                                "true".to_owned(),
                             );
                         }
                     }
