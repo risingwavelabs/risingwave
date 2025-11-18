@@ -29,8 +29,6 @@ pub struct Model {
     pub job_status: JobStatus,
     pub create_type: CreateType,
     pub timezone: Option<String>,
-    // Here `NULL` is equivalent to an empty config override string.
-    pub config_override: Option<String>,
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,

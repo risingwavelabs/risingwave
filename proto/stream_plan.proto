@@ -1197,16 +1197,12 @@ message StreamActor {
   string mview_definition = 9;
   // Provide the necessary context, e.g. session info like time zone, for the actor.
   plan_common.ExprContext expr_context = 10;
-  // The config override for this actor.
-  string config_override = 11;
 }
 
 // The streaming context associated with a stream plan
 message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.
   string timezone = 1;
-  // The partial config of this job to override the global config.
-  string config_override = 2;
 }
 
 message BackfillOrder {

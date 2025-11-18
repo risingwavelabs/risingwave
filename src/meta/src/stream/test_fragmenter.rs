@@ -33,19 +33,19 @@ use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, Field};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode,
-    PbDispatchOutputMapping, PbStreamContext, ProjectNode, SimpleAggNode, SourceNode,
+    PbDispatchOutputMapping, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
 };
 
 use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::model::{StreamContext, StreamJobFragments};
+use crate::model::StreamJobFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
@@ -413,7 +413,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
-        ctx: Some(PbStreamContext::default()),
+        ctx: Some(StreamContext::default()),
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
@@ -454,7 +454,10 @@ async fn test_graph_builder() -> MetaResult<()> {
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
     let graph = make_stream_graph();
-    let ctx = StreamContext::from_protobuf(graph.ctx.as_ref().unwrap());
+    let expr_context = ExprContext {
+        time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
+        strict_mode: false,
+    };
     let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
     let internal_tables = fragment_graph.incomplete_internal_tables();
 
@@ -470,7 +473,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         upstream_fragment_downstreams,
         downstream_fragment_relations,
         ..
-    } = actor_graph_builder.generate_graph(&env, &job, ctx)?;
+    } = actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
     let new_fragment_relation = || {
         upstream_fragment_downstreams

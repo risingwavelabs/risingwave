@@ -54,7 +54,8 @@ use risingwave_pb::source::{ConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    PbDispatchOutputMapping, PbDispatcherType, PbStreamNode, PbStreamScanType, StreamScanType,
+    PbDispatchOutputMapping, PbDispatcherType, PbStreamContext, PbStreamNode, PbStreamScanType,
+    StreamScanType,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
@@ -78,8 +79,7 @@ use crate::controller::utils::{
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
-    StreamActor, StreamContext, StreamJobFragments, StreamingJobModelContextExt as _,
-    TableParallelism,
+    StreamActor, StreamContext, StreamJobFragments, TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
 use crate::stream::UpstreamSinkInfo;
@@ -101,7 +101,6 @@ struct ActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<VnodeBitmap>,
     pub expr_context: ExprContext,
-    pub config_override: Arc<str>,
 }
 
 #[derive(Clone, Debug)]
@@ -263,7 +262,7 @@ impl CatalogController {
     fn compose_table_fragments(
         job_id: JobId,
         state: PbState,
-        ctx: StreamContext,
+        ctx: Option<PbStreamContext>,
         fragments: Vec<(fragment::Model, Vec<ActorInfo>)>,
         parallelism: StreamingParallelism,
         max_parallelism: usize,
@@ -285,7 +284,10 @@ impl CatalogController {
             state: state as _,
             fragments: pb_fragments,
             actor_status: pb_actor_status,
-            ctx,
+            ctx: ctx
+                .as_ref()
+                .map(StreamContext::from_protobuf)
+                .unwrap_or_default(),
             assigned_parallelism: match parallelism {
                 StreamingParallelism::Custom => TableParallelism::Custom,
                 StreamingParallelism::Adaptive => TableParallelism::Adaptive,
@@ -350,7 +352,6 @@ impl CatalogController {
                 splits,
                 vnode_bitmap,
                 expr_context,
-                config_override,
                 ..
             } = actor;
 
@@ -373,7 +374,6 @@ impl CatalogController {
                 vnode_bitmap,
                 mview_definition: job_definition.clone().unwrap_or("".to_owned()),
                 expr_context: pb_expr_context,
-                config_override,
             })
         }
 
@@ -558,7 +558,7 @@ impl CatalogController {
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
 
         let fragment_actors =
-            self.collect_fragment_actor_pairs(fragments, job_info.stream_context())?;
+            self.collect_fragment_actor_pairs(fragments, job_info.timezone.clone())?;
 
         let job_definition = resolve_streaming_job_definition(&inner.db, &HashSet::from([job_id]))
             .await?
@@ -567,7 +567,7 @@ impl CatalogController {
         Self::compose_table_fragments(
             job_id,
             job_info.job_status.into(),
-            job_info.stream_context(),
+            job_info.timezone.map(|tz| PbStreamContext { timezone: tz }),
             fragment_actors,
             job_info.parallelism.clone(),
             job_info.max_parallelism as _,
@@ -866,9 +866,10 @@ impl CatalogController {
     fn collect_fragment_actor_map(
         &self,
         fragment_ids: &[FragmentId],
-        stream_context: StreamContext,
+        timezone: Option<String>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorInfo>>> {
         let guard = self.env.shared_actor_infos().read_guard();
+        let stream_context = StreamContext { timezone };
         let pb_expr_context = stream_context.to_expr_context();
         let expr_context: ExprContext = (&pb_expr_context).into();
 
@@ -893,7 +894,6 @@ impl CatalogController {
                         .as_ref()
                         .map(|bitmap| VnodeBitmap::from(&bitmap.to_protobuf())),
                     expr_context: expr_context.clone(),
-                    config_override: stream_context.config_override.clone(),
                 })
                 .collect();
 
@@ -906,10 +906,10 @@ impl CatalogController {
     fn collect_fragment_actor_pairs(
         &self,
         fragments: Vec<fragment::Model>,
-        stream_context: StreamContext,
+        timezone: Option<String>,
     ) -> MetaResult<Vec<(fragment::Model, Vec<ActorInfo>)>> {
         let fragment_ids: Vec<_> = fragments.iter().map(|f| f.fragment_id).collect();
-        let mut actor_map = self.collect_fragment_actor_map(&fragment_ids, stream_context)?;
+        let mut actor_map = self.collect_fragment_actor_map(&fragment_ids, timezone)?;
         fragments
             .into_iter()
             .map(|fragment| {
@@ -943,14 +943,14 @@ impl CatalogController {
                 .await?;
 
             let fragment_actors =
-                self.collect_fragment_actor_pairs(fragments, job.stream_context())?;
+                self.collect_fragment_actor_pairs(fragments, job.timezone.clone())?;
 
             table_fragments.insert(
                 job.job_id,
                 Self::compose_table_fragments(
                     job.job_id,
                     job.job_status.into(),
-                    job.stream_context(),
+                    job.timezone.map(|tz| PbStreamContext { timezone: tz }),
                     fragment_actors,
                     job.parallelism.clone(),
                     job.max_parallelism as _,
@@ -1890,7 +1890,6 @@ mod tests {
                     time_zone: String::from("America/New_York"),
                     strict_mode: false,
                 }),
-                config_override: "".into(),
             })
             .collect_vec();
 
@@ -1954,7 +1953,6 @@ mod tests {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
                     }),
-                    config_override: "a.b.c = true".into(),
                 }
             })
             .collect_vec();

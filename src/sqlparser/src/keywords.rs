@@ -138,7 +138,6 @@ define_keywords!(
     COMMITTED,
     CONCURRENTLY,
     CONDITION,
-    CONFIG,
     CONFLICT,
     CONFLUENT,
     CONNECT,

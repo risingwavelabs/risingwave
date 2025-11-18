@@ -205,7 +205,6 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         vnode_bitmap: None,
         mview_definition: "".to_owned(),
         expr_context: None,
-        config_override: "".into(),
     };
     let table1 = TableId::new(1);
     let table2 = TableId::new(2);
