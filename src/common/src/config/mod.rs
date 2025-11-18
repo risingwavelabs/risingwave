@@ -36,8 +36,10 @@ pub use storage::{
     CacheEvictionConfig, EvictionConfig, ObjectStoreConfig, StorageConfig, StorageMemoryConfig,
     extract_storage_memory_config,
 };
+pub mod merge;
 pub mod system;
 pub mod utils;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -45,6 +47,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
+pub use merge::*;
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
