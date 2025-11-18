@@ -510,7 +510,7 @@ pub async fn start_service_as_election_leader(
     let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
         metadata_manager.clone(),
         barrier_scheduler.clone(),
-        env.shared_actor_infos().clone(),
+        &env,
         refresh_scheduler_interval,
     )
     .await?;

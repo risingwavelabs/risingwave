@@ -280,7 +280,7 @@ impl CommandContext {
                 for job_id in streaming_job_ids {
                     barrier_manager_context
                         .refresh_manager
-                        .remove_progress_tracker(job_id.as_mv_table_id());
+                        .remove_progress_tracker(job_id.as_mv_table_id(), "drop_streaming_jobs");
                 }
 
                 barrier_manager_context

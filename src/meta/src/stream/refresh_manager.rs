@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -31,7 +31,8 @@ use tokio::sync::{Notify, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::barrier::{BarrierScheduler, Command, SharedActorInfos};
-use crate::manager::MetadataManager;
+use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
 pub type GlobalRefreshManagerRef = Arc<GlobalRefreshManager>;
@@ -49,9 +50,10 @@ impl GlobalRefreshManager {
     pub async fn start(
         metadata_manager: MetadataManager,
         barrier_scheduler: BarrierScheduler,
-        shared_actor_infos: SharedActorInfos,
+        env: &MetaSrvEnv,
         scheduler_interval: Duration,
     ) -> MetaResult<(GlobalRefreshManagerRef, JoinHandle<()>, oneshot::Sender<()>)> {
+        let shared_actor_infos = env.shared_actor_infos().clone();
         let manager = Arc::new(Self {
             metadata_manager: metadata_manager.clone(),
             barrier_scheduler,
@@ -112,17 +114,22 @@ impl GlobalRefreshManager {
 
         self.ensure_refreshable(table_id, associated_source_id)
             .await?;
-        self.execute_refresh(table_id, associated_source_id, shared_actor_infos)
-            .await?;
 
-        Ok(RefreshResponse { status: None })
+        let result = self
+            .execute_refresh(table_id, associated_source_id, shared_actor_infos)
+            .await;
+
+        match result {
+            Ok(_) => Ok(RefreshResponse { status: None }),
+            Err(err) => Err(err),
+        }
     }
 
     pub async fn mark_refresh_complete(&self, table_id: TableId) -> MetaResult<()> {
         self.metadata_manager
             .update_refresh_job_status(table_id, RefreshState::Idle, None)
             .await?;
-        self.remove_progress_tracker(table_id);
+        self.remove_progress_tracker(table_id, "success");
         tracing::info!(%table_id, "Table refresh completed, state updated to Idle");
         Ok(())
     }
@@ -189,7 +196,11 @@ impl GlobalRefreshManager {
         job: &refresh_job::Model,
     ) -> MetaResult<()> {
         if job.current_status != RefreshState::Idle {
-            tracing::info!(table_id = %job.table_id, "skip scheduled refresh: current status is not idle: {:?}", job.current_status);
+            GLOBAL_META_METRICS
+                .refresh_cron_job_miss_cnt
+                .with_guarded_label_values(&[&job.table_id.to_string()])
+                .inc();
+            tracing::warn!(table_id = %job.table_id, "skip scheduled refresh: current status is not idle: {:?}", job.current_status);
             return Ok(());
         }
         let Some(interval_secs) = job.trigger_interval_secs else {
@@ -245,6 +256,13 @@ impl GlobalRefreshManager {
         };
         let associated_source_id = SourceId::new(src_id);
 
+        // Increment cron job trigger counter
+        let table_id_str = job.table_id.to_string();
+        GLOBAL_META_METRICS
+            .refresh_cron_job_trigger_cnt
+            .with_guarded_label_values(&[&table_id_str])
+            .inc();
+
         self.ensure_refreshable(job.table_id, associated_source_id)
             .await?;
         self.execute_refresh(job.table_id, associated_source_id, &self.shared_actor_infos)
@@ -258,6 +276,7 @@ impl GlobalRefreshManager {
         associated_source_id: SourceId,
         shared_actor_infos: &SharedActorInfos,
     ) -> MetaResult<()> {
+        let start_time = std::time::Instant::now();
         let trigger_time = Utc::now().naive_utc();
         let database_id = self
             .metadata_manager
@@ -270,7 +289,7 @@ impl GlobalRefreshManager {
             .get_job_fragments_by_id(table_id.as_job_id())
             .await?;
 
-        let mut tracker = SingleTableRefreshProgressTracker::default();
+        let mut tracker = SingleTableRefreshProgressTracker::new();
         {
             let fragment_info_guard = shared_actor_infos.read_guard();
             for (fragment_id, fragment) in &job_fragments.fragments {
@@ -316,26 +335,31 @@ impl GlobalRefreshManager {
             associated_source_id,
         };
 
-        if let Err(err) = self
+        let result = self
             .barrier_scheduler
             .run_command(database_id, refresh_command)
-            .await
-        {
-            tracing::error!(
-                error = %err.as_report(),
-                table_id = %table_id,
-                "failed to execute refresh command"
-            );
-            self.metadata_manager
-                .update_refresh_job_status(table_id, RefreshState::Idle, None)
-                .await?;
-            self.remove_progress_tracker(table_id);
-            Err(anyhow!(err)
-                .context(format!("Failed to refresh table {}", table_id))
-                .into())
-        } else {
-            tracing::info!(table_id = %table_id, "refresh command scheduled");
-            Ok(())
+            .await;
+
+        match result {
+            Ok(_) => {
+                let duration = start_time.elapsed();
+                tracing::info!(table_id = %table_id, duration = ?duration, "refresh command scheduled");
+                Ok(())
+            }
+            Err(err) => {
+                tracing::error!(
+                    error = %err.as_report(),
+                    table_id = %table_id,
+                    "failed to execute refresh command"
+                );
+                self.metadata_manager
+                    .update_refresh_job_status(table_id, RefreshState::Idle, None)
+                    .await?;
+                self.remove_progress_tracker(table_id, "failure");
+                Err(anyhow!(err)
+                    .context(format!("Failed to refresh table {}", table_id))
+                    .into())
+            }
         }
     }
 
@@ -394,9 +418,19 @@ impl GlobalRefreshManager {
             .insert(table_id);
     }
 
-    pub fn remove_progress_tracker(&self, table_id: TableId) {
+    pub fn remove_progress_tracker(&self, table_id: TableId, status: &str) {
         let mut guard = self.progress_trackers.lock();
-        guard.inner.remove(&table_id);
+        if let Some(entry) = guard.inner.remove(&table_id) {
+            let status = status.to_owned();
+            GLOBAL_META_METRICS
+                .refresh_job_duration
+                .with_guarded_label_values(&[&table_id.to_string(), &status])
+                .set(entry.start_time.elapsed().as_secs());
+            GLOBAL_META_METRICS
+                .refresh_job_finish_cnt
+                .with_guarded_label_values(&[&table_id.to_string(), &status])
+                .inc();
+        }
         guard.table_id_by_database_id.values_mut().for_each(|set| {
             set.remove(&table_id);
         });
@@ -419,15 +453,27 @@ impl GlobalRefreshTableProgressTracker {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct SingleTableRefreshProgressTracker {
     pub expected_list_actors: HashSet<ActorId>,
     pub expected_fetch_actors: HashSet<ActorId>,
     pub list_finished_actors: HashSet<ActorId>,
     pub fetch_finished_actors: HashSet<ActorId>,
+
+    pub start_time: Instant,
 }
 
 impl SingleTableRefreshProgressTracker {
+    pub fn new() -> Self {
+        Self {
+            expected_list_actors: HashSet::new(),
+            expected_fetch_actors: HashSet::new(),
+            list_finished_actors: HashSet::new(),
+            fetch_finished_actors: HashSet::new(),
+            start_time: Instant::now(),
+        }
+    }
+
     pub fn report_list_finished(&mut self, actor_ids: impl Iterator<Item = ActorId>) {
         self.list_finished_actors.extend(actor_ids);
     }
