@@ -35,6 +35,7 @@
 #![feature(register_tool)]
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
+#![feature(float_gamma)]
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(vec_into_raw_parts)]
 #![feature(exact_div)]

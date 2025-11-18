@@ -227,6 +227,8 @@ impl Strong {
             | ExprType::Scale
             | ExprType::MinScale
             | ExprType::TrimScale
+            | ExprType::Gamma
+            | ExprType::Lgamma
             | ExprType::Encode
             | ExprType::Decode
             | ExprType::Sha1
