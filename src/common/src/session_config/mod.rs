@@ -594,6 +594,8 @@ impl SessionConfig {
 
 #[cfg(test)]
 mod test {
+    use expect_test::expect;
+
     use super::*;
 
     #[derive(SessionConfig)]
@@ -612,5 +614,27 @@ mod test {
             .unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "3");
         assert!(TestConfig::check_no_alter_sys("test_param").unwrap());
+    }
+
+    #[test]
+    fn test_initial_streaming_config_override() {
+        let mut config = SessionConfig::default();
+        config
+            .set_streaming_join_encoding(Some(JoinEncodingType::Cpu).into(), &mut ())
+            .unwrap();
+
+        // Check the converted config override string.
+        let override_str = config.to_initial_streaming_config_override().unwrap();
+        expect![[r#"
+            [streaming.developer]
+            stream_join_encoding_type = "cpu_optimized"
+        "#]]
+        .assert_eq(&override_str);
+
+        // Try merging it to the default streaming config.
+        let merged = merge_streaming_config_section(&StreamingConfig::default(), &override_str)
+            .unwrap()
+            .unwrap();
+        assert_eq!(merged.developer.join_encoding_type, JoinEncodingType::Cpu);
     }
 }
