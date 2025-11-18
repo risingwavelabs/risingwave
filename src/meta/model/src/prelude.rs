@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use risingwave_pb::id::*;
 pub use {Source as SourceModel, Table as TableModel};
 
-pub use super::actor::Entity as Actor;
 pub use super::catalog_version::Entity as CatalogVersion;
 pub use super::cluster::Entity as Cluster;
 pub use super::compaction_config::Entity as CompactionConfig;

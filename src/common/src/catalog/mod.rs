@@ -35,11 +35,13 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
 pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_test_utils};
-use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
+pub use crate::id::{
+    ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, TableId,
+};
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
@@ -74,7 +76,7 @@ pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const MAX_SYS_CATALOG_NUM: i32 = 5000;
 pub const SYS_CATALOG_START_ID: i32 = i32::MAX - MAX_SYS_CATALOG_NUM;
 
-pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
+pub use risingwave_pb::id::OBJECT_ID_PLACEHOLDER;
 
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
@@ -137,6 +139,9 @@ pub const CDC_OFFSET_COLUMN_NAME: &str = "_rw_offset";
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
 pub const CDC_TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
+pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
+pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
+
 /// The local system catalog reader in the frontend node.
 pub trait SysCatalogReader: Sync + Send + 'static {
     /// Reads the data of the system catalog table.
@@ -144,138 +149,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
-
-pub type ObjectId = u32;
-
-#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Copy)]
-#[display("{database_id}")]
-pub struct DatabaseId {
-    pub database_id: u32,
-}
-
-impl DatabaseId {
-    pub const fn new(database_id: u32) -> Self {
-        DatabaseId { database_id }
-    }
-
-    pub fn placeholder() -> Self {
-        DatabaseId {
-            database_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-}
-
-impl From<u32> for DatabaseId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for DatabaseId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<DatabaseId> for u32 {
-    fn from(id: DatabaseId) -> Self {
-        id.database_id
-    }
-}
-
-#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq)]
-#[display("{schema_id}")]
-pub struct SchemaId {
-    pub schema_id: u32,
-}
-
-impl SchemaId {
-    pub fn new(schema_id: u32) -> Self {
-        SchemaId { schema_id }
-    }
-
-    pub fn placeholder() -> Self {
-        SchemaId {
-            schema_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-}
-
-impl From<u32> for SchemaId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for SchemaId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<SchemaId> for u32 {
-    fn from(id: SchemaId) -> Self {
-        id.schema_id
-    }
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Display,
-    Default,
-    Hash,
-    PartialOrd,
-    PartialEq,
-    Eq,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
-#[display("{table_id}")]
-pub struct TableId {
-    pub table_id: u32,
-}
-
-impl TableId {
-    pub const fn new(table_id: u32) -> Self {
-        TableId { table_id }
-    }
-
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        TableId {
-            table_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn table_id(&self) -> u32 {
-        self.table_id
-    }
-
-    pub fn is_placeholder(&self) -> bool {
-        self.table_id == OBJECT_ID_PLACEHOLDER
-    }
-}
-
-impl From<u32> for TableId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for TableId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<TableId> for u32 {
-    fn from(id: TableId) -> Self {
-        id.table_id
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
@@ -302,75 +175,6 @@ impl TableOption {
     pub fn new(retention_seconds: Option<u32>) -> Self {
         // now we only support ttl for TableOption
         TableOption { retention_seconds }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq)]
-#[display("{index_id}")]
-pub struct IndexId {
-    pub index_id: u32,
-}
-
-impl IndexId {
-    pub const fn new(index_id: u32) -> Self {
-        IndexId { index_id }
-    }
-
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        IndexId {
-            index_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn index_id(&self) -> u32 {
-        self.index_id
-    }
-}
-
-impl From<u32> for IndexId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-impl From<IndexId> for u32 {
-    fn from(id: IndexId) -> Self {
-        id.index_id
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct FunctionId(pub u32);
-
-impl FunctionId {
-    pub const fn new(id: u32) -> Self {
-        FunctionId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        FunctionId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn function_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for FunctionId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for FunctionId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<FunctionId> for u32 {
-    fn from(id: FunctionId) -> Self {
-        id.0
     }
 }
 
@@ -407,76 +211,6 @@ impl From<&u32> for UserId {
 impl From<UserId> for u32 {
     fn from(id: UserId) -> Self {
         id.user_id
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct ConnectionId(pub u32);
-
-impl ConnectionId {
-    pub const fn new(id: u32) -> Self {
-        ConnectionId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        ConnectionId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn connection_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for ConnectionId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for ConnectionId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<ConnectionId> for u32 {
-    fn from(id: ConnectionId) -> Self {
-        id.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct SecretId(pub u32);
-
-impl SecretId {
-    pub const fn new(id: u32) -> Self {
-        SecretId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        SecretId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn secret_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for SecretId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for SecretId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<SecretId> for u32 {
-    fn from(id: SecretId) -> Self {
-        id.0
     }
 }
 

@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::ICEBERG_SOURCE_PREFIX;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
+use super::util::execute_with_long_running_notification;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
@@ -67,10 +69,23 @@ pub async fn handle_drop_source(
         }
     };
 
+    if source_name.starts_with(ICEBERG_SOURCE_PREFIX) {
+        return Err(crate::error::ErrorCode::NotSupported(
+            "Dropping Iceberg sources is not supported".to_owned(),
+            "Please use DROP TABLE command.".to_owned(),
+        )
+        .into());
+    }
+
     session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_source(source.id, cascade).await?;
+    execute_with_long_running_notification(
+        catalog_writer.drop_source(source.id, cascade),
+        &session,
+        "DROP SOURCE",
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
 }

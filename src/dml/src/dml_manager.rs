@@ -98,19 +98,27 @@ impl DmlManager {
                     // table is successfully created and all the readers are registered.
                     Ordering::Less => unreachable!("table version `{table_version_id}` expired"),
 
-                    // Register with the correct version. This happens when the following
-                    // `DmlExecutor`s of this table is activated on this compute
-                    // node.
-                    Ordering::Equal => handle
-                        .upgrade()
-                        .inspect(|handle| {
+                    // Register with the correct version.
+                    Ordering::Equal => {
+                        if let Some(handle) = handle.upgrade() {
+                            // If there's already a reader, check the schema is the same and reuse it.
+                            // This happens when the following `DmlExecutor`s of this table is activated
+                            // on this compute node.
                             assert_eq!(
                                 handle.column_descs(),
                                 column_descs,
                                 "dml handler registers with same version but different schema"
-                            )
-                        })
-                        .expect("the first dml executor is gone"), // this should never happen
+                            );
+                            handle
+                        } else {
+                            // Currently when scaling the fragment, we may drop all actors first before
+                            // creating new actors, which will drop the old reader. In this case, recreate
+                            // a new reader.
+                            // TODO: this will interrupt ongoing DML requests even for scaling out. We
+                            // should try preserving the old actors, thus preserving the reader.
+                            new_handle!(o)
+                        }
+                    }
 
                     // A new version of the table is activated, overwrite the old reader.
                     Ordering::Greater => new_handle!(o),

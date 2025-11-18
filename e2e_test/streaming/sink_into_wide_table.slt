@@ -1,0 +1,59 @@
+statement ok
+set implicit_flush = true;
+
+statement ok
+create table t (k int primary key, a int, b int) on conflict DO UPDATE IF NOT NULL;
+
+statement ok
+create table sa (k int primary key, a int);
+
+statement ok
+create table sb (k int primary key, b int);
+
+statement ok
+create sink ska into t(k, a) from sa;
+
+statement ok
+create sink skb into t(k, b) from sb;
+
+statement ok
+insert into sa values (1, 101), (2, 102);
+
+query III
+select * from t order by k;
+----
+1 101 NULL
+2 102 NULL
+
+# 1. `Insert` record from a sink can enrich an existing row.
+statement ok
+insert into sb values (1, 201);
+
+query III
+select * from t order by k;
+----
+1 101 201
+2 102 NULL
+
+# 2. `Update` record from a sink can also correctly enrich an existing row.
+# https://github.com/risingwavelabs/risingwave/issues/22579
+statement ok
+update sb set b = 202 where k = 1;
+
+query III
+select * from t order by k;
+----
+1 101 202
+2 102 NULL
+
+# 3. `Delete` record from one sink will remove the entire row.
+statement ok
+delete from sb where k = 1;
+
+query III
+select * from t order by k;
+----
+2 102 NULL
+
+statement ok
+drop table t cascade;

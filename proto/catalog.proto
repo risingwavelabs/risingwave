@@ -149,6 +149,9 @@ message Source {
   // Used for secret connect options.
   map<string, secret.SecretRef> secret_refs = 19;
 
+  // Source refresh mode
+  plan_common.SourceRefreshMode refresh_mode = 20;
+
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
 
@@ -160,6 +163,7 @@ enum SinkType {
   SINK_TYPE_APPEND_ONLY = 1;
   SINK_TYPE_FORCE_APPEND_ONLY = 2;
   SINK_TYPE_UPSERT = 3;
+  SINK_TYPE_RETRACT = 4;
 }
 
 // Similar to `StreamSourceInfo`, and may replace `SinkType` later.

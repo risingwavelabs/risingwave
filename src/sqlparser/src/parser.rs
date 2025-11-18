@@ -12,15 +12,7 @@
 
 //! SQL Parser
 
-#[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    format,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
-use core::fmt;
+use std::fmt;
 
 use ddl::WebhookSourceInfo;
 use itertools::Itertools;
@@ -111,7 +103,6 @@ use crate::ast::ddl::AlterFragmentOperation;
 
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Eq, Clone, Debug, PartialEq, Hash)]
 pub struct IncludeOptionItem {
     pub column_type: Ident,
@@ -168,7 +159,6 @@ impl fmt::Display for ParserError {
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for ParserError {}
 
 type ColumnsDefTuple = (
@@ -3280,9 +3270,20 @@ impl Parser<'_> {
                 AlterTableOperation::SetBackfillRateLimit { rate_limit }
             } else if let Some(rate_limit) = self.parse_alter_dml_rate_limit()? {
                 AlterTableOperation::SetDmlRateLimit { rate_limit }
+            } else if self.parse_keyword(Keyword::CONFIG) {
+                let entries = self.parse_options()?;
+                AlterTableOperation::SetConfig { entries }
             } else {
-                return self
-                    .expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT after SET");
+                return self.expected(
+                    "SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT/CONFIG after SET",
+                );
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::CONFIG) {
+                let keys = self.parse_parenthesized_object_name_list()?;
+                AlterTableOperation::ResetConfig { keys }
+            } else {
+                return self.expected("CONFIG after RESET");
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3335,7 +3336,7 @@ impl Parser<'_> {
             }
         } else {
             return self.expected(
-                "ADD or RENAME or OWNER TO or SET or DROP or SWAP or CONNECTOR after ALTER TABLE",
+                "ADD or RENAME or OWNER TO or SET or RESET or DROP or SWAP or CONNECTOR after ALTER TABLE",
             );
         };
         Ok(Statement::AlterTable {
@@ -3436,11 +3437,21 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CONFIG) {
+                let entries = self.parse_options()?;
+                AlterIndexOperation::SetConfig { entries }
             } else {
-                return self.expected("PARALLELISM after SET");
+                return self.expected("PARALLELISM or CONFIG after SET");
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::CONFIG) {
+                let keys = self.parse_parenthesized_object_name_list()?;
+                AlterIndexOperation::ResetConfig { keys }
+            } else {
+                return self.expected("CONFIG after RESET");
             }
         } else {
-            return self.expected("RENAME after ALTER INDEX");
+            return self.expected("RENAME, SET, or RESET after ALTER INDEX");
         };
 
         Ok(Statement::AlterIndex {
@@ -3517,8 +3528,11 @@ impl Parser<'_> {
                 && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
             {
                 AlterViewOperation::SetBackfillRateLimit { rate_limit }
+            } else if self.parse_keyword(Keyword::CONFIG) && materialized {
+                let entries = self.parse_options()?;
+                AlterViewOperation::SetConfig { entries }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET");
+                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET");
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
@@ -3528,8 +3542,11 @@ impl Parser<'_> {
                     resource_group: None,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CONFIG) && materialized {
+                let keys = self.parse_parenthesized_object_name_list()?;
+                AlterViewOperation::ResetConfig { keys }
             } else {
-                return self.expected("RESOURCE_GROUP after RESET");
+                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
             }
         } else {
             return self.expected(&format!(
@@ -3607,8 +3624,20 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
+            } else if self.parse_keyword(Keyword::CONFIG) {
+                let entries = self.parse_options()?;
+                AlterSinkOperation::SetConfig { entries }
             } else {
-                return self.expected("SCHEMA/PARALLELISM after SET");
+                return self.expected(
+                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                );
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::CONFIG) {
+                let keys = self.parse_parenthesized_object_name_list()?;
+                AlterSinkOperation::ResetConfig { keys }
+            } else {
+                return self.expected("CONFIG after RESET");
             }
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_sink = self.parse_object_name()?;
@@ -3619,7 +3648,8 @@ impl Parser<'_> {
                 alter_props: changed_props,
             }
         } else {
-            return self.expected("RENAME or OWNER TO or SET or CONNECTOR WITH after ALTER SINK");
+            return self
+                .expected("RENAME or OWNER TO or SET or RESET or CONNECTOR WITH after ALTER SINK");
         };
 
         Ok(Statement::AlterSink {
@@ -3707,8 +3737,18 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::CONFIG) {
+                let entries = self.parse_options()?;
+                AlterSourceOperation::SetConfig { entries }
             } else {
-                return self.expected("SCHEMA, SOURCE_RATE_LIMIT or PARALLELISM after SET");
+                return self.expected("SCHEMA, SOURCE_RATE_LIMIT, PARALLELISM or CONFIG after SET");
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::CONFIG) {
+                let keys = self.parse_parenthesized_object_name_list()?;
+                AlterSourceOperation::ResetConfig { keys }
+            } else {
+                return self.expected("CONFIG after RESET");
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();
@@ -3727,8 +3767,9 @@ impl Parser<'_> {
                 alter_props: with_options,
             }
         } else {
-            return self
-                .expected("RENAME, ADD COLUMN, OWNER TO, CONNECTOR or SET after ALTER SOURCE");
+            return self.expected(
+                "RENAME, ADD COLUMN, OWNER TO, CONNECTOR, SET or RESET after ALTER SOURCE",
+            );
         };
 
         Ok(Statement::AlterSource {
@@ -3810,14 +3851,25 @@ impl Parser<'_> {
     }
 
     pub fn parse_alter_fragment(&mut self) -> ModalResult<Statement> {
-        let fragment_id = self.parse_literal_u32()?;
+        let mut fragment_ids = vec![self.parse_literal_u32()?];
+        while self.consume_token(&Token::Comma) {
+            fragment_ids.push(self.parse_literal_u32()?);
+        }
         if !self.parse_keyword(Keyword::SET) {
             return self.expected("SET after ALTER FRAGMENT");
         }
-        let rate_limit = self.parse_alter_fragment_rate_limit()?;
-        let operation = AlterFragmentOperation::AlterBackfillRateLimit { rate_limit };
+        let operation = if self.parse_keyword(Keyword::PARALLELISM) {
+            if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+                return self.expected("TO or = after ALTER FRAGMENT SET PARALLELISM");
+            }
+            let parallelism = self.parse_set_variable()?;
+            AlterFragmentOperation::SetParallelism { parallelism }
+        } else {
+            let rate_limit = self.parse_alter_fragment_rate_limit()?;
+            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit }
+        };
         Ok(Statement::AlterFragment {
-            fragment_id,
+            fragment_ids,
             operation,
         })
     }
@@ -4193,6 +4245,17 @@ impl Parser<'_> {
             }
         }
         Ok(ObjectName(idents))
+    }
+
+    /// Parse a parenthesized comma-separated list of object names
+    pub fn parse_parenthesized_object_name_list(&mut self) -> ModalResult<Vec<ObjectName>> {
+        if self.consume_token(&Token::LParen) {
+            let names = self.parse_comma_separated(Parser::parse_object_name)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(names)
+        } else {
+            self.expected("a list of object names in parentheses")
+        }
     }
 
     /// Parse identifiers strictly i.e. don't parse keywords

@@ -59,6 +59,7 @@ pub async fn update_schedulability(
         let worker_id = worker
             .parse::<u32>()
             .ok()
+            .map(Into::into)
             .or_else(|| worker_index_by_host.get(&worker).cloned());
 
         if let Some(worker_id) = worker_id

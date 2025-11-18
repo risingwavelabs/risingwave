@@ -20,6 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::{Itertools, enumerate};
 use prometheus::IntGauge;
 use prometheus::core::{AtomicU64, GenericCounter};
+use risingwave_common::id::{JobId, TableId};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::level::Levels;
@@ -63,8 +64,8 @@ impl LocalTableMetrics {
 
 pub fn get_or_create_local_table_stat<'a>(
     metrics: &MetaMetrics,
-    table_id: u32,
-    local_metrics: &'a mut HashMap<u32, LocalTableMetrics>,
+    table_id: TableId,
+    local_metrics: &'a mut HashMap<TableId, LocalTableMetrics>,
 ) -> &'a mut LocalTableMetrics {
     local_metrics.entry(table_id).or_insert_with(|| {
         let table_label = format!("{}", table_id);
@@ -89,7 +90,7 @@ pub fn get_or_create_local_table_stat<'a>(
 
 pub fn trigger_local_table_stat(
     metrics: &MetaMetrics,
-    local_metrics: &mut HashMap<u32, LocalTableMetrics>,
+    local_metrics: &mut HashMap<TableId, LocalTableMetrics>,
     version_stats: &HummockVersionStats,
     table_stats_change: &PbTableStatsMap,
 ) {
@@ -113,7 +114,7 @@ pub fn trigger_local_table_stat(
 pub fn trigger_mv_stat(
     metrics: &MetaMetrics,
     version_stats: &HummockVersionStats,
-    mv_id_to_all_table_ids: Vec<(u32, Vec<u32>)>,
+    mv_id_to_all_table_ids: Vec<(JobId, Vec<TableId>)>,
 ) {
     metrics.materialized_view_stats.reset();
     for (mv_id, all_table_ids) in mv_id_to_all_table_ids {

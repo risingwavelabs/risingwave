@@ -336,7 +336,7 @@ pub fn fetch_table_catalog_for_alter(
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
         let has_incoming_sinks = reader
-            .get_schema_by_id(&table.database_id, &table.schema_id)?
+            .get_schema_by_id(table.database_id, table.schema_id)?
             .table_incoming_sinks(table.id)
             .map(|sinks| !sinks.is_empty())
             .unwrap_or(false);

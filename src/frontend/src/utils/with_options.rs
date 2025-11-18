@@ -26,6 +26,10 @@ use risingwave_connector::source::kafka::private_link::{
 use risingwave_connector::{Get, GetKeyIter, WithPropertiesExt};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
+use risingwave_pb::plan_common::SourceRefreshMode;
+use risingwave_pb::plan_common::source_refresh_mode::{
+    RefreshMode, SourceRefreshModeFullRecompute, SourceRefreshModeStreaming,
+};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
@@ -45,6 +49,8 @@ use crate::telemetry::report_event;
 pub mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
+
+pub const SOURCE_REFRESH_MODE_KEY: &str = "refresh_mode";
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
@@ -241,7 +247,11 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
     object: Option<TelemetryDatabaseObject>,
-) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
+) -> RwResult<(
+    WithOptionsSecResolved,
+    PbConnectionType,
+    Option<ConnectionId>,
+)> {
     let connector_name = with_options.get_connector();
     let db_name: &str = &session.database();
     let (mut options, secret_refs, connection_refs) = with_options.into_parts();
@@ -387,12 +397,40 @@ fn resolve_secret_refs_inner(
             SecretRefAsType::File => PbRefAsType::File,
         };
         let pb_secret_ref = PbSecretRef {
-            secret_id: secret_catalog.id.secret_id(),
+            secret_id: secret_catalog.id,
             ref_as: ref_as.into(),
         };
         resolved_secret_refs.insert(key.clone(), pb_secret_ref);
     }
     Ok(resolved_secret_refs)
+}
+
+pub(crate) fn resolve_source_refresh_mode_in_with_option(
+    with_options: &mut WithOptions,
+) -> RwResult<Option<SourceRefreshMode>> {
+    let source_refresh_mode = if let Some(source_refresh_mode_str) =
+        with_options.remove(SOURCE_REFRESH_MODE_KEY)
+    {
+        match source_refresh_mode_str.to_uppercase().as_str() {
+            "STREAMING" => SourceRefreshMode {
+                refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+            },
+            "FULL_RECOMPUTE" => SourceRefreshMode {
+                refresh_mode: Some(RefreshMode::FullRecompute(
+                    SourceRefreshModeFullRecompute {},
+                )),
+            },
+            _ => {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RECOMPUTE'",
+                    SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
+                ))));
+            }
+        }
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(source_refresh_mode))
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

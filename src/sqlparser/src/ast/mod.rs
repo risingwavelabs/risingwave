@@ -20,20 +20,12 @@ mod query;
 mod statement;
 mod value;
 
-#[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    vec::Vec,
-};
-use core::fmt;
-use core::fmt::Display;
 use std::collections::HashSet;
+use std::fmt;
+use std::fmt::Display;
 use std::sync::Arc;
 
 use itertools::Itertools;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
@@ -109,7 +101,6 @@ where
 
 /// An identifier, decomposed into its value or character data and the quote style.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ident {
     /// The value of the identifier without quotes.
     pub(crate) value: String,
@@ -185,7 +176,10 @@ impl Ident {
     pub fn from_real_value(value: &str) -> Self {
         let needs_quotes = value
             .chars()
-            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
+            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'))
+            // Also need quotes if the identifier starts with a digit, as it would be
+            // tokenized as a number instead of an identifier (e.g., "2000000")
+            || value.chars().next().is_some_and(|c| c.is_ascii_digit());
 
         if needs_quotes {
             Self::with_quote_unchecked('"', value.replace('"', "\"\""))
@@ -226,7 +220,6 @@ impl fmt::Display for Ident {
 ///
 /// Is is ensured to be non-empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ObjectName(pub Vec<Ident>);
 
 impl ObjectName {
@@ -271,7 +264,6 @@ impl From<Vec<Ident>> for ObjectName {
 
 /// For array type `ARRAY[..]` or `[..]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Array {
     /// The list of expressions between brackets
     pub elem: Vec<Expr>,
@@ -293,7 +285,6 @@ impl fmt::Display for Array {
 
 /// An escape character, to represent '' or a single character.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EscapeChar(Option<char>);
 
 impl EscapeChar {
@@ -321,7 +312,6 @@ impl fmt::Display for EscapeChar {
 /// (e.g. boolean vs string), so the caller must handle expressions of
 /// inappropriate type, like `WHERE 1` or `SELECT 1=1`, as necessary.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Expr {
     /// Identifier e.g. table name or column name
     Identifier(Ident),
@@ -861,7 +851,6 @@ impl fmt::Display for Expr {
 /// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`).
 /// This is used both for named window definitions and inline window specifications.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WindowSpec {
     pub partition_by: Vec<Expr>,
     pub order_by: Vec<OrderByExpr>,
@@ -871,7 +860,6 @@ pub struct WindowSpec {
 /// A window definition that can appear in the OVER clause of a window function.
 /// This can be either an inline window specification or a reference to a named window.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Window {
     /// Inline window specification: `OVER (PARTITION BY ... ORDER BY ...)`
     Spec(WindowSpec),
@@ -918,7 +906,6 @@ impl fmt::Display for Window {
 /// Note: The parser does not validate the specified bounds; the caller should
 /// reject invalid bounds like `ROWS UNBOUNDED FOLLOWING` before execution.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct WindowFrame {
     pub units: WindowFrameUnits,
     pub bounds: WindowFrameBounds,
@@ -926,7 +913,6 @@ pub struct WindowFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum WindowFrameUnits {
     Rows,
     Range,
@@ -935,7 +921,6 @@ pub enum WindowFrameUnits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum WindowFrameBounds {
     Bounds {
         start: WindowFrameBound,
@@ -978,7 +963,6 @@ impl fmt::Display for WindowFrameUnits {
 
 /// Specifies [WindowFrame]'s `start_bound` and `end_bound`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum WindowFrameBound {
     /// `CURRENT ROW`
     CurrentRow,
@@ -1002,7 +986,6 @@ impl fmt::Display for WindowFrameBound {
 
 /// Frame exclusion option of [WindowFrame].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum WindowFrameExclusion {
     CurrentRow,
     Group,
@@ -1022,7 +1005,6 @@ impl fmt::Display for WindowFrameExclusion {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AddDropSync {
     ADD,
     DROP,
@@ -1040,7 +1022,6 @@ impl fmt::Display for AddDropSync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ShowObject {
     Table { schema: Option<Ident> },
     InternalTable { schema: Option<Ident> },
@@ -1064,7 +1045,6 @@ pub enum ShowObject {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct JobIdents(pub Vec<u32>);
 
 impl fmt::Display for ShowObject {
@@ -1112,7 +1092,6 @@ impl fmt::Display for ShowObject {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ShowCreateType {
     Table,
     MaterializedView,
@@ -1140,7 +1119,6 @@ impl fmt::Display for ShowCreateType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CommentObject {
     Column,
     Table,
@@ -1156,7 +1134,6 @@ impl fmt::Display for CommentObject {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ExplainType {
     Logical,
     Physical,
@@ -1174,7 +1151,6 @@ impl fmt::Display for ExplainType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ExplainFormat {
     Text,
     Json,
@@ -1196,7 +1172,6 @@ impl fmt::Display for ExplainFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExplainOptions {
     /// Display additional information regarding the plan.
     pub verbose: bool,
@@ -1250,14 +1225,12 @@ impl fmt::Display for ExplainOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CdcTableInfo {
     pub source_name: ObjectName,
     pub external_table_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CopyEntity {
     Query(Box<Query>),
     Table {
@@ -1269,7 +1242,6 @@ pub enum CopyEntity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CopyTarget {
     Stdin {
         /// VALUES a vector of values to be copied
@@ -1281,7 +1253,6 @@ pub enum CopyTarget {
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Statement {
     /// Analyze (Hive)
     Analyze {
@@ -1522,7 +1493,7 @@ pub enum Statement {
     },
     /// ALTER FRAGMENT
     AlterFragment {
-        fragment_id: u32,
+        fragment_ids: Vec<u32>,
         operation: AlterFragmentOperation,
     },
     /// DESCRIBE relation
@@ -1736,7 +1707,6 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DescribeKind {
     /// `DESCRIBE <name>`
     Plain,
@@ -2515,10 +2485,15 @@ impl Statement {
                 Ok(())
             }
             Statement::AlterFragment {
-                fragment_id,
+                fragment_ids,
                 operation,
             } => {
-                write!(f, "ALTER FRAGMENT {} {}", fragment_id, operation)
+                write!(
+                    f,
+                    "ALTER FRAGMENT {} {}",
+                    display_comma_separated(fragment_ids),
+                    operation
+                )
             }
             Statement::AlterDefaultPrivileges {
                 target_users,
@@ -2580,7 +2555,6 @@ impl Display for IncludeOptionItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum OnInsert {
     /// ON DUPLICATE KEY UPDATE (MySQL when the key already exists, then execute an update instead)
@@ -2601,7 +2575,6 @@ impl fmt::Display for OnInsert {
 
 /// Privileges granted in a GRANT statement or revoked in a REVOKE statement.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Privileges {
     /// All privileges applicable to the object type
     All {
@@ -2637,7 +2610,6 @@ impl fmt::Display for Privileges {
 
 /// A privilege on a database object (table, sequence, etc.).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Action {
     Connect,
     Create,
@@ -2686,7 +2658,6 @@ impl fmt::Display for Action {
 
 /// Objects on which privileges are granted in a GRANT statement.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GrantObjects {
     /// Grant privileges on `ALL SEQUENCES IN SCHEMA <schema_name> [, ...]`
     AllSequencesInSchema { schemas: Vec<ObjectName> },
@@ -2848,7 +2819,6 @@ impl fmt::Display for GrantObjects {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PrivilegeObjectType {
     Tables,
     Sources,
@@ -2881,7 +2851,6 @@ impl fmt::Display for PrivilegeObjectType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DefaultPrivilegeOperation {
     Grant {
         privileges: Privileges,
@@ -2957,7 +2926,6 @@ impl DefaultPrivilegeOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AssignmentValue {
     /// An expression, e.g. `foo = 1`
     Expr(Expr),
@@ -2976,7 +2944,6 @@ impl fmt::Display for AssignmentValue {
 
 /// SQL assignment `foo = { expr | DEFAULT }` as used in SQLUpdate
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Assignment {
     pub id: Vec<Ident>,
     pub value: AssignmentValue,
@@ -2989,7 +2956,6 @@ impl fmt::Display for Assignment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
     /// Expr is an arbitrary expression, returning either a table or a column.
@@ -3050,7 +3016,6 @@ impl fmt::Display for FunctionArgExpr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArg {
     Named { name: Ident, arg: FunctionArgExpr },
     Unnamed(FunctionArgExpr),
@@ -3077,7 +3042,6 @@ impl fmt::Display for FunctionArg {
 /// A list of function arguments, including additional modifiers like `DISTINCT` or `ORDER BY`.
 /// This basically holds all the information between the `(` and `)` in a function call.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FunctionArgList {
     /// Aggregate function calls may have a `DISTINCT`, e.g. `count(DISTINCT x)`.
     pub distinct: bool,
@@ -3153,7 +3117,6 @@ impl FunctionArgList {
 
 /// A function call
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Function {
     /// Whether the function is prefixed with `AGGREGATE:`
     pub scalar_as_agg: bool,
@@ -3203,7 +3166,6 @@ impl fmt::Display for Function {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ObjectType {
     Table,
     View,
@@ -3274,7 +3236,6 @@ impl ParseTo for ObjectType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
     pub name: ObjectName,
     pub value: SqlOptionValue,
@@ -3300,7 +3261,13 @@ impl TryFrom<(&String, &String)> for SqlOption {
     type Error = ParserError;
 
     fn try_from((name, value): (&String, &String)) -> Result<Self, Self::Error> {
-        let query = format!("{} = {}", name, value);
+        // Use from_real_value to properly escape the name, which handles cases like
+        // "debezium.column.truncate.to.2000000.chars" where "2000000" would be
+        // tokenized as a number instead of an identifier if not properly quoted.
+        let name_parts: Vec<&str> = name.split('.').collect();
+        let object_name = ObjectName(name_parts.into_iter().map(Ident::from_real_value).collect());
+
+        let query = format!("{} = {}", object_name, value);
         let mut tokenizer = Tokenizer::new(query.as_str());
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser(&tokens);
@@ -3311,7 +3278,6 @@ impl TryFrom<(&String, &String)> for SqlOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SqlOptionValue {
     Value(Value),
     SecretRef(SecretRefValue),
@@ -3341,7 +3307,6 @@ impl From<Value> for SqlOptionValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EmitMode {
     Immediately,
     OnWindowClose,
@@ -3357,7 +3322,6 @@ impl fmt::Display for EmitMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum OnConflict {
     UpdateFull,
     Nothing,
@@ -3375,7 +3339,6 @@ impl fmt::Display for OnConflict {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Engine {
     Hummock,
     Iceberg,
@@ -3391,7 +3354,6 @@ impl fmt::Display for crate::ast::Engine {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetTimeZoneValue {
     Ident(Ident),
     Literal(Value),
@@ -3411,7 +3373,6 @@ impl fmt::Display for SetTimeZoneValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TransactionMode {
     AccessMode(TransactionAccessMode),
     IsolationLevel(TransactionIsolationLevel),
@@ -3428,7 +3389,6 @@ impl fmt::Display for TransactionMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TransactionAccessMode {
     ReadOnly,
     ReadWrite,
@@ -3445,7 +3405,6 @@ impl fmt::Display for TransactionAccessMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TransactionIsolationLevel {
     ReadUncommitted,
     ReadCommitted,
@@ -3466,7 +3425,6 @@ impl fmt::Display for TransactionIsolationLevel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ShowStatementFilter {
     Like(String),
     ILike(String),
@@ -3486,7 +3444,6 @@ impl fmt::Display for ShowStatementFilter {
 
 /// Function describe in DROP FUNCTION.
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DropFunctionOption {
     Restrict,
     Cascade,
@@ -3503,7 +3460,6 @@ impl fmt::Display for DropFunctionOption {
 
 /// Function describe in DROP FUNCTION.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FunctionDesc {
     pub name: ObjectName,
     pub args: Option<Vec<OperateFunctionArg>>,
@@ -3521,7 +3477,6 @@ impl fmt::Display for FunctionDesc {
 
 /// Function argument in CREATE FUNCTION.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OperateFunctionArg {
     pub mode: Option<ArgMode>,
     pub name: Option<Ident>,
@@ -3569,7 +3524,6 @@ impl fmt::Display for OperateFunctionArg {
 
 /// The mode of an argument in CREATE FUNCTION.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ArgMode {
     In,
     Out,
@@ -3588,7 +3542,6 @@ impl fmt::Display for ArgMode {
 
 /// These attributes inform the query optimizer about the behavior of the function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionBehavior {
     Immutable,
     Stable,
@@ -3606,7 +3559,6 @@ impl fmt::Display for FunctionBehavior {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionDefinition {
     Identifier(String),
     SingleQuotedDef(String),
@@ -3646,7 +3598,6 @@ impl FunctionDefinition {
 
 /// Return types of a function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateFunctionReturns {
     /// RETURNS rettype
     Value(DataType),
@@ -3667,7 +3618,6 @@ impl fmt::Display for CreateFunctionReturns {
 
 /// Table column definition
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TableColumnDef {
     pub name: Ident,
     pub data_type: DataType,
@@ -3684,7 +3634,6 @@ impl fmt::Display for TableColumnDef {
 /// See [Postgresdocs](https://www.postgresql.org/docs/15/sql-createfunction.html)
 /// for more details
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateFunctionBody {
     /// LANGUAGE lang_name
     pub language: Option<Ident>,
@@ -3728,7 +3677,6 @@ impl fmt::Display for CreateFunctionBody {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateFunctionWithOptions {
     /// Always retry on network errors.
     pub always_retry_on_network_error: Option<bool>,
@@ -3793,7 +3741,6 @@ impl Display for CreateFunctionWithOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateFunctionUsing {
     Link(String),
     Base64(String),
@@ -3812,7 +3759,6 @@ impl fmt::Display for CreateFunctionUsing {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ConfigParam {
     pub param: Ident,
     pub value: SetVariableValue,
@@ -3825,7 +3771,6 @@ impl fmt::Display for ConfigParam {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
     Single(SetVariableValueSingle),
     List(Vec<SetVariableValueSingle>),
@@ -3850,7 +3795,6 @@ impl fmt::Display for SetVariableValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValueSingle {
     Ident(Ident),
     Literal(Value),
@@ -3877,7 +3821,6 @@ impl fmt::Display for SetVariableValueSingle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AsOf {
     ProcessTime,
     // used by time travel
@@ -3908,7 +3851,6 @@ impl fmt::Display for AsOf {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DiscardType {
     All,
 }
@@ -3925,7 +3867,6 @@ impl fmt::Display for DiscardType {
 // We decouple "default" from none,
 // so we can choose strategies that make the most sense.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BackfillOrderStrategy {
     #[default]
     Default,

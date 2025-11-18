@@ -24,6 +24,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::Database;
@@ -103,7 +104,7 @@ impl DatabaseScheduledQueue {
                 inner: Default::default(),
                 send_latency: metrics
                     .barrier_send_latency
-                    .with_guarded_label_values(&[database_id.database_id.to_string().as_str()]),
+                    .with_guarded_label_values(&[database_id.to_string().as_str()]),
             },
             status,
         }
@@ -218,7 +219,7 @@ impl BarrierScheduler {
     }
 
     /// Try to cancel scheduled cmd for create streaming job, return true if the command exists previously and get cancelled.
-    pub fn try_cancel_scheduled_create(&self, database_id: DatabaseId, table_id: TableId) -> bool {
+    pub fn try_cancel_scheduled_create(&self, database_id: DatabaseId, job_id: JobId) -> bool {
         let queue = &mut self.inner.queue.lock();
         let Some(queue) = queue.queue.get_mut(&database_id) else {
             return false;
@@ -226,7 +227,7 @@ impl BarrierScheduler {
 
         if let Some(idx) = queue.queue.inner.iter().position(|scheduled| {
             if let Command::CreateStreamingJob { info, .. } = &scheduled.command
-                && info.stream_job_fragments.stream_job_id() == table_id
+                && info.stream_job_fragments.stream_job_id() == job_id
             {
                 true
             } else {
@@ -373,7 +374,7 @@ impl PeriodicBarriers {
         let mut databases = HashMap::with_capacity(database_infos.len());
         let mut timer_streams = StreamMap::with_capacity(database_infos.len());
         database_infos.into_iter().for_each(|database| {
-            let database_id: DatabaseId = database.id.into();
+            let database_id: DatabaseId = database.id;
             let barrier_interval_ms = database.barrier_interval_ms;
             let checkpoint_frequency = database.checkpoint_frequency;
             databases.insert(
@@ -784,7 +785,7 @@ mod tests {
         checkpoint_frequency: Option<u64>,
     ) -> Database {
         Database {
-            id,
+            id: id.into(),
             name: format!("test_db_{}", id),
             barrier_interval_ms,
             checkpoint_frequency,
@@ -874,25 +875,29 @@ mod tests {
 
         async fn handle_list_finished_source_ids(
             &self,
-            _list_finished_source_ids: Vec<u32>,
+            _list_finished_source_ids: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbListFinishedSource,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }
 
         async fn handle_load_finished_source_ids(
             &self,
-            _load_finished_source_ids: Vec<u32>,
+            _load_finished_source_ids: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbLoadFinishedSource,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }
 
-        async fn finish_cdc_table_backfill(&self, _job_id: TableId) -> MetaResult<()> {
+        async fn finish_cdc_table_backfill(&self, _job_id: JobId) -> MetaResult<()> {
             unimplemented!()
         }
 
         async fn handle_refresh_finished_table_ids(
             &self,
-            _refresh_finished_table_ids: Vec<u32>,
+            _refresh_finished_table_ids: Vec<JobId>,
         ) -> MetaResult<()> {
             unimplemented!()
         }

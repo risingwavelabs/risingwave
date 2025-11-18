@@ -34,6 +34,7 @@ mod plan_visitor;
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
+use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 
 pub mod backfill_order_strategy;
 mod logical_optimization;
@@ -85,7 +86,9 @@ use crate::optimizer::plan_node::{
     StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion, StreamVectorIndexWrite,
     ToStream, VisitExprsRecursive,
 };
-use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
+use crate::optimizer::plan_visitor::{
+    LocalityProviderCounter, RwTimestampValidator, TemporalJoinValidator,
+};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
 
@@ -581,6 +584,12 @@ impl LogicalPlanRoot {
             ).into());
         }
 
+        if ctx.session_ctx().config().enable_locality_backfill()
+            && LocalityProviderCounter::count(plan.clone()) > 5
+        {
+            risingwave_common::license::Feature::LocalityBackfill.check_available()?
+        }
+
         Ok(optimized_plan.into_phase(plan))
     }
 
@@ -932,7 +941,17 @@ impl LogicalPlanRoot {
         // Determine if the table should be refreshable based on the connector type
         let refreshable = source_catalog
             .as_ref()
-            .map(|catalog| catalog.with_properties.is_batch_connector())
+            .map(|catalog| {
+                catalog.with_properties.is_batch_connector() || {
+                    matches!(
+                        catalog
+                            .refresh_mode
+                            .as_ref()
+                            .map(|refresh_mode| refresh_mode.refresh_mode),
+                        Some(Some(RefreshMode::FullRecompute(_)))
+                    )
+                }
+            })
             .unwrap_or(false);
 
         // Validate that refreshable tables have a user-defined primary key (i.e., does not have rowid)

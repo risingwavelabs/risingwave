@@ -10,7 +10,7 @@ grpc_max_reset_stream = 200
 
 [server.heap_profiling]
 enable_auto = true
-threshold_auto = 0.8999999761581421
+threshold_auto = 0.9
 dir = "./"
 
 [meta]
@@ -69,6 +69,7 @@ compaction_group_merge_dimension_threshold = 1.2
 cdc_table_split_init_sleep_interval_splits = 1000
 cdc_table_split_init_sleep_duration_millis = 500
 cdc_table_split_init_insert_batch_size = 100
+enable_legacy_table_migration = true
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -159,6 +160,19 @@ max_total_query_size_bytes = 1073741824
 min_single_query_size_bytes = 1048576
 max_single_query_size_bytes = 1073741824
 
+[[frontend.hba_config.entries]]
+connection_type = "Local"
+databases = ["all"]
+users = ["all"]
+auth_method = "trust"
+
+[[frontend.hba_config.entries]]
+connection_type = "Host"
+databases = ["all"]
+users = ["all"]
+addresses = ["0.0.0.0/0"]
+auth_method = "password"
+
 [streaming]
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
@@ -211,7 +225,7 @@ connect_timeout_secs = 5
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
-shared_buffer_flush_ratio = 0.800000011920929
+shared_buffer_flush_ratio = 0.8
 shared_buffer_min_batch_flush_size_mb = 800
 imm_merge_threshold = 0
 write_conflict_detection_enabled = true
@@ -242,7 +256,6 @@ compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
 vector_file_block_size_kb = 1024
 time_travel_version_cache_capacity = 10
-iceberg_compaction_target_file_size_mb = 1024
 iceberg_compaction_enable_validate = false
 iceberg_compaction_max_record_batch_rows = 1024
 iceberg_compaction_min_size_per_partition_mb = 1024
@@ -253,9 +266,8 @@ iceberg_compaction_enable_heuristic_output_parallelism = false
 iceberg_compaction_max_concurrent_closes = 8
 iceberg_compaction_enable_dynamic_size_estimation = true
 iceberg_compaction_size_estimation_smoothing_factor = 0.3
-iceberg_compaction_small_file_threshold_mb = 32
-iceberg_compaction_max_task_total_size_mb = 51200
 iceberg_compaction_pending_parallelism_budget_multiplier = 4.0
+iceberg_compaction_target_binpack_group_size_mb = 102400
 
 [storage.cache]
 vector_block_cache_capacity_mb = 16

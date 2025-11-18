@@ -27,7 +27,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, FullKeyTracker, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use thiserror_ext::AsReport;
 use tracing::{error, warn};
@@ -154,11 +154,8 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         assert!(payload.iter().all(|imm| imm.has_old_value()));
     }
     // Local memory compaction looks at all key ranges.
-    let existing_table_ids: HashSet<u32> = payload
-        .iter()
-        .map(|imm| imm.table_id.table_id)
-        .dedup()
-        .collect();
+    let existing_table_ids: HashSet<TableId> =
+        payload.iter().map(|imm| imm.table_id).dedup().collect();
     assert!(!existing_table_ids.is_empty());
 
     let compaction_catalog_agent_ref = compaction_catalog_manager_ref
@@ -168,7 +165,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
         .table_ids()
         .collect::<HashSet<_>>();
     payload.retain(|imm| {
-        let ret = existing_table_ids.contains(&imm.table_id.table_id);
+        let ret = existing_table_ids.contains(&imm.table_id);
         if !ret {
             error!(
                 "can not find table {:?}, it may be removed by meta-service",
@@ -279,7 +276,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             let compaction_executor = context.compaction_executor.clone();
             let mut forward_iters = Vec::with_capacity(payload.len());
             for imm in &payload {
-                if !existing_table_ids.contains(&imm.table_id.table_id) {
+                if !existing_table_ids.contains(&imm.table_id) {
                     continue;
                 }
                 forward_iters.push(imm.clone().into_forward_iter());
@@ -463,12 +460,12 @@ pub async fn merge_imms_in_memory(
 ///  Based on the incoming payload and opts, calculate the sharding method and sstable size of shared buffer compaction.
 fn generate_splits(
     payload: &Vec<ImmutableMemtable>,
-    existing_table_ids: &HashSet<u32>,
+    existing_table_ids: &HashSet<TableId>,
     storage_opts: &StorageOpts,
-) -> (Vec<KeyRange>, u64, BTreeMap<u32, u32>) {
+) -> (Vec<KeyRange>, u64, BTreeMap<TableId, u32>) {
     let mut size_and_start_user_keys = vec![];
     let mut compact_data_size = 0;
-    let mut table_size_infos: HashMap<u32, u64> = HashMap::default();
+    let mut table_size_infos: HashMap<TableId, u64> = HashMap::default();
     let mut table_vnode_partition = BTreeMap::default();
     for imm in payload {
         let data_size = {
@@ -476,17 +473,22 @@ fn generate_splits(
             (imm.value_count() * EPOCH_LEN + imm.size()) as u64
         };
         compact_data_size += data_size;
-        size_and_start_user_keys.push((data_size, imm.start_user_key()));
-        let v = table_size_infos.entry(imm.table_id.table_id).or_insert(0);
+        size_and_start_user_keys.push((
+            data_size,
+            FullKey {
+                user_key: imm.start_user_key(),
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
+            }
+            .encode(),
+        ));
+        let v = table_size_infos.entry(imm.table_id).or_insert(0);
         *v += data_size;
     }
-    size_and_start_user_keys.sort_by(|a, b| a.1.cmp(&b.1));
+
+    size_and_start_user_keys
+        .sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
     let mut splits = Vec::with_capacity(size_and_start_user_keys.len());
     splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
-    let mut key_split_append = |key_before_last: &Bytes| {
-        splits.last_mut().unwrap().right = key_before_last.clone();
-        splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
-    };
     let sstable_size = (storage_opts.sstable_size_mb as u64) << 20;
     let min_sstable_size = (storage_opts.min_sstable_size_mb as u64) << 20;
     let parallel_compact_size = (storage_opts.parallel_compact_size_mb as u64) << 20;
@@ -500,31 +502,23 @@ fn generate_splits(
         compact_data_size
     };
 
-    if existing_table_ids.len() > 1 {
-        if parallelism > 1 && compact_data_size > sstable_size {
-            let mut last_buffer_size = 0;
-            let mut last_user_key: UserKey<Vec<u8>> = UserKey::default();
-            for (data_size, user_key) in size_and_start_user_keys {
-                if last_buffer_size >= sub_compaction_data_size
-                    && last_user_key.as_ref() != user_key
-                {
-                    last_user_key.set(user_key);
-                    key_split_append(
-                        &FullKey {
-                            user_key,
-                            epoch_with_gap: EpochWithGap::new_max_epoch(),
-                        }
-                        .encode()
-                        .into(),
-                    );
-                    last_buffer_size = data_size;
-                } else {
-                    last_user_key.set(user_key);
-                    last_buffer_size += data_size;
-                }
+    if parallelism > 1 && compact_data_size > sstable_size {
+        let mut last_buffer_size = 0;
+        let mut last_key: Vec<u8> = vec![];
+        for (data_size, key) in size_and_start_user_keys {
+            if last_buffer_size >= sub_compaction_data_size && !last_key.eq(&key) {
+                splits.last_mut().unwrap().right = Bytes::from(key.clone());
+                splits.push(KeyRange::new(Bytes::from(key.clone()), Bytes::default()));
+                last_buffer_size = data_size;
+            } else {
+                last_buffer_size += data_size;
             }
-        }
 
+            last_key = key;
+        }
+    }
+
+    if compact_data_size > sstable_size {
         // Meta node will calculate size of each state-table in one task in `risingwave_meta::hummock::manager::compaction::calculate_vnode_partition`.
         // To make the calculate result more accurately we shall split the large state-table from other small ones.
         for table_id in existing_table_ids {
@@ -553,7 +547,7 @@ impl SharedBufferCompactRunner {
         key_range: KeyRange,
         context: CompactorContext,
         sub_compaction_sstable_size: usize,
-        table_vnode_partition: BTreeMap<u32, u32>,
+        table_vnode_partition: BTreeMap<TableId, u32>,
         use_block_based_filter: bool,
         object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
@@ -687,17 +681,114 @@ mod tests {
             ..Default::default()
         };
         let payload = vec![imm1, imm2, imm3, imm4, imm5];
-        let (splits, _sstable_capacity, vnodes) =
-            generate_splits(&payload, &HashSet::from_iter([1, 2]), &storage_opts);
+        let (splits, _sstable_capacity, vnodes) = generate_splits(
+            &payload,
+            &HashSet::from_iter([1.into(), 2.into()]),
+            &storage_opts,
+        );
         assert_eq!(
             splits.len(),
             storage_opts.share_buffers_sync_parallelism as usize
         );
         assert!(vnodes.is_empty());
+
+        // Basic validation: splits should be continuous and monotonic
         for i in 1..splits.len() {
             assert_eq!(splits[i].left, splits[i - 1].right);
             assert!(splits[i].left > splits[i - 1].left);
             assert!(splits[i].right.is_empty() || splits[i].left < splits[i].right);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_generate_splits_no_duplicate_keys() {
+        // Create test data with specific ordering to detect sorting issues
+        // Make data sizes large enough to trigger splitting
+        let imm1 = ImmutableMemtable::build_shared_buffer_batch_for_test(
+            test_epoch(1),
+            0,
+            vec![(
+                generate_key("zzz"), // This should be last after sorting
+                SharedBufferValue::Insert(Bytes::from_static(b"v1")),
+            )],
+            2 * 1024 * 1024, // 2MB to ensure compact_data_size > sstable_size
+            TableId::new(1),
+        );
+
+        let imm2 = ImmutableMemtable::build_shared_buffer_batch_for_test(
+            test_epoch(1),
+            0,
+            vec![(
+                generate_key("aaa"), // This should be first after sorting
+                SharedBufferValue::Insert(Bytes::from_static(b"v1")),
+            )],
+            2 * 1024 * 1024, // 2MB
+            TableId::new(1),
+        );
+
+        let imm3 = ImmutableMemtable::build_shared_buffer_batch_for_test(
+            test_epoch(1),
+            0,
+            vec![(
+                generate_key("mmm"), // This should be middle after sorting
+                SharedBufferValue::Insert(Bytes::from_static(b"v1")),
+            )],
+            2 * 1024 * 1024, // 2MB
+            TableId::new(1),
+        );
+
+        let storage_opts = StorageOpts {
+            share_buffers_sync_parallelism: 3, // Enable parallelism
+            parallel_compact_size_mb: 2,       // Small threshold to trigger splitting
+            sstable_size_mb: 1,                // Small SSTable size to trigger condition
+            ..Default::default()
+        };
+
+        // Test with payload in wrong order (zzz, aaa, mmm) instead of sorted order (aaa, mmm, zzz)
+        let payload = vec![imm1, imm2, imm3];
+        let (splits, _sstable_capacity, _vnodes) =
+            generate_splits(&payload, &HashSet::from_iter([1.into()]), &storage_opts);
+
+        // Should have multiple splits due to large data size
+        assert!(
+            splits.len() > 1,
+            "Expected multiple splits, got {}",
+            splits.len()
+        );
+
+        // Verify no key range overlaps between splits
+        for i in 0..splits.len() {
+            for j in (i + 1)..splits.len() {
+                let split_i = &splits[i];
+                let split_j = &splits[j];
+
+                // Check that splits don't overlap
+                if !split_i.right.is_empty() && !split_j.left.is_empty() {
+                    assert!(
+                        split_i.right <= split_j.left || split_j.right <= split_i.left,
+                        "Split {} and {} overlap: [{:?}, {:?}) vs [{:?}, {:?})",
+                        i,
+                        j,
+                        split_i.left,
+                        split_i.right,
+                        split_j.left,
+                        split_j.right
+                    );
+                }
+            }
+        }
+
+        // Additional verification: ensure splits are sorted
+        for i in 1..splits.len() {
+            if !splits[i - 1].right.is_empty() && !splits[i].left.is_empty() {
+                assert!(
+                    splits[i - 1].right <= splits[i].left,
+                    "Splits are not in sorted order at index {}: {:?} > {:?}",
+                    i,
+                    splits[i - 1].right,
+                    splits[i].left
+                );
+            }
         }
     }
 }

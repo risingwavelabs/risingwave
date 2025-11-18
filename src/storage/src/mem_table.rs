@@ -752,7 +752,7 @@ mod tests {
         check_data(&mut iter, &[]).await;
 
         // Test seek with a smaller table id
-        let smaller_table_id = TableId::new(TEST_TABLE_ID.table_id() - 1);
+        let smaller_table_id = TableId::new(TEST_TABLE_ID.as_raw_id() - 1);
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: smaller_table_id,
@@ -765,7 +765,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data).await;
 
         // Test seek with a greater table id
-        let greater_table_id = TableId::new(TEST_TABLE_ID.table_id() + 1);
+        let greater_table_id = TableId::new(TEST_TABLE_ID.as_raw_id() + 1);
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: greater_table_id,
@@ -791,7 +791,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data).await;
 
         // Test seek with a smaller table id
-        let smaller_table_id = TableId::new(TEST_TABLE_ID.table_id() - 1);
+        let smaller_table_id = TableId::new(TEST_TABLE_ID.as_raw_id() - 1);
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: smaller_table_id,
@@ -804,7 +804,7 @@ mod tests {
         check_data(&mut iter, &[]).await;
 
         // Test seek with a greater table id
-        let greater_table_id = TableId::new(TEST_TABLE_ID.table_id() + 1);
+        let greater_table_id = TableId::new(TEST_TABLE_ID.as_raw_id() + 1);
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: greater_table_id,

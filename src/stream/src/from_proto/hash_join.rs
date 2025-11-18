@@ -124,21 +124,21 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let state_table_l = StateTableBuilder::new(table_l, store.clone(), Some(vnodes.clone()))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let degree_state_table_l =
             StateTableBuilder::new(degree_table_l, store.clone(), Some(vnodes.clone()))
-                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
 
         let state_table_r = StateTableBuilder::new(table_r, store.clone(), Some(vnodes.clone()))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let degree_state_table_r = StateTableBuilder::new(degree_table_r, store, Some(vnodes))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
 
@@ -166,11 +166,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
-            chunk_size: params.env.config().developer.chunk_size,
-            high_join_amplification_threshold: params
-                .env
-                .config()
-                .developer
+            chunk_size: params.config.developer.chunk_size,
+            high_join_amplification_threshold: (params.config.developer)
                 .high_join_amplification_threshold,
             join_encoding_type,
         };

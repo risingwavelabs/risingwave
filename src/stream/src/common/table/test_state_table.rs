@@ -36,7 +36,7 @@ use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indic
 
 #[tokio::test]
 async fn test_state_table_update_insert() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -227,7 +227,7 @@ async fn test_state_table_update_insert() {
 
 #[tokio::test]
 async fn test_state_table_iter_with_prefix() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
@@ -362,7 +362,7 @@ async fn test_state_table_iter_with_prefix() {
 
 #[tokio::test]
 async fn test_state_table_iter_with_pk_range() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
@@ -505,7 +505,7 @@ async fn test_state_table_iter_with_pk_range() {
 #[tokio::test]
 #[should_panic]
 async fn test_mem_table_assertion() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -548,7 +548,7 @@ async fn test_mem_table_assertion() {
 
 #[tokio::test]
 async fn test_state_table_iter_with_value_indices() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
@@ -721,7 +721,7 @@ async fn test_state_table_iter_with_value_indices() {
 
 #[tokio::test]
 async fn test_state_table_iter_with_shuffle_value_indices() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
@@ -963,7 +963,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
 
 #[tokio::test]
 async fn test_state_table_write_chunk() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -1095,7 +1095,7 @@ async fn test_state_table_write_chunk() {
 
 #[tokio::test]
 async fn test_state_table_write_chunk_visibility() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -1221,7 +1221,7 @@ async fn test_state_table_write_chunk_visibility() {
 
 #[tokio::test]
 async fn test_state_table_write_chunk_value_indices() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -1323,7 +1323,7 @@ async fn test_state_table_write_chunk_value_indices() {
 // cache. Test for apply_batch.
 #[tokio::test]
 async fn test_state_table_watermark_cache_ignore_null() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -1449,7 +1449,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
 // Check the partitioned values (larger than watermark) should be retained in cache.
 #[tokio::test]
 async fn test_state_table_watermark_cache_write_chunk() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -1624,7 +1624,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
 // Check the partitioned values (larger than watermark) should be retained in cache.
 #[tokio::test]
 async fn test_state_table_watermark_cache_refill() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -1723,7 +1723,7 @@ async fn test_state_table_watermark_cache_refill() {
 
 #[tokio::test]
 async fn test_state_table_iter_prefix_and_sub_range() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::ascending()];
@@ -1911,7 +1911,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
 async fn test_replicated_state_table_replication() {
     type TestReplicatedStateTable = ReplicatedStateTable<HummockStorage, BasicSerde>;
     // Define the base table to replicate
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let order_types = vec![OrderType::ascending()];
     let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
@@ -2100,7 +2100,7 @@ async fn test_replicated_state_table_replication() {
 #[tokio::test]
 async fn test_non_pk_prefix_watermark_read() {
     // Define the base table to replicate
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let order_types = vec![OrderType::ascending(), OrderType::ascending()];
     let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![

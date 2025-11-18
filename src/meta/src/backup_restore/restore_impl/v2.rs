@@ -142,7 +142,6 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.schemas.clone(), db).await?;
         insert_models(metadata.streaming_jobs.clone(), db).await?;
         insert_models(metadata.fragments.clone(), db).await?;
-        insert_models(metadata.actors.clone(), db).await?;
         insert_models(metadata.fragment_relation.clone(), db).await?;
         insert_models(metadata.connections.clone(), db).await?;
         insert_models(metadata.sources.clone(), db).await?;
@@ -160,6 +159,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.iceberg_tables.clone(), db).await?;
         insert_models(metadata.iceberg_namespace_properties.clone(), db).await?;
         insert_models(metadata.user_default_privilege.clone(), db).await?;
+        insert_models(metadata.fragment_splits.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
         Ok(())
@@ -209,7 +209,6 @@ macro_rules! for_all_auto_increment {
             {"object", objects, oid},
             {"user", users, user_id},
             {"user_privilege", user_privileges, id},
-            {"actor", actors, actor_id},
             {"fragment", fragments, fragment_id},
             {"object_dependency", object_dependencies, id}
         )

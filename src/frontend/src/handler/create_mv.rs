@@ -15,8 +15,9 @@
 use std::collections::HashSet;
 
 use either::Either;
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
+use risingwave_common::catalog::{FunctionId, ObjectId};
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
@@ -217,7 +218,7 @@ pub async fn handle_create_mv_bound(
     if_not_exists: bool,
     name: ObjectName,
     query: BoundQuery,
-    dependent_relations: HashSet<TableId>,
+    dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
@@ -280,14 +281,14 @@ pub(crate) async fn gen_create_mv_graph(
     handler_args: HandlerArgs,
     name: ObjectName,
     query: BoundQuery,
-    dependent_relations: HashSet<TableId>,
+    dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(
     TableCatalog,
     PbStreamFragmentGraph,
-    HashSet<u32>,
+    HashSet<ObjectId>,
     Option<String>,
 )> {
     let mut with_options = get_with_options(handler_args.clone());
@@ -378,12 +379,7 @@ It only indicates the physical clustering of the data, which may improve the per
     // during binding instead of visiting the optimized plan.
     let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
         .into_iter()
-        .map(|id| id.table_id() as ObjectId)
-        .chain(
-            dependent_udfs
-                .into_iter()
-                .map(|id| id.function_id() as ObjectId),
-        )
+        .chain(dependent_udfs.iter().copied().map_into())
         .collect();
 
     let graph = build_graph_with_strategy(

@@ -122,6 +122,21 @@ IcebergProperties:
   - name: s3.secret.key
     field_type: String
     required: false
+  - name: s3.iam_role_arn
+    field_type: String
+    required: false
+  - name: glue.access.key
+    field_type: String
+    required: false
+  - name: glue.secret.key
+    field_type: String
+    required: false
+  - name: glue.iam_role_arn
+    field_type: String
+    required: false
+  - name: glue.region
+    field_type: String
+    required: false
   - name: gcs.credential
     field_type: String
     required: false
@@ -1230,6 +1245,10 @@ PulsarProperties:
       contains a generated suffix in the subscription name.
       The subscription name will be `{subscription_name_prefix}-{fragment_id}-{actor_id}`.
     required: false
+  - name: subscription.unacked.resend.delay
+    field_type: Duration
+    required: false
+    default: Default::default
 TestSourceProperties:
   fields:
   - name: properties

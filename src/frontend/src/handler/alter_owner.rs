@@ -16,8 +16,7 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
-use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::user::grant_privilege;
+use risingwave_common::id::SchemaId;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -33,17 +32,12 @@ use crate::user::user_catalog::UserCatalog;
 pub fn check_schema_create_privilege(
     session: &Arc<SessionImpl>,
     new_owner: &UserCatalog,
-    schema_id: u32,
+    schema_id: SchemaId,
 ) -> Result<()> {
     if session.is_super_user() {
         return Ok(());
     }
-    if !new_owner.is_super
-        && !new_owner.has_privilege(
-            &grant_privilege::Object::SchemaId(schema_id),
-            AclMode::Create,
-        )
-    {
+    if !new_owner.is_super && !new_owner.has_privilege(schema_id, AclMode::Create) {
         return Err(PermissionDenied(
             "Require new owner to have create privilege on the object.".to_owned(),
         )
@@ -104,7 +98,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&table.owner)?;
-                    Object::TableId(table.id.table_id)
+                    table.id.into()
                 }
                 StatementType::ALTER_VIEW => {
                     let (view, schema_name) =
@@ -118,7 +112,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&view.owner)?;
-                    Object::ViewId(view.id)
+                    view.id.into()
                 }
                 StatementType::ALTER_SOURCE => {
                     let (source, schema_name) =
@@ -132,7 +126,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&source.owner())?;
-                    Object::SourceId(source.id)
+                    source.id.into()
                 }
                 StatementType::ALTER_SINK => {
                     let (sink, schema_name) = catalog_reader.get_created_sink_by_name(
@@ -149,7 +143,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&sink.owner())?;
-                    Object::SinkId(sink.id.sink_id)
+                    sink.id.into()
                 }
                 StatementType::ALTER_SUBSCRIPTION => {
                     let (subscription, schema_name) = catalog_reader.get_subscription_by_name(
@@ -166,7 +160,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&subscription.owner())?;
-                    Object::SubscriptionId(subscription.id.subscription_id)
+                    subscription.id.into()
                 }
                 StatementType::ALTER_DATABASE => {
                     let database = catalog_reader.get_database_by_name(&obj_name.real_value())?;
@@ -175,7 +169,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&database.owner)?;
-                    Object::DatabaseId(database.id())
+                    database.id().into()
                 }
                 StatementType::ALTER_SCHEMA => {
                     let schema =
@@ -185,7 +179,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&schema.owner)?;
-                    Object::SchemaId(schema.id())
+                    schema.id().into()
                 }
                 StatementType::ALTER_CONNECTION => {
                     let (connection, schema_name) = catalog_reader.get_connection_by_name(
@@ -198,7 +192,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&connection.owner)?;
-                    Object::ConnectionId(connection.id)
+                    connection.id.into()
                 }
                 _ => unreachable!(),
             },

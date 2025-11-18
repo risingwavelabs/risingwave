@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
+use risingwave_hummock_sdk::table_stats::{PbTableStatsMap, add_prost_table_stats_map};
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
@@ -30,7 +30,8 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
-use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
+use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
+use risingwave_pb::id::TableId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use super::GroupStateValidator;
@@ -53,7 +54,7 @@ pub struct Versioning {
     pub disable_commit_epochs: bool,
     /// Latest hummock version
     pub current_version: HummockVersion,
-    pub local_metrics: HashMap<u32, LocalTableMetrics>,
+    pub local_metrics: HashMap<TableId, LocalTableMetrics>,
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
@@ -306,7 +307,7 @@ pub(super) fn calc_new_write_limits(
                         .state_table_info
                         .compaction_group_member_table_ids(*id)
                         .iter()
-                        .map(|table_id| table_id.table_id)
+                        .copied()
                         .collect(),
                     reason: group_state.reason().unwrap().to_owned(),
                 },
@@ -339,8 +340,8 @@ fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
 /// - The file stats is evenly distributed among multiple tables within the file.
 /// - The total key size and total value size are estimated based on key range and file size.
 /// - Branched files may lead to an overestimation.
-fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
-    let mut changes: HashMap<u32, TableStats> = HashMap::default();
+fn estimate_table_stats(sst: &SstableInfo) -> PbTableStatsMap {
+    let mut changes: PbTableStatsMap = HashMap::default();
     let weighted_value =
         |value: i64| -> i64 { (value as f64 / sst.table_ids.len() as f64).ceil() as i64 };
     let key_range = &sst.key_range;
@@ -370,6 +371,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use itertools::Itertools;
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::{Level, Levels};
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
@@ -390,9 +392,9 @@ mod tests {
         let mut context_info = ContextInfo::default();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
         context_info.pinned_versions.insert(
-            1,
+            1.into(),
             HummockPinnedVersion {
-                context_id: 1,
+                context_id: 1.into(),
                 min_pinned_id: 10,
             },
         );
@@ -469,7 +471,7 @@ mod tests {
         let origin_snapshot: HashMap<CompactionGroupId, WriteLimit> = [(
             2,
             WriteLimit {
-                table_ids: vec![1, 2, 3],
+                table_ids: [1, 2, 3].into_iter().map_into().collect(),
                 reason: "for test".to_owned(),
             },
         )]
@@ -540,7 +542,7 @@ mod tests {
         last_level.table_infos.extend(vec![
             SstableInfoInner {
                 key_range: KeyRange::default(),
-                table_ids: vec![1, 2, 3],
+                table_ids: vec![1.into(), 2.into(), 3.into()],
                 total_key_count: 100,
                 sst_size: 100,
                 uncompressed_file_size: 100,
@@ -549,7 +551,7 @@ mod tests {
             .into(),
             SstableInfoInner {
                 key_range: KeyRange::default(),
-                table_ids: vec![1, 2, 3],
+                table_ids: vec![1.into(), 2.into(), 3.into()],
                 total_key_count: 100,
                 sst_size: 100,
                 uncompressed_file_size: 100,
@@ -615,7 +617,7 @@ mod tests {
                 right: vec![1; 20].into(),
                 ..Default::default()
             },
-            table_ids: vec![1, 2, 3],
+            table_ids: vec![1.into(), 2.into(), 3.into()],
             total_key_count: 6000,
             uncompressed_file_size: 6_000_000,
             ..Default::default()
@@ -677,7 +679,7 @@ mod tests {
                 right: vec![1; 2000].into(),
                 ..Default::default()
             },
-            table_ids: vec![1, 2, 3],
+            table_ids: vec![1.into(), 2.into(), 3.into()],
             total_key_count: 6000,
             uncompressed_file_size: 60_000,
             ..Default::default()

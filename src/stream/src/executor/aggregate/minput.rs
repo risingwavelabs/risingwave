@@ -34,7 +34,7 @@ use super::agg_state_cache::{AggStateCache, GenericAggStateCache};
 use crate::common::StateTableColumnMapping;
 use crate::common::state_cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
-use crate::executor::{PkIndices, StreamExecutorResult};
+use crate::executor::{StreamExecutorResult, StreamKeyRef};
 
 /// Aggregation state as a materialization of input chunks.
 ///
@@ -71,7 +71,7 @@ impl MaterializedInputState {
     pub fn new(
         version: PbAggNodeVersion,
         agg_call: &AggCall,
-        pk_indices: &PkIndices,
+        stream_key: StreamKeyRef<'_>,
         order_columns: &[ColumnOrder],
         col_mapping: &StateTableColumnMapping,
         extreme_cache_size: usize,
@@ -88,7 +88,7 @@ impl MaterializedInputState {
         let (order_col_indices, order_types) = if version < PbAggNodeVersion::Issue13465 {
             generate_order_columns_before_version_issue_13465(
                 agg_call,
-                pk_indices,
+                stream_key,
                 &arg_col_indices,
             )
         } else {
@@ -262,7 +262,7 @@ impl MaterializedInputState {
 /// Copied from old code before <https://github.com/risingwavelabs/risingwave/commit/0020507edbc4010b20aeeb560c7bea9159315602>.
 fn generate_order_columns_before_version_issue_13465(
     agg_call: &AggCall,
-    pk_indices: &PkIndices,
+    stream_key: StreamKeyRef<'_>,
     arg_col_indices: &[usize],
 ) -> (Vec<usize>, Vec<OrderType>) {
     let (mut order_col_indices, mut order_types) = if matches!(
@@ -295,7 +295,7 @@ fn generate_order_columns_before_version_issue_13465(
     };
 
     if agg_call.distinct {
-        // If distinct, we need to materialize input with the distinct keys
+        // If distinct, we need to materialize input with the distinct key
         // As we only support single-column distinct for now, we use the
         // `agg_call.args.val_indices()[0]` as the distinct key.
         if !order_col_indices.contains(&agg_call.args.val_indices()[0]) {
@@ -303,10 +303,10 @@ fn generate_order_columns_before_version_issue_13465(
             order_types.push(OrderType::ascending());
         }
     } else {
-        // If not distinct, we need to materialize input with the primary keys
-        let pk_len = pk_indices.len();
-        order_col_indices.extend(pk_indices.iter());
-        order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+        // If not distinct, we need to materialize input with the stream key
+        let key_len = stream_key.len();
+        order_col_indices.extend(stream_key.iter());
+        order_types.extend(itertools::repeat_n(OrderType::ascending(), key_len));
     }
 
     (order_col_indices, order_types)
@@ -335,7 +335,7 @@ mod tests {
     use crate::common::StateTableColumnMapping;
     use crate::common::table::state_table::StateTable;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::{PkIndices, StreamExecutorResult};
+    use crate::executor::{StreamExecutorResult, StreamKey};
 
     fn create_chunk<S: StateStore>(
         pretty: &str,
@@ -403,7 +403,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,
@@ -461,7 +461,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::LATEST,
                 &agg_call,
-                &PkIndices::new(), // unused
+                &StreamKey::new(), // unused
                 &order_columns,
                 &mapping,
                 usize::MAX,
@@ -509,7 +509,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,
@@ -567,7 +567,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::LATEST,
                 &agg_call,
-                &PkIndices::new(), // unused
+                &StreamKey::new(), // unused
                 &order_columns,
                 &mapping,
                 usize::MAX,
@@ -631,7 +631,7 @@ mod tests {
         let mut state_1 = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call_1,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns_1,
             &mapping_1,
             usize::MAX,
@@ -646,7 +646,7 @@ mod tests {
         let mut state_2 = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call_2,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns_2,
             &mapping_2,
             usize::MAX,
@@ -734,7 +734,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,
@@ -791,7 +791,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::LATEST,
                 &agg_call,
-                &PkIndices::new(), // unused
+                &StreamKey::new(), // unused
                 &order_columns,
                 &mapping,
                 usize::MAX,
@@ -841,7 +841,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns,
             &mapping,
             1024,
@@ -949,7 +949,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns,
             &mapping,
             3, // cache capacity = 3 for easy testing
@@ -1068,7 +1068,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,
@@ -1157,7 +1157,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::LATEST,
             &agg_call,
-            &PkIndices::new(), // unused
+            &StreamKey::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,

@@ -76,7 +76,7 @@ impl ReadSnapshot {
     pub fn fill_batch_query_epoch(&self, query: &mut Query) -> SchedulerResult<()> {
         fn on_node(
             execution_plan_node: &mut ExecutionPlanNode,
-            f: &mut impl FnMut(&mut Option<BatchQueryEpoch>, u32),
+            f: &mut impl FnMut(&mut Option<BatchQueryEpoch>, TableId),
         ) {
             for node in &mut execution_plan_node.children {
                 on_node(node, f);
@@ -105,7 +105,7 @@ impl ReadSnapshot {
             f(query_epoch, table_id);
         }
 
-        fn on_query(query: &mut Query, mut f: impl FnMut(&mut Option<BatchQueryEpoch>, u32)) {
+        fn on_query(query: &mut Query, mut f: impl FnMut(&mut Option<BatchQueryEpoch>, TableId)) {
             for stage in query.stage_graph.stages.values_mut() {
                 on_node(&mut stage.root, &mut f);
             }
@@ -114,7 +114,7 @@ impl ReadSnapshot {
         let mut unspecified_epoch_table_ids = HashSet::new();
         on_query(query, |query_epoch, table_id| {
             if query_epoch.is_none() {
-                unspecified_epoch_table_ids.insert(table_id.into());
+                unspecified_epoch_table_ids.insert(table_id);
             }
         });
 
@@ -201,11 +201,11 @@ impl PinnedSnapshot {
 
     pub fn list_change_log_epochs(
         &self,
-        table_id: u32,
+        table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Vec<u64> {
-        if let Some(table_change_log) = self.value.table_change_log.get(&TableId::new(table_id)) {
+        if let Some(table_change_log) = self.value.table_change_log.get(&table_id) {
             let table_change_log = table_change_log.clone();
             table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
         } else {
@@ -241,8 +241,8 @@ pub struct HummockSnapshotManager {
 
 #[derive(Default)]
 struct TableChangeLogNotificationMsg {
-    updated_change_log_table_ids: HashSet<u32>,
-    deleted_table_ids: HashSet<u32>,
+    updated_change_log_table_ids: HashSet<TableId>,
+    deleted_table_ids: HashSet<TableId>,
 }
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
@@ -277,7 +277,7 @@ impl HummockSnapshotManager {
                 if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {
                     None
                 } else {
-                    Some(table_id.table_id())
+                    Some(*table_id)
                 }
             })
             .collect();
@@ -315,7 +315,7 @@ impl HummockSnapshotManager {
         let deleted_table_ids: HashSet<_> = deltas
             .version_deltas
             .iter()
-            .flat_map(|version_deltas| version_deltas.removed_table_ids.clone())
+            .flat_map(|version_deltas| version_deltas.removed_table_ids.iter().copied())
             .collect();
         self.table_change_log_notification_sender
             .send(TableChangeLogNotificationMsg {
@@ -384,7 +384,10 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn wait_table_change_log_notification(&self, table_id: u32) -> Result<(), RwError> {
+    pub async fn wait_table_change_log_notification(
+        &self,
+        table_id: TableId,
+    ) -> Result<(), RwError> {
         let mut rx = self.table_change_log_notification_sender.subscribe();
         loop {
             rx.changed()

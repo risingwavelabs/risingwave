@@ -23,7 +23,7 @@ use risingwave_pb::user::alter_default_privilege_request::{
     Operation as AlterDefaultPrivilegeOperation, PbGrantPrivilege as OpGrantPrivilege,
     PbRevokePrivilege as OpRevokePrivilege,
 };
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
+use risingwave_pb::user::grant_privilege::ActionWithGrantOption;
 use risingwave_pb::user::{PbAction, PbGrantPrivilege};
 use risingwave_sqlparser::ast::{
     DefaultPrivilegeOperation, GrantObjects, Ident, PrivilegeObjectType, Privileges, Statement,
@@ -65,14 +65,14 @@ fn make_prost_privilege(
             for db in databases {
                 let database_name = Binder::resolve_database_name(db)?;
                 let database = reader.get_database_by_name(&database_name)?;
-                grant_objs.push(PbObject::DatabaseId(database.id()));
+                grant_objs.push(database.id().into());
             }
         }
         GrantObjects::Schemas(schemas) => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
-                grant_objs.push(PbObject::SchemaId(schema.id()));
+                grant_objs.push(schema.id().into());
             }
         }
         GrantObjects::Mviews(tables) => {
@@ -96,7 +96,7 @@ fn make_prost_privilege(
                         .into());
                     }
                 }
-                grant_objs.push(PbObject::TableId(table.id().table_id));
+                grant_objs.push(table.id().into());
             }
         }
         GrantObjects::Tables(tables) => {
@@ -113,7 +113,7 @@ fn make_prost_privilege(
                     Ok((table, _)) => {
                         match table.table_type() {
                             TableType::Table => {
-                                grant_objs.push(PbObject::TableId(table.id().table_id));
+                                grant_objs.push(table.id().into());
                                 continue;
                             }
                             _ => {
@@ -128,7 +128,7 @@ fn make_prost_privilege(
                         let (view, _) = reader
                             .get_view_by_name(db_name, schema_path, &table_name)
                             .map_err(|_| CatalogError::NotFound("table", table_name))?;
-                        grant_objs.push(PbObject::ViewId(view.id));
+                        grant_objs.push(view.id.into());
                     }
                     Err(e) => {
                         return Err(e.into());
@@ -147,7 +147,7 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (source, _) = reader.get_source_by_name(db_name, schema_path, &source_name)?;
-                grant_objs.push(PbObject::SourceId(source.id));
+                grant_objs.push(source.id.into());
             }
         }
         GrantObjects::Sinks(sinks) => {
@@ -162,7 +162,7 @@ fn make_prost_privilege(
 
                 let (sink, _) =
                     reader.get_created_sink_by_name(db_name, schema_path, &sink_name)?;
-                grant_objs.push(PbObject::SinkId(sink.id.sink_id));
+                grant_objs.push(sink.id.into());
             }
         }
         GrantObjects::Views(views) => {
@@ -176,7 +176,7 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (view, _) = reader.get_view_by_name(db_name, schema_path, &view_name)?;
-                grant_objs.push(PbObject::ViewId(view.id));
+                grant_objs.push(view.id.into());
             }
         }
         GrantObjects::Connections(conns) => {
@@ -190,7 +190,7 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (conn, _) = reader.get_connection_by_name(db_name, schema_path, &conn_name)?;
-                grant_objs.push(PbObject::ConnectionId(conn.id));
+                grant_objs.push(conn.id.into());
             }
         }
         GrantObjects::Subscriptions(subscriptions) => {
@@ -204,7 +204,7 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (sub, _) = reader.get_subscription_by_name(db_name, schema_path, &sub_name)?;
-                grant_objs.push(PbObject::SubscriptionId(sub.id.subscription_id));
+                grant_objs.push(sub.id.into());
             }
         }
         GrantObjects::Functions(func_descs) => {
@@ -248,7 +248,7 @@ fn make_prost_privilege(
                         )
                     }
                 };
-                grant_objs.push(PbObject::FunctionId(func.id.function_id()));
+                grant_objs.push(func.id.into());
             }
         }
         GrantObjects::Secrets(secrets) => {
@@ -262,7 +262,7 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (secret, _) = reader.get_secret_by_name(db_name, schema_path, &secret_name)?;
-                grant_objs.push(PbObject::SecretId(secret.id.secret_id()));
+                grant_objs.push(secret.id.into());
             }
         }
         GrantObjects::AllSourcesInSchema { schemas } => {
@@ -270,7 +270,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_source().for_each(|source| {
-                    grant_objs.push(PbObject::SourceId(source.id));
+                    grant_objs.push(source.id.into());
                 });
             }
         }
@@ -279,7 +279,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_all_mvs().for_each(|mview| {
-                    grant_objs.push(PbObject::TableId(mview.id().table_id));
+                    grant_objs.push(mview.id().into());
                 });
             }
         }
@@ -288,7 +288,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_user_table().for_each(|table| {
-                    grant_objs.push(PbObject::TableId(table.id().table_id));
+                    grant_objs.push(table.id().into());
                 });
             }
         }
@@ -297,7 +297,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_sink().for_each(|sink| {
-                    grant_objs.push(PbObject::SinkId(sink.id.sink_id));
+                    grant_objs.push(sink.id.into());
                 });
             }
         }
@@ -306,7 +306,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_view().for_each(|view| {
-                    grant_objs.push(PbObject::ViewId(view.id));
+                    grant_objs.push(view.id.into());
                 });
             }
         }
@@ -315,7 +315,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_function().for_each(|func| {
-                    grant_objs.push(PbObject::FunctionId(func.id.function_id()));
+                    grant_objs.push(func.id.into());
                 });
             }
         }
@@ -324,7 +324,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_secret().for_each(|secret| {
-                    grant_objs.push(PbObject::SecretId(secret.id.secret_id()));
+                    grant_objs.push(secret.id.into());
                 });
             }
         }
@@ -333,7 +333,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_subscription().for_each(|sub| {
-                    grant_objs.push(PbObject::SubscriptionId(sub.id.subscription_id));
+                    grant_objs.push(sub.id.into());
                 });
             }
         }
@@ -342,7 +342,7 @@ fn make_prost_privilege(
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(&session.database(), &schema_name)?;
                 schema.iter_connections().for_each(|conn| {
-                    grant_objs.push(PbObject::ConnectionId(conn.id));
+                    grant_objs.push(conn.id.into());
                 });
             }
         }
@@ -572,7 +572,7 @@ pub async fn handle_alter_default_privileges(
                 let catalog_reader = session.env().catalog_reader();
                 let reader = catalog_reader.read_guard();
                 let schemas = reader
-                    .get_database_by_id(&session.database_id())?
+                    .get_database_by_id(session.database_id())?
                     .iter_schemas()
                     .filter(|schema| !is_system_schema(&schema.name))
                     .map(|schema| schema.id())
@@ -705,7 +705,7 @@ mod tests {
                             with_grant_option: true,
                             granted_by: session.user_id(),
                         }],
-                        object: Some(PbObject::DatabaseId(session_database_id)),
+                        object: Some(session_database_id.into()),
                     },
                     PbGrantPrivilege {
                         action_with_opts: vec![
@@ -720,7 +720,7 @@ mod tests {
                                 granted_by: DEFAULT_SUPER_USER_ID,
                             }
                         ],
-                        object: Some(PbObject::DatabaseId(database_id)),
+                        object: Some(database_id.into()),
                     }
                 ]
             );
@@ -738,7 +738,7 @@ mod tests {
                 user_info
                     .grant_privileges
                     .iter()
-                    .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id)))
+                    .filter(|gp| gp.object == Some(database_id.into()))
                     .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option))
             );
         }
@@ -759,7 +759,7 @@ mod tests {
                         with_grant_option: true,
                         granted_by: session.user_id(),
                     }],
-                    object: Some(PbObject::DatabaseId(session_database_id)),
+                    object: Some(session_database_id.into()),
                 }]
             );
         }

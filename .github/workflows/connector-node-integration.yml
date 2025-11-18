@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        java: [ '11', '17' ]
+        java: [ '17', '21' ]
     name: Java ${{ matrix.java }}
     steps:
       - uses: actions/checkout@v4
@@ -27,11 +27,21 @@ jobs:
               - 'proto/**'
       - name: Set up JDK ${{ matrix.java }}
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ matrix.java }}
           distribution: 'adopt'
           cache: 'maven'
+      - name: Setup Rust toolchain
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
+        run: rustup show
+      - name: Install build dependencies
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make build-essential cmake protobuf-compiler \
+            libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config \
+            lld libopenblas-dev liblapack-dev
       - name: run integration tests
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: |
@@ -39,11 +49,7 @@ jobs:
 
           RISINGWAVE_ROOT=${PWD}
 
-          echo "--- build connector node"
+          echo "--- build connector node with Rust native library"
           cd ${RISINGWAVE_ROOT}/java
-          # run unit test
-          # WARN: `testOnNext_writeValidation` is skipped because it relies on Rust code to decode message,
-          #       while we don't build Rust code (`-Dno-build-rust`) here to save time
-          mvn --batch-mode --update-snapshots clean package -Dno-build-rust \
-            '-Dtest=!com.risingwave.connector.sink.SinkStreamObserverTest#testOnNext_writeValidation' \
-            -Dsurefire.failIfNoSpecifiedTests=false
+          # Build with Rust to support OpendalSchemaHistory in MySQL CDC integration tests
+          mvn --batch-mode --update-snapshots clean package

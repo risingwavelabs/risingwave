@@ -236,8 +236,9 @@ impl CatalogController {
         let mut privileges = vec![];
         for gp in new_grant_privileges {
             let id = extract_grant_obj_id(gp.get_object()?);
-            let internal_table_ids = get_internal_tables_by_id(id, &txn).await?;
-            let index_state_table_ids = get_index_state_tables_by_table_id(id, &txn).await?;
+            let internal_table_ids = get_internal_tables_by_id(id.as_job_id(), &txn).await?;
+            let index_state_table_ids =
+                get_index_state_tables_by_table_id(id.as_table_id(), &txn).await?;
             for action_with_opt in &gp.action_with_opts {
                 let action = action_with_opt.get_action()?.into();
                 privileges.push(user_privilege::ActiveModel {
@@ -253,7 +254,7 @@ impl CatalogController {
                             .iter()
                             .chain(index_state_table_ids.iter())
                             .map(|&tid| user_privilege::ActiveModel {
-                                oid: Set(tid),
+                                oid: Set(tid.as_object_id()),
                                 granted_by: Set(grantor),
                                 action: Set(Action::Select),
                                 with_grant_option: Set(with_grant_option),
@@ -381,8 +382,9 @@ impl CatalogController {
         let mut revoke_items = HashMap::new();
         for privilege in revoke_grant_privileges {
             let obj = extract_grant_obj_id(privilege.get_object()?);
-            let internal_table_ids = get_internal_tables_by_id(obj, &txn).await?;
-            let index_state_table_ids = get_index_state_tables_by_table_id(obj, &txn).await?;
+            let internal_table_ids = get_internal_tables_by_id(obj.as_job_id(), &txn).await?;
+            let index_state_table_ids =
+                get_index_state_tables_by_table_id(obj.as_table_id(), &txn).await?;
             let mut include_select = false;
             let actions = privilege
                 .action_with_opts
@@ -401,7 +403,7 @@ impl CatalogController {
                     internal_table_ids
                         .iter()
                         .chain(index_state_table_ids.iter())
-                        .map(|&tid| (tid, vec![Action::Select])),
+                        .map(|&tid| (tid.as_object_id(), vec![Action::Select])),
                 );
             }
         }
@@ -526,7 +528,7 @@ impl CatalogController {
     ) -> MetaResult<()> {
         tracing::debug!(
             ?user_ids,
-            database_id,
+            %database_id,
             ?schema_ids,
             ?actions,
             ?object_type,
@@ -746,7 +748,7 @@ mod tests {
     use super::*;
     use crate::manager::MetaSrvEnv;
 
-    const TEST_DATABASE_ID: DatabaseId = 1;
+    const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
     const TEST_ROOT_USER_ID: UserId = 1;
 
     fn make_test_user(name: &str) -> PbUserInfo {
@@ -800,16 +802,9 @@ mod tests {
         let user_1 = mgr.get_user(user_1.user_id).await?;
         assert_eq!(user_1.name, "test_user_1_new".to_owned());
 
-        let conn_with_option = make_privilege(
-            PbObject::DatabaseId(TEST_DATABASE_ID as _),
-            &[PbAction::Connect],
-            true,
-        );
-        let create_without_option = make_privilege(
-            PbObject::DatabaseId(TEST_DATABASE_ID as _),
-            &[PbAction::Create],
-            false,
-        );
+        let conn_with_option = make_privilege(TEST_DATABASE_ID.into(), &[PbAction::Connect], true);
+        let create_without_option =
+            make_privilege(TEST_DATABASE_ID.into(), &[PbAction::Create], false);
         // ROOT grant CONN with grant option to user_1.
         mgr.grant_privilege(
             vec![user_1.user_id],
@@ -849,16 +844,22 @@ mod tests {
 
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 2);
-        assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID as u32));
+        assert!(
+            privilege_1
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID as u32)
+        );
 
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_2.len(), 1);
-        assert!(privilege_2.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].granted_by == user_1.user_id as u32
-            && gp.action_with_opts[0].with_grant_option));
+        assert!(
+            privilege_2
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].granted_by == user_1.user_id as u32
+                    && gp.action_with_opts[0].with_grant_option)
+        );
 
         // revoke privilege for others by non-super user.
         assert!(
@@ -918,9 +919,12 @@ mod tests {
 
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 1);
-        assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].action == PbAction::Connect as i32));
+        assert!(
+            privilege_1
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].action == PbAction::Connect as i32)
+        );
 
         // revoke grant option for referred privilege in cascade mode.
         mgr.revoke_privilege(
@@ -934,16 +938,22 @@ mod tests {
         .await?;
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 1);
-        assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].action == PbAction::Connect as i32
-            && !gp.action_with_opts[0].with_grant_option));
+        assert!(
+            privilege_1
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].action == PbAction::Connect as i32
+                    && !gp.action_with_opts[0].with_grant_option)
+        );
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_2.len(), 1);
-        assert!(privilege_2.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
-            && gp.action_with_opts[0].action == PbAction::Connect as i32
-            && !gp.action_with_opts[0].with_grant_option));
+        assert!(
+            privilege_2
+                .iter()
+                .all(|gp| gp.object == Some(TEST_DATABASE_ID.into())
+                    && gp.action_with_opts[0].action == PbAction::Connect as i32
+                    && !gp.action_with_opts[0].with_grant_option)
+        );
 
         // revoke referred privilege in cascade mode.
         mgr.revoke_privilege(

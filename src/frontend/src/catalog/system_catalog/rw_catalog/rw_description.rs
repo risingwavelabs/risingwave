@@ -15,6 +15,7 @@
 use std::iter;
 
 use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
+use risingwave_common::id::TableId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -35,13 +36,15 @@ struct RwDescription {
 
 #[system_catalog(table, "rw_catalog.rw_description")]
 fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDescription>> {
-    let build_row =
-        |table_id, catalog_id, index: Option<i32>, description: Option<Box<str>>| RwDescription {
-            objoid: table_id,
-            classoid: catalog_id,
-            objsubid: index,
-            description: description.map(|s| s.into()),
-        };
+    let build_row = |table_id: TableId,
+                     catalog_id,
+                     index: Option<i32>,
+                     description: Option<Box<str>>| RwDescription {
+        objoid: table_id.as_i32_id(),
+        classoid: catalog_id,
+        objsubid: index,
+        description: description.map(|s| s.into()),
+    };
 
     let catalog_reader = reader.catalog_reader.read_guard();
     let rw_catalog =
@@ -52,21 +55,21 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDescription>> {
 
     let rw_tables_id: i32 = rw_catalog
         .get_system_table_by_name("rw_tables")
-        .map(|st| st.id.table_id)
+        .map(|st| st.id.as_raw_id())
         .unwrap_or_default() as _;
 
     Ok(schemas
         .flat_map(|schema| {
             schema.iter_user_table().flat_map(|table| {
                 iter::once(build_row(
-                    table.id.table_id as _,
+                    table.id,
                     rw_tables_id,
                     None,
                     table.description.as_deref().map(Into::into),
                 ))
                 .chain(table.columns.iter().map(|col| {
                     build_row(
-                        table.id.table_id as _,
+                        table.id,
                         rw_tables_id,
                         Some(col.column_id().get_id() as _),
                         col.column_desc.description.as_deref().map(Into::into),

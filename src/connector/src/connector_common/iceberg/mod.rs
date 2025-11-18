@@ -20,7 +20,9 @@ mod storage_catalog;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ::iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use ::iceberg::io::{
+    S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
+};
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, TableIdent};
 use anyhow::{Context, anyhow};
@@ -59,6 +61,17 @@ pub struct IcebergCommon {
     pub access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
     pub secret_key: Option<String>,
+    #[serde(rename = "s3.iam_role_arn")]
+    pub s3_iam_role_arn: Option<String>,
+
+    #[serde(rename = "glue.access.key")]
+    pub glue_access_key: Option<String>,
+    #[serde(rename = "glue.secret.key")]
+    pub glue_secret_key: Option<String>,
+    #[serde(rename = "glue.iam_role_arn")]
+    pub glue_iam_role_arn: Option<String>,
+    #[serde(rename = "glue.region")]
+    pub glue_region: Option<String>,
 
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
@@ -165,6 +178,8 @@ impl EnforceSecret for IcebergCommon {
         "catalog.oauth2_server_uri",
         "adlsgen2.account_key",
         "adlsgen2.client_secret",
+        "glue.access.key",
+        "glue.secret.key",
     };
 }
 
@@ -211,6 +226,22 @@ impl IcebergCommon {
 
     pub fn vended_credentials(&self) -> bool {
         self.vended_credentials.unwrap_or(false)
+    }
+
+    fn glue_access_key(&self) -> Option<&str> {
+        self.glue_access_key
+            .as_deref()
+            .or(self.access_key.as_deref())
+    }
+
+    fn glue_secret_key(&self) -> Option<&str> {
+        self.glue_secret_key
+            .as_deref()
+            .or(self.secret_key.as_deref())
+    }
+
+    fn glue_region(&self) -> Option<&str> {
+        self.glue_region.as_deref().or(self.region.as_deref())
     }
 
     pub fn catalog_name(&self) -> String {
@@ -281,6 +312,9 @@ impl IcebergCommon {
             }
             if let Some(secret_key) = &self.secret_key {
                 iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+            }
+            if let Some(role_arn) = &self.s3_iam_role_arn {
+                iceberg_configs.insert(S3_ASSUME_ROLE_ARN.to_owned(), role_arn.clone());
             }
             if let Some(gcs_credential) = &self.gcs_credential {
                 iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
@@ -473,24 +507,34 @@ impl IcebergCommon {
                             "client.credentials-provider".to_owned(),
                             "com.risingwave.connector.catalog.GlueCredentialProvider".to_owned(),
                         );
-                        // Use S3 ak/sk and region as glue ak/sk and region by default.
-                        // TODO: use different ak/sk and region for s3 and glue.
-                        if let Some(access_key) = &self.access_key {
+                        if let Some(region) = self.glue_region() {
                             java_catalog_configs.insert(
-                                "client.credentials-provider.glue.access-key-id".to_owned(),
-                                access_key.clone(),
+                                "client.credentials-provider.glue.region".to_owned(),
+                                region.to_owned(),
                             );
                         }
-                        if let Some(secret_key) = &self.secret_key {
+                        if let Some(access_key) = self.glue_access_key() {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.access-key-id".to_owned(),
+                                access_key.to_owned(),
+                            );
+                        }
+                        if let Some(secret_key) = self.glue_secret_key() {
                             java_catalog_configs.insert(
                                 "client.credentials-provider.glue.secret-access-key".to_owned(),
-                                secret_key.clone(),
+                                secret_key.to_owned(),
+                            );
+                        }
+                        if let Some(role_arn) = self.glue_iam_role_arn.as_deref() {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.iam-role-arn".to_owned(),
+                                role_arn.to_owned(),
                             );
                         }
                     }
 
-                    if let Some(region) = &self.region {
-                        java_catalog_configs.insert("client.region".to_owned(), region.clone());
+                    if let Some(region) = self.glue_region() {
+                        java_catalog_configs.insert("client.region".to_owned(), region.to_owned());
                         java_catalog_configs.insert(
                             "glue.endpoint".to_owned(),
                             format!("https://glue.{}.amazonaws.com", region),
@@ -622,14 +666,14 @@ impl IcebergCommon {
             "glue_rust" => {
                 let mut iceberg_configs = HashMap::new();
                 // glue
-                if let Some(region) = &self.region {
-                    iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.clone());
+                if let Some(region) = self.glue_region() {
+                    iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.to_owned());
                 }
-                if let Some(access_key) = &self.access_key {
-                    iceberg_configs.insert(AWS_ACCESS_KEY_ID.to_owned(), access_key.clone());
+                if let Some(access_key) = self.glue_access_key() {
+                    iceberg_configs.insert(AWS_ACCESS_KEY_ID.to_owned(), access_key.to_owned());
                 }
-                if let Some(secret_key) = &self.secret_key {
-                    iceberg_configs.insert(AWS_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                if let Some(secret_key) = self.glue_secret_key() {
+                    iceberg_configs.insert(AWS_SECRET_ACCESS_KEY.to_owned(), secret_key.to_owned());
                 }
                 // s3
                 if let Some(region) = &self.region {
@@ -643,6 +687,9 @@ impl IcebergCommon {
                 }
                 if let Some(secret_key) = &self.secret_key {
                     iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                }
+                if let Some(role_arn) = &self.s3_iam_role_arn {
+                    iceberg_configs.insert(S3_ASSUME_ROLE_ARN.to_owned(), role_arn.clone());
                 }
                 if let Some(path_style_access) = &self.path_style_access {
                     iceberg_configs.insert(

@@ -653,7 +653,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: source-test-env
+          run: backward-compatibility-test-env
           environment:
           - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs

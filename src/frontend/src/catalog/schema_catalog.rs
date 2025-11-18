@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FunctionId, IndexId, StreamJobStatus, TableId};
+use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, StreamJobStatus, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
@@ -87,7 +87,7 @@ pub struct SchemaCatalog {
 impl SchemaCatalog {
     pub fn create_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
-        let id = prost.id.into();
+        let id = prost.id;
         let table: TableCatalog = prost.into();
         let table_ref = Arc::new(table);
 
@@ -115,7 +115,7 @@ impl SchemaCatalog {
 
     pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
         let name = prost.name.clone();
-        let id = prost.id.into();
+        let id = prost.id;
         let table: TableCatalog = prost.into();
         let table_ref = Arc::new(table);
 
@@ -135,13 +135,11 @@ impl SchemaCatalog {
 
     pub fn update_index(&mut self, prost: &PbIndex) {
         let name = prost.name.clone();
-        let id = prost.id.into();
+        let id = prost.id;
         let old_index = self.index_by_id.get(&id).unwrap();
-        let index_table = self
-            .get_created_table_by_id(&prost.index_table_id.into())
-            .unwrap();
+        let index_table = self.get_created_table_by_id(prost.index_table_id).unwrap();
         let primary_table = self
-            .get_created_table_by_id(&prost.primary_table_id.into())
+            .get_created_table_by_id(prost.primary_table_id)
             .unwrap();
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
@@ -177,7 +175,7 @@ impl SchemaCatalog {
             self.indexes_by_table_id.remove(&table_ref.id);
         } else {
             tracing::warn!(
-                id = ?id.table_id,
+                %id,
                 "table not found when dropping, frontend might not be notified yet"
             );
         }
@@ -185,10 +183,10 @@ impl SchemaCatalog {
 
     pub fn create_index(&mut self, prost: &PbIndex) {
         let name = prost.name.clone();
-        let id = prost.id.into();
-        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let id = prost.id;
+        let index_table = self.get_table_by_id(prost.index_table_id).unwrap();
         let primary_table = self
-            .get_created_table_by_id(&prost.primary_table_id.into())
+            .get_created_table_by_id(prost.primary_table_id)
             .unwrap();
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
@@ -283,7 +281,7 @@ impl SchemaCatalog {
 
         if let Some(connection_id) = sink_ref.connection_id {
             self.connection_sink_ref
-                .entry(connection_id.0)
+                .entry(connection_id)
                 .and_modify(|sinks| sinks.push(id))
                 .or_insert(vec![id]);
         }
@@ -293,7 +291,7 @@ impl SchemaCatalog {
                 self.table_incoming_sinks
                     .entry(target_table)
                     .or_default()
-                    .insert(sink_ref.id.sink_id)
+                    .insert(sink_ref.id)
             );
         }
 
@@ -307,7 +305,7 @@ impl SchemaCatalog {
         if let Some(sink_ref) = self.sink_by_id.remove(&id) {
             self.sink_by_name.remove(&sink_ref.name).unwrap();
             if let Some(connection_id) = sink_ref.connection_id
-                && let Occupied(mut e) = self.connection_sink_ref.entry(connection_id.0)
+                && let Occupied(mut e) = self.connection_sink_ref.entry(connection_id)
             {
                 let sink_ids = e.get_mut();
                 sink_ids.retain_mut(|sid| *sid != id);
@@ -320,14 +318,14 @@ impl SchemaCatalog {
                     .table_incoming_sinks
                     .get_mut(&target_table)
                     .expect("should exists");
-                assert!(incoming_sinks.remove(&sink_ref.id.sink_id));
+                assert!(incoming_sinks.remove(&sink_ref.id));
                 if incoming_sinks.is_empty() {
                     self.table_incoming_sinks.remove(&target_table);
                 }
             }
         } else {
             tracing::warn!(
-                id,
+                %id,
                 "sink not found when dropping, frontend might not be notified yet"
             );
         }
@@ -344,7 +342,7 @@ impl SchemaCatalog {
         // check if the sink name gets updated.
         if old_sink.name != name
             && let Some(s) = self.sink_by_name.get(&old_sink.name)
-            && s.id.sink_id == id
+            && s.id == id
         {
             self.sink_by_name.remove(&old_sink.name);
         }
@@ -388,7 +386,7 @@ impl SchemaCatalog {
         // check if the subscription name gets updated.
         if old_subscription.name != name
             && let Some(s) = self.subscription_by_name.get(&old_subscription.name)
-            && s.id.subscription_id == id
+            && s.id == id
         {
             self.subscription_by_name.remove(&old_subscription.name);
         }
@@ -466,7 +464,7 @@ impl SchemaCatalog {
             .try_insert(args, function_ref.clone())
             .expect("function already exists with same argument types");
         self.function_by_id
-            .try_insert(id.into(), function_ref)
+            .try_insert(id, function_ref)
             .expect("function id exists");
     }
 
@@ -489,7 +487,7 @@ impl SchemaCatalog {
 
     pub fn update_function(&mut self, prost: &PbFunction) {
         let name = prost.name.clone();
-        let id = prost.id.into();
+        let id = prost.id;
         let function = FunctionCatalog::from(prost);
         let function_ref = Arc::new(function);
 
@@ -560,7 +558,7 @@ impl SchemaCatalog {
 
     pub fn create_secret(&mut self, prost: &PbSecret) {
         let name = prost.name.clone();
-        let id = SecretId::new(prost.id);
+        let id = prost.id;
         let secret = SecretCatalog::from(prost);
         let secret_ref = Arc::new(secret);
 
@@ -572,7 +570,7 @@ impl SchemaCatalog {
 
     pub fn update_secret(&mut self, prost: &PbSecret) {
         let name = prost.name.clone();
-        let id = SecretId::new(prost.id);
+        let id = prost.id;
         let secret = SecretCatalog::from(prost);
         let secret_ref = Arc::new(secret);
 
@@ -613,7 +611,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name
             .values()
-            .filter(|v| v.is_user_table() && has_access_to_object(user, v.id.table_id, v.owner))
+            .filter(|v| v.is_user_table() && has_access_to_object(user, v.id, v.owner))
     }
 
     pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
@@ -628,7 +626,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name
             .values()
-            .filter(|v| v.is_internal_table() && has_access_to_object(user, v.id.table_id, v.owner))
+            .filter(|v| v.is_internal_table() && has_access_to_object(user, v.id, v.owner))
     }
 
     /// Iterate all non-internal tables, including user tables, materialized views and indices.
@@ -642,9 +640,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name.values().filter(|v| {
-            !v.is_internal_table() && has_access_to_object(user, v.id.table_id, v.owner)
-        })
+        self.table_by_name
+            .values()
+            .filter(|v| !v.is_internal_table() && has_access_to_object(user, v.id, v.owner))
     }
 
     /// Iterate all materialized views, excluding the indices.
@@ -658,7 +656,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
         self.table_by_name
             .values()
-            .filter(|v| v.is_mview() && has_access_to_object(user, v.id.table_id, v.owner))
+            .filter(|v| v.is_mview() && has_access_to_object(user, v.id, v.owner))
     }
 
     /// Iterate created materialized views, excluding the indices.
@@ -672,9 +670,9 @@ impl SchemaCatalog {
         &'a self,
         user: &'a UserCatalog,
     ) -> impl Iterator<Item = &'a Arc<TableCatalog>> {
-        self.table_by_name.values().filter(|v| {
-            v.is_mview() && v.is_created() && has_access_to_object(user, v.id.table_id, v.owner)
-        })
+        self.table_by_name
+            .values()
+            .filter(|v| v.is_mview() && v.is_created() && has_access_to_object(user, v.id, v.owner))
     }
 
     /// Iterate all indices
@@ -688,7 +686,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<IndexCatalog>> {
         self.index_by_name
             .values()
-            .filter(|idx| has_access_to_object(user, idx.id.index_id, idx.owner()))
+            .filter(|idx| has_access_to_object(user, idx.id, idx.owner()))
     }
 
     /// Iterate all sources
@@ -715,7 +713,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SinkCatalog>> {
         self.sink_by_name
             .values()
-            .filter(|s| has_access_to_object(user, s.id.sink_id, s.owner.user_id))
+            .filter(|s| has_access_to_object(user, s.id, s.owner.user_id))
     }
 
     pub fn iter_subscription(&self) -> impl Iterator<Item = &Arc<SubscriptionCatalog>> {
@@ -728,7 +726,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SubscriptionCatalog>> {
         self.subscription_by_name
             .values()
-            .filter(|s| has_access_to_object(user, s.id.subscription_id, s.owner.user_id))
+            .filter(|s| has_access_to_object(user, s.id, s.owner.user_id))
     }
 
     pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
@@ -755,7 +753,7 @@ impl SchemaCatalog {
         self.function_by_name
             .values()
             .flat_map(|v| v.values())
-            .filter(|f| has_access_to_object(user, f.id.function_id(), f.owner))
+            .filter(|f| has_access_to_object(user, f.id, f.owner))
     }
 
     pub fn iter_connections(&self) -> impl Iterator<Item = &Arc<ConnectionCatalog>> {
@@ -781,7 +779,7 @@ impl SchemaCatalog {
     ) -> impl Iterator<Item = &'a Arc<SecretCatalog>> {
         self.secret_by_name
             .values()
-            .filter(|s| has_access_to_object(user, s.id.secret_id(), s.owner))
+            .filter(|s| has_access_to_object(user, s.id, s.owner))
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &Arc<SystemTableCatalog>> {
@@ -806,13 +804,13 @@ impl SchemaCatalog {
         self.get_table_by_name(table_name, false)
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
-        self.table_by_id.get(table_id)
+    pub fn get_table_by_id(&self, table_id: TableId) -> Option<&Arc<TableCatalog>> {
+        self.table_by_id.get(&table_id)
     }
 
-    pub fn get_created_table_by_id(&self, table_id: &TableId) -> Option<&Arc<TableCatalog>> {
+    pub fn get_created_table_by_id(&self, table_id: TableId) -> Option<&Arc<TableCatalog>> {
         self.table_by_id
-            .get(table_id)
+            .get(&table_id)
             .filter(|&table| table.stream_job_status == StreamJobStatus::Created)
     }
 
@@ -820,16 +818,16 @@ impl SchemaCatalog {
         self.view_by_name.get(view_name)
     }
 
-    pub fn get_view_by_id(&self, view_id: &ViewId) -> Option<&Arc<ViewCatalog>> {
-        self.view_by_id.get(view_id)
+    pub fn get_view_by_id(&self, view_id: ViewId) -> Option<&Arc<ViewCatalog>> {
+        self.view_by_id.get(&view_id)
     }
 
     pub fn get_source_by_name(&self, source_name: &str) -> Option<&Arc<SourceCatalog>> {
         self.source_by_name.get(source_name)
     }
 
-    pub fn get_source_by_id(&self, source_id: &SourceId) -> Option<&Arc<SourceCatalog>> {
-        self.source_by_id.get(source_id)
+    pub fn get_source_by_id(&self, source_id: SourceId) -> Option<&Arc<SourceCatalog>> {
+        self.source_by_id.get(&source_id)
     }
 
     pub fn get_sink_by_name(
@@ -850,8 +848,8 @@ impl SchemaCatalog {
         self.get_sink_by_name(sink_name, false)
     }
 
-    pub fn get_sink_by_id(&self, sink_id: &SinkId) -> Option<&Arc<SinkCatalog>> {
-        self.sink_by_id.get(sink_id)
+    pub fn get_sink_by_id(&self, sink_id: SinkId) -> Option<&Arc<SinkCatalog>> {
+        self.sink_by_id.get(&sink_id)
     }
 
     pub fn get_subscription_by_name(
@@ -863,9 +861,9 @@ impl SchemaCatalog {
 
     pub fn get_subscription_by_id(
         &self,
-        subscription_id: &SubscriptionId,
+        subscription_id: SubscriptionId,
     ) -> Option<&Arc<SubscriptionCatalog>> {
-        self.subscription_by_id.get(subscription_id)
+        self.subscription_by_id.get(&subscription_id)
     }
 
     pub fn get_index_by_name(
@@ -886,17 +884,17 @@ impl SchemaCatalog {
         self.get_index_by_name(index_name, false)
     }
 
-    pub fn get_index_by_id(&self, index_id: &IndexId) -> Option<&Arc<IndexCatalog>> {
-        self.index_by_id.get(index_id)
+    pub fn get_index_by_id(&self, index_id: IndexId) -> Option<&Arc<IndexCatalog>> {
+        self.index_by_id.get(&index_id)
     }
 
     pub fn get_indexes_by_table_id(
         &self,
-        table_id: &TableId,
+        table_id: TableId,
         include_creating: bool,
     ) -> Vec<Arc<IndexCatalog>> {
         self.indexes_by_table_id
-            .get(table_id)
+            .get(&table_id)
             .cloned()
             .unwrap_or_default()
             .into_iter()
@@ -904,11 +902,11 @@ impl SchemaCatalog {
             .collect()
     }
 
-    pub fn get_any_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+    pub fn get_any_indexes_by_table_id(&self, table_id: TableId) -> Vec<Arc<IndexCatalog>> {
         self.get_indexes_by_table_id(table_id, true)
     }
 
-    pub fn get_created_indexes_by_table_id(&self, table_id: &TableId) -> Vec<Arc<IndexCatalog>> {
+    pub fn get_created_indexes_by_table_id(&self, table_id: TableId) -> Vec<Arc<IndexCatalog>> {
         self.get_indexes_by_table_id(table_id, false)
     }
 
@@ -979,9 +977,9 @@ impl SchemaCatalog {
 
     pub fn get_connection_by_id(
         &self,
-        connection_id: &ConnectionId,
+        connection_id: ConnectionId,
     ) -> Option<&Arc<ConnectionCatalog>> {
-        self.connection_by_id.get(connection_id)
+        self.connection_by_id.get(&connection_id)
     }
 
     pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Arc<ConnectionCatalog>> {
@@ -992,8 +990,8 @@ impl SchemaCatalog {
         self.secret_by_name.get(secret_name)
     }
 
-    pub fn get_secret_by_id(&self, secret_id: &SecretId) -> Option<&Arc<SecretCatalog>> {
-        self.secret_by_id.get(secret_id)
+    pub fn get_secret_by_id(&self, secret_id: SecretId) -> Option<&Arc<SecretCatalog>> {
+        self.secret_by_id.get(&secret_id)
     }
 
     /// get all sources referencing the connection
@@ -1013,67 +1011,69 @@ impl SchemaCatalog {
             .map(|s| s.to_owned())
     }
 
-    pub fn get_grant_object_by_oid(&self, oid: u32) -> Option<OwnedGrantObject> {
+    pub fn get_grant_object_by_oid(&self, oid: ObjectId) -> Option<OwnedGrantObject> {
         #[allow(clippy::manual_map)]
-        if let Some(table) = self.get_created_table_by_id(&TableId::new(oid)) {
+        if let Some(table) = self.get_created_table_by_id(oid.as_table_id()) {
             Some(OwnedGrantObject {
                 owner: table.owner,
-                object: Object::TableId(oid),
+                object: Object::TableId(oid.as_raw_id()),
             })
-        } else if let Some(index) = self.get_index_by_id(&IndexId::new(oid)) {
+        } else if let Some(index) = self.get_index_by_id(oid.as_index_id()) {
             Some(OwnedGrantObject {
                 owner: index.owner(),
-                object: Object::TableId(oid),
+                object: Object::TableId(oid.as_raw_id()),
             })
-        } else if let Some(source) = self.get_source_by_id(&oid) {
+        } else if let Some(source) = self.get_source_by_id(oid.as_source_id()) {
             Some(OwnedGrantObject {
                 owner: source.owner,
-                object: Object::SourceId(oid),
+                object: Object::SourceId(oid.as_raw_id()),
             })
-        } else if let Some(sink) = self.get_sink_by_id(&oid) {
+        } else if let Some(sink) = self.get_sink_by_id(oid.as_sink_id()) {
             Some(OwnedGrantObject {
                 owner: sink.owner.user_id,
-                object: Object::SinkId(oid),
+                object: Object::SinkId(oid.as_raw_id()),
             })
-        } else if let Some(view) = self.get_view_by_id(&oid) {
+        } else if let Some(view) = self.get_view_by_id(oid.as_view_id()) {
             Some(OwnedGrantObject {
                 owner: view.owner,
-                object: Object::ViewId(oid),
+                object: Object::ViewId(oid.as_raw_id()),
             })
-        } else if let Some(function) = self.get_function_by_id(FunctionId::new(oid)) {
+        } else if let Some(function) = self.get_function_by_id(oid.as_function_id()) {
             Some(OwnedGrantObject {
                 owner: function.owner(),
-                object: Object::FunctionId(oid),
+                object: Object::FunctionId(oid.as_raw_id()),
             })
-        } else if let Some(subscription) = self.get_subscription_by_id(&oid) {
+        } else if let Some(subscription) = self.get_subscription_by_id(oid.as_subscription_id()) {
             Some(OwnedGrantObject {
                 owner: subscription.owner.user_id,
-                object: Object::SubscriptionId(oid),
+                object: Object::SubscriptionId(oid.as_raw_id()),
             })
-        } else if let Some(connection) = self.get_connection_by_id(&oid) {
+        } else if let Some(connection) = self.get_connection_by_id(oid.as_connection_id()) {
             Some(OwnedGrantObject {
                 owner: connection.owner,
-                object: Object::ConnectionId(oid),
+                object: Object::ConnectionId(oid.as_raw_id()),
             })
-        } else if let Some(secret) = self.get_secret_by_id(&SecretId::new(oid)) {
+        } else if let Some(secret) = self.get_secret_by_id(oid.as_secret_id()) {
             Some(OwnedGrantObject {
                 owner: secret.owner,
-                object: Object::SecretId(oid),
+                object: Object::SecretId(oid.as_raw_id()),
             })
         } else {
             None
         }
     }
 
-    pub fn contains_object(&self, oid: u32) -> bool {
-        self.table_by_id.contains_key(&TableId::new(oid))
-            || self.index_by_id.contains_key(&IndexId::new(oid))
-            || self.source_by_id.contains_key(&oid)
-            || self.sink_by_id.contains_key(&oid)
-            || self.view_by_id.contains_key(&oid)
-            || self.function_by_id.contains_key(&FunctionId::new(oid))
-            || self.subscription_by_id.contains_key(&oid)
-            || self.connection_by_id.contains_key(&oid)
+    pub fn contains_object(&self, oid: ObjectId) -> bool {
+        self.table_by_id.contains_key(&oid.as_table_id())
+            || self.index_by_id.contains_key(&oid.as_index_id())
+            || self.source_by_id.contains_key(&oid.as_source_id())
+            || self.sink_by_id.contains_key(&oid.as_sink_id())
+            || self.view_by_id.contains_key(&oid.as_view_id())
+            || self.function_by_id.contains_key(&oid.as_function_id())
+            || self
+                .subscription_by_id
+                .contains_key(&oid.as_subscription_id())
+            || self.connection_by_id.contains_key(&oid.as_connection_id())
     }
 
     pub fn id(&self) -> SchemaId {

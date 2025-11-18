@@ -184,7 +184,7 @@ impl StreamCdcTableScan {
             .to_internal_table_prost();
 
         // We need to pass the id of upstream source job here
-        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
+        let upstream_source_id = self.core.cdc_table_desc.source_id;
 
         // filter upstream source chunk by the value of `_rw_table_name` column
         let filter_expr =
@@ -270,7 +270,7 @@ impl StreamCdcTableScan {
 
         let options = self.core.options.to_proto();
         let stream_scan_body = PbNodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
-            table_id: upstream_source_id,
+            table_id: upstream_source_id.as_cdc_table_id(),
             upstream_column_ids,
             output_indices,
             // The table desc used by backfill executor

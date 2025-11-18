@@ -101,6 +101,7 @@ pub async fn handle_explain_analyze_stream_job(
 /// Binding pass, since we don't go through the binder.
 /// TODO(noel): Should this be in binder? But it may make compilation slower and doesn't require any binder logic...
 mod bind {
+    use risingwave_common::id::JobId;
     use risingwave_sqlparser::ast::AnalyzeTarget;
 
     use crate::Binder;
@@ -112,9 +113,9 @@ mod bind {
     pub(super) fn bind_relation(
         target_relation: &AnalyzeTarget,
         handler_args: &HandlerArgs,
-    ) -> Result<u32> {
+    ) -> Result<JobId> {
         let job_id = match &target_relation {
-            AnalyzeTarget::Id(id) => *id,
+            AnalyzeTarget::Id(id) => (*id).into(),
             AnalyzeTarget::Index(name)
             | AnalyzeTarget::Table(name)
             | AnalyzeTarget::Sink(name)
@@ -133,22 +134,22 @@ mod bind {
                     AnalyzeTarget::Index(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_index_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.index_id
+                        catalog.id.as_job_id()
                     }
                     AnalyzeTarget::Table(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_table_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.table_id
+                        catalog.id.as_job_id()
                     }
                     AnalyzeTarget::Sink(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_sink_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.sink_id
+                        catalog.id.as_job_id()
                     }
                     AnalyzeTarget::MaterializedView(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_table_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.table_id
+                        catalog.id.as_job_id()
                     }
                     AnalyzeTarget::Id(_) => unreachable!(),
                 }
@@ -162,6 +163,7 @@ mod bind {
 mod net {
     use std::collections::HashSet;
 
+    use risingwave_common::id::{FragmentId, JobId};
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::monitor_service::GetProfileStatsRequest;
@@ -191,7 +193,7 @@ mod net {
     // TODO(kwannoel): Only fetch the names, actor_ids and graph of the fragments
     pub(super) async fn get_fragments(
         meta_client: &dyn FrontendMetaClient,
-        job_id: u32,
+        job_id: JobId,
     ) -> Result<Vec<FragmentInfo>> {
         let mut fragment_map = meta_client.list_table_fragments(&[job_id]).await?;
         assert_eq!(fragment_map.len(), 1, "expected only one fragment");
@@ -204,7 +206,7 @@ mod net {
         handler_args: &HandlerArgs,
         worker_nodes: &[WorkerNode],
         executor_ids: &HashSet<ExecutorId>,
-        dispatcher_fragment_ids: &HashSet<u32>,
+        dispatcher_fragment_ids: &HashSet<FragmentId>,
         profiling_duration: Duration,
     ) -> Result<ExecutorStats> {
         let dispatcher_fragment_ids = dispatcher_fragment_ids.iter().copied().collect::<Vec<_>>();
@@ -579,6 +581,7 @@ mod graph {
         unique_executor_id_from_unique_operator_id, unique_operator_id,
         unique_operator_id_into_parts,
     };
+    use risingwave_pb::id::ActorId;
     use risingwave_pb::meta::list_table_fragments_response::FragmentInfo;
     use risingwave_pb::stream_plan::stream_node::{NodeBody, NodeBodyDiscriminants};
     use risingwave_pb::stream_plan::{MergeNode, StreamNode as PbStreamNode};
@@ -593,9 +596,9 @@ mod graph {
     /// This is an internal struct used ONLY for explain analyze stream job.
     pub(super) struct StreamNode {
         operator_id: OperatorId,
-        fragment_id: u32,
+        fragment_id: FragmentId,
         identity: NodeBodyDiscriminants,
-        actor_ids: HashSet<u32>,
+        actor_ids: HashSet<ActorId>,
         dependencies: Vec<u64>,
     }
 
@@ -615,7 +618,7 @@ mod graph {
     }
 
     impl StreamNode {
-        fn new_for_dispatcher(fragment_id: u32) -> Self {
+        fn new_for_dispatcher(fragment_id: FragmentId) -> Self {
             StreamNode {
                 operator_id: operator_id_for_dispatch(fragment_id),
                 fragment_id,
@@ -634,7 +637,10 @@ mod graph {
         HashSet<FragmentId>,
         HashMap<OperatorId, StreamNode>,
     ) {
-        let job_fragment_ids = fragments.iter().map(|f| f.id).collect::<HashSet<_>>();
+        let job_fragment_ids = fragments
+            .iter()
+            .map(|f| f.id)
+            .collect::<HashSet<FragmentId>>();
 
         // Finds root nodes of the graph
         fn find_root_nodes(stream_nodes: &HashMap<u64, StreamNode>) -> HashSet<u64> {
@@ -650,11 +656,11 @@ mod graph {
         // Recursively extracts stream node info, and builds an adjacency list between stream nodes
         // and their dependencies
         fn extract_stream_node_info(
-            fragment_id: u32,
-            fragment_id_to_merge_operator_id: &mut HashMap<u32, OperatorId>,
+            fragment_id: FragmentId,
+            fragment_id_to_merge_operator_id: &mut HashMap<FragmentId, OperatorId>,
             operator_id_to_stream_node: &mut HashMap<OperatorId, StreamNode>,
             node: &PbStreamNode,
-            actor_ids: &HashSet<u32>,
+            actor_ids: &HashSet<ActorId>,
         ) {
             let identity = node
                 .node_body
@@ -861,9 +867,10 @@ mod graph {
 mod utils {
     use risingwave_common::operator::unique_operator_id;
 
+    use crate::catalog::FragmentId;
     use crate::handler::explain_analyze_stream_job::graph::OperatorId;
 
-    pub(super) fn operator_id_for_dispatch(fragment_id: u32) -> OperatorId {
+    pub(super) fn operator_id_for_dispatch(fragment_id: FragmentId) -> OperatorId {
         unique_operator_id(fragment_id, u32::MAX as u64)
     }
 }

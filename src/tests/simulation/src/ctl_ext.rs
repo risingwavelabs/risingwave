@@ -24,8 +24,10 @@ use rand::seq::IteratorRandom;
 use rand::{Rng, rng as thread_rng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::id::WorkerId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
+use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
@@ -125,11 +127,11 @@ pub struct Fragment {
 
 impl Fragment {
     /// The fragment id.
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> FragmentId {
         self.inner.fragment_id
     }
 
-    pub fn all_worker_count(&self) -> HashMap<u32, usize> {
+    pub fn all_worker_count(&self) -> HashMap<WorkerId, usize> {
         self.r
             .worker_nodes
             .iter()
@@ -148,7 +150,7 @@ impl Fragment {
         self.inner.actors.len()
     }
 
-    pub fn used_worker_count(&self) -> HashMap<u32, usize> {
+    pub fn used_worker_count(&self) -> HashMap<WorkerId, usize> {
         let actor_to_worker: HashMap<_, _> = self
             .r
             .table_fragments
@@ -164,7 +166,7 @@ impl Fragment {
             .actors
             .iter()
             .map(|a| actor_to_worker[&a.actor_id])
-            .fold(HashMap::<u32, usize>::new(), |mut acc, num| {
+            .fold(HashMap::<WorkerId, usize>::new(), |mut acc, num| {
                 *acc.entry(num).or_insert(0) += 1;
                 acc
             })
@@ -249,8 +251,9 @@ impl Cluster {
     }
 
     /// Locate a fragment with the given id.
-    pub async fn locate_fragment_by_id(&mut self, id: u32) -> Result<Fragment> {
-        self.locate_one_fragment([predicate::id(id)]).await
+    pub async fn locate_fragment_by_id(&mut self, id: FragmentId) -> Result<Fragment> {
+        self.locate_one_fragment([predicate::id(id.as_raw_id())])
+            .await
     }
 
     #[cfg_or_panic(madsim)]
@@ -268,7 +271,7 @@ impl Cluster {
     }
 
     /// `actor_id -> splits`
-    pub async fn list_source_splits(&self) -> Result<BTreeMap<u32, String>> {
+    pub async fn list_source_splits(&self) -> Result<BTreeMap<ActorId, String>> {
         let info = self.get_cluster_info().await?;
         let mut res = BTreeMap::new();
 
@@ -290,7 +293,7 @@ impl Cluster {
     #[cfg_or_panic(madsim)]
     async fn update_worker_node_schedulability(
         &self,
-        worker_ids: Vec<u32>,
+        worker_ids: Vec<WorkerId>,
         target: Schedulability,
     ) -> Result<()> {
         let worker_ids = worker_ids
@@ -312,12 +315,12 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn cordon_worker(&self, id: u32) -> Result<()> {
+    pub async fn cordon_worker(&self, id: WorkerId) -> Result<()> {
         self.update_worker_node_schedulability(vec![id], Schedulability::Unschedulable)
             .await
     }
 
-    pub async fn uncordon_worker(&self, id: u32) -> Result<()> {
+    pub async fn uncordon_worker(&self, id: WorkerId) -> Result<()> {
         self.update_worker_node_schedulability(vec![id], Schedulability::Schedulable)
             .await
     }
@@ -341,11 +344,8 @@ impl Cluster {
     pub async fn throttle_mv(&mut self, table_id: TableId, rate_limit: Option<u32>) -> Result<()> {
         self.ctl
             .spawn(async move {
-                let mut command: Vec<String> = vec![
-                    "throttle".into(),
-                    "mv".into(),
-                    table_id.table_id.to_string(),
-                ];
+                let mut command: Vec<String> =
+                    vec!["throttle".into(), "mv".into(), table_id.to_string()];
                 if let Some(rate_limit) = rate_limit {
                     command.push(rate_limit.to_string());
                 }

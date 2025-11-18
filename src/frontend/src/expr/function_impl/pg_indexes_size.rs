@@ -36,11 +36,11 @@ fn pg_indexes_size_impl(catalog: &CatalogReader, db_name: &str, oid: i32) -> Res
     let mut sum = 0;
     for schema in database.iter_schemas() {
         for index in schema.iter_index() {
-            if index.primary_table.id().table_id == oid as u32
+            if index.primary_table.id().as_raw_id() == oid as u32
                 && let Some(table_stats) = catalog
                     .table_stats()
                     .table_stats
-                    .get(&index.primary_table.id().table_id)
+                    .get(&index.primary_table.id())
             {
                 sum += table_stats.total_key_size + table_stats.total_value_size;
             }

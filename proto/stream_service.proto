@@ -34,11 +34,11 @@ message InjectBarrierRequest {
     common.Buffer vnode_bitmap = 4;
     string mview_definition = 5;
     plan_common.ExprContext expr_context = 6;
+    string config_override = 9;
+    repeated uint32 initial_subscriber_ids = 7;
   }
 
   repeated FragmentBuildActorInfo actors_to_build = 9;
-  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_add = 10;
-  repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
 }
 
 message BarrierCompleteResponse {
@@ -54,6 +54,7 @@ message BarrierCompleteResponse {
     uint64 pending_epoch_lag = 5;
     // Buffered rows that are yet to be consumed (used by locality backfill to report precise progress)
     uint64 buffered_rows = 6;
+    uint32 fragment_id = 7;
   }
   message CdcTableBackfillProgress {
     uint32 actor_id = 1;
@@ -85,7 +86,15 @@ message BarrierCompleteResponse {
   // Used for refreshable batch source.
   // SourceExecutor reports the source load is finished, and then
   // meta will issue a LoadFinish barrier to notify MaterializeExecutor to start diff calculation.
-  repeated uint32 load_finished_source_ids = 11;
+  message LoadFinishedSource {
+    // The actor that reported the completion event.
+    uint32 reporter_actor_id = 1;
+    // The table ID for the refreshable batch source.
+    uint32 table_id = 2;
+    // The source identifier associated with the finished load.
+    uint32 associated_source_id = 3;
+  }
+  repeated LoadFinishedSource load_finished_sources = 11;
   map<uint32, hummock.VectorIndexDelta.VectorIndexAdds> vector_index_adds = 12;
   repeated CdcTableBackfillProgress cdc_table_backfill_progress = 13;
   // Used for truncating tables in storage layer.
@@ -98,23 +107,20 @@ message BarrierCompleteResponse {
   repeated uint32 refresh_finished_tables = 15;
   // SourceExecutor reports the source list is finished, and then
   // meta will issue a ListFinish barrier to notify the source to start loading.
-  repeated uint32 list_finished_source_ids = 16;
+  message ListFinishedSource {
+    // The actor that reported the completion event.
+    uint32 reporter_actor_id = 1;
+    // The table ID for the refreshable batch source.
+    uint32 table_id = 2;
+    // The source identifier associated with the completed listing.
+    uint32 associated_source_id = 3;
+  }
+  repeated ListFinishedSource list_finished_sources = 16;
 }
 
 message StreamingControlStreamRequest {
-  message InitialPartialGraph {
-    uint32 partial_graph_id = 1;
-    repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
-  }
-
-  message DatabaseInitialPartialGraph {
-    uint32 database_id = 1;
-    repeated InitialPartialGraph graphs = 2;
-  }
-
   message InitRequest {
-    repeated DatabaseInitialPartialGraph databases = 1;
-    string term_id = 2;
+    string term_id = 1;
   }
 
   message CreatePartialGraphRequest {

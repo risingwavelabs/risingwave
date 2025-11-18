@@ -28,12 +28,15 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::id::{JobId, TableId};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
-use risingwave_common::{bail, bail_not_implemented, catalog};
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::connector_common::validate_connection;
+use risingwave_connector::sink::SinkParam;
+use risingwave_connector::sink::iceberg::IcebergSink;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
@@ -42,7 +45,7 @@ use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
-    SchemaId, SecretId, SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId, WorkerId,
+    SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
@@ -55,7 +58,6 @@ use risingwave_pb::ddl_service::{
     alter_swap_rename_request,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
-use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
@@ -80,8 +82,9 @@ use crate::manager::{
     NotificationVersion, StreamingJob, StreamingJobType,
 };
 use crate::model::{
-    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation, StreamContext,
-    StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+    DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation,
+    FragmentId as CatalogFragmentId, StreamContext, StreamJobFragments, StreamJobFragmentsToCreate,
+    TableParallelism,
 };
 use crate::stream::cdc::{
     is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
@@ -90,9 +93,9 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    JobRescheduleTarget, ReplaceStreamJobContext, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
+    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -129,13 +132,11 @@ impl std::fmt::Display for StreamingJobId {
 }
 
 impl StreamingJobId {
-    #[allow(dead_code)]
-    fn id(&self) -> TableId {
+    fn id(&self) -> JobId {
         match self {
-            StreamingJobId::MaterializedView(id)
-            | StreamingJobId::Sink(id)
-            | StreamingJobId::Table(_, id)
-            | StreamingJobId::Index(id) => *id,
+            StreamingJobId::MaterializedView(id) | StreamingJobId::Table(_, id) => id.as_job_id(),
+            StreamingJobId::Index(id) => id.as_job_id(),
+            StreamingJobId::Sink(id) => id.as_job_id(),
         }
     }
 }
@@ -193,17 +194,17 @@ impl DdlCommand {
         use Either::*;
         match self {
             DdlCommand::CreateDatabase(database) => Left(database.name.clone()),
-            DdlCommand::DropDatabase(id) => Right(*id),
+            DdlCommand::DropDatabase(id) => Right(id.as_object_id()),
             DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
-            DdlCommand::DropSchema(id, _) => Right(*id),
+            DdlCommand::DropSchema(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
-            DdlCommand::DropSource(id, _) => Right(*id),
+            DdlCommand::DropSource(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
-            DdlCommand::DropFunction(id, _) => Right(*id),
+            DdlCommand::DropFunction(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
-            DdlCommand::DropView(id, _) => Right(*id),
+            DdlCommand::DropView(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateStreamingJob { stream_job, .. } => Left(stream_job.name()),
-            DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id()),
+            DdlCommand::DropStreamingJob { job_id, .. } => Right(job_id.id().as_object_id()),
             DdlCommand::AlterName(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSwapRename(object) => Left(format!("{object:?}")),
             DdlCommand::ReplaceStreamJob(info) => Left(info.streaming_job.name()),
@@ -211,14 +212,14 @@ impl DdlCommand {
             DdlCommand::AlterObjectOwner(object, _) => Left(format!("{object:?}")),
             DdlCommand::AlterSetSchema(object, _) => Left(format!("{object:?}")),
             DdlCommand::CreateConnection(connection) => Left(connection.name.clone()),
-            DdlCommand::DropConnection(id, _) => Right(*id),
+            DdlCommand::DropConnection(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateSecret(secret) => Left(secret.name.clone()),
             DdlCommand::AlterSecret(secret) => Left(secret.name.clone()),
-            DdlCommand::DropSecret(id) => Right(*id),
-            DdlCommand::CommentOn(comment) => Right(comment.table_id as _),
+            DdlCommand::DropSecret(id) => Right(id.as_object_id()),
+            DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
-            DdlCommand::DropSubscription(id, _) => Right(*id),
-            DdlCommand::AlterDatabaseParam(id, _) => Right(*id),
+            DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
         }
     }
 
@@ -488,11 +489,11 @@ impl DdlController {
     #[tracing::instrument(skip(self), level = "debug")]
     pub async fn reschedule_streaming_job(
         &self,
-        job_id: u32,
-        target: JobRescheduleTarget,
+        job_id: JobId,
+        target: ReschedulePolicy,
         mut deferred: bool,
     ) -> MetaResult<()> {
-        tracing::info!("alter parallelism");
+        tracing::info!("altering parallelism for job {}", job_id);
         if self.barrier_manager.check_status_running().is_err() {
             tracing::info!(
                 "alter parallelism is set to deferred mode because the system is in recovery state"
@@ -507,8 +508,8 @@ impl DdlController {
 
     pub async fn reschedule_cdc_table_backfill(
         &self,
-        job_id: u32,
-        target: JobRescheduleTarget,
+        job_id: JobId,
+        target: ReschedulePolicy,
     ) -> MetaResult<()> {
         tracing::info!("alter CDC table backfill parallelism");
         if self.barrier_manager.check_status_running().is_err() {
@@ -519,8 +520,26 @@ impl DdlController {
             .await
     }
 
+    pub async fn reschedule_fragments(
+        &self,
+        fragment_targets: HashMap<FragmentId, Option<StreamingParallelism>>,
+    ) -> MetaResult<()> {
+        tracing::info!(
+            "altering parallelism for fragments {:?}",
+            fragment_targets.keys()
+        );
+        let fragment_targets = fragment_targets
+            .into_iter()
+            .map(|(fragment_id, parallelism)| (fragment_id as CatalogFragmentId, parallelism))
+            .collect();
+
+        self.stream_manager
+            .reschedule_fragments(fragment_targets)
+            .await
+    }
+
     async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Database, database_id as _, DropMode::Cascade)
+        self.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
             .await
     }
 
@@ -536,7 +555,7 @@ impl DdlController {
         schema_id: SchemaId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Schema, schema_id as _, drop_mode)
+        self.drop_object(ObjectType::Schema, schema_id, drop_mode)
             .await
     }
 
@@ -553,7 +572,7 @@ impl DdlController {
             .await?;
         self.source_manager
             .register_source_with_handle(source_id, handle)
-            .await?;
+            .await;
         Ok(version)
     }
 
@@ -562,7 +581,7 @@ impl DdlController {
         source_id: SourceId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Source, source_id as _, drop_mode)
+        self.drop_object(ObjectType::Source, source_id, drop_mode)
             .await
     }
 
@@ -587,7 +606,7 @@ impl DdlController {
         function_id: FunctionId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Function, function_id as _, drop_mode)
+        self.drop_object(ObjectType::Function, function_id, drop_mode)
             .await
     }
 
@@ -607,8 +626,7 @@ impl DdlController {
         view_id: ViewId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::View, view_id as _, drop_mode)
-            .await
+        self.drop_object(ObjectType::View, view_id, drop_mode).await
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
@@ -624,7 +642,7 @@ impl DdlController {
         connection_id: ConnectionId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Connection, connection_id as _, drop_mode)
+        self.drop_object(ObjectType::Connection, connection_id, drop_mode)
             .await
     }
 
@@ -683,7 +701,7 @@ impl DdlController {
     }
 
     async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Secret, secret_id as _, DropMode::Restrict)
+        self.drop_object(ObjectType::Secret, secret_id, DropMode::Restrict)
             .await
     }
 
@@ -718,7 +736,7 @@ impl DdlController {
             let _ = self
                 .metadata_manager
                 .catalog_controller
-                .try_abort_creating_subscription(subscription.id as _)
+                .try_abort_creating_subscription(subscription.id)
                 .await
                 .inspect_err(|e| {
                     tracing::error!(
@@ -751,14 +769,14 @@ impl DdlController {
             .get_subscription_by_id(subscription_id)
             .await?;
         let table_id = subscription.dependent_table_id;
-        let database_id = subscription.database_id.into();
+        let database_id = subscription.database_id;
         let (_, version) = self
             .metadata_manager
             .catalog_controller
-            .drop_object(ObjectType::Subscription, subscription_id as _, drop_mode)
+            .drop_object(ObjectType::Subscription, subscription_id, drop_mode)
             .await?;
         self.stream_manager
-            .drop_subscription(database_id, subscription_id as _, table_id)
+            .drop_subscription(database_id, subscription_id, table_id)
             .await;
         tracing::debug!("finish drop subscription");
         Ok(version)
@@ -838,7 +856,7 @@ impl DdlController {
     async fn validate_cdc_table_inner(
         &self,
         node_body: &Option<NodeBody>,
-        table_id: u32,
+        table_id: TableId,
     ) -> MetaResult<bool> {
         let meta_store = self.env.meta_store_ref();
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
@@ -905,7 +923,7 @@ impl DdlController {
         if let StreamingJob::Sink(sink) = &streaming_job
             && let Some(target_table) = sink.target_table
         {
-            self.validate_table_for_sink(target_table as _).await?;
+            self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         let check_ret = self
@@ -928,7 +946,7 @@ impl DdlController {
                 if streaming_job.create_type() == CreateType::Foreground {
                     let database_id = streaming_job.database_id();
                     self.metadata_manager
-                        .wait_streaming_job_finished(database_id.into(), *job_id)
+                        .wait_streaming_job_finished(database_id, *job_id)
                         .await
                 } else {
                     Ok(IGNORED_NOTIFICATION_VERSION)
@@ -939,7 +957,7 @@ impl DdlController {
         }
         let job_id = streaming_job.id();
         tracing::debug!(
-            id = job_id,
+            id = %job_id,
             definition = streaming_job.definition(),
             create_type = streaming_job.create_type().as_str_name(),
             job_type = ?streaming_job.job_type(),
@@ -976,7 +994,7 @@ impl DdlController {
         {
             Ok(version) => Ok(version),
             Err(err) => {
-                tracing::error!(id = job_id, error = %err.as_report(), "failed to create streaming job");
+                tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
                     name,
@@ -989,15 +1007,15 @@ impl DdlController {
                 let (aborted, _) = self
                     .metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id as _, false)
+                    .try_abort_creating_streaming_job(job_id, false)
                     .await?;
                 if aborted {
-                    tracing::warn!(id = job_id, "aborted streaming job");
+                    tracing::warn!(id = %job_id, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
                             .apply_source_change(SourceChange::DropSource {
-                                dropped_source_ids: vec![source_id as SourceId],
+                                dropped_source_ids: vec![source_id],
                             })
                             .await;
                     }
@@ -1033,7 +1051,7 @@ impl DdlController {
         fragment_graph.refill_internal_table_ids(table_id_map);
 
         // create fragment and actor catalogs.
-        tracing::debug!(id = streaming_job.id(), "building streaming job");
+        tracing::debug!(id = %streaming_job.id(), "building streaming job");
         let (ctx, stream_job_fragments) = self
             .build_stream_job(ctx, streaming_job, fragment_graph, specific_resource_group)
             .await?;
@@ -1129,14 +1147,21 @@ impl DdlController {
     pub async fn drop_object(
         &self,
         object_type: ObjectType,
-        object_id: ObjectId,
+        object_id: impl Into<ObjectId>,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
+        let object_id = object_id.into();
         let (release_ctx, version) = self
             .metadata_manager
             .catalog_controller
             .drop_object(object_type, object_id, drop_mode)
             .await?;
+
+        if object_type == ObjectType::Source {
+            self.env
+                .notification_manager_ref()
+                .notify_local_subscribers(LocalNotification::SourceDropped(object_id));
+        }
 
         let ReleaseContext {
             database_id,
@@ -1148,12 +1173,13 @@ impl DdlController {
             removed_actors,
             removed_fragments,
             removed_sink_fragment_by_targets,
+            removed_iceberg_table_sinks,
         } = release_ctx;
 
         let _guard = self.source_manager.pause_tick().await;
         self.stream_manager
             .drop_streaming_jobs(
-                catalog::DatabaseId::new(database_id as _),
+                database_id,
                 removed_actors.iter().map(|id| *id as _).collect(),
                 removed_streaming_job_ids,
                 removed_state_table_ids,
@@ -1177,24 +1203,42 @@ impl DdlController {
 
         // unregister fragments and actors from source manager.
         // FIXME: need also unregister source backfill fragments.
-        let dropped_source_fragments = removed_source_fragments
-            .into_iter()
-            .map(|(source_id, fragments)| {
-                (
-                    source_id,
-                    fragments.into_iter().map(|id| id as u32).collect(),
-                )
-            })
-            .collect();
+        let dropped_source_fragments = removed_source_fragments;
         self.source_manager
             .apply_source_change(SourceChange::DropMv {
                 dropped_source_fragments,
             })
             .await;
 
+        // clean up iceberg table sinks
+        for sink in removed_iceberg_table_sinks {
+            let sink_param = SinkParam::try_from_sink_catalog(sink.into())
+                .expect("Iceberg sink should be valid");
+            let iceberg_sink =
+                IcebergSink::try_from(sink_param).expect("Iceberg sink should be valid");
+            if let Ok(iceberg_catalog) = iceberg_sink.config.create_catalog().await {
+                let table_identifier = iceberg_sink.config.full_table_name().unwrap();
+                tracing::info!(
+                    "dropping iceberg table {} for dropped sink",
+                    table_identifier
+                );
+
+                let _ = iceberg_catalog
+                    .drop_table(&table_identifier)
+                    .await
+                    .inspect_err(|err| {
+                        tracing::error!(
+                            "failed to drop iceberg table {} during cleanup: {}",
+                            table_identifier,
+                            err.as_report()
+                        );
+                    });
+            }
+        }
+
         // remove secrets.
         for secret in secret_ids {
-            LocalSecretManager::global().remove_secret(secret as _);
+            LocalSecretManager::global().remove_secret(secret);
         }
         Ok(version)
     }
@@ -1223,7 +1267,7 @@ impl DdlController {
         // Ensure the max parallelism unchanged before replacing table.
         let original_max_parallelism = self
             .metadata_manager
-            .get_job_max_parallelism(streaming_job.id().into())
+            .get_job_max_parallelism(streaming_job.id())
             .await?;
         let fragment_graph = PbStreamFragmentGraph {
             max_parallelism: original_max_parallelism as _,
@@ -1241,13 +1285,13 @@ impl DdlController {
             let auto_refresh_schema_sinks = self
                 .metadata_manager
                 .catalog_controller
-                .get_sink_auto_refresh_schema_from(table.id as _)
+                .get_sink_auto_refresh_schema_from(table.id)
                 .await?;
             if !auto_refresh_schema_sinks.is_empty() {
                 let original_table_columns = self
                     .metadata_manager
                     .catalog_controller
-                    .get_table_columns(table.id as _)
+                    .get_table_columns(table.id)
                     .await?;
                 // compare column id to find newly added columns
                 let mut original_table_column_ids: HashSet<_> = original_table_columns
@@ -1271,7 +1315,7 @@ impl DdlController {
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
                         .metadata_manager
-                        .get_job_fragments_by_id(&catalog::TableId::new(sink.id))
+                        .get_job_fragments_by_id(sink.id.as_job_id())
                         .await?;
                     if sink_job_fragments.fragments.len() != 1 {
                         return Err(anyhow!(
@@ -1290,6 +1334,7 @@ impl DdlController {
                             table,
                             fragment_graph.table_fragment_id(),
                             self.env.id_gen_manager(),
+                            self.env.actor_id_generator(),
                         )?;
 
                     assert_eq!(
@@ -1308,7 +1353,6 @@ impl DdlController {
                                 new_sink_fragment.actors[i].actor_id,
                                 PbActorStatus {
                                     location: Some(PbActorLocation { worker_node_id }),
-                                    state: PbActorState::Inactive as _,
                                 },
                             )
                         })
@@ -1320,7 +1364,8 @@ impl DdlController {
                         .metadata_manager
                         .catalog_controller
                         .create_job_catalog_for_replace(&streaming_job, None, None, None)
-                        .await?;
+                        .await?
+                        .as_sink_id();
                     let StreamingJob::Sink(sink) = streaming_job else {
                         unreachable!()
                     };
@@ -1358,11 +1403,14 @@ impl DdlController {
             )
             .await?;
 
-        let tmp_sink_ids = auto_refresh_schema_sinks
-            .as_ref()
-            .map(|sinks| sinks.iter().map(|sink| sink.tmp_sink_id).collect_vec());
+        let tmp_sink_ids = auto_refresh_schema_sinks.as_ref().map(|sinks| {
+            sinks
+                .iter()
+                .map(|sink| sink.tmp_sink_id.as_object_id())
+                .collect_vec()
+        });
 
-        tracing::debug!(id = job_id, "building replace streaming job");
+        tracing::debug!(id = %job_id, "building replace streaming job");
         let mut updated_sink_catalogs = vec![];
 
         let mut drop_table_connector_ctx = None;
@@ -1372,7 +1420,7 @@ impl DdlController {
                     ctx,
                     &streaming_job,
                     fragment_graph,
-                    tmp_id as _,
+                    tmp_id,
                     auto_refresh_schema_sinks,
                 )
                 .await?;
@@ -1383,12 +1431,12 @@ impl DdlController {
                         .iter()
                         .map(|sink| FinishAutoRefreshSchemaSinkContext {
                             tmp_sink_id: sink.tmp_sink_id,
-                            original_sink_id: sink.original_sink.id as _,
+                            original_sink_id: sink.original_sink.id,
                             columns: sink.new_schema.clone(),
                             new_log_store_table: sink
                                 .new_log_store_table
                                 .as_ref()
-                                .map(|table| (table.id as _, table.columns.clone())),
+                                .map(|table| (table.id, table.columns.clone())),
                         })
                         .collect()
                 });
@@ -1423,9 +1471,8 @@ impl DdlController {
                     self.metadata_manager
                         .catalog_controller
                         .prepare_streaming_job(
-                            sink.tmp_sink_id,
+                            sink.tmp_sink_id.as_job_id(),
                             || [&sink.new_fragment].into_iter(),
-                            &sink.actor_status,
                             &empty_downstreams,
                             true,
                             None,
@@ -1471,12 +1518,12 @@ impl DdlController {
                 Ok(version)
             }
             Err(err) => {
-                tracing::error!(id = job_id, error = ?err.as_report(), "failed to replace job");
+                tracing::error!(id = %job_id, error = ?err.as_report(), "failed to replace job");
                 let _ = self.metadata_manager
                     .catalog_controller
                     .try_abort_replacing_streaming_job(tmp_id, tmp_sink_ids)
                     .await.inspect_err(|err| {
-                    tracing::error!(id = job_id, error = ?err.as_report(), "failed to abort replacing job");
+                    tracing::error!(id = %job_id, error = ?err.as_report(), "failed to abort replacing job");
                 });
                 Err(err)
             }
@@ -1493,10 +1540,10 @@ impl DdlController {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let (object_id, object_type) = match job_id {
-            StreamingJobId::MaterializedView(id) => (id as _, ObjectType::Table),
-            StreamingJobId::Sink(id) => (id as _, ObjectType::Sink),
-            StreamingJobId::Table(_, id) => (id as _, ObjectType::Table),
-            StreamingJobId::Index(idx) => (idx as _, ObjectType::Index),
+            StreamingJobId::MaterializedView(id) => (id.as_object_id(), ObjectType::Table),
+            StreamingJobId::Sink(id) => (id.as_object_id(), ObjectType::Sink),
+            StreamingJobId::Table(_, id) => (id.as_object_id(), ObjectType::Table),
+            StreamingJobId::Index(idx) => (idx.as_object_id(), ObjectType::Index),
         };
 
         let job_status = self
@@ -1511,13 +1558,9 @@ impl DdlController {
                 );
             }
             JobStatus::Creating => {
-                let canceled_jobs = self
-                    .stream_manager
-                    .cancel_streaming_jobs(vec![(job_id.id() as u32).into()])
-                    .await;
-                if canceled_jobs.is_empty() {
-                    tracing::warn!(job_id = job_id.id(), "failed to cancel streaming job");
-                }
+                self.stream_manager
+                    .cancel_streaming_jobs(vec![job_id.id()])
+                    .await?;
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Created => {
@@ -1617,7 +1660,6 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
-        let expr_context = stream_ctx.to_expr_context();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
         // 1. Fragment Level ordering graph
@@ -1698,7 +1740,7 @@ impl DdlController {
         let resource_group = match specific_resource_group {
             None => {
                 self.metadata_manager
-                    .get_database_resource_group(stream_job.database_id() as ObjectId)
+                    .get_database_resource_group(stream_job.database_id())
                     .await?
             }
             Some(resource_group) => resource_group,
@@ -1738,7 +1780,7 @@ impl DdlController {
             new_no_shuffle,
             replace_upstream,
             ..
-        } = actor_graph_builder.generate_graph(&self.env, &stream_job, expr_context)?;
+        } = actor_graph_builder.generate_graph(&self.env, &stream_job, stream_ctx.clone())?;
         assert!(replace_upstream.is_empty());
 
         // 4. Build the table fragments structure that will be persisted in the stream manager,
@@ -1753,7 +1795,7 @@ impl DdlController {
         };
 
         let stream_job_fragments = StreamJobFragments::new(
-            id.into(),
+            id,
             graph,
             &building_locations.actor_locations,
             stream_ctx.clone(),
@@ -1770,7 +1812,7 @@ impl DdlController {
         {
             let tables = self
                 .metadata_manager
-                .get_table_catalog_by_ids(&[*table_id as _])
+                .get_table_catalog_by_ids(&[*table_id])
                 .await?;
             let target_table = tables
                 .first()
@@ -1781,7 +1823,7 @@ impl DdlController {
             let mview_fragment_id = self
                 .metadata_manager
                 .catalog_controller
-                .get_mview_fragment_by_id(*table_id as _)
+                .get_mview_fragment_by_id(table_id.as_job_id())
                 .await?;
             let upstream_sink_info = build_upstream_sink_info(
                 sink,
@@ -1800,7 +1842,6 @@ impl DdlController {
             upstream_actors,
             building_locations,
             definition: stream_job.definition(),
-            mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
             streaming_job: stream_job,
@@ -1831,7 +1872,7 @@ impl DdlController {
         stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
-        tmp_job_id: TableId,
+        tmp_job_id: JobId,
         auto_refresh_schema_sinks: Option<Vec<AutoRefreshSchemaSinkContext>>,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragmentsToCreate)> {
         match &stream_job {
@@ -1844,21 +1885,17 @@ impl DdlController {
         }
 
         let id = stream_job.id();
-        let expr_context = stream_ctx.to_expr_context();
 
         // check if performing drop table connector
         let mut drop_table_associated_source_id = None;
         if let StreamingJob::Table(None, _, _) = &stream_job {
             drop_table_associated_source_id = self
                 .metadata_manager
-                .get_table_associated_source_id(id as _)
+                .get_table_associated_source_id(id.as_mv_table_id())
                 .await?;
         }
 
-        let old_fragments = self
-            .metadata_manager
-            .get_job_fragments_by_id(&id.into())
-            .await?;
+        let old_fragments = self.metadata_manager.get_job_fragments_by_id(id).await?;
         let old_internal_table_ids = old_fragments.internal_table_ids();
 
         // handle drop table's associated source
@@ -1870,8 +1907,8 @@ impl DdlController {
             drop_table_connector_ctx = Some(DropTableConnectorContext {
                 // we do not remove the original table catalog as it's still needed for the streaming job
                 // just need to remove the ref to the state table
-                to_change_streaming_job_id: id as i32,
-                to_remove_state_table_id: old_internal_table_ids[0] as i32, // asserted before
+                to_change_streaming_job_id: id,
+                to_remove_state_table_id: old_internal_table_ids[0], // asserted before
                 to_remove_source_id,
             });
         } else if stream_job.is_materialized_view() {
@@ -1927,17 +1964,11 @@ impl DdlController {
                         downstream_actor_location.remove(actor_id);
                     }
                     for (actor_id, status) in &sink.actor_status {
-                        downstream_actor_location.insert(
-                            *actor_id,
-                            status.location.as_ref().unwrap().worker_node_id as WorkerId,
-                        );
+                        downstream_actor_location
+                            .insert(*actor_id, status.location.as_ref().unwrap().worker_node_id);
                     }
 
-                    *downstream_fragment = (
-                        &sink.new_fragment_info(),
-                        catalog::TableId::from(stream_job.id()),
-                    )
-                        .into();
+                    *downstream_fragment = (&sink.new_fragment_info(), stream_job.id()).into();
                 }
             }
             assert!(remaining_fragment.is_empty());
@@ -1983,7 +2014,7 @@ impl DdlController {
 
         let resource_group = self
             .metadata_manager
-            .get_existing_job_resource_group(id as ObjectId)
+            .get_existing_job_resource_group(id)
             .await?;
 
         // 2. Build the actor graph.
@@ -2010,7 +2041,7 @@ impl DdlController {
             mut replace_upstream,
             new_no_shuffle,
             ..
-        } = actor_graph_builder.generate_graph(&self.env, stream_job, expr_context)?;
+        } = actor_graph_builder.generate_graph(&self.env, stream_job, stream_ctx.clone())?;
 
         // general table & source does not have upstream job, so the dispatchers should be empty
         if matches!(
@@ -2024,7 +2055,7 @@ impl DdlController {
         // the context that contains all information needed for building the actors on the compute
         // nodes.
         let stream_job_fragments = StreamJobFragments::new(
-            (tmp_job_id as u32).into(),
+            tmp_job_id,
             graph,
             &building_locations.actor_locations,
             stream_ctx,
@@ -2050,7 +2081,7 @@ impl DdlController {
             upstream_fragment_downstreams,
             building_locations,
             streaming_job: stream_job.clone(),
-            tmp_id: tmp_job_id as _,
+            tmp_id: tmp_job_id,
             drop_table_connector_ctx,
             auto_refresh_schema_sinks,
         };
@@ -2070,16 +2101,14 @@ impl DdlController {
         new_name: &str,
     ) -> MetaResult<NotificationVersion> {
         let (obj_type, id) = match relation {
-            alter_name_request::Object::TableId(id) => (ObjectType::Table, id as ObjectId),
-            alter_name_request::Object::ViewId(id) => (ObjectType::View, id as ObjectId),
-            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id as ObjectId),
-            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
-            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id as ObjectId),
-            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
-            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
-            alter_name_request::Object::SubscriptionId(id) => {
-                (ObjectType::Subscription, id as ObjectId)
-            }
+            alter_name_request::Object::TableId(id) => (ObjectType::Table, id),
+            alter_name_request::Object::ViewId(id) => (ObjectType::View, id),
+            alter_name_request::Object::IndexId(id) => (ObjectType::Index, id),
+            alter_name_request::Object::SinkId(id) => (ObjectType::Sink, id),
+            alter_name_request::Object::SourceId(id) => (ObjectType::Source, id),
+            alter_name_request::Object::SchemaId(id) => (ObjectType::Schema, id),
+            alter_name_request::Object::DatabaseId(id) => (ObjectType::Database, id),
+            alter_name_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
         };
         self.metadata_manager
             .catalog_controller
@@ -2094,38 +2123,23 @@ impl DdlController {
         let (obj_type, src_id, dst_id) = match object {
             alter_swap_rename_request::Object::Schema(_) => unimplemented!("schema swap"),
             alter_swap_rename_request::Object::Table(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::Table, src_id, dst_id)
             }
             alter_swap_rename_request::Object::View(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::View, src_id, dst_id)
             }
             alter_swap_rename_request::Object::Source(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::Source, src_id, dst_id)
             }
             alter_swap_rename_request::Object::Sink(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::Sink, src_id, dst_id)
             }
             alter_swap_rename_request::Object::Subscription(objs) => {
-                let (src_id, dst_id) = (
-                    objs.src_object_id as ObjectId,
-                    objs.dst_object_id as ObjectId,
-                );
+                let (src_id, dst_id) = (objs.src_object_id, objs.dst_object_id);
                 (ObjectType::Subscription, src_id, dst_id)
             }
         };
@@ -2142,18 +2156,18 @@ impl DdlController {
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
         let (obj_type, id) = match object {
-            Object::TableId(id) => (ObjectType::Table, id as ObjectId),
-            Object::ViewId(id) => (ObjectType::View, id as ObjectId),
-            Object::SourceId(id) => (ObjectType::Source, id as ObjectId),
-            Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
-            Object::SchemaId(id) => (ObjectType::Schema, id as ObjectId),
-            Object::DatabaseId(id) => (ObjectType::Database, id as ObjectId),
-            Object::SubscriptionId(id) => (ObjectType::Subscription, id as ObjectId),
-            Object::ConnectionId(id) => (ObjectType::Connection, id as ObjectId),
+            Object::TableId(id) => (ObjectType::Table, id),
+            Object::ViewId(id) => (ObjectType::View, id),
+            Object::SourceId(id) => (ObjectType::Source, id),
+            Object::SinkId(id) => (ObjectType::Sink, id),
+            Object::SchemaId(id) => (ObjectType::Schema, id),
+            Object::DatabaseId(id) => (ObjectType::Database, id),
+            Object::SubscriptionId(id) => (ObjectType::Subscription, id),
+            Object::ConnectionId(id) => (ObjectType::Connection, id),
         };
         self.metadata_manager
             .catalog_controller
-            .alter_owner(obj_type, id, owner_id as _)
+            .alter_owner(obj_type, id.into(), owner_id as _)
             .await
     }
 
@@ -2163,23 +2177,17 @@ impl DdlController {
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
         let (obj_type, id) = match object {
-            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id as ObjectId),
-            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id as ObjectId),
-            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id as ObjectId),
-            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id as ObjectId),
-            alter_set_schema_request::Object::FunctionId(id) => {
-                (ObjectType::Function, id as ObjectId)
-            }
-            alter_set_schema_request::Object::ConnectionId(id) => {
-                (ObjectType::Connection, id as ObjectId)
-            }
-            alter_set_schema_request::Object::SubscriptionId(id) => {
-                (ObjectType::Subscription, id as ObjectId)
-            }
+            alter_set_schema_request::Object::TableId(id) => (ObjectType::Table, id),
+            alter_set_schema_request::Object::ViewId(id) => (ObjectType::View, id),
+            alter_set_schema_request::Object::SourceId(id) => (ObjectType::Source, id),
+            alter_set_schema_request::Object::SinkId(id) => (ObjectType::Sink, id),
+            alter_set_schema_request::Object::FunctionId(id) => (ObjectType::Function, id),
+            alter_set_schema_request::Object::ConnectionId(id) => (ObjectType::Connection, id),
+            alter_set_schema_request::Object::SubscriptionId(id) => (ObjectType::Subscription, id),
         };
         self.metadata_manager
             .catalog_controller
-            .alter_schema(obj_type, id, new_schema_id as _)
+            .alter_schema(obj_type, id.into(), new_schema_id as _)
             .await
     }
 
@@ -2189,7 +2197,7 @@ impl DdlController {
             if self
                 .metadata_manager
                 .catalog_controller
-                .list_background_creating_jobs(true)
+                .list_background_creating_jobs(true, None)
                 .await?
                 .is_empty()
             {
@@ -2212,7 +2220,7 @@ impl DdlController {
 }
 
 fn report_create_object(
-    catalog_id: u32,
+    job_id: JobId,
     event_name: &str,
     obj_type: PbTelemetryDatabaseObject,
     connector_name: Option<String>,
@@ -2221,14 +2229,14 @@ fn report_create_object(
     report_event(
         PbTelemetryEventStage::CreateStreamJob,
         event_name,
-        catalog_id.into(),
+        job_id.as_raw_id() as _,
         connector_name,
         Some(obj_type),
         attr_info,
     );
 }
 
-async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: i32) -> MetaResult<()> {
+async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: SinkId) -> MetaResult<()> {
     match Entity::delete_many()
         .filter(Column::SinkId.eq(sink_id))
         .exec(db)
@@ -2316,7 +2324,7 @@ pub fn build_upstream_sink_info(
     let current_target_columns = target_table.get_columns();
     let project_exprs = build_select_node_list(&sink_columns, current_target_columns)?;
     Ok(UpstreamSinkInfo {
-        sink_id: sink.id as _,
+        sink_id: sink.id,
         sink_fragment_id: sink_fragment_id as _,
         sink_output_fields,
         sink_original_target_columns: sink.get_original_target_columns().clone(),

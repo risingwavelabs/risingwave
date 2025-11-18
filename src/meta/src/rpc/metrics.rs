@@ -1066,7 +1066,7 @@ pub async fn refresh_fragment_info_metrics(
                 Some(host) => format!("{}:{}", host.host, host.port),
                 None => "".to_owned(),
             };
-            (worker_node.id as WorkerId, addr)
+            (worker_node.id, addr)
         })
         .collect();
     let table_compaction_group_id_mapping = hummock_manager
@@ -1115,7 +1115,7 @@ pub async fn refresh_fragment_info_metrics(
                 .cloned()
                 .unwrap_or_else(|| ("unknown".to_owned(), "unknown".to_owned()));
             let compaction_group_id = table_compaction_group_id_mapping
-                .get(&(table_id as u32))
+                .get(&table_id)
                 .map(|cg_id| cg_id.to_string())
                 .unwrap_or_else(|| "unknown".to_owned());
             meta_metrics

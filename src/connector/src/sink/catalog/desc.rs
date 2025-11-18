@@ -128,7 +128,7 @@ impl SinkDesc {
 
     pub fn to_proto(&self) -> PbSinkDesc {
         PbSinkDesc {
-            id: self.id.sink_id,
+            id: self.id,
             name: self.name.clone(),
             definition: self.definition.clone(),
             column_catalogs: self
@@ -145,7 +145,7 @@ impl SinkDesc {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
-            target_table: self.target_table.map(|table_id| table_id.table_id()),
+            target_table: self.target_table.map(|table_id| table_id.as_raw_id()),
             extra_partition_col_idx: self.extra_partition_col_idx.map(|idx| idx as u64),
             secret_refs: self.secret_refs.clone(),
         }

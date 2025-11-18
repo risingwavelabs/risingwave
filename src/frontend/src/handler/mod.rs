@@ -488,7 +488,7 @@ pub async fn handle(
             DescribeKind::Plain => describe::handle_describe(handler_args, name),
         },
         Statement::DescribeFragment { fragment_id } => {
-            describe::handle_describe_fragment(handler_args, fragment_id).await
+            describe::handle_describe_fragment(handler_args, fragment_id.into()).await
         }
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
@@ -866,6 +866,12 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER TABLE SET CONFIG")
+            }
+            AlterTableOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER TABLE RESET CONFIG")
+            }
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
@@ -914,6 +920,12 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterIndexOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER INDEX SET CONFIG")
+            }
+            AlterIndexOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER INDEX RESET CONFIG")
             }
         },
         Statement::AlterView {
@@ -1030,6 +1042,18 @@ pub async fn handle(
                     }
                     alter_mv::handle_alter_mv(handler_args, name, query).await
                 }
+                AlterViewOperation::SetConfig { .. } => {
+                    if !materialized {
+                        bail!("SET CONFIG is only supported for materialized views");
+                    }
+                    bail_not_implemented!("ALTER MATERIALIZED VIEW SET CONFIG")
+                }
+                AlterViewOperation::ResetConfig { .. } => {
+                    if !materialized {
+                        bail!("RESET CONFIG is only supported for materialized views");
+                    }
+                    bail_not_implemented!("ALTER MATERIALIZED VIEW RESET CONFIG")
+                }
             }
         }
 
@@ -1071,6 +1095,12 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterSinkOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER SINK SET CONFIG")
+            }
+            AlterSinkOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER SINK RESET CONFIG")
             }
             AlterSinkOperation::SwapRenameSink { target_sink } => {
                 alter_swap_rename::handle_swap_rename(
@@ -1207,6 +1237,12 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSourceOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER SOURCE SET CONFIG")
+            }
+            AlterSourceOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER SOURCE RESET CONFIG")
+            }
         },
         Statement::AlterFunction {
             name,
@@ -1254,18 +1290,35 @@ pub async fn handle(
             operation,
         } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
         Statement::AlterFragment {
-            fragment_id,
-            operation: AlterFragmentOperation::AlterBackfillRateLimit { rate_limit },
-        } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
-                &handler_args.session,
-                PbThrottleTarget::Fragment,
-                fragment_id,
-                rate_limit,
-                StatementType::SET_VARIABLE,
-            )
-            .await
-        }
+            fragment_ids,
+            operation,
+        } => match operation {
+            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
+                let [fragment_id] = fragment_ids.as_slice() else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "ALTER FRAGMENT ... SET RATE_LIMIT supports exactly one fragment id"
+                            .to_owned(),
+                    )
+                    .into());
+                };
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                    &handler_args.session,
+                    PbThrottleTarget::Fragment,
+                    *fragment_id,
+                    rate_limit,
+                    StatementType::SET_VARIABLE,
+                )
+                .await
+            }
+            AlterFragmentOperation::SetParallelism { parallelism } => {
+                alter_parallelism::handle_alter_fragment_parallelism(
+                    handler_args,
+                    fragment_ids.into_iter().map_into().collect(),
+                    parallelism,
+                )
+                .await
+            }
+        },
         Statement::AlterDefaultPrivileges { .. } => {
             handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
         }

@@ -72,7 +72,7 @@ pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bo
     offset: usize,
 
     /// The storage key indices of the `GroupTopNExecutor`
-    storage_key_indices: PkIndices,
+    storage_key_indices: Vec<usize>,
 
     managed_state: ManagedTopNState<S>,
 
@@ -127,7 +127,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             group_by,
             caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
-            topn_cache_min_capacity: ctx.streaming_config.developer.topn_cache_min_capacity,
+            topn_cache_min_capacity: ctx.config.developer.topn_cache_min_capacity,
             metrics,
         })
     }
@@ -316,7 +316,7 @@ mod tests {
         vec![ColumnOrder::new(0, OrderType::ascending())]
     }
 
-    fn pk_indices() -> PkIndices {
+    fn stream_key() -> StreamKey {
         vec![1, 2, 0]
     }
 
@@ -366,7 +366,7 @@ mod tests {
             Message::Chunk(std::mem::take(&mut chunks[3])),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(5))),
         ])
-        .into_executor(schema, pk_indices())
+        .into_executor(schema, stream_key())
     }
 
     #[tokio::test]
@@ -379,7 +379,7 @@ mod tests {
                 OrderType::ascending(),
                 OrderType::ascending(),
             ],
-            &pk_indices(),
+            &stream_key(),
         )
         .await;
         let schema = source.schema().clone();
@@ -466,7 +466,7 @@ mod tests {
                 OrderType::ascending(),
                 OrderType::ascending(),
             ],
-            &pk_indices(),
+            &stream_key(),
         )
         .await;
         let schema = source.schema().clone();
@@ -546,7 +546,7 @@ mod tests {
                 OrderType::ascending(),
                 OrderType::ascending(),
             ],
-            &pk_indices(),
+            &stream_key(),
         )
         .await;
         let schema = source.schema().clone();

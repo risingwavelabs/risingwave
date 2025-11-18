@@ -19,12 +19,12 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 
 pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
-    object_id: i32,
+    object_id: ObjectId,
     column: object::Column,
     new_value: Value,
     objects_to_notify: &mut Vec<PbObjectInfo>,
 ) -> MetaResult<()> {
-    let internal_tables = get_internal_tables_by_id(object_id, txn).await?;
+    let internal_tables = get_internal_tables_by_id(object_id.as_job_id(), txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
@@ -92,15 +92,15 @@ impl CatalogController {
             match extract_external_table_name_from_definition(&definition) {
                 None => {
                     tracing::warn!(
-                        table_id = table_id,
-                        definition = definition,
+                        %table_id,
+                        definition,
                         "failed to extract cdc table name from table definition.",
                     )
                 }
                 Some(external_table_name) => {
                     cdc_table_ids.insert(
                         table_id,
-                        build_cdc_table_id(source_id as u32, &external_table_name),
+                        build_cdc_table_id(source_id, &external_table_name),
                     );
                 }
             }
@@ -150,8 +150,8 @@ impl CatalogController {
         let mut obj_dependencies = dependencies
             .into_iter()
             .map(|(oid, used_by)| PbObjectDependencies {
-                object_id: used_by as _,
-                referenced_object_id: oid as _,
+                object_id: used_by,
+                referenced_object_id: oid,
             })
             .collect_vec();
 
@@ -172,8 +172,8 @@ impl CatalogController {
 
         obj_dependencies.extend(view_dependencies.into_iter().map(|(view_id, table_id)| {
             PbObjectDependencies {
-                object_id: table_id as _,
-                referenced_object_id: view_id as _,
+                object_id: table_id,
+                referenced_object_id: view_id,
             }
         }));
 
@@ -197,8 +197,8 @@ impl CatalogController {
         };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
-                object_id: table_id as _,
-                referenced_object_id: sink_id as _,
+                object_id: table_id.into(),
+                referenced_object_id: sink_id.into(),
             }
         }));
 
@@ -224,8 +224,8 @@ impl CatalogController {
         };
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
             |(subscription_id, table_id)| PbObjectDependencies {
-                object_id: subscription_id as _,
-                referenced_object_id: table_id as _,
+                object_id: subscription_id.into(),
+                referenced_object_id: table_id.into(),
             },
         ));
 
@@ -267,7 +267,7 @@ impl CatalogController {
                 .await?;
             for (table_id, name, definition) in table_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: table_id as _,
+                    id: table_id.as_job_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -291,7 +291,7 @@ impl CatalogController {
                 .await?;
             for (source_id, name, definition) in source_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: source_id as _,
+                    id: source_id.as_share_source_job_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -315,7 +315,7 @@ impl CatalogController {
                 .await?;
             for (sink_id, name, definition) in sink_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: sink_id as _,
+                    id: sink_id.as_job_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -397,8 +397,7 @@ impl CatalogController {
                                     let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
                                         unreachable!("expect merge node");
                                     };
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
+                                    if all_fragment_ids.contains(&(merge_node.upstream_fragment_id))
                                     {
                                         true
                                     } else {
@@ -408,8 +407,7 @@ impl CatalogController {
                                     }
                                 }
                                 Some(NodeBody::Merge(merge_node)) => {
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
+                                    if all_fragment_ids.contains(&(merge_node.upstream_fragment_id))
                                     {
                                         true
                                     } else {
@@ -510,9 +508,7 @@ impl CatalogController {
 
         Ok(infos
             .into_iter()
-            .flat_map(|info| {
-                job_mapping.remove(&(info.database_id as _, info.schema_id as _, info.name))
-            })
+            .flat_map(|info| job_mapping.remove(&(info.database_id, info.schema_id, info.name)))
             .collect())
     }
 }

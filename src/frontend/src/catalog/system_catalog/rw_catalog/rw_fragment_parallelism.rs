@@ -37,7 +37,8 @@ use risingwave_frontend_macro::system_catalog;
         f.upstream_fragment_ids,
         f.flags,
         f.parallelism,
-        f.max_parallelism
+        f.max_parallelism,
+        f.parallelism_policy
     FROM all_streaming_jobs job
     INNER JOIN rw_fragments f ON job.id = f.table_id
     ORDER BY job.id"
@@ -54,4 +55,5 @@ struct RwFragmentParallelism {
     flags: Vec<String>,
     parallelism: i32,
     max_parallelism: i32,
+    parallelism_policy: String,
 }

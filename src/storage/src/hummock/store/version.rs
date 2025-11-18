@@ -54,7 +54,8 @@ use crate::hummock::utils::{
     filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
     search_sst_idx,
 };
-use crate::hummock::vector::file::FileVectorStore;
+use crate::hummock::vector::file::{FileVectorStore, FileVectorStoreCtx};
+use crate::hummock::vector::monitor::{VectorStoreCacheStats, report_hnsw_stat};
 use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
@@ -641,10 +642,9 @@ impl HummockVersionReader {
         }
 
         // 2. order guarantee: imm -> sst
-        let dist_key_hash = read_options
-            .prefix_hint
-            .as_ref()
-            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref(), table_id.table_id()));
+        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+            Sstable::hash_for_bloom_filter(dist_key.as_ref(), table_id.as_raw_id())
+        });
 
         // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
         // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
@@ -958,7 +958,7 @@ impl HummockVersionReader {
         let bloom_filter_prefix_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|hint| Sstable::hash_for_bloom_filter(hint, table_id.table_id()));
+            .map(|hint| Sstable::hash_for_bloom_filter(hint, table_id.as_raw_id()));
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
         if read_options.prefetch_options.prefetch {
             sst_read_options.must_iterated_end_user_key =
@@ -1001,12 +1001,9 @@ impl HummockVersionReader {
             }
 
             if level.level_type == LevelType::Nonoverlapping {
-                let mut table_infos = prune_nonoverlapping_ssts(
-                    &level.table_infos,
-                    user_key_range_ref,
-                    table_id.table_id(),
-                )
-                .peekable();
+                let mut table_infos =
+                    prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref, table_id)
+                        .peekable();
 
                 if table_infos.peek().is_none() {
                     continue;
@@ -1121,7 +1118,7 @@ impl HummockVersionReader {
                 warn!(
                     max_epoch,
                     change_log_epochs = ?change_log.iter().flat_map(|epoch_log| epoch_log.epochs()).collect_vec(),
-                    table_id = options.table_id.table_id,
+                    table_id = %options.table_id,
                     "max_epoch does not exist"
                 );
             }
@@ -1223,16 +1220,21 @@ impl HummockVersionReader {
         match &index.inner {
             VectorIndexImpl::Flat(flat) => {
                 let mut builder = NearestBuilder::<'_, O, M>::new(target, options.top_n);
+                let mut cache_stat = VectorStoreCacheStats::default();
                 for vector_file in &flat.vector_store_info.vector_files {
-                    let meta = self.sstable_store.get_vector_file_meta(vector_file).await?;
+                    let meta = self
+                        .sstable_store
+                        .get_vector_file_meta(vector_file, &mut cache_stat)
+                        .await?;
                     for (i, block_meta) in meta.block_metas.iter().enumerate() {
                         let block = self
                             .sstable_store
-                            .get_vector_block(vector_file, i, block_meta)
+                            .get_vector_block(vector_file, i, block_meta, &mut cache_stat)
                             .await?;
                         builder.add(&**block, &on_nearest_item_fn);
                     }
                 }
+                cache_stat.report(table_id, "flat", self.stats());
                 Ok(builder.finish())
             }
             VectorIndexImpl::HnswFlat(hnsw_flat) => {
@@ -1240,12 +1242,18 @@ impl HummockVersionReader {
                     return Ok(vec![]);
                 };
 
-                let graph = self.sstable_store.get_hnsw_graph(graph_file).await?;
+                let mut ctx = FileVectorStoreCtx::default();
+
+                let graph = self
+                    .sstable_store
+                    .get_hnsw_graph(graph_file, &mut ctx.stats)
+                    .await?;
 
                 let vector_store =
                     FileVectorStore::new_for_reader(hnsw_flat, self.sstable_store.clone());
-                let (items, _stats) = nearest::<O, M>(
+                let (items, stats) = nearest::<O, M, _>(
                     &vector_store,
+                    &mut ctx,
                     &*graph,
                     target,
                     on_nearest_item_fn,
@@ -1253,6 +1261,15 @@ impl HummockVersionReader {
                     options.top_n,
                 )
                 .await?;
+                ctx.stats.report(table_id, "hnsw_read", self.stats());
+                report_hnsw_stat(
+                    self.stats(),
+                    table_id,
+                    "hnsw_read",
+                    options.top_n,
+                    options.hnsw_ef_search,
+                    [stats],
+                );
                 Ok(items)
             }
         }

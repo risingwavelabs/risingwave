@@ -399,7 +399,7 @@ impl SubscriptionCursor {
         cursor_metrics: Arc<CursorMetrics>,
     ) -> Result<Self> {
         let (state, fields_manager) = if let Some(start_timestamp) = start_timestamp {
-            let table_catalog = handler_args.session.get_table_by_id(&dependent_table_id)?;
+            let table_catalog = handler_args.session.get_table_by_id(dependent_table_id)?;
             (
                 State::InitLogStoreQuery {
                     seek_timestamp: start_timestamp,
@@ -413,7 +413,7 @@ impl SubscriptionCursor {
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
             let (chunk_stream, init_query_timer, table_catalog) =
-                Self::initiate_query(None, &dependent_table_id, handler_args.clone(), None).await?;
+                Self::initiate_query(None, dependent_table_id, handler_args.clone(), None).await?;
             let pinned_epoch = match handler_args.session.get_pinned_snapshot().ok_or_else(
                 || ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_owned()),
             )? {
@@ -484,7 +484,7 @@ impl SubscriptionCursor {
                     // Initiate a new batch query to continue fetching
                     match Self::get_next_rw_timestamp(
                         *seek_timestamp,
-                        &self.dependent_table_id,
+                        self.dependent_table_id,
                         *expected_timestamp,
                         handler_args.clone(),
                         &self.subscription,
@@ -493,7 +493,7 @@ impl SubscriptionCursor {
                             let (mut chunk_stream, init_query_timer, catalog) =
                                 Self::initiate_query(
                                     Some(rw_timestamp),
-                                    &self.dependent_table_id,
+                                    self.dependent_table_id,
                                     handler_args.clone(),
                                     None,
                                 )
@@ -652,7 +652,7 @@ impl SubscriptionCursor {
                         session
                             .env
                             .hummock_snapshot_manager()
-                            .wait_table_change_log_notification(self.dependent_table_id.table_id()),
+                            .wait_table_change_log_notification(self.dependent_table_id),
                     )
                     .await
                     {
@@ -688,7 +688,7 @@ impl SubscriptionCursor {
 
     fn get_next_rw_timestamp(
         seek_timestamp: u64,
-        table_id: &TableId,
+        table_id: TableId,
         expected_timestamp: Option<u64>,
         handler_args: HandlerArgs,
         dependent_subscription: &SubscriptionCatalog,
@@ -701,7 +701,7 @@ impl SubscriptionCursor {
         )?;
 
         // The epoch here must be pulled every time, otherwise there will be cache consistency issues
-        let new_epochs = session.list_change_log_epochs(table_id.table_id(), seek_timestamp, 2)?;
+        let new_epochs = session.list_change_log_epochs(table_id, seek_timestamp, 2)?;
         if let Some(expected_timestamp) = expected_timestamp
             && (new_epochs.is_empty() || &expected_timestamp != new_epochs.first().unwrap())
         {
@@ -722,7 +722,7 @@ impl SubscriptionCursor {
             // Only used to return generated plans, so rw_timestamp are meaningless
             State::InitLogStoreQuery { .. } => Self::init_batch_plan_for_subscription_cursor(
                 Some(0),
-                &self.dependent_table_id,
+                self.dependent_table_id,
                 handler_args,
                 self.seek_pk_row.clone(),
             ),
@@ -734,14 +734,14 @@ impl SubscriptionCursor {
                 if from_snapshot {
                     Self::init_batch_plan_for_subscription_cursor(
                         None,
-                        &self.dependent_table_id,
+                        self.dependent_table_id,
                         handler_args,
                         self.seek_pk_row.clone(),
                     )
                 } else {
                     Self::init_batch_plan_for_subscription_cursor(
                         Some(rw_timestamp),
-                        &self.dependent_table_id,
+                        self.dependent_table_id,
                         handler_args,
                         self.seek_pk_row.clone(),
                     )
@@ -756,7 +756,7 @@ impl SubscriptionCursor {
 
     fn init_batch_plan_for_subscription_cursor(
         rw_timestamp: Option<u64>,
-        dependent_table_id: &TableId,
+        dependent_table_id: TableId,
         handler_args: HandlerArgs,
         seek_pk_row: Option<Row>,
     ) -> Result<BatchQueryPlanResult> {
@@ -769,7 +769,7 @@ impl SubscriptionCursor {
             if !version
                 .state_table_info
                 .info()
-                .contains_key(dependent_table_id)
+                .contains_key(&dependent_table_id)
             {
                 return Err(anyhow!("table id {dependent_table_id} has been dropped").into());
             }
@@ -787,7 +787,7 @@ impl SubscriptionCursor {
 
     async fn initiate_query(
         rw_timestamp: Option<u64>,
-        dependent_table_id: &TableId,
+        dependent_table_id: TableId,
         handler_args: HandlerArgs,
         seek_pk_row: Option<Row>,
     ) -> Result<(CursorDataChunkStream, Instant, Arc<TableCatalog>)> {

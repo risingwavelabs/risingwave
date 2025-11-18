@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::id::JobId;
 use sea_orm::FromJsonQueryResult;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -24,10 +25,12 @@ use crate::{CreateType, JobStatus, StreamingParallelism};
 #[sea_orm(table_name = "streaming_job")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub job_id: i32,
+    pub job_id: JobId,
     pub job_status: JobStatus,
     pub create_type: CreateType,
     pub timezone: Option<String>,
+    // Here `NULL` is equivalent to an empty config override string.
+    pub config_override: Option<String>,
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
