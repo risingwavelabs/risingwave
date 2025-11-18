@@ -109,6 +109,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
         let ConnectorProperties::Iceberg(iceberg_properties) = config else {
             unreachable!()
         };
+        let iceberg_properties = (*iceberg_properties).clone();
 
         // Get consistent column names for schema stability across snapshots
         let downstream_columns = self.downstream_columns.map(|columns| {
@@ -184,38 +185,48 @@ impl<S: StateStore> IcebergListExecutor<S> {
         }
 
         let last_snapshot = Arc::new(Mutex::new(last_snapshot));
-        let incremental_scan_stream = incremental_scan_stream(
-            *iceberg_properties,
-            last_snapshot.clone(),
-            self.streaming_config.developer.iceberg_list_interval_sec,
-            downstream_columns,
-        )
-        .map(|res| match res {
-            Ok(scan_task) => {
-                let row = (
-                    Op::Insert,
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(scan_task.data_file_path().into())),
-                        Some(ScalarImpl::Jsonb(PersistedFileScanTask::encode(scan_task))),
-                    ]),
-                );
-                Ok(StreamChunk::from_rows(
-                    &[row],
-                    &[DataType::Varchar, DataType::Jsonb],
-                ))
-            }
-            Err(e) => Err(e),
-        });
+        let downstream_columns_for_incremental = downstream_columns.clone();
+        let iceberg_list_interval_sec = self.streaming_config.developer.iceberg_list_interval_sec;
+        let mut build_incremental_stream = || {
+            incremental_scan_stream(
+                iceberg_properties.clone(),
+                last_snapshot.clone(),
+                iceberg_list_interval_sec,
+                downstream_columns_for_incremental.clone(),
+            )
+            .map(|res| match res {
+                Ok(scan_task) => {
+                    let row = (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Utf8(scan_task.data_file_path().into())),
+                            Some(ScalarImpl::Jsonb(PersistedFileScanTask::encode(scan_task))),
+                        ]),
+                    );
+                    Ok(StreamChunk::from_rows(
+                        &[row],
+                        &[DataType::Varchar, DataType::Jsonb],
+                    ))
+                }
+                Err(e) => Err(e),
+            })
+        };
 
-        let mut stream =
-            StreamReaderWithPause::<true, _>::new(barrier_stream, incremental_scan_stream);
+        let mut stream = StreamReaderWithPause::<true, _>::new(
+            barrier_stream,
+            build_incremental_stream(),
+        );
 
         // TODO: support pause (incl. pause on startup)/resume/rate limit
 
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "encountered an error");
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "incremental iceberg list stream errored, rebuilding"
+                    );
+                    stream.replace_data_stream(build_incremental_stream());
                 }
                 Ok(msg) => match msg {
                     // Barrier arrives.
