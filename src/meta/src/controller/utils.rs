@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
@@ -20,7 +21,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::{JobId, SubscriptionId};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
@@ -68,7 +69,7 @@ use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::scale::resolve_streaming_job_definition;
-use crate::model::FragmentDownstreamRelation;
+use crate::model::{FragmentDownstreamRelation, StreamContext};
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -2166,15 +2167,19 @@ pub fn build_select_node_list(
 
     for to_col in to {
         let to_col = to_col.column_desc.as_ref().unwrap();
-        let to_col_type = to_col.column_type.clone();
+        let to_col_type_ref = to_col.column_type.as_ref().unwrap();
+        let to_col_type = DataType::from(to_col_type_ref);
         if let Some(from_idx) = idx_by_col_id.get(&to_col.column_id) {
-            let from_col_type = from[*from_idx]
-                .column_desc
-                .as_ref()
-                .unwrap()
-                .column_type
-                .clone();
-            if to_col_type != from_col_type {
+            let from_col_type = DataType::from(
+                from[*from_idx]
+                    .column_desc
+                    .as_ref()
+                    .unwrap()
+                    .column_type
+                    .as_ref()
+                    .unwrap(),
+            );
+            if !to_col_type.equals_datatype(&from_col_type) {
                 return Err(anyhow!(
                     "Column type mismatch: {:?} != {:?}",
                     from_col_type,
@@ -2184,7 +2189,7 @@ pub fn build_select_node_list(
             }
             exprs.push(PbExprNode {
                 function_type: expr_node::Type::Unspecified.into(),
-                return_type: to_col_type,
+                return_type: Some(to_col_type_ref.clone()),
                 rex_node: Some(expr_node::RexNode::InputRef(*from_idx as _)),
             });
         } else {
@@ -2199,7 +2204,7 @@ pub fn build_select_node_list(
                     let null = Datum::None.to_protobuf();
                     PbExprNode {
                         function_type: expr_node::Type::Unspecified.into(),
-                        return_type: to_col_type,
+                        return_type: Some(to_col_type_ref.clone()),
                         rex_node: Some(expr_node::RexNode::Constant(null)),
                     }
                 };
@@ -2213,7 +2218,17 @@ pub fn build_select_node_list(
 #[derive(Clone, Debug, Default)]
 pub struct StreamingJobExtraInfo {
     pub timezone: Option<String>,
+    pub config_override: Arc<str>,
     pub job_definition: String,
+}
+
+impl StreamingJobExtraInfo {
+    pub fn stream_context(&self) -> StreamContext {
+        StreamContext {
+            timezone: self.timezone.clone(),
+            config_override: self.config_override.clone(),
+        }
+    }
 }
 
 pub async fn get_streaming_job_extra_info<C>(
@@ -2223,11 +2238,12 @@ pub async fn get_streaming_job_extra_info<C>(
 where
     C: ConnectionTrait,
 {
-    let timezone_pairs: Vec<(JobId, Option<String>)> = StreamingJob::find()
+    let pairs: Vec<(JobId, Option<String>, Option<String>)> = StreamingJob::find()
         .select_only()
         .columns([
             streaming_job::Column::JobId,
             streaming_job::Column::Timezone,
+            streaming_job::Column::ConfigOverride,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .into_tuple()
@@ -2238,14 +2254,15 @@ where
 
     let mut definitions = resolve_streaming_job_definition(txn, &job_ids).await?;
 
-    let result = timezone_pairs
+    let result = pairs
         .into_iter()
-        .map(|(job_id, timezone)| {
+        .map(|(job_id, timezone, config_override)| {
             let job_definition = definitions.remove(&job_id).unwrap_or_default();
             (
                 job_id,
                 StreamingJobExtraInfo {
                     timezone,
+                    config_override: config_override.unwrap_or_default().into(),
                     job_definition,
                 },
             )

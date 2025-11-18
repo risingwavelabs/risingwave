@@ -22,9 +22,11 @@ use risingwave_common::util::epoch::Epoch;
 use tracing::warn;
 
 use crate::barrier::info::{
-    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, SharedActorInfos, SubscriberType,
+    BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
+    SharedActorInfos, SubscriberType,
 };
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::controller::fragment::InflightFragmentInfo;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(crate) struct BarrierWorkerState {
@@ -198,10 +200,17 @@ impl BarrierWorkerState {
         let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
         let mut jobs_to_wait = HashSet::new();
         if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
-            for (table_id, (_, graph_info)) in jobs_to_merge {
-                jobs_to_wait.insert(*table_id);
-                table_ids_to_commit.extend(graph_info.existing_table_ids());
-                self.inflight_graph_info.add_existing(graph_info.clone());
+            for (&job_id, (_, graph_info)) in jobs_to_merge {
+                jobs_to_wait.insert(job_id);
+                table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
+                    graph_info.values(),
+                ));
+                self.inflight_graph_info.add_existing(InflightStreamingJobInfo {
+                    job_id,
+                    fragment_infos: graph_info.clone(),
+                    subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
+                    status: CreateStreamingJobStatus::Created,
+                });
             }
         }
 

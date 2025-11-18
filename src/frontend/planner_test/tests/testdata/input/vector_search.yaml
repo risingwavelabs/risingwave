@@ -203,7 +203,7 @@
 - id: create_correlated_tables_with_column_value_index
   sql: |
     create table items (id int primary key, name string, unindexed timestamptz, embedding vector(3)) append only;
-    create table events (event_id int primary key, time timestamp, embedding vector(3));
+    create table events (event_id int primary key, time timestamp, embedding vector(3)) append only;
     create index i on items using flat (embedding) include (name) with (distance_type = 'l2');
   expected_outputs: []
 - before:
@@ -236,3 +236,33 @@
     - logical_plan
     - optimized_logical_plan_for_batch
     - batch_plan
+- before:
+    - create_correlated_tables_with_column_value_index
+  id: correlated_read_without_embedding
+  sql: |
+    select
+      event_id, array(
+        select row(name)
+        from (select name from items FOR SYSTEM_TIME AS OF PROCTIME() order by events.embedding <-> items.embedding limit 3)
+      ) as related_info,
+      time
+    from events;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+- before:
+    - create_correlated_tables_with_column_value_index
+  id: correlated_read_without_embedding
+  sql: |
+    select
+      event_id, array(
+        select row(id, name, distance)
+        from (select id, name, events.embedding <-> items.embedding as distance from items FOR SYSTEM_TIME AS OF PROCTIME() order by distance limit 3)
+      ) as related_info,
+      time
+    from events;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
