@@ -41,7 +41,9 @@ use crate::controller::scale::{
 };
 use crate::error::bail_invalid_parameter;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers};
+use crate::model::{
+    ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers, StreamContext,
+};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -211,9 +213,8 @@ impl ScaleController {
             .collect();
 
         let extra_info = job_extra_info.cloned().unwrap_or_default();
-        let expr_context = extra_info.stream_context().to_expr_context();
+        let timezone = extra_info.timezone.clone();
         let job_definition = extra_info.job_definition;
-        let config_override = extra_info.config_override;
 
         let newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)> =
             added_actor_ids
@@ -224,8 +225,12 @@ impl ScaleController {
                         fragment_id: prev_fragment_info.fragment_id,
                         vnode_bitmap: curr_actors[actor_id].vnode_bitmap.clone(),
                         mview_definition: job_definition.clone(),
-                        expr_context: Some(expr_context.clone()),
-                        config_override: config_override.clone(),
+                        expr_context: Some(
+                            StreamContext {
+                                timezone: timezone.clone(),
+                            }
+                            .to_expr_context(),
+                        ),
                     };
                     (
                         *actor_id,

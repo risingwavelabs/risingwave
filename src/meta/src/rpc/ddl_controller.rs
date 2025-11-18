@@ -1660,6 +1660,7 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
+        let expr_context = stream_ctx.to_expr_context();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
         // 1. Fragment Level ordering graph
@@ -1780,7 +1781,7 @@ impl DdlController {
             new_no_shuffle,
             replace_upstream,
             ..
-        } = actor_graph_builder.generate_graph(&self.env, &stream_job, stream_ctx.clone())?;
+        } = actor_graph_builder.generate_graph(&self.env, &stream_job, expr_context)?;
         assert!(replace_upstream.is_empty());
 
         // 4. Build the table fragments structure that will be persisted in the stream manager,
@@ -1885,6 +1886,7 @@ impl DdlController {
         }
 
         let id = stream_job.id();
+        let expr_context = stream_ctx.to_expr_context();
 
         // check if performing drop table connector
         let mut drop_table_associated_source_id = None;
@@ -2041,7 +2043,7 @@ impl DdlController {
             mut replace_upstream,
             new_no_shuffle,
             ..
-        } = actor_graph_builder.generate_graph(&self.env, stream_job, stream_ctx.clone())?;
+        } = actor_graph_builder.generate_graph(&self.env, stream_job, expr_context)?;
 
         // general table & source does not have upstream job, so the dispatchers should be empty
         if matches!(
