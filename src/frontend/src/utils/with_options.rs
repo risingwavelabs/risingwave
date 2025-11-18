@@ -28,7 +28,7 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::plan_common::SourceRefreshMode;
 use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeFullRecompute, SourceRefreshModeStreaming,
+    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
@@ -431,43 +431,42 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             }
         };
 
-    let source_refresh_mode = if let Some(source_refresh_mode_str) =
-        with_options.remove(SOURCE_REFRESH_MODE_KEY)
-    {
-        match source_refresh_mode_str.to_uppercase().as_str() {
-            "STREAMING" => {
-                if source_refresh_interval_sec.is_some() {
+    let source_refresh_mode =
+        if let Some(source_refresh_mode_str) = with_options.remove(SOURCE_REFRESH_MODE_KEY) {
+            match source_refresh_mode_str.to_uppercase().as_str() {
+                "STREAMING" => {
+                    if source_refresh_interval_sec.is_some() {
+                        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                            "`{}` is not allowed when `{}` is 'STREAMING'",
+                            SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                        ))));
+                    }
+                    SourceRefreshMode {
+                        refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+                    }
+                }
+                "FULL_RELOAD" => SourceRefreshMode {
+                    refresh_mode: Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
+                        refresh_interval_sec: source_refresh_interval_sec,
+                    })),
+                },
+                _ => {
                     return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "`{}` is not allowed when `{}` is 'STREAMING'",
-                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                        "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
+                        SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
                     ))));
                 }
-                SourceRefreshMode {
-                    refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
-                }
             }
-            "FULL_RECOMPUTE" => SourceRefreshMode {
-                refresh_mode: Some(RefreshMode::FullRecompute(SourceRefreshModeFullRecompute {
-                    refresh_interval_sec: source_refresh_interval_sec,
-                })),
-            },
-            _ => {
+        } else {
+            // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
+            if source_refresh_interval_sec.is_some() {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RECOMPUTE'",
-                    SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
+                    "`{}` is not allowed when `{}` is not 'FULL_RELOAD'",
+                    SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
                 ))));
             }
-        }
-    } else {
-        // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
-        if source_refresh_interval_sec.is_some() {
-            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                "`{}` is not allowed when `{}` is not 'FULL_RECOMPUTE'",
-                SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
-            ))));
-        }
-        return Ok(None);
-    };
+            return Ok(None);
+        };
     Ok(Some(source_refresh_mode))
 }
 

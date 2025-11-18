@@ -68,7 +68,7 @@ create table iceberg_batch_table ( primary key (id) ) with (
   catalog.type = 'storage',
   table.name = 't_refresh',
   database.name = 'public',
-  refresh_mode = 'FULL_RECOMPUTE'
+  refresh_mode = 'FULL_RELOAD'
 );
 
 

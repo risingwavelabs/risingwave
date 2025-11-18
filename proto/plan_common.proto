@@ -307,12 +307,12 @@ enum AdditionalColumnType {
 
 message SourceRefreshMode {
   message SourceRefreshModeStreaming {}
-  message SourceRefreshModeFullRecompute {
+  message SourceRefreshModeFullReload {
     optional int64 refresh_interval_sec = 1;
   }
 
   oneof refresh_mode {
     SourceRefreshModeStreaming streaming = 1;
-    SourceRefreshModeFullRecompute full_recompute = 2;
+    SourceRefreshModeFullReload full_reload = 2;
   }
 }

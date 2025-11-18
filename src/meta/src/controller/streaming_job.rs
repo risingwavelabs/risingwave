@@ -49,7 +49,7 @@ use risingwave_pb::meta::subscribe_response::{
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeFullRecompute, SourceRefreshModeStreaming,
+    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -272,11 +272,9 @@ impl CatalogController {
                         .and_then(|source_catalog| source_catalog.refresh_mode)
                         .and_then(
                             |source_refresh_mode| match source_refresh_mode.refresh_mode {
-                                Some(RefreshMode::FullRecompute(
-                                    SourceRefreshModeFullRecompute {
-                                        refresh_interval_sec,
-                                    },
-                                )) => refresh_interval_sec,
+                                Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
+                                    refresh_interval_sec,
+                                })) => refresh_interval_sec,
                                 Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})) => None,
                                 None => None,
                             },
