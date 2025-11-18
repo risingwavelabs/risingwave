@@ -580,23 +580,19 @@ impl SessionConfig {
         if let Some(v) = self.streaming_sync_log_store_pause_duration_ms.as_ref() {
             add(
                 &mut map,
-                "streaming.developer.stream_sync_log_store_pause_duration_ms",
+                "streaming.developer.sync_log_store_pause_duration_ms",
                 v,
             )?;
         }
         if let Some(v) = self.streaming_sync_log_store_buffer_size.as_ref() {
             add(
                 &mut map,
-                "streaming.developer.stream_sync_log_store_buffer_size",
+                "streaming.developer.sync_log_store_buffer_size",
                 v,
             )?;
         }
         if let Some(v) = self.streaming_over_window_cache_policy.as_ref() {
-            add(
-                &mut map,
-                "streaming.developer.stream_over_window_cache_policy",
-                v,
-            )?;
+            add(&mut map, "streaming.developer.over_window_cache_policy", v)?;
         }
 
         let res = toml::to_string(&map)?;
@@ -650,12 +646,19 @@ mod test {
         config
             .set_streaming_join_encoding(Some(JoinEncodingType::Cpu).into(), &mut ())
             .unwrap();
+        config
+            .set_streaming_over_window_cache_policy(
+                Some(OverWindowCachePolicy::RecentFirstN).into(),
+                &mut (),
+            )
+            .unwrap();
 
         // Check the converted config override string.
         let override_str = config.to_initial_streaming_config_override().unwrap();
         expect![[r#"
             [streaming.developer]
             join_encoding_type = "cpu_optimized"
+            over_window_cache_policy = "recent_first_n"
         "#]]
         .assert_eq(&override_str);
 
@@ -664,5 +667,9 @@ mod test {
             .unwrap()
             .unwrap();
         assert_eq!(merged.developer.join_encoding_type, JoinEncodingType::Cpu);
+        assert_eq!(
+            merged.developer.over_window_cache_policy,
+            OverWindowCachePolicy::RecentFirstN
+        );
     }
 }

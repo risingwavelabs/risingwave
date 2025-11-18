@@ -220,6 +220,9 @@ mem_preload_state_table_ids_blacklist = []
 aggressive_noop_update_elimination = false
 refresh_scheduler_interval_sec = 60
 join_encoding_type = "memory_optimized"
+sync_log_store_pause_duration_ms = 64
+sync_log_store_buffer_size = 2048
+over_window_cache_policy = "full"
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
