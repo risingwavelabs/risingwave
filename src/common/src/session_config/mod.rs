@@ -14,7 +14,6 @@
 
 mod non_zero64;
 mod opt;
-mod over_window;
 pub mod parallelism;
 mod query_mode;
 mod search_path;
@@ -25,7 +24,6 @@ mod visibility_mode;
 use chrono_tz::Tz;
 use itertools::Itertools;
 pub use opt::OptionConfig;
-pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
@@ -34,7 +32,7 @@ use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
 use crate::config::mutate::TomlTableMutateExt;
-use crate::config::streaming::JoinEncodingType;
+use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
 use crate::session_config::parallelism::ConfigParallelism;
@@ -351,9 +349,12 @@ pub struct SessionConfig {
     sink_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
-    /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
-    #[parameter(default = OverWindowCachePolicy::default(), alias = "rw_streaming_over_window_cache_policy")]
-    streaming_over_window_cache_policy: OverWindowCachePolicy,
+    /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None, alias = "rw_streaming_over_window_cache_policy")]
+    streaming_over_window_cache_policy: OptionConfig<OverWindowCachePolicy>,
 
     /// Run DDL statements in background
     #[parameter(default = false)]
@@ -562,18 +563,19 @@ impl SessionConfig {
                 .unwrap();
         }
         if let Some(v) = self.streaming_sync_log_store_pause_duration_ms.as_ref() {
-            add(
-                &mut map,
-                "streaming.developer.stream_sync_log_store_pause_duration_ms",
-                v,
-            )?;
+            table
+                .upsert("streaming.developer.sync_log_store_pause_duration_ms", v)
+                .unwrap();
         }
         if let Some(v) = self.streaming_sync_log_store_buffer_size.as_ref() {
-            add(
-                &mut map,
-                "streaming.developer.stream_sync_log_store_buffer_size",
-                v,
-            )?;
+            table
+                .upsert("streaming.developer.sync_log_store_buffer_size", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_over_window_cache_policy.as_ref() {
+            table
+                .upsert("streaming.developer.over_window_cache_policy", v)
+                .unwrap();
         }
 
         let res = toml::to_string(&table)?;
