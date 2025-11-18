@@ -411,7 +411,7 @@ impl StreamNode for StreamHashJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             is_append_only: self.is_append_only,
-            // Join encoding type is now defined in per-job config override, allowing altering after job creation.
+            // Join encoding type should now be read from per-job config override.
             #[allow(deprecated)]
             join_encoding_type: PbJoinEncodingType::Unspecified as _,
         }))
