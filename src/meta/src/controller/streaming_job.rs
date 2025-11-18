@@ -48,6 +48,9 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
+use risingwave_pb::plan_common::source_refresh_mode::{
+    RefreshMode, SourceRefreshModeFullRecompute, SourceRefreshModeStreaming,
+};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -263,10 +266,25 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
 
                 if table.refreshable {
+                    let trigger_interval_secs = src
+                        .as_ref()
+                        .and_then(|source_catalog| source_catalog.refresh_mode)
+                        .and_then(
+                            |source_refresh_mode| match source_refresh_mode.refresh_mode {
+                                Some(RefreshMode::FullRecompute(
+                                    SourceRefreshModeFullRecompute {
+                                        refresh_interval_sec,
+                                    },
+                                )) => refresh_interval_sec,
+                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})) => None,
+                                None => None,
+                            },
+                        );
+
                     RefreshJob::insert(refresh_job::ActiveModel {
                         table_id: Set(table.id),
                         last_trigger_time: Set(None),
-                        trigger_interval_secs: Set(None),
+                        trigger_interval_secs: Set(trigger_interval_secs),
                         current_status: Set(RefreshState::Idle),
                     })
                     .exec(&txn)

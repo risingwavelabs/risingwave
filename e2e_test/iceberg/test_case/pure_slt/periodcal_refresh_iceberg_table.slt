@@ -1,0 +1,186 @@
+control substitution on
+
+statement ok
+create secret IF NOT EXISTS my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection IF NOT EXISTS my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+create table t_refresh (id int primary key, name varchar, foo varchar) with (commit_checkpoint_interval = 10) engine = iceberg;
+
+statement ok
+insert into t_refresh values (1, 'xxx', 'a') , (2, 'yyy', 'b'), (3, 'zzz', 'c'), (4, 'www', 'd'), (5, 'zzz', 'c');
+
+statement ok
+flush;
+
+statement ok
+delete from t_refresh where id = 4;
+
+statement ok
+flush;
+
+
+statement error
+create table iceberg_batch_table ( primary key (id) ) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh',
+  database.name = 'public',
+  refresh_interval_sec = 'abcdef'
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid Parameter Value: `refresh_interval_sec` must be a positive integer and larger than 0, but got: abcdef (error: invalid digit found in string)
+
+
+statement error
+create table iceberg_batch_table ( primary key (id) ) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh',
+  database.name = 'public',
+  refresh_interval_sec = '-10'
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid Parameter Value: `refresh_interval_sec` must be larger than 0, but got: -10
+
+
+statement error
+create table iceberg_batch_table ( primary key (id) ) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh',
+  database.name = 'public',
+  refresh_interval_sec = '15'
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid Parameter Value: `refresh_interval_sec` is not allowed when `refresh_mode` is not 'FULL_RECOMPUTE'
+
+
+statement ok
+create table iceberg_batch_table ( primary key (id) ) with (
+  connector = 'iceberg',
+  warehouse.path = 's3://hummock001/iceberg_connection',
+  s3.access.key = secret my_secret,
+  s3.secret.key = secret my_secret,
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.region = 'us-west-2',
+  catalog.type = 'storage',
+  table.name = 't_refresh',
+  database.name = 'public',
+  refresh_mode = 'FULL_RECOMPUTE',
+  refresh_interval_sec = '11'
+);
+
+query ?
+select current_status, trigger_interval_secs from rw_refresh_table_state;
+----
+IDLE 11
+
+
+# wait for refresh
+sleep 20s
+
+
+query ? retry 3 backoff 1s
+select id from t_refresh order by id;
+----
+1
+2
+3
+5
+
+
+query ? retry 3 backoff 1s
+select id from iceberg_batch_table order by id;
+----
+1
+2
+3
+5
+
+
+statement ok
+insert into t_refresh values (6, 'aaa', 'a') , (7, 'bbb', 'b') , (8, 'ccc', 'c');
+
+statement ok
+flush;
+
+sleep 20s
+
+query ? retry 3 backoff 1s
+select id from t_refresh order by id;
+----
+1
+2
+3
+5
+6
+7
+8
+
+
+query ? retry 3 backoff 1s
+select id from iceberg_batch_table order by id;
+----
+1
+2
+3
+5
+6
+7
+8
+
+
+# Cleanup
+
+statement ok
+drop table iceberg_batch_table;
+
+statement ok
+drop table t_refresh;
+
+statement ok
+drop connection my_conn;
+
+statement ok
+drop secret my_secret;

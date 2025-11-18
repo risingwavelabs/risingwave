@@ -12,6 +12,7 @@ in_flight_barrier_nums = 10
 
 [streaming.developer]
 stream_exchange_concurrent_barriers = 10
+refresh_scheduler_interval_sec = 10
 
 [storage]
 share_buffers_sync_parallelism = 4
