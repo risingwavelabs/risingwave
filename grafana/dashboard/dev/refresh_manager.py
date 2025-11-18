@@ -23,7 +23,7 @@ def _(outer_panels: Panels):
                     "Number of finished refresh jobs",
                     [
                         panels.target(
-                            f"sum by(status) (rate({metric('meta_refresh_job_finish_cnt')}[$__rate_interval]))",
+                            f"{metric('meta_refresh_job_finish_cnt')}",
                             "{{status}}"
                         )
                     ]
