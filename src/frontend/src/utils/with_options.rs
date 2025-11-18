@@ -410,28 +410,26 @@ fn resolve_secret_refs_inner(
 pub(crate) fn resolve_source_refresh_mode_in_with_option(
     with_options: &mut WithOptions,
 ) -> RwResult<Option<SourceRefreshMode>> {
-    let source_refresh_interval_sec = {
-        if let Some(maybe_int) = with_options.remove(SOURCE_REFRESH_INTERVAL_SEC_KEY) {
-            let maybe_pos_int = maybe_int.parse::<i64>();
-            let expect_err = |e: Option<String>| {
+    let source_refresh_interval_sec =
+        {
+            if let Some(maybe_int) = with_options.remove(SOURCE_REFRESH_INTERVAL_SEC_KEY) {
+                let some_int = maybe_int.parse::<i64>().map_err(|e| {
                 RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "`{}` must be a positive integer and larger than 10, but got: {}: error: {:?}",
-                    SOURCE_REFRESH_INTERVAL_SEC_KEY, maybe_int, e
+                    "`{}` must be a positive integer and larger than 0, but got: {} (error: {})",
+                    SOURCE_REFRESH_INTERVAL_SEC_KEY, maybe_int, e.as_report()
                 )))
-            };
-            if let Err(e) = maybe_pos_int {
-                return Err(expect_err(Some(e.to_report_string())));
+            })?;
+                if some_int <= 0 {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` must be larger than 0, but got: {}",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, some_int
+                    ))));
+                }
+                Some(some_int)
+            } else {
+                None
             }
-            if let Ok(some_int) = maybe_pos_int
-                && some_int < 10
-            {
-                return Err(expect_err(None));
-            }
-            Some(maybe_pos_int.unwrap())
-        } else {
-            None
-        }
-    };
+        };
 
     let source_refresh_mode = if let Some(source_refresh_mode_str) =
         with_options.remove(SOURCE_REFRESH_MODE_KEY)
