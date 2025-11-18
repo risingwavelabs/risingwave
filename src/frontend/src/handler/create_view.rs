@@ -104,9 +104,7 @@ pub async fn handle_create_view(
         owner: session.user_id(),
         sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
-        initialized_at_epoch: None,
         created_at_epoch: None,
-        initialized_at_cluster_version: None,
         created_at_cluster_version: None,
     };
 
