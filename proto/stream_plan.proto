@@ -988,8 +988,10 @@ message RowMergeNode {
 
 message SyncLogStoreNode {
   catalog.Table log_store_table = 1;
-  uint32 pause_duration_ms = 2;
-  uint32 buffer_size = 3;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  optional uint32 pause_duration_ms = 2 [deprecated = true];
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  optional uint32 buffer_size = 3 [deprecated = true];
   bool aligned = 4;
 }
 

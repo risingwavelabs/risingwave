@@ -393,6 +393,14 @@ pub mod default {
         pub fn refresh_scheduler_interval_sec() -> u64 {
             60
         }
+
+        pub fn sync_log_store_pause_duration_ms() -> usize {
+            64
+        }
+
+        pub fn sync_log_store_buffer_size() -> usize {
+            2048
+        }
     }
 }
 
