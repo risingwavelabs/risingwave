@@ -23,11 +23,16 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum AdaptiveParallelismStrategy {
     #[default]
+    #[serde(alias = "Auto")]
     Auto,
+    #[serde(alias = "Full")]
     Full,
+    #[serde(alias = "Bounded")]
     Bounded(NonZeroUsize),
+    #[serde(alias = "Ratio")]
     Ratio(f32),
 }
 
