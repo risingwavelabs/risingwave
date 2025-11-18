@@ -519,6 +519,10 @@ impl CatalogController {
         )
         .await?;
         pb_view.id = view_obj.oid.as_view_id();
+        pb_view.created_at_epoch =
+            Some(Epoch::from_unix_millis(view_obj.created_at.and_utc().timestamp_millis() as _).0);
+        pb_view.created_at_cluster_version = view_obj.created_at_cluster_version;
+
         let view: view::ActiveModel = pb_view.clone().into();
         View::insert(view).exec(&txn).await?;
 
@@ -530,20 +534,6 @@ impl CatalogController {
             })
             .exec(&txn)
             .await?;
-        }
-        
-        // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
-        let res = Object::update_many()
-            .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
-            .col_expr(
-                object::Column::CreatedAtClusterVersion,
-                current_cluster_version().into(),
-            )
-            .filter(object::Column::Oid.eq(view_obj.oid))
-            .exec(&txn)
-            .await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("view", view_obj.oid));
         }
 
         let updated_user_info = grant_default_privileges_automatically(&txn, view_obj.oid).await?;

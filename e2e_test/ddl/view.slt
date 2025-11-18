@@ -9,11 +9,10 @@ statement ok
 CREATE VIEW IF NOT EXISTS v1 (a1, b1) AS SELECT a, b FROM t1;
 
 query ok
-SELECT created_at, initialized_at, created_at_cluster_version, initialized_at_cluster_version
+SELECT name, created_at, created_at_cluster_version
 FROM rw_views
 WHERE
   created_at >= now() - interval '10' minute AND
-  initialized_at >= now() - interval '10' minute AND
-  created_at_cluster_version = (SELECT version()) AND
-  initialized_at_cluster_version = (SELECT version());
+  created_at_cluster_version = (SELECT version());
 ----
+v1 2025-11-18 11:25:35+00:00 PostgreSQL 13.14.0-RisingWave-2.7.0-alpha (unknown)

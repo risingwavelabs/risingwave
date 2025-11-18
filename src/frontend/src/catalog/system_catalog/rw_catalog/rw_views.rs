@@ -27,9 +27,7 @@ struct RwView {
     owner: i32,
     definition: String,
     acl: Vec<String>,
-    initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
-    initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
 }
 
@@ -53,9 +51,7 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
                 owner: view.owner as i32,
                 definition: view.create_sql(schema.name()),
                 acl: get_acl_items(view.id, false, &users, username_map),
-                initialized_at: view.initialized_at_epoch.map(|e| e.as_timestamptz()),
                 created_at: view.created_at_epoch.map(|e| e.as_timestamptz()),
-                initialized_at_cluster_version: view.initialized_at_cluster_version.clone(),
                 created_at_cluster_version: view.created_at_cluster_version.clone(),
             })
         })

@@ -432,13 +432,9 @@ impl From<ObjectModel<view::Model>> for PbView {
             properties: value.0.properties.0,
             sql: value.0.definition,
             columns: value.0.columns.to_protobuf(),
-            initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
-            ),
             created_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
-            initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
         }
     }

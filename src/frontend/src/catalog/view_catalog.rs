@@ -34,9 +34,7 @@ pub struct ViewCatalog {
     pub sql: String,
     pub columns: Vec<Field>,
     pub created_at_epoch: Option<Epoch>,
-    pub initialized_at_epoch: Option<Epoch>,
     pub created_at_cluster_version: Option<String>,
-    pub initialized_at_cluster_version: Option<String>,
 }
 
 impl From<&PbView> for ViewCatalog {
@@ -51,9 +49,7 @@ impl From<&PbView> for ViewCatalog {
             sql: view.sql.clone(),
             columns: view.columns.iter().map(|f| f.into()).collect(),
             created_at_epoch: view.created_at_epoch.map(Epoch::from),
-            initialized_at_epoch: view.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: view.created_at_cluster_version.clone(),
-            initialized_at_cluster_version: view.initialized_at_cluster_version.clone(),
         }
     }
 }
