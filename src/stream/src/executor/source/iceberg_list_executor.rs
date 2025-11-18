@@ -187,7 +187,7 @@ impl<S: StateStore> IcebergListExecutor<S> {
         let last_snapshot = Arc::new(Mutex::new(last_snapshot));
         let downstream_columns_for_incremental = downstream_columns.clone();
         let iceberg_list_interval_sec = self.streaming_config.developer.iceberg_list_interval_sec;
-        let mut build_incremental_stream = || {
+        let build_incremental_stream = || {
             incremental_scan_stream(
                 iceberg_properties.clone(),
                 last_snapshot.clone(),
