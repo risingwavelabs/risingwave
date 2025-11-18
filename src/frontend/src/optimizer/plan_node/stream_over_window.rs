@@ -127,19 +127,16 @@ impl StreamNode for StreamOverWindow {
             .infer_state_table()
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
-        let cache_policy = self
-            .base
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_over_window_cache_policy();
 
         PbNodeBody::OverWindow(Box::new(OverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
-            cache_policy: cache_policy.to_protobuf() as _,
+
+            // Cache policy should now be read from per-job config override.
+            #[allow(deprecated)]
+            cache_policy: PbOverWindowCachePolicy::Unspecified as _,
         }))
     }
 }
