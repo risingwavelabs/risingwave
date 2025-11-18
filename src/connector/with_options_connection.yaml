@@ -44,6 +44,12 @@ IcebergConnection:
   - name: glue.region
     field_type: String
     required: false
+  - name: glue.id
+    field_type: String
+    comments: |-
+      AWS Client id, can be omitted for storage catalog or when
+      caller's AWS account ID matches glue id
+    required: false
   - name: gcs.credential
     field_type: String
     required: false
@@ -68,12 +74,6 @@ IcebergConnection:
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
-    required: false
-  - name: glue.id
-    field_type: String
-    comments: |-
-      AWS Client id, can be omitted for storage catalog or when
-      caller's AWS account ID matches glue id
     required: false
   - name: catalog.name
     field_type: String
