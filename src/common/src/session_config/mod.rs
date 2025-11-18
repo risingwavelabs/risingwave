@@ -232,9 +232,9 @@ pub struct SessionConfig {
     streaming_separate_sink: bool,
 
     /// Determine which encoding will be used to encode join rows in operator cache.
-    /// Take effect for new streaming jobs created in this session.
-    // Note: This will become an initial override of the config. If it's set to `None`, the value
-    // specified in the global config file will be used.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
     #[parameter(default = None)]
     streaming_join_encoding: OptionConfig<JoinEncodingType>,
 
