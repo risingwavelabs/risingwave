@@ -17,12 +17,18 @@ use risingwave_common_proc_macro::serde_prefix_all;
 use super::*;
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MetaBackend {
     #[default]
+    #[serde(alias = "Mem")]
     Mem,
+    #[serde(alias = "Sql")]
     Sql, // any database url
+    #[serde(alias = "Sqlite")]
     Sqlite,
+    #[serde(alias = "Postgres")]
     Postgres,
+    #[serde(alias = "Mysql")]
     Mysql,
 }
 
@@ -45,7 +51,7 @@ impl Serialize for DefaultParallelism {
             Int(usize),
         }
         match self {
-            DefaultParallelism::Full => Parallelism::Str("Full".to_owned()).serialize(serializer),
+            DefaultParallelism::Full => Parallelism::Str("full".to_owned()).serialize(serializer),
             DefaultParallelism::Default(val) => {
                 Parallelism::Int(val.get() as _).serialize(serializer)
             }

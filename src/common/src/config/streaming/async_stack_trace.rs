@@ -16,15 +16,24 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AsyncStackTraceOption {
     /// Disabled.
+    #[serde(alias = "Off")]
     Off,
     /// Enabled with basic instruments.
+    #[serde(alias = "On")]
     On,
     /// Enabled with extra verbose instruments in release build.
     /// Behaves the same as `on` in debug build due to performance concern.
     #[default]
     #[clap(alias = "verbose")]
+    #[serde(
+        rename = "verbose",
+        alias = "Verbose",
+        alias = "release_verbose",
+        alias = "ReleaseVerbose"
+    )]
     ReleaseVerbose,
 }
 

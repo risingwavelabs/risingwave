@@ -19,27 +19,18 @@ use std::str::FromStr;
 
 use regex::Regex;
 use risingwave_common::system_param::ParamValue;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use serde_with::DeserializeFromStr;
 use thiserror::Error;
 
-/// Use `#[serde(try_from, into)]` to serialize/deserialize as string format (e.g., "Bounded(64)"),
-/// which is consistent with `ALTER SYSTEM SET` command.
-#[derive(PartialEq, Copy, Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
+#[derive(PartialEq, Copy, Clone, Debug, Serialize, DeserializeFromStr, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum AdaptiveParallelismStrategy {
     #[default]
     Auto,
     Full,
     Bounded(NonZeroUsize),
     Ratio(f32),
-}
-
-impl TryFrom<String> for AdaptiveParallelismStrategy {
-    type Error = ParallelismStrategyParseError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        s.parse()
-    }
 }
 
 impl Display for AdaptiveParallelismStrategy {
