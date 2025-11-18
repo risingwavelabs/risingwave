@@ -30,7 +30,6 @@ pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
@@ -70,8 +69,19 @@ const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
 
-#[serde_as]
 /// This is the Session Config of RisingWave.
+///
+/// All config entries implement `Display` and `FromStr` for getter and setter, to be read and
+/// altered within a session.
+///
+/// Users can change the default value of a configuration entry using `ALTER SYSTEM SET`. To
+/// facilitate this, a `serde` implementation is used as the wire format for retrieving initial
+/// configurations and updates from the meta service. It's important to note that the meta
+/// service stores the overridden value of each configuration entry per row with `Display` in
+/// the meta store, rather than using the `serde` format. However, we still delegate the `serde`
+/// impl of all fields to `Display`/`FromStr` to make it consistent.
+#[serde_with::apply(_ => #[serde_as(as = "serde_with::DisplayFromStr")] )]
+#[serde_with::serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc, PartialEq)]
 pub struct SessionConfig {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
@@ -88,7 +98,6 @@ pub struct SessionConfig {
     /// A temporary config variable to force query running in either local or distributed mode.
     /// The default value is auto which means let the system decide to run batch queries in local
     /// or distributed mode automatically.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = QueryMode::default())]
     query_mode: QueryMode,
 
@@ -134,23 +143,19 @@ pub struct SessionConfig {
     /// Sets the order in which schemas are searched when an object (table, data type, function, etc.)
     /// is referenced by a simple name with no schema specified.
     /// See <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SearchPath::default())]
     search_path: SearchPath,
 
     /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = VisibilityMode::default())]
     visibility_mode: VisibilityMode,
 
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = IsolationLevel::default())]
     transaction_isolation: IsolationLevel,
 
     /// Select as of specific epoch.
     /// Sets the historical epoch for querying data. If 0, querying latest data.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     query_epoch: ConfigNonZeroU64,
 
@@ -163,32 +168,26 @@ pub struct SessionConfig {
     ///
     /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
     /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism: ConfigParallelism,
 
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_table: ConfigParallelism,
 
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_sink: ConfigParallelism,
 
     /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_index: ConfigParallelism,
 
     /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_source: ConfigParallelism,
 
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_materialized_view: ConfigParallelism,
 
@@ -269,7 +268,6 @@ pub struct SessionConfig {
     interval_style: String,
 
     /// If `BATCH_PARALLELISM` is non-zero, batch queries will use this parallelism.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     batch_parallelism: ConfigNonZeroU64,
 
@@ -290,7 +288,6 @@ pub struct SessionConfig {
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SinkDecouple::default())]
     sink_decouple: SinkDecouple,
 
@@ -354,7 +351,6 @@ pub struct SessionConfig {
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = OverWindowCachePolicy::default(), alias = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
