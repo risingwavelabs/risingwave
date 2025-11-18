@@ -388,6 +388,14 @@ pub mod default {
         pub fn iceberg_sink_write_parquet_max_row_group_rows() -> usize {
             100_000
         }
+
+        pub fn sync_log_store_pause_duration_ms() -> usize {
+            64
+        }
+
+        pub fn sync_log_store_buffer_size() -> usize {
+            2048
+        }
     }
 }
 
