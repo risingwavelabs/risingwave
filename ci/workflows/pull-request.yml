@@ -27,7 +27,10 @@ anchors:
         nienbo/cache#v2.4.21:
           id: maven
           key: >-
-            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java' }}-{{ checksum 'e2e_test/udf/remote_java' }}
+            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java/pom.xml' }}-{{ checksum 'e2e_test/udf/remote_java/pom.xml' }}
+          restore-keys:
+            - "v1-cache-cargo-{{ runner.os }}-"
+            - "v1-cache-cargo-"
           backend: s3
           s3:
             bucket: rw-ci-cache-bucket
