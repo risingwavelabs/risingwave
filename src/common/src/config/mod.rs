@@ -365,7 +365,7 @@ pub mod default {
         }
 
         pub fn iceberg_list_interval_sec() -> u64 {
-            1
+            10
         }
 
         pub fn iceberg_fetch_batch_size() -> u64 {
