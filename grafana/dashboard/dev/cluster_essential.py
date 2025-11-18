@@ -58,13 +58,13 @@ def _actor_busy_time_relative_target(panels: Panels):
         f"  ) by (fragment_id)"
         f")"
     )
-    # NOTE(kwannoel): Busy time is the max of the output and input blocking durations.
+    # NOTE(kwannoel): Busy time is the sum of the output and input blocking durations.
     # It's critical for output_block_expr to be on the left-hand side (LHS), since it always exists.
     # If input_block_expr doesn't exist, it either means the input is blocked, or the actor has no input.
     # In the first case, we don't want to render the blocking duration; treating it as zero would skew the result.
     # In the second case, rendering is not important. As mentioned above, such actors are usually root nodes
     # (e.g., source or table) and are rarely the bottleneck.
-    busy_expr = f"(({output_block_expr}) > ({input_block_expr})) or ({input_block_expr})"
+    busy_expr = f"(({output_block_expr}) + ({input_block_expr})) or ({input_block_expr})"
 
     # NOTE(kwannoel): We ignore `fragment_id` to get a global max of busy time.
     baseline_busy_expr = f"ignoring (fragment_id) group_left() max({busy_expr})"
@@ -107,11 +107,11 @@ def _actor_busy_rate_expr(rate_interval: str):
         f") by (fragment_id)"
     )
     busy_rate_expr = (
-        f"clamp_min(0,"
+        f"clamp_min("
         f"  1 - ("
-        f"    ({output_blocking_rate_expr}) > ({input_blocking_rate_expr}) or"
+        f"    ({output_blocking_rate_expr}) + ({input_blocking_rate_expr}) or"
         f"    ({input_blocking_rate_expr})"
-        f"  )"
+        f"  ), 0"
         f")"
     )
     return busy_rate_expr
