@@ -6,7 +6,7 @@ statement ok
 INSERT INTO t1 VALUES (115, 1, 8), (585, 2, 3), (601, 3, 7);
 
 statement ok
-CREATE VIEW IF NOT EXISTS v1 (a1, b1) AS SELECT a, b FROM t1;
+CREATE VIEW IF NOT EXISTS view_check (a1, b1) AS SELECT a, b FROM t1;
 
 query ok
 SELECT name
@@ -15,10 +15,10 @@ WHERE
   created_at >= now() - interval '10' minute AND
   created_at_cluster_version = (SELECT version());
 ----
-v1
+view_check
+
+statement ok
+DROP VIEW view_check;
 
 statement ok
 DROP TABLE t1;
-
-statement ok
-DROP VIEW v1;
