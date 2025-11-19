@@ -39,7 +39,7 @@ use crate::barrier::{
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::{MetaSrvEnv, MetadataManager};
-use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn commit_epoch(
@@ -118,6 +118,8 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     /// Barrier scheduler for scheduling load finish commands
     barrier_scheduler: BarrierScheduler,
+
+    pub(super) refresh_manager: GlobalRefreshManagerRef,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -130,6 +132,7 @@ impl GlobalBarrierWorkerContextImpl {
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
+        refresh_manager: GlobalRefreshManagerRef,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -140,6 +143,7 @@ impl GlobalBarrierWorkerContextImpl {
             _scale_controller: scale_controller,
             env,
             barrier_scheduler,
+            refresh_manager,
         }
     }
 

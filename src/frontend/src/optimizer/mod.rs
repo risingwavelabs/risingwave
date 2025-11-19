@@ -948,7 +948,7 @@ impl LogicalPlanRoot {
                             .refresh_mode
                             .as_ref()
                             .map(|refresh_mode| refresh_mode.refresh_mode),
-                        Some(Some(RefreshMode::FullRecompute(_)))
+                        Some(Some(RefreshMode::FullReload(_)))
                     )
                 }
             })

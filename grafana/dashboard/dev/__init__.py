@@ -38,6 +38,7 @@ from . import iceberg_compaction_metrics as _
 from . import kinesis_metrics as _
 from . import system_params as _
 from . import vector_search as _
+from . import refresh_manager as _
 
 def generate_panels(panels: Panels):
     return [x for s in sections for x in s(panels)]

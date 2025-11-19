@@ -537,7 +537,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"

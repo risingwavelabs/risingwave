@@ -19,12 +19,14 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
+use risingwave_meta_model::refresh_job::{self, RefreshState};
 use risingwave_meta_model::{SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
+use sea_orm::prelude::DateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
 use tracing::warn;
@@ -425,6 +427,45 @@ impl MetadataManager {
     pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
         self.catalog_controller
             .get_table_incoming_sinks(table_id)
+            .await
+    }
+
+    pub async fn list_refresh_jobs(&self) -> MetaResult<Vec<refresh_job::Model>> {
+        self.catalog_controller.list_refresh_jobs().await
+    }
+
+    pub async fn list_refreshable_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        self.catalog_controller.list_refreshable_table_ids().await
+    }
+
+    pub async fn ensure_refresh_job(&self, table_id: TableId) -> MetaResult<()> {
+        self.catalog_controller.ensure_refresh_job(table_id).await
+    }
+
+    pub async fn update_refresh_job_status(
+        &self,
+        table_id: TableId,
+        status: RefreshState,
+        trigger_time: Option<DateTime>,
+    ) -> MetaResult<()> {
+        self.catalog_controller
+            .update_refresh_job_status(table_id, status, trigger_time)
+            .await
+    }
+
+    pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
+        self.catalog_controller
+            .reset_all_refresh_jobs_to_idle()
+            .await
+    }
+
+    pub async fn update_refresh_job_interval(
+        &self,
+        table_id: TableId,
+        trigger_interval_secs: Option<i64>,
+    ) -> MetaResult<()> {
+        self.catalog_controller
+            .update_refresh_job_interval(table_id, trigger_interval_secs)
             .await
     }
 

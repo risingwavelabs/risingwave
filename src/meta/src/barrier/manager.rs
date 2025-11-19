@@ -33,7 +33,7 @@ use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
-use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub struct GlobalBarrierManager {
     status: Arc<ArcSwap<BarrierManagerStatus>>,
@@ -143,6 +143,7 @@ impl GlobalBarrierManager {
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
         barrier_scheduler: schedule::BarrierScheduler,
+        refresh_manager: GlobalRefreshManagerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
         let hummock_manager_clone = hummock_manager.clone();
@@ -157,6 +158,7 @@ impl GlobalBarrierManager {
             scale_controller,
             request_rx,
             barrier_scheduler,
+            refresh_manager,
         )
         .await;
         let manager = Self {

@@ -388,6 +388,10 @@ pub mod default {
         pub fn iceberg_sink_write_parquet_max_row_group_rows() -> usize {
             100_000
         }
+
+        pub fn refresh_scheduler_interval_sec() -> u64 {
+            60
+        }
     }
 }
 
