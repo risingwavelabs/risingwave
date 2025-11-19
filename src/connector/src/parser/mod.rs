@@ -118,7 +118,8 @@ impl<'a> MessageMeta<'a> {
                     CDC_TABLE_NAME_COLUMN_NAME,
                     "unexpected cdc meta column name"
                 );
-                Some(cdc_meta.full_table_name.as_str().into())
+                // For CDC sources, extract_table_name() strips the database prefix:
+                cdc_meta.extract_table_name()
             }
 
             // For other cases, return `None`.
