@@ -9,10 +9,16 @@ statement ok
 CREATE VIEW IF NOT EXISTS v1 (a1, b1) AS SELECT a, b FROM t1;
 
 query ok
-SELECT name, created_at, created_at_cluster_version
+SELECT name
 FROM rw_views
 WHERE
   created_at >= now() - interval '10' minute AND
   created_at_cluster_version = (SELECT version());
 ----
-v1 2025-11-18 11:25:35+00:00 PostgreSQL 13.14.0-RisingWave-2.7.0-alpha (unknown)
+v1
+
+statement ok
+DROP TABLE t1;
+
+statement ok
+DROP VIEW v1;
