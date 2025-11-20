@@ -288,6 +288,8 @@ impl Binder {
                 ("set_bit", raw_call(ExprType::SetBit)),
                 ("set_byte", raw_call(ExprType::SetByte)),
                 ("bit_count", raw_call(ExprType::BitCount)),
+                ("crc32", raw_call(ExprType::Crc32)),
+                ("crc32c", raw_call(ExprType::Crc32c)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
                 ("convert_from", raw_call(ExprType::ConvertFrom)),
