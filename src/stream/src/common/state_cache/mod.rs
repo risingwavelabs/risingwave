@@ -16,10 +16,18 @@ use risingwave_common::array::Op;
 use risingwave_common_estimate_size::EstimateSize;
 
 mod ordered;
+mod percentile;
 mod top_n;
 
 pub use ordered::*;
+pub use percentile::*;
 pub use top_n::*;
+
+#[derive(Clone, EstimateSize)]
+pub enum PercentileMode {
+    Disc,
+    Cont,
+}
 
 /// A common interface for state table cache.
 pub trait StateCache: EstimateSize {
