@@ -42,7 +42,7 @@ mod utils;
 ///     - [Return Value](#return-value)
 ///     - [Variadic Function](#variadic-function)
 ///     - [Optimization](#optimization)
-///     - [Functions Returning Strings](#functions-returning-strings)
+///     - [Writer Style Function](#writer-style-function)
 ///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
 ///     - [Context](#context)
 ///     - [Async Function](#async-function)
@@ -229,8 +229,16 @@ mod utils;
 ///
 /// ## Writer Style Function
 ///
-/// For functions returning `varchar`, `bytea` or `jsonb`, you can use a writer-style function signature to
-/// avoid extra memory allocations and copying.
+/// For functions that return large or variable-length values (varchar, bytea, jsonb, anyarray),
+/// prefer a writer-style signature to avoid extra allocations and copying.
+///
+/// The evaluation framework uses builders and per-row writers:
+/// - Allocate a column builder for the result once.
+/// - For each row, create a writer backed by the builder (no per-row heap alloc).
+/// - Call the function with the writer so it writes the output directly into the builder.
+/// - If the call succeeds, finalize the writer; on error or null, rollback and append NULL.
+///
+/// This pattern minimizes heap allocations and copies for these types.
 ///
 /// ```ignore
 /// #[function("trim(varchar) -> varchar")]
@@ -267,8 +275,9 @@ mod utils;
 /// - For `varchar`: `&mut impl std::fmt::Write`
 /// - For `bytea`: `&mut impl std::io::Write`
 /// - For `jsonb`: `&mut jsonbb::Builder`
+/// - For `anyarray`: `&mut impl risingwave_common::array::ListWrite`
 ///
-/// Note: Use fully-qualified trait paths (for example, `impl std::io::Write` or `impl std::fmt::Write`).
+/// Note: Use fully-qualified trait paths (for example, `impl std::fmt::Write`).
 /// Partial or relative paths (such as `impl Write` or `impl ::std::fmt::Write`) are not recognized.
 ///
 /// ## Preprocessing Constant Arguments
@@ -606,11 +615,12 @@ impl AggregateFnOrImpl {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum WriterTypeKind {
     FmtWrite,      // std::fmt::Write
     IoWrite,       // std::io::Write
     JsonbbBuilder, // jsonbb::Builder
+    ListWrite,     // risingwave_common::array::ListWrite
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

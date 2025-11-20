@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{I32Array, ListRef, ListValue};
-use risingwave_common::types::ScalarRefImpl;
+use risingwave_common::array::ListRef;
+use risingwave_common::types::{ScalarRefImpl, ToOwnedDatum};
 use risingwave_expr::{ExprError, Result, function};
 
 /// Returns the subscript of the first occurrence of the second argument in the array, or `NULL` if
@@ -184,20 +184,19 @@ fn array_position_common(
 fn array_positions(
     array: Option<ListRef<'_>>,
     element: Option<ScalarRefImpl<'_>>,
-) -> Result<Option<ListValue>> {
+    writer: &mut impl risingwave_common::array::ListWrite,
+) -> Result<Option<()>> {
     let Some(array) = array else {
         return Ok(None);
     };
-    let values = array.iter();
-    if values.len() - 1 > i32::MAX as usize {
+    if array.len() - 1 > i32::MAX as usize {
         return Err(ExprError::CastOutOfRange("invalid array length"));
     }
-    Ok(Some(ListValue::new(
-        values
-            .enumerate()
-            .filter(|(_, item)| item == &element)
-            .map(|(idx, _)| idx as i32 + 1)
-            .collect::<I32Array>()
-            .into(),
-    )))
+
+    for (idx, item) in array.iter().enumerate() {
+        if item == element {
+            writer.write(((idx as i32) + 1).to_owned_datum());
+        }
+    }
+    Ok(Some(()))
 }
