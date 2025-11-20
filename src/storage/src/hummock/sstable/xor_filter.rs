@@ -517,11 +517,10 @@ mod tests {
             .sstable(&sst, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        let mut stat = StoreLocalStatistic::default();
         if let XorFilter::BlockXor16(reader) = &sstable.filter_reader.filter {
             for idx in 0..sstable.meta.block_metas.len() {
                 let resp = sstable_store
-                    .get_block_response(&sstable, idx, CachePolicy::Fill(Hint::Normal), &mut stat)
+                    .get_block_response(&sstable, idx, CachePolicy::Fill(Hint::Normal))
                     .await
                     .unwrap();
                 let block = resp.wait().await.unwrap();
