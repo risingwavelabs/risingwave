@@ -192,6 +192,9 @@ for_all_wrapped_id_fields! (
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
         }
+        AlterStreamingJobConfigRequest {
+            job_id: JobId,
+        }
         AlterSwapRenameRequest.ObjectNameSwapPair {
             src_object_id: ObjectId,
             dst_object_id: ObjectId,

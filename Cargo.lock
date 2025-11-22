@@ -12240,6 +12240,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
+ "toml 0.9.6",
  "tower 0.5.2",
  "tower-http",
  "tracing",
