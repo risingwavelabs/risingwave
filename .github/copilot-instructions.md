@@ -45,7 +45,7 @@ When implementing features or fixing bugs, use these commands:
 
 - Always write code comments in English
 - Write simple, easy-to-read and maintainable code
-- Use `cargo fmt` to format code when needed
+- Always run `cargo fmt` to format code after you make changes
 - Follow existing code patterns and conventions in the repository
 
 ## Understanding RisingWave Macros
