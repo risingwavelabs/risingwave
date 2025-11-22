@@ -27,21 +27,46 @@ use crate::sink::encoder::{
 use crate::tri;
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
+pub(crate) const KEY_SCHEMA_ENABLE: &str = "key.schema.enable";
 
 pub struct DebeziumAdapterOpts {
     gen_tombstone: bool,
+    with_schema: bool,
 }
 
 impl Default for DebeziumAdapterOpts {
     fn default() -> Self {
         Self {
             gen_tombstone: true,
+            with_schema: true,
         }
+    }
+}
+
+impl DebeziumAdapterOpts {
+    pub fn with_schema(mut self, with_schema: bool) -> Self {
+        self.with_schema = with_schema;
+        self
     }
 }
 
 fn concat_debezium_name_field(db_name: &str, sink_from_name: &str, value: &str) -> String {
     DEBEZIUM_NAME_FIELD_PREFIX.to_owned() + "." + db_name + "." + sink_from_name + "." + value
+}
+
+fn maybe_with_schema<P>(with_schema: bool, schema_val: Value, payload: P) -> Value
+where
+    P: Into<Value>,
+{
+    let payload_value: Value = payload.into();
+    if with_schema {
+        json!({
+            "schema": schema_val,
+            "payload": payload_value,
+        })
+    } else {
+        json!({ "payload": payload_value })
+    }
 }
 
 pub struct DebeziumJsonFormatter {
@@ -127,37 +152,46 @@ impl SinkFormatter for DebeziumJsonFormatter {
                 let mut update_cache: Option<Map<String, Value>> = None;
 
                 for (op, row) in chunk.rows() {
-                    let event_key_object: Option<Value> = Some(json!({
-                        "schema": json!({
-                            "type": "struct",
-                            "fields": fields_pk_to_json(&schema.fields, pk_indices),
-                            "optional": false,
-                            "name": concat_debezium_name_field(db_name, sink_from_name, "Key"),
-                        }),
-                        "payload": tri!(key_encoder.encode(row)),
-                    }));
+                    let key_schema_val = json!({
+                        "type": "struct",
+                        "fields": fields_pk_to_json(&schema.fields, pk_indices),
+                        "optional": false,
+                        "name": concat_debezium_name_field(db_name, sink_from_name, "Key"),
+                    });
+
+                    let event_key_object: Option<Value> = Some(maybe_with_schema(
+                        opts.with_schema,
+                        key_schema_val,
+                        tri!(key_encoder.encode(row)),
+                    ));
                     let event_object: Option<Value> = match op {
-                        Op::Insert => Some(json!({
-                            "schema": schema_to_json(schema, db_name, sink_from_name),
-                            "payload": {
+                        Op::Insert => {
+                            let payload = json!({
                                 "before": null,
                                 "after": tri!(val_encoder.encode(row)),
                                 "op": "c",
                                 "ts_ms": ts_ms,
                                 "source": source_field,
-                            }
-                        })),
+                            });
+                            Some(maybe_with_schema(
+                                opts.with_schema,
+                                schema_to_json(schema, db_name, sink_from_name),
+                                payload,
+                            ))
+                        }
                         Op::Delete => {
-                            let value_obj = Some(json!({
-                                "schema": schema_to_json(schema, db_name, sink_from_name),
-                                "payload": {
-                                    "before": tri!(val_encoder.encode(row)),
-                                    "after": null,
-                                    "op": "d",
-                                    "ts_ms": ts_ms,
-                                    "source": source_field,
-                                }
-                            }));
+                            let payload = json!({
+                                "before": tri!(val_encoder.encode(row)),
+                                "after": null,
+                                "op": "d",
+                                "ts_ms": ts_ms,
+                                "source": source_field,
+                            });
+                            let value_obj = Some(maybe_with_schema(
+                                opts.with_schema,
+                                schema_to_json(schema, db_name, sink_from_name),
+                                payload,
+                            ));
                             yield Ok((event_key_object.clone(), value_obj));
 
                             if opts.gen_tombstone {
@@ -174,16 +208,19 @@ impl SinkFormatter for DebeziumJsonFormatter {
                         }
                         Op::UpdateInsert => {
                             if let Some(before) = update_cache.take() {
-                                Some(json!({
-                                    "schema": schema_to_json(schema, db_name, sink_from_name),
-                                    "payload": {
-                                        "before": before,
-                                        "after": tri!(val_encoder.encode(row)),
-                                        "op": "u",
-                                        "ts_ms": ts_ms,
-                                        "source": source_field,
-                                    }
-                                }))
+                                let payload = json!({
+                                    "before": before,
+                                    "after": tri!(val_encoder.encode(row)),
+                                    "op": "u",
+                                    "ts_ms": ts_ms,
+                                    "source": source_field,
+                                });
+
+                                Some(maybe_with_schema(
+                                    opts.with_schema,
+                                    schema_to_json(schema, db_name, sink_from_name),
+                                    payload,
+                                ))
                             } else {
                                 warn!(
                                     "not found UpdateDelete in prev row, skipping, row index {:?}",
