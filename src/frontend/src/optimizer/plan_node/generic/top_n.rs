@@ -33,6 +33,7 @@ pub struct TopN<PlanRef> {
     pub limit_attr: TopNLimit,
     pub offset: u64,
     pub order: Order,
+    pub full_order: Order,
     pub group_key: Vec<usize>,
 }
 
@@ -137,6 +138,7 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
             input,
             limit_attr,
             offset,
+            full_order: order.clone(),
             order,
             group_key,
         }
@@ -151,6 +153,7 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
             input,
             limit_attr,
             offset,
+            full_order: order.clone(),
             order,
             group_key: vec![],
         }
