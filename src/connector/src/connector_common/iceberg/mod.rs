@@ -287,9 +287,8 @@ impl IcebergCommon {
                 );
             }
             return false;
-        } else {
-            self.enable_config_load.unwrap_or(false)
         }
+        self.enable_config_load.unwrap_or(false)
     }
 
     /// For both V1 and V2.
