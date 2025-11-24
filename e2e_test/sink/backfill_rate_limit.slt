@@ -1,0 +1,37 @@
+statement ok
+set sink_decouple = true;
+
+statement ok
+CREATE TABLE t1(v1 int, v2 int);
+
+statement ok
+CREATE SINK s1 AS select * from t1 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+SET BACKFILL_RATE_LIMIT TO 100;
+
+statement ok
+SET BACKFILL_RATE_LIMIT TO 0;
+
+statement ok
+SET BACKFILL_RATE_LIMIT TO default;
+
+statement ok
+ALTER SINK s1 SET BACKFILL_RATE_LIMIT = 1000;
+
+statement ok
+ALTER SINK s1 SET BACKFILL_RATE_LIMIT = 0;
+
+statement ok
+ALTER SINK s1 SET BACKFILL_RATE_LIMIT = default;
+
+statement ok
+DROP SINK s1;
+
+statement ok
+DROP TABLE t1;
+
+statement ok
+FLUSH;
