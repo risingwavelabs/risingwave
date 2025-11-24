@@ -37,7 +37,7 @@ flush;
 
 sleep 10s
 
-query ?
+query ? retry 5 backoff 1s
 select count(*) = 1 from rw_iceberg_files where source_name = '__iceberg_source_t_refresh' and content = 'PositionDeletes';
 ----
 t
@@ -68,12 +68,24 @@ create table iceberg_batch_table ( primary key (id) ) with (
   catalog.type = 'storage',
   table.name = 't_refresh',
   database.name = 'public',
-  refresh_mode = 'FULL_RECOMPUTE'
+  refresh_mode = 'FULL_RELOAD'
 );
+
+
+query ?
+select current_status from rw_refresh_table_state;
+----
+IDLE
 
 
 statement ok
 refresh table iceberg_batch_table;
+
+query ?
+select current_status from rw_refresh_table_state;
+----
+REFRESHING
+
 
 sleep 10s
 
@@ -112,16 +124,23 @@ t
 statement ok
 refresh table iceberg_batch_table;
 
-sleep 10s
+sleep 15s
 
-query I
+query I retry 3 backoff 1s
 select id from t_refresh order by id;
 ----
 1
 2
 
 
-query I
+# make sure the refresh finished
+query ?
+select current_status from rw_refresh_table_state;
+----
+IDLE
+
+
+query I retry 3 backoff 1s
 select id from iceberg_batch_table order by id;
 ----
 1

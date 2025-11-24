@@ -342,6 +342,7 @@ profile:
       - use: frontend
 
   ci-iceberg-test:
+    config-path: src/config/ci.toml
     steps:
       - use: minio
       - use: mysql
