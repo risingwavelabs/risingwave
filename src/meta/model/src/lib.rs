@@ -54,6 +54,7 @@ pub mod index;
 pub mod object;
 pub mod object_dependency;
 pub mod pending_sink_state;
+pub mod refresh_job;
 pub mod schema;
 pub mod secret;
 pub mod serde_seaql_migration;
