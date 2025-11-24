@@ -166,6 +166,8 @@ impl CdcTableBackfillTracker {
         self.next_generation += 1;
         let splits = match &mut self.status {
             CdcBackfillStatus::Backfilling(progress) => {
+                progress.split_backfilled_count = 0;
+                progress.split_completed_count = 0;
                 progress.split_assignment_generation = generation;
                 progress.splits.as_slice()
             }
@@ -324,5 +326,6 @@ mod test {
         };
         assert_eq!(progress.splits.len() as u64, split_count);
         assert_eq!(progress.split_completed_count, 0);
+        assert_eq!(progress.split_backfilled_count, 0);
     }
 }
