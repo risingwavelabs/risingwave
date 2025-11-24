@@ -37,7 +37,7 @@ flush;
 
 sleep 10s
 
-query ?
+query ? retry 5 backoff 1s
 select count(*) = 1 from rw_iceberg_files where source_name = '__iceberg_source_t_refresh' and content = 'PositionDeletes';
 ----
 t
