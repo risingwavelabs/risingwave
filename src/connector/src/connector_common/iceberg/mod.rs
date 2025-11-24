@@ -281,9 +281,15 @@ impl IcebergCommon {
     pub fn enable_config_load(&self) -> bool {
         // If the env var is set to true, we disable the default config load. (Cloud environment)
         if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            if matches!(self.enable_config_load, Some(true)) {
+                tracing::warn!(
+                    "`enable_config_load` can't be enabled in SaaS environment, the behavior might be unexpected"
+                );
+            }
             return false;
+        } else {
+            self.enable_config_load.unwrap_or(false)
         }
-        self.enable_config_load.unwrap_or(false)
     }
 
     /// For both V1 and V2.
