@@ -25,10 +25,7 @@ use risingwave_meta_model::{
 };
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
-use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::table::{
-    CdcTableType as PbCdcTableType, PbEngine, PbOptionalAssociatedSourceId, PbTableType,
-};
+use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, PbEngine, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
@@ -191,7 +188,7 @@ impl From<ObjectModel<database::Model>> for PbDatabase {
 impl From<ObjectModel<secret::Model>> for PbSecret {
     fn from(value: ObjectModel<secret::Model>) -> Self {
         Self {
-            id: value.0.secret_id as _,
+            id: value.0.secret_id,
             name: value.0.name,
             database_id: value.1.database_id.unwrap(),
             value: value.0.value,
@@ -260,10 +257,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             stream_job_status: PbStreamJobStatus::Created as _,
             create_type: PbCreateType::Foreground as _,
             version: value.0.version.map(|v| v.to_protobuf()),
-            optional_associated_source_id: value
-                .0
-                .optional_associated_source_id
-                .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
+            optional_associated_source_id: value.0.optional_associated_source_id.map(Into::into),
             description: value.0.description,
             #[expect(deprecated)]
             incoming_sinks: vec![],
@@ -311,7 +305,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             info: value.0.source_info.map(|info| info.to_protobuf()),
             watermark_descs: value.0.watermark_descs.to_protobuf(),
             definition: value.0.definition,
-            connection_id: value.0.connection_id.map(|id| id as _),
+            connection_id: value.0.connection_id,
             // todo: using the timestamp from the database directly.
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
@@ -320,10 +314,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
                 Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             version: value.0.version as _,
-            optional_associated_table_id: value
-                .0
-                .optional_associated_table_id
-                .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id.as_raw_id())),
+            optional_associated_table_id: value.0.optional_associated_table_id.map(Into::into),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
             secret_refs: secret_ref_map,
@@ -355,7 +346,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
             definition: value.0.definition,
-            connection_id: value.0.connection_id.map(|id| id as _),
+            connection_id: value.0.connection_id,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
             ),
@@ -399,7 +390,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             ),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
-            dependent_table_id: value.0.dependent_table_id as _,
+            dependent_table_id: value.0.dependent_table_id,
             subscription_state: value.0.subscription_state as _,
         }
     }
@@ -459,7 +450,7 @@ impl From<ObjectModel<connection::Model>> for PbConnection {
             PbConnectionInfo::PrivateLinkService(value.0.info.to_protobuf())
         };
         Self {
-            id: value.1.oid as _,
+            id: value.1.oid.as_connection_id(),
             schema_id: value.1.schema_id.unwrap(),
             database_id: value.1.database_id.unwrap(),
             name: value.0.name,

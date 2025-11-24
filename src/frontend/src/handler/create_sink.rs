@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ConnectionId, ObjectId, Schema, UserId};
+use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, Schema, UserId};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -415,19 +415,14 @@ pub async fn gen_sink_plan(
     let dependencies =
         RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
             .into_iter()
-            .map(|id| id.as_raw_id() as ObjectId)
-            .chain(
-                dependent_udfs
-                    .into_iter()
-                    .map(|id| id.function_id() as ObjectId),
-            )
+            .chain(dependent_udfs.iter().copied().map_into())
             .collect();
 
     let sink_catalog = sink_desc.into_catalog(
         sink_schema_id,
         sink_database_id,
         UserId::new(session.user_id()),
-        connector_conn_ref.map(ConnectionId::from),
+        connector_conn_ref,
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -577,6 +572,13 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
+    if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+            "Sink name cannot start with reserved prefix '{}'",
+            ICEBERG_SINK_PREFIX
+        ))));
+    }
+
     let (mut sink, graph, target_table_catalog, dependencies) = {
         let SinkPlanContext {
             query,
@@ -650,7 +652,7 @@ fn derive_sink_to_table_expr(
 ) -> Result<ExprImpl> {
     let input_type = &sink_schema.fields()[idx].data_type;
 
-    if target_type != input_type {
+    if !target_type.equals_datatype(input_type) {
         bail!(
             "column type mismatch: {:?} vs {:?}, column name: {:?}",
             target_type,

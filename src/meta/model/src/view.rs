@@ -53,7 +53,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbView> for ActiveModel {
     fn from(view: PbView) -> Self {
         Self {
-            view_id: Set(view.id as _),
+            view_id: Set(view.id),
             name: Set(view.name),
             properties: Set(Property(view.properties)),
             definition: Set(view.sql),

@@ -2154,9 +2154,9 @@ dependencies = [
 
 [[package]]
 name = "bytemuck"
-version = "1.23.0"
+version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9134a6ef01ce4b366b50689c94f82c14bc72bc5d0386829828a2e2752ef7958c"
+checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
 
 [[package]]
 name = "byteorder"
@@ -6428,6 +6428,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hex-literal"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
+
+[[package]]
 name = "hickory-proto"
 version = "0.24.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6782,7 +6788,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0",
@@ -6834,7 +6840,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6851,7 +6857,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-memory"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "async-trait",
  "futures",
@@ -6864,7 +6870,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6884,7 +6890,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=1e81f8a1ec2c2d6c6b9008438e77f26d0532effe#1e81f8a1ec2c2d6c6b9008438e77f26d0532effe"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=50ef52e257b5e062380d7b4447851a86bf5d131c#50ef52e257b5e062380d7b4447851a86bf5d131c"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6915,7 +6921,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.4.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=0b5d05b20e8a5277a47585141082a7a638238ae1#0b5d05b20e8a5277a47585141082a7a638238ae1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=1d79e119ffb30bda0fafcb3114a17c77f46dc6fd#1d79e119ffb30bda0fafcb3114a17c77f46dc6fd"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7303,9 +7309,9 @@ dependencies = [
 
 [[package]]
 name = "jsonbb"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08074a5ad6e383dfd928869e5bc201318554c72be460d0367203f1f6c9c9c8fd"
+checksum = "ae8b46684788e8fce542d6ee3cde00ffbe31818a19d605d6d292f24f38c5a41c"
 dependencies = [
  "bytes",
  "serde",
@@ -7826,12 +7832,9 @@ dependencies = [
 
 [[package]]
 name = "mach2"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1b95cd5421ec55b445b5ae102f5ea0e768de1f82bd3001e11f426c269c3aea"
-dependencies = [
- "libc",
-]
+checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "macro_magic"
@@ -8718,12 +8721,6 @@ checksum = "2819ce041d2ee131036f4fc9d6ae7ae125a3a40e97ba64d04fe799ad9dabbb44"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "number_prefix"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
 name = "oauth2"
@@ -11482,13 +11479,12 @@ dependencies = [
  "libc",
  "linkme",
  "lru 0.16.2",
- "mach2 0.5.0",
+ "mach2 0.6.0",
  "madsim-tokio",
  "memcomparable",
  "more-asserts",
  "num-integer",
  "num-traits",
- "number_prefix",
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot 0.12.1",
@@ -11544,6 +11540,7 @@ dependencies = [
  "tracing-futures",
  "tracing-opentelemetry",
  "twox-hash 2.1.0",
+ "unit-prefix",
  "url",
  "uuid",
  "workspace-hack",
@@ -11607,7 +11604,7 @@ dependencies = [
  "hytra",
  "itertools 0.14.0",
  "libc",
- "mach2 0.5.0",
+ "mach2 0.6.0",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -12111,6 +12108,7 @@ dependencies = [
  "futures-util",
  "ginepro",
  "hex",
+ "hex-literal",
  "hmac",
  "iceberg",
  "itertools 0.14.0",
@@ -12149,6 +12147,7 @@ name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
  "itertools 0.14.0",
+ "proc-macro-error 1.0.4",
  "proc-macro2",
  "quote",
  "syn 2.0.107",
@@ -12632,6 +12631,7 @@ dependencies = [
  "fs-err",
  "madsim-tonic",
  "madsim-tonic-build",
+ "paste",
  "pbjson",
  "pbjson-build",
  "prost 0.13.4",
@@ -12902,7 +12902,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "lz4",
- "mach2 0.5.0",
+ "mach2 0.6.0",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -12981,6 +12981,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
+ "moka",
  "multimap 0.10.0",
  "parking_lot 0.12.1",
  "pin-project",
@@ -16288,9 +16289,9 @@ checksum = "c7de7d73e1754487cb58364ee906a499937a0dfabd86bcb980fa99ec8c8fa2ce"
 
 [[package]]
 name = "unit-prefix"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "323402cff2dd658f39ca17c789b502021b3f18707c91cdf22e3838e1b4023817"
+checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 
 [[package]]
 name = "unsafe-libyaml"

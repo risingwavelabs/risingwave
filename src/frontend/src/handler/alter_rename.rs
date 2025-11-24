@@ -15,7 +15,6 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::is_system_schema;
-use risingwave_pb::ddl_service::alter_name_request;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
@@ -94,10 +93,7 @@ pub async fn handle_rename_index(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::IndexId(index_id.index_id),
-            &new_index_name,
-        )
+        .alter_name(index_id.into(), &new_index_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_INDEX))
@@ -126,7 +122,7 @@ pub async fn handle_rename_view(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(alter_name_request::Object::ViewId(view_id), &new_view_name)
+        .alter_name(view_id.into(), &new_view_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_VIEW))
@@ -187,10 +183,7 @@ pub async fn handle_rename_subscription(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::SubscriptionId(subscription_id.subscription_id),
-            &new_subscription_name,
-        )
+        .alter_name(subscription_id.into(), &new_subscription_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SUBSCRIPTION))
@@ -230,10 +223,7 @@ pub async fn handle_rename_source(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_name(
-            alter_name_request::Object::SourceId(source_id),
-            &new_source_name,
-        )
+        .alter_name(source_id.into(), &new_source_name)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
@@ -368,7 +358,7 @@ mod tests {
 
         let catalog_reader = session.env().catalog_reader().read_guard();
         let altered_table_name = catalog_reader
-            .get_any_table_by_id(&table_id)
+            .get_any_table_by_id(table_id)
             .unwrap()
             .name()
             .to_owned();

@@ -25,6 +25,7 @@ use futures::FutureExt;
 use futures::stream::FuturesOrdered;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::SourceId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
@@ -85,6 +86,7 @@ struct BarrierState {
 }
 
 use risingwave_common::must_match;
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
 use crate::executor::exchange::permit;
@@ -166,7 +168,7 @@ impl Display for &'_ PartialGraphManagedBarrierState {
             writeln!(f, "Create MView Progress:")?;
             for (epoch, progress) in &self.create_mview_progress {
                 write!(f, "> Epoch {}:", epoch)?;
-                for (actor_id, state) in progress {
+                for (actor_id, (_, state)) in progress {
                     write!(f, ">> Actor {}: {}, ", actor_id, state)?;
                 }
             }
@@ -311,7 +313,7 @@ pub(crate) struct PartialGraphManagedBarrierState {
     /// 2. converted to [`ManagedBarrierStateInner`] in [`Self::may_have_collected_all`]
     /// 3. handled by [`Self::pop_barrier_to_complete`]
     /// 4. put in [`crate::task::barrier_worker::BarrierCompleteResult`] and reported to meta.
-    pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
+    pub(crate) create_mview_progress: HashMap<u64, HashMap<ActorId, (FragmentId, BackfillState)>>,
 
     /// Record the source list finished reports for each epoch of concurrent checkpoints.
     /// Used for refreshable batch source. The map key is epoch and the value is
@@ -875,10 +877,11 @@ impl DatabaseManagedBarrierState {
                 }
                 LocalBarrierEvent::ReportCreateProgress {
                     epoch,
+                    fragment_id,
                     actor,
                     state,
                 } => {
-                    self.update_create_mview_progress(epoch, actor, state);
+                    self.update_create_mview_progress(epoch, fragment_id, actor, state);
                 }
                 LocalBarrierEvent::ReportSourceListFinished {
                     epoch,
@@ -1029,7 +1032,7 @@ impl DatabaseManagedBarrierState {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
@@ -1043,7 +1046,7 @@ impl DatabaseManagedBarrierState {
                 .push(PbListFinishedSource {
                     reporter_actor_id: actor_id,
                     table_id,
-                    associated_source_id: associated_source_id.as_raw_id(),
+                    associated_source_id,
                 });
         } else {
             warn!(
@@ -1059,7 +1062,7 @@ impl DatabaseManagedBarrierState {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
@@ -1073,7 +1076,7 @@ impl DatabaseManagedBarrierState {
                 .push(PbLoadFinishedSource {
                     reporter_actor_id: actor_id,
                     table_id,
-                    associated_source_id: associated_source_id.as_raw_id(),
+                    associated_source_id,
                 });
         } else {
             warn!(
@@ -1155,7 +1158,7 @@ impl PartialGraphManagedBarrierState {
                 .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(actor, state)| state.to_pb(actor))
+                .map(|(actor, (fragment_id, state))| state.to_pb(fragment_id, actor))
                 .collect();
 
             let list_finished_source_ids = self

@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::function;
 
 #[function("lower(varchar) -> varchar")]
-pub fn lower(s: &str, writer: &mut impl Write) {
+pub fn lower(s: &str, writer: &mut impl std::fmt::Write) {
     for c in s.chars() {
         writer.write_char(c.to_ascii_lowercase()).unwrap();
     }

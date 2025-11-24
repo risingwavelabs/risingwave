@@ -56,7 +56,8 @@ mod m20250916_120000_add_refresh_fields;
 mod m20251005_000000_fragment_splits;
 mod m20251016_220528_fragment_parallelism;
 mod m20251022_294610_source_refresh_mode;
-mod m20251104_195858_pending_sink_state;
+mod m20251112_114514_streaming_job_config_override;
+mod m20251124_195858_pending_sink_state;
 mod utils;
 
 pub struct Migrator;
@@ -151,7 +152,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20251005_000000_fragment_splits::Migration),
             Box::new(m20251016_220528_fragment_parallelism::Migration),
             Box::new(m20251022_294610_source_refresh_mode::Migration),
-            Box::new(m20251104_195858_pending_sink_state::Migration),
+            Box::new(m20251112_114514_streaming_job_config_override::Migration),
+            Box::new(m20251124_195858_pending_sink_state::Migration),
         ]
     }
 }

@@ -17,7 +17,7 @@ use std::fmt::{Display, Write};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::data::{ArrayType, PbArray};
 
-use super::bytes_array::{BytesWriter, PartialBytesWriter};
+use super::bytes_array::BytesWriter;
 use super::{Array, ArrayBuilder, BytesArray, BytesArrayBuilder, DataType};
 use crate::bitmap::Bitmap;
 
@@ -105,7 +105,7 @@ impl Utf8Array {
         let mut builder = Utf8ArrayBuilder::new(iter.size_hint().0);
         for e in iter {
             if let Some(s) = e {
-                let mut writer = builder.writer().begin();
+                let mut writer = builder.writer();
                 write!(writer, "{}", s).unwrap();
                 writer.finish();
             } else {
@@ -177,7 +177,7 @@ impl Utf8ArrayBuilder {
     /// Append an element as the `Display` format to the array.
     pub fn append_display(&mut self, value: Option<impl Display>) {
         if let Some(s) = value {
-            let mut writer = self.writer().begin();
+            let mut writer = self.writer();
             write!(writer, "{}", s).unwrap();
             writer.finish();
         } else {
@@ -186,35 +186,26 @@ impl Utf8ArrayBuilder {
     }
 }
 
+/// Note: dropping an unfinished `StringWriter` will rollback the partial data, which is the behavior of the inner `BytesWriter`.
 pub struct StringWriter<'a> {
     bytes: BytesWriter<'a>,
 }
 
-impl<'a> StringWriter<'a> {
-    /// `begin` will create a `PartialStringWriter`, which allow multiple appendings to create a new
-    /// record.
-    pub fn begin(self) -> PartialStringWriter<'a> {
-        PartialStringWriter {
-            bytes: self.bytes.begin(),
-        }
-    }
-}
-
-// Note: dropping an unfinished `PartialStringWriter` will rollback the partial data, which is the
-// behavior of the inner `PartialBytesWriter`.
-pub struct PartialStringWriter<'a> {
-    bytes: PartialBytesWriter<'a>,
-}
-
-impl PartialStringWriter<'_> {
+impl StringWriter<'_> {
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used.
     pub fn finish(self) {
         self.bytes.finish()
     }
+
+    /// `rollback` will be called while the entire record is abandoned.
+    /// The partial data was cleaned and the `builder` can be safely used.
+    pub fn rollback(self) {
+        self.bytes.rollback();
+    }
 }
 
-impl Write for PartialStringWriter<'_> {
+impl Write for StringWriter<'_> {
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
         self.bytes.write_ref(s.as_bytes());
         Ok(())
@@ -245,15 +236,14 @@ mod tests {
     }
 
     #[test]
-    fn test_utf8_partial_writer() {
+    fn test_utf8_writer() {
         let mut builder = Utf8ArrayBuilder::new(0);
         {
-            let writer = builder.writer();
-            let mut partial_writer = writer.begin();
+            let mut writer = builder.writer();
             for _ in 0..2 {
-                partial_writer.write_str("ran").unwrap();
+                writer.write_str("ran").unwrap();
             }
-            partial_writer.finish()
+            writer.finish()
         };
         let array = builder.finish();
         assert_eq!(array.len(), 1);
@@ -262,33 +252,30 @@ mod tests {
     }
 
     #[test]
-    fn test_utf8_partial_writer_failed() {
+    fn test_utf8_writer_failed() {
         let mut builder = Utf8ArrayBuilder::new(0);
         // Write a record.
         {
-            let writer = builder.writer();
-            let mut partial_writer = writer.begin();
-            partial_writer.write_str("Dia").unwrap();
-            partial_writer.write_str("na").unwrap();
-            partial_writer.finish()
+            let mut writer = builder.writer();
+            writer.write_str("Dia").unwrap();
+            writer.write_str("na").unwrap();
+            writer.finish()
         };
 
         // Write a record failed.
         {
-            let writer = builder.writer();
-            let mut partial_writer = writer.begin();
-            partial_writer.write_str("Ca").unwrap();
-            partial_writer.write_str("rol").unwrap();
+            let mut writer = builder.writer();
+            writer.write_str("Ca").unwrap();
+            writer.write_str("rol").unwrap();
             // We don't finish here.
         };
 
         // Write a record.
         {
-            let writer = builder.writer();
-            let mut partial_writer = writer.begin();
-            partial_writer.write_str("Ki").unwrap();
-            partial_writer.write_str("ra").unwrap();
-            partial_writer.finish()
+            let mut writer = builder.writer();
+            writer.write_str("Ki").unwrap();
+            writer.write_str("ra").unwrap();
+            writer.finish()
         };
 
         // Verify only two valid records.

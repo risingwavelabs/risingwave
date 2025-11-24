@@ -23,7 +23,6 @@ use risingwave_common::hash::{ActorAlignmentId, IsSingleton, VnodeCount, VnodeCo
 use risingwave_common::id::{ActorId, JobId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
-use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, MergeNode, StreamNode, StreamScanType,
@@ -35,7 +34,7 @@ use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::{
     Fragment, FragmentDownstreamRelation, FragmentId, FragmentNewNoShuffle,
-    FragmentReplaceUpstream, StreamActor,
+    FragmentReplaceUpstream, StreamActor, StreamContext,
 };
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, DownstreamExternalEdgeId, EdgeId, EitherFragment,
@@ -136,7 +135,7 @@ impl FragmentActorBuilder {
                 // Index the upstreams by the an external edge ID.
                 let (upstream_fragment_id, upstream_no_shuffle_actor) = &self.upstreams
                     [&EdgeId::UpstreamExternal {
-                        upstream_table_id: stream_scan.table_id,
+                        upstream_job_id: stream_scan.table_id.as_job_id(),
                         downstream_fragment_id: self.fragment_id,
                     }];
 
@@ -197,7 +196,7 @@ impl FragmentActorBuilder {
                 // Index the upstreams by the an external edge ID.
                 let (upstream_fragment_id, upstream_actors) = &self.upstreams
                     [&EdgeId::UpstreamExternal {
-                        upstream_table_id: upstream_source_id.into(),
+                        upstream_job_id: upstream_source_id.as_share_source_job_id(),
                         downstream_fragment_id: self.fragment_id,
                     }];
 
@@ -248,7 +247,7 @@ impl FragmentActorBuilder {
 
 impl ActorBuilder {
     /// Build an actor after all the upstreams and downstreams are processed.
-    fn build(self, job: &StreamingJob, expr_context: ExprContext) -> MetaResult<StreamActor> {
+    fn build(self, job: &StreamingJob, ctx: &StreamContext) -> MetaResult<StreamActor> {
         // Only fill the definition when debug assertions enabled, otherwise use name instead.
         #[cfg(not(debug_assertions))]
         let mview_definition = job.name();
@@ -260,7 +259,8 @@ impl ActorBuilder {
             fragment_id: self.fragment_id.as_global_id(),
             vnode_bitmap: self.vnode_bitmap,
             mview_definition,
-            expr_context: Some(expr_context),
+            expr_context: Some(ctx.to_expr_context()),
+            config_override: ctx.config_override.clone(),
         })
     }
 }
@@ -735,7 +735,7 @@ impl ActorGraphBuilder {
         self,
         env: &MetaSrvEnv,
         job: &StreamingJob,
-        expr_context: ExprContext,
+        ctx: StreamContext,
     ) -> MetaResult<ActorGraphBuildResult> {
         // Pre-generate IDs for all actors.
         let actor_len = self
@@ -814,7 +814,7 @@ impl ActorGraphBuilder {
                             builder
                                 .actor_builders
                                 .into_values()
-                                .map(|builder| builder.build(job, expr_context.clone()))
+                                .map(|builder| builder.build(job, &ctx))
                                 .try_collect()?,
                         ),
                     )

@@ -140,6 +140,9 @@ pub struct ReleaseContext {
 
     /// Removed sink fragment by target fragment.
     pub(crate) removed_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
+
+    /// Dropped iceberg table sinks
+    pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 }
 
 impl CatalogController {
@@ -211,10 +214,12 @@ impl CatalogController {
 }
 
 impl CatalogController {
-    pub async fn finish_create_subscription_catalog(&self, subscription_id: u32) -> MetaResult<()> {
+    pub async fn finish_create_subscription_catalog(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        let job_id = subscription_id as i32;
 
         // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
         let res = Object::update_many()
@@ -223,22 +228,25 @@ impl CatalogController {
                 object::Column::CreatedAtClusterVersion,
                 current_cluster_version().into(),
             )
-            .filter(object::Column::Oid.eq(job_id))
+            .filter(object::Column::Oid.eq(subscription_id))
             .exec(&txn)
             .await?;
         if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("subscription", job_id));
+            return Err(MetaError::catalog_id_not_found(
+                "subscription",
+                subscription_id,
+            ));
         }
 
         // mark the target subscription as `Create`.
         let job = subscription::ActiveModel {
-            subscription_id: Set(job_id),
+            subscription_id: Set(subscription_id),
             subscription_state: Set(SubscriptionState::Created.into()),
             ..Default::default()
         };
         job.update(&txn).await?;
 
-        let _ = grant_default_privileges_automatically(&txn, job_id).await?;
+        let _ = grant_default_privileges_automatically(&txn, subscription_id).await?;
 
         txn.commit().await?;
 
@@ -247,16 +255,15 @@ impl CatalogController {
 
     pub async fn notify_create_subscription(
         &self,
-        subscription_id: u32,
+        subscription_id: SubscriptionId,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.read().await;
-        let job_id = subscription_id as i32;
-        let (subscription, obj) = Subscription::find_by_id(job_id)
+        let (subscription, obj) = Subscription::find_by_id(subscription_id)
             .find_also_related(Object)
             .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .one(&inner.db)
             .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
 
         let mut version = self
             .notify_frontend(
@@ -277,7 +284,7 @@ impl CatalogController {
             .select_only()
             .distinct()
             .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Oid.eq(subscription_id as ObjectId))
+            .filter(user_privilege::Column::Oid.eq(subscription_id.as_object_id()))
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -439,7 +446,7 @@ impl CatalogController {
             filter_condition
         };
 
-        let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
+        let mut dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .columns([
@@ -453,6 +460,12 @@ impl CatalogController {
             .into_partial_model()
             .all(&txn)
             .await?;
+
+        // Check if there are any pending iceberg table jobs.
+        let dirty_iceberg_jobs = find_dirty_iceberg_table_jobs(&txn, database_id).await?;
+        if !dirty_iceberg_jobs.is_empty() {
+            dirty_job_objs.extend(dirty_iceberg_jobs);
+        }
 
         Self::clean_dirty_sink_downstreams(&txn).await?;
 
@@ -549,9 +562,13 @@ impl CatalogController {
             .chain(
                 dirty_state_table_ids
                     .into_iter()
-                    .map(|table_id| table_id.as_raw_id() as _),
+                    .map(|table_id| table_id.as_object_id()),
             )
-            .chain(dirty_associated_source_ids.clone().into_iter())
+            .chain(
+                dirty_associated_source_ids
+                    .iter()
+                    .map(|source_id| source_id.as_object_id()),
+            )
             .collect();
 
         let res = Object::delete_many()
@@ -622,14 +639,9 @@ impl CatalogController {
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        ensure_object_id(
-            ObjectType::Database,
-            comment.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(ObjectType::Schema, comment.schema_id.as_raw_id() as _, &txn).await?;
-        let table_obj = Object::find_by_id(comment.table_id.as_raw_id() as ObjectId)
+        ensure_object_id(ObjectType::Database, comment.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, comment.schema_id, &txn).await?;
+        let table_obj = Object::find_by_id(comment.table_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
@@ -1249,16 +1261,6 @@ impl CatalogControllerInner {
                 .flat_map(|(_, txs)| txs.into_iter())
             {
                 let _ = tx.send(Err(err.clone()));
-            }
-        }
-    }
-
-    pub(crate) fn notify_cancelled(&mut self, database_id: DatabaseId, job_id: JobId) {
-        if let Some(creating_tables) = self.creating_table_finish_notifier.get_mut(&database_id)
-            && let Some(tx_list) = creating_tables.remove(&job_id)
-        {
-            for tx in tx_list {
-                let _ = tx.send(Err("Cancelled".to_owned()));
             }
         }
     }

@@ -110,7 +110,35 @@ pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_ag
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
-pub const MAX_SNAPSHOTS_NUM: &str = "max_snapshots_num_before_compaction";
+pub const COMPACTION_MAX_SNAPSHOTS_NUM: &str = "compaction.max_snapshots_num";
+
+pub const COMPACTION_SMALL_FILES_THRESHOLD_MB: &str = "compaction.small_files_threshold_mb";
+
+pub const COMPACTION_DELETE_FILES_COUNT_THRESHOLD: &str = "compaction.delete_files_count_threshold";
+
+pub const COMPACTION_TRIGGER_SNAPSHOT_COUNT: &str = "compaction.trigger_snapshot_count";
+
+pub const COMPACTION_TARGET_FILE_SIZE_MB: &str = "compaction.target_file_size_mb";
+
+fn deserialize_and_normalize_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(s.to_lowercase().replace('_', "-"))
+}
+
+fn deserialize_and_normalize_optional_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.map(|s| s.to_lowercase().replace('_', "-")))
+}
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -126,6 +154,54 @@ fn default_true() -> bool {
 
 fn default_some_true() -> Option<bool> {
     Some(true)
+}
+
+/// Compaction type for Iceberg sink
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CompactionType {
+    /// Full compaction - rewrites all data files
+    #[default]
+    Full,
+    /// Small files compaction - only compact small files
+    SmallFiles,
+    /// Files with delete compaction - only compact files that have associated delete files
+    FilesWithDelete,
+}
+
+impl CompactionType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CompactionType::Full => "full",
+            CompactionType::SmallFiles => "small-files",
+            CompactionType::FilesWithDelete => "files-with-delete",
+        }
+    }
+}
+
+impl std::fmt::Display for CompactionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for CompactionType {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        // Normalize the input string first: lowercase and replace underscores with hyphens
+        let normalized = s.to_lowercase().replace('_', "-");
+
+        match normalized.as_str() {
+            "full" => Ok(CompactionType::Full),
+            "small-files" => Ok(CompactionType::SmallFiles),
+            "files-with-delete" => Ok(CompactionType::FilesWithDelete),
+            _ => Err(format!(
+                "Unknown compaction type '{}', must be one of: 'full', 'small-files', 'files-with-delete'",
+                s // 使用原始输入字符串来显示错误，而不是规范化后的
+            )),
+        }
+    }
 }
 
 #[serde_as]
@@ -201,7 +277,11 @@ pub struct IcebergConfig {
     pub enable_snapshot_expiration: bool,
 
     /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
-    #[serde(rename = "write_mode", default = "default_iceberg_write_mode")]
+    #[serde(
+        rename = "write_mode",
+        default = "default_iceberg_write_mode",
+        deserialize_with = "deserialize_and_normalize_string"
+    )]
     pub write_mode: String,
 
     /// The maximum age (in milliseconds) for snapshots before they expire
@@ -235,10 +315,40 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
-    #[serde(rename = "max_snapshots_num_before_compaction", default)]
+    #[serde(rename = "compaction.max_snapshots_num", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub max_snapshots_num_before_compaction: Option<usize>,
+
+    #[serde(rename = "compaction.small_files_threshold_mb", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub small_files_threshold_mb: Option<u64>,
+
+    #[serde(rename = "compaction.delete_files_count_threshold", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub delete_files_count_threshold: Option<usize>,
+
+    #[serde(rename = "compaction.trigger_snapshot_count", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub trigger_snapshot_count: Option<usize>,
+
+    #[serde(rename = "compaction.target_file_size_mb", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub target_file_size_mb: Option<u64>,
+
+    /// Compaction type: `full`, `small-files`, or `files-with-delete`
+    /// If not set, will default to `full`
+    #[serde(
+        rename = "compaction.type",
+        default,
+        deserialize_with = "deserialize_and_normalize_optional_string"
+    )]
+    #[with_option(allow_alter_on_fly)]
+    pub compaction_type: Option<String>,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -275,13 +385,13 @@ impl IcebergConfig {
             if let Some(primary_key) = &config.primary_key {
                 if primary_key.is_empty() {
                     return Err(SinkError::Config(anyhow!(
-                        "`primary_key` must not be empty in {}",
+                        "`primary-key` must not be empty in {}",
                         SINK_TYPE_UPSERT
                     )));
                 }
             } else {
                 return Err(SinkError::Config(anyhow!(
-                    "Must set `primary_key` in {}",
+                    "Must set `primary-key` in {}",
                     SINK_TYPE_UPSERT
                 )));
             }
@@ -302,8 +412,14 @@ impl IcebergConfig {
 
         if config.commit_checkpoint_interval == 0 {
             return Err(SinkError::Config(anyhow!(
-                "`commit_checkpoint_interval` must be greater than 0"
+                "`commit-checkpoint-interval` must be greater than 0"
             )));
+        }
+
+        // Validate compaction_type early
+        if let Some(ref compaction_type_str) = config.compaction_type {
+            CompactionType::from_str(compaction_type_str)
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
         }
 
         Ok(config)
@@ -345,6 +461,31 @@ impl IcebergConfig {
     pub fn snapshot_expiration_timestamp_ms(&self, current_time_ms: i64) -> Option<i64> {
         self.snapshot_expiration_max_age_millis
             .map(|max_age_millis| current_time_ms - max_age_millis)
+    }
+
+    pub fn trigger_snapshot_count(&self) -> usize {
+        self.trigger_snapshot_count.unwrap_or(16)
+    }
+
+    pub fn small_files_threshold_mb(&self) -> u64 {
+        self.small_files_threshold_mb.unwrap_or(64)
+    }
+
+    pub fn delete_files_count_threshold(&self) -> usize {
+        self.delete_files_count_threshold.unwrap_or(256)
+    }
+
+    pub fn target_file_size_mb(&self) -> u64 {
+        self.target_file_size_mb.unwrap_or(1024)
+    }
+
+    /// Get the compaction type as an enum
+    /// This method parses the string and returns the enum value
+    pub fn compaction_type(&self) -> CompactionType {
+        self.compaction_type
+            .as_deref()
+            .and_then(|s| CompactionType::from_str(s).ok())
+            .unwrap_or_default()
     }
 }
 
@@ -584,10 +725,73 @@ impl Sink for IcebergSink {
         if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
             bail!("Snowflake catalog only supports iceberg sources");
         }
+
         if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        // Validate compaction type configuration
+        let compaction_type = self.config.compaction_type();
+
+        // Check COW mode constraints
+        // COW mode only supports 'full' compaction type
+        if self.config.write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE
+            && compaction_type != CompactionType::Full
+        {
+            bail!(
+                "'copy-on-write' mode only supports 'full' compaction type, got: '{}'",
+                compaction_type
+            );
+        }
+
+        match compaction_type {
+            CompactionType::SmallFiles => {
+                // 1. check license
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                // 2. check write mode
+                if self.config.write_mode != ICEBERG_WRITE_MODE_MERGE_ON_READ {
+                    bail!(
+                        "'small-files' compaction type only supports 'merge-on-read' write mode, got: '{}'",
+                        self.config.write_mode
+                    );
+                }
+
+                // 3. check conflicting parameters
+                if self.config.delete_files_count_threshold.is_some() {
+                    bail!(
+                        "`compaction.delete-files-count-threshold` is not supported for 'small-files' compaction type"
+                    );
+                }
+            }
+            CompactionType::FilesWithDelete => {
+                // 1. check license
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                // 2. check write mode
+                if self.config.write_mode != ICEBERG_WRITE_MODE_MERGE_ON_READ {
+                    bail!(
+                        "'files-with-delete' compaction type only supports 'merge-on-read' write mode, got: '{}'",
+                        self.config.write_mode
+                    );
+                }
+
+                // 3. check conflicting parameters
+                if self.config.small_files_threshold_mb.is_some() {
+                    bail!(
+                        "`compaction.small-files-threshold-mb` must not be set for 'files-with-delete' compaction type"
+                    );
+                }
+            }
+            CompactionType::Full => {
+                // Full compaction has no special requirements
+            }
         }
 
         let _ = self.create_and_validate_table().await?;
@@ -597,25 +801,27 @@ impl Sink for IcebergSink {
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
         let iceberg_config = IcebergConfig::from_btreemap(config.clone())?;
 
+        // Validate compaction interval
         if let Some(compaction_interval) = iceberg_config.compaction_interval_sec {
             if iceberg_config.enable_compaction && compaction_interval == 0 {
                 bail!(
-                    "`compaction_interval_sec` must be greater than 0 when `enable_compaction` is true"
-                );
-            } else {
-                // log compaction_interval
-                tracing::info!(
-                    "Alter config compaction_interval set to {} seconds",
-                    compaction_interval
+                    "`compaction-interval-sec` must be greater than 0 when `enable-compaction` is true"
                 );
             }
+
+            // log compaction_interval
+            tracing::info!(
+                "Alter config compaction_interval set to {} seconds",
+                compaction_interval
+            );
         }
 
+        // Validate max snapshots
         if let Some(max_snapshots) = iceberg_config.max_snapshots_num_before_compaction
             && max_snapshots < 1
         {
             bail!(
-                "`max_snapshots_num_before_compaction` must be greater than 0, got: {}",
+                "`compaction.max-snapshots-num` must be greater than 0, got: {}",
                 max_snapshots
             );
         }
@@ -2216,8 +2422,8 @@ mod test {
     use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
     use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
-        COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-        ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, MAX_SNAPSHOTS_NUM,
+        COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION,
+        ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig,
         SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
         SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     };
@@ -2425,19 +2631,24 @@ mod test {
             common: IcebergCommon {
                 warehouse_path: Some("s3://iceberg".to_owned()),
                 catalog_uri: Some("jdbc://postgresql://postgres:5432/iceberg".to_owned()),
-                region: Some("us-east-1".to_owned()),
-                endpoint: Some("http://127.0.0.1:9301".to_owned()),
-                access_key: Some("hummockadmin".to_owned()),
-                secret_key: Some("hummockadmin".to_owned()),
+                s3_region: Some("us-east-1".to_owned()),
+                s3_endpoint: Some("http://127.0.0.1:9301".to_owned()),
+                s3_access_key: Some("hummockadmin".to_owned()),
+                s3_secret_key: Some("hummockadmin".to_owned()),
+                s3_iam_role_arn: None,
                 gcs_credential: None,
                 catalog_type: Some("jdbc".to_owned()),
                 glue_id: None,
+                glue_region: None,
+                glue_access_key: None,
+                glue_secret_key: None,
+                glue_iam_role_arn: None,
                 catalog_name: Some("demo".to_owned()),
-                path_style_access: Some(true),
-                credential: None,
-                oauth2_server_uri: None,
-                scope: None,
-                token: None,
+                s3_path_style_access: Some(true),
+                catalog_credential: None,
+                catalog_oauth2_server_uri: None,
+                catalog_scope: None,
+                catalog_token: None,
                 enable_config_load: None,
                 rest_signing_name: None,
                 rest_signing_region: None,
@@ -2446,7 +2657,7 @@ mod test {
                 azblob_account_name: None,
                 azblob_account_key: None,
                 azblob_endpoint_url: None,
-                header: None,
+                catalog_header: None,
                 adlsgen2_account_name: None,
                 adlsgen2_account_key: None,
                 adlsgen2_endpoint: None,
@@ -2477,6 +2688,11 @@ mod test {
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true,
             max_snapshots_num_before_compaction: None,
+            small_files_threshold_mb: None,
+            delete_files_count_threshold: None,
+            trigger_snapshot_count: None,
+            target_file_size_mb: None,
+            compaction_type: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
@@ -2490,9 +2706,7 @@ mod test {
     async fn test_create_catalog(configs: BTreeMap<String, String>) {
         let iceberg_config = IcebergConfig::from_btreemap(configs).unwrap();
 
-        let table = iceberg_config.load_table().await.unwrap();
-
-        println!("{:?}", table.identifier());
+        let _table = iceberg_config.load_table().await.unwrap();
     }
 
     #[tokio::test]
@@ -2624,6 +2838,49 @@ mod test {
             SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
             "snapshot_expiration_clear_expired_meta_data"
         );
-        assert_eq!(MAX_SNAPSHOTS_NUM, "max_snapshots_num_before_compaction");
+        assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
+    }
+
+    #[test]
+    fn test_parse_iceberg_compaction_config() {
+        // Test parsing with new compaction.* prefix config names
+        let values = [
+            ("connector", "iceberg"),
+            ("type", "upsert"),
+            ("primary_key", "id"),
+            ("warehouse.path", "s3://iceberg"),
+            ("s3.endpoint", "http://127.0.0.1:9301"),
+            ("s3.access.key", "test"),
+            ("s3.secret.key", "test"),
+            ("s3.region", "us-east-1"),
+            ("catalog.type", "storage"),
+            ("catalog.name", "demo"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+            ("enable_compaction", "true"),
+            ("compaction.max_snapshots_num", "100"),
+            ("compaction.small_files_threshold_mb", "512"),
+            ("compaction.delete_files_count_threshold", "50"),
+            ("compaction.trigger_snapshot_count", "10"),
+            ("compaction.target_file_size_mb", "256"),
+            ("compaction.type", "full"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify all compaction config fields are parsed correctly
+        assert!(iceberg_config.enable_compaction);
+        assert_eq!(
+            iceberg_config.max_snapshots_num_before_compaction,
+            Some(100)
+        );
+        assert_eq!(iceberg_config.small_files_threshold_mb, Some(512));
+        assert_eq!(iceberg_config.delete_files_count_threshold, Some(50));
+        assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
+        assert_eq!(iceberg_config.target_file_size_mb, Some(256));
+        assert_eq!(iceberg_config.compaction_type, Some("full".to_owned()));
     }
 }

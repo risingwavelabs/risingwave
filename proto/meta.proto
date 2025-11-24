@@ -372,7 +372,7 @@ message RecoverResponse {}
 
 message AlterConnectorPropsRequest {
   message AlterIcebergTableIds {
-    int32 source_id = 1;
+    uint32 source_id = 1;
     uint32 sink_id = 2;
   }
   enum AlterConnectorPropsObject {

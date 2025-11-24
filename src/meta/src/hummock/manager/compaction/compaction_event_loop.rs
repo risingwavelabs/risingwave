@@ -650,7 +650,8 @@ impl IcebergCompactionEventHandler {
 
             let iceberg_compaction_handles = self
                 .compaction_manager
-                .get_top_n_iceberg_commit_sink_ids(pull_task_count);
+                .get_top_n_iceberg_commit_sink_ids(pull_task_count)
+                .await;
 
             for handle in iceberg_compaction_handles {
                 let compactor = compactor.clone();

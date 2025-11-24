@@ -73,15 +73,6 @@ pub mod worker_property;
 
 pub type TransactionId = i32;
 
-type RawObjectId = i32;
-pub type ObjectId = RawObjectId;
-pub type SourceId = RawObjectId;
-pub type SubscriptionId = RawObjectId;
-pub type IndexId = RawObjectId;
-pub type ViewId = RawObjectId;
-pub type FunctionId = RawObjectId;
-pub type ConnectionId = RawObjectId;
-pub type SecretId = RawObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;

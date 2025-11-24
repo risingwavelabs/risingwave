@@ -247,7 +247,11 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
     object: Option<TelemetryDatabaseObject>,
-) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
+) -> RwResult<(
+    WithOptionsSecResolved,
+    PbConnectionType,
+    Option<ConnectionId>,
+)> {
     let connector_name = with_options.get_connector();
     let db_name: &str = &session.database();
     let (mut options, secret_refs, connection_refs) = with_options.into_parts();
@@ -393,7 +397,7 @@ fn resolve_secret_refs_inner(
             SecretRefAsType::File => PbRefAsType::File,
         };
         let pb_secret_ref = PbSecretRef {
-            secret_id: secret_catalog.id.secret_id(),
+            secret_id: secret_catalog.id,
             ref_as: ref_as.into(),
         };
         resolved_secret_refs.insert(key.clone(), pb_secret_ref);

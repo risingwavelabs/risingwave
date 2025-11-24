@@ -747,7 +747,7 @@ async fn resolve_source_fragments<C>(
 where
     C: ConnectionTrait,
 {
-    let mut source_fragment_ids = HashMap::new();
+    let mut source_fragment_ids: HashMap<SourceId, _> = HashMap::new();
     for (fragment_id, fragment) in fragment_map {
         let mask = FragmentTypeMask::from(fragment.fragment_type_mask);
         if mask.contains(FragmentTypeFlag::Source)
@@ -1199,6 +1199,7 @@ mod tests {
             job_status: JobStatus::Created,
             create_type: CreateType::Foreground,
             timezone: None,
+            config_override: None,
             parallelism: StreamingParallelism::Fixed(1),
             max_parallelism: 1,
             specific_resource_group: None,
@@ -1291,6 +1292,7 @@ mod tests {
             job_status: JobStatus::Created,
             create_type: CreateType::Background,
             timezone: None,
+            config_override: None,
             parallelism: StreamingParallelism::Fixed(2),
             max_parallelism: 2,
             specific_resource_group: None,
@@ -1383,7 +1385,7 @@ mod tests {
         let downstream_fragment_id: FragmentId = 12.into();
         let job_id: JobId = 30.into();
         let database_id: DatabaseId = DatabaseId::new(7);
-        let source_id: SourceId = 99;
+        let source_id: SourceId = 99.into();
 
         let source_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::Source]) as i32;
         let source_scan_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::SourceScan]) as i32;
@@ -1411,6 +1413,7 @@ mod tests {
             job_status: JobStatus::Created,
             create_type: CreateType::Background,
             timezone: None,
+            config_override: None,
             parallelism: StreamingParallelism::Fixed(2),
             max_parallelism: 2,
             specific_resource_group: None,

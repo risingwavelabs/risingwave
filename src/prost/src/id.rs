@@ -25,6 +25,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror_ext::AsReport;
 use tracing::warn;
 
+use crate::catalog::source::OptionalAssociatedTableId;
+use crate::catalog::table::OptionalAssociatedSourceId;
+
 pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 
 #[derive(Clone, Copy, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
@@ -62,8 +65,12 @@ impl<const N: usize> TypedId<N> {
         TypedId(inner)
     }
 
-    pub fn as_raw_id(&self) -> u32 {
+    pub fn as_raw_id(self) -> u32 {
         self.0
+    }
+
+    pub fn as_i32_id(self) -> i32 {
+        self.to_i32()
     }
 
     pub const fn placeholder() -> Self {
@@ -93,6 +100,27 @@ impl<const N: usize> TypedId<N> {
                 inner as _
             }
         }))
+    }
+
+    fn to_i32(self) -> i32 {
+        self.0.try_into().unwrap_or_else(|e: TryFromIntError| {
+            if cfg!(debug_assertions) {
+                panic!(
+                    "invalid u32 id {} for {}: {:?}",
+                    self.0,
+                    type_name::<Self>(),
+                    e.as_report()
+                );
+            } else {
+                warn!(
+                    "invalid u32 id {} for {}: {:?}",
+                    self.0,
+                    type_name::<Self>(),
+                    e.as_report()
+                );
+                self.0 as _
+            }
+        })
     }
 
     pub fn raw_slice(slice: &[Self]) -> &[u32] {
@@ -134,25 +162,7 @@ impl<const N: usize> From<u32> for TypedId<N> {
 
 impl<const N: usize> From<TypedId<N>> for sea_orm::Value {
     fn from(value: TypedId<N>) -> Self {
-        let inner: i32 = value.0.try_into().unwrap_or_else(|e: TryFromIntError| {
-            if cfg!(debug_assertions) {
-                panic!(
-                    "invalid u32 id {} for {}: {:?}",
-                    value.0,
-                    type_name::<Self>(),
-                    e.as_report()
-                );
-            } else {
-                warn!(
-                    "invalid u32 id {} for {}: {:?}",
-                    value.0,
-                    type_name::<Self>(),
-                    e.as_report()
-                );
-                value.0 as _
-            }
-        });
-        sea_orm::Value::from(inner)
+        sea_orm::Value::from(value.to_i32())
     }
 }
 
@@ -235,6 +245,16 @@ pub type FragmentId = TypedId<5>;
 pub type ActorId = TypedId<6>;
 pub type WorkerId = TypedId<7>;
 pub type SinkId = TypedId<8>;
+pub type SourceId = TypedId<9>;
+
+pub type SubscriptionId = TypedId<10>;
+pub type IndexId = TypedId<11>;
+pub type ViewId = TypedId<12>;
+pub type FunctionId = TypedId<13>;
+pub type ConnectionId = TypedId<14>;
+pub type SecretId = TypedId<15>;
+
+pub type ObjectId = TypedId<256>;
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {
@@ -248,6 +268,14 @@ impl JobId {
     pub fn as_sink_id(self) -> SinkId {
         SinkId::new(self.0)
     }
+
+    pub fn as_shared_source_id(self) -> SourceId {
+        SourceId::new(self.0)
+    }
+
+    pub fn as_index_id(self) -> IndexId {
+        IndexId::new(self.0)
+    }
 }
 
 impl TableId {
@@ -256,9 +284,51 @@ impl TableId {
     }
 }
 
+impl From<OptionalAssociatedTableId> for TableId {
+    fn from(value: OptionalAssociatedTableId) -> Self {
+        let OptionalAssociatedTableId::AssociatedTableId(table_id) = value;
+        Self(table_id)
+    }
+}
+
+impl From<TableId> for OptionalAssociatedTableId {
+    fn from(value: TableId) -> Self {
+        OptionalAssociatedTableId::AssociatedTableId(value.0)
+    }
+}
+
 impl SinkId {
     pub fn as_job_id(self) -> JobId {
         JobId::new(self.0)
+    }
+}
+
+impl IndexId {
+    pub fn as_job_id(self) -> JobId {
+        JobId::new(self.0)
+    }
+}
+
+impl SourceId {
+    pub fn as_share_source_job_id(self) -> JobId {
+        JobId::new(self.0)
+    }
+
+    pub fn as_cdc_table_id(self) -> TableId {
+        TableId::new(self.0)
+    }
+}
+
+impl From<OptionalAssociatedSourceId> for SourceId {
+    fn from(value: OptionalAssociatedSourceId) -> Self {
+        let OptionalAssociatedSourceId::AssociatedSourceId(source_id) = value;
+        Self(source_id)
+    }
+}
+
+impl From<SourceId> for OptionalAssociatedSourceId {
+    fn from(value: SourceId) -> Self {
+        OptionalAssociatedSourceId::AssociatedSourceId(value.0)
     }
 }
 
@@ -279,7 +349,13 @@ impl_into_object!(
     DatabaseId,
     TableId,
     SchemaId,
-    SinkId
+    SinkId,
+    SourceId,
+    SubscriptionId,
+    ViewId,
+    FunctionId,
+    ConnectionId,
+    SecretId
 );
 
 impl_into_object!(
@@ -287,7 +363,11 @@ impl_into_object!(
     DatabaseId,
     TableId,
     SchemaId,
-    SinkId
+    SinkId,
+    SourceId,
+    SubscriptionId,
+    IndexId,
+    ViewId
 );
 
 impl_into_object!(
@@ -295,5 +375,82 @@ impl_into_object!(
     DatabaseId,
     TableId,
     SchemaId,
-    SinkId
+    SinkId,
+    SourceId,
+    SubscriptionId,
+    ViewId,
+    ConnectionId
+);
+
+impl_into_object!(
+    crate::ddl_service::alter_set_schema_request::Object,
+    TableId,
+    ViewId,
+    SourceId,
+    SinkId,
+    SubscriptionId,
+    FunctionId,
+    ConnectionId
+);
+
+macro_rules! impl_into_rename_object {
+    ($($type_name:ident),+) => {
+        paste::paste! {
+            $(
+                impl From<([<$type_name Id>], [<$type_name Id>])> for crate::ddl_service::alter_swap_rename_request::Object {
+                    fn from((src_object_id, dst_object_id): ([<$type_name Id>], [<$type_name Id>])) -> Self {
+                        crate::ddl_service::alter_swap_rename_request::Object::$type_name(crate::ddl_service::alter_swap_rename_request::ObjectNameSwapPair {
+                            src_object_id: src_object_id.as_object_id(),
+                            dst_object_id: dst_object_id.as_object_id(),
+                        })
+                    }
+                }
+            )+
+        }
+    };
+}
+
+impl_into_rename_object!(Table, View, Source, Sink, Subscription);
+
+macro_rules! impl_object_id_conversion {
+    ($($type_name:ident),+) => {
+        $(
+            impl From<$type_name> for ObjectId {
+                fn from(value: $type_name) -> Self {
+                    Self::new(value.0)
+                }
+            }
+
+            impl $type_name {
+                pub fn as_object_id(self) -> ObjectId {
+                    ObjectId::new(self.0)
+                }
+            }
+        )+
+
+        paste::paste! {
+            impl ObjectId {
+                $(
+                    pub fn [< as_ $type_name:snake>](self) -> $type_name {
+                        $type_name::new(self.0)
+                    }
+                )+
+            }
+        }
+    };
+}
+
+impl_object_id_conversion!(
+    DatabaseId,
+    TableId,
+    SchemaId,
+    SinkId,
+    SourceId,
+    JobId,
+    SubscriptionId,
+    IndexId,
+    ViewId,
+    FunctionId,
+    ConnectionId,
+    SecretId
 );

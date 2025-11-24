@@ -54,7 +54,7 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
             let resource = worker.resource.as_ref();
             let is_compute = worker.get_type().unwrap() == WorkerType::ComputeNode;
             RwWorkerNode {
-                id: worker.id.as_raw_id() as i32,
+                id: worker.id.as_i32_id(),
                 host: host.map(|h| h.host.clone()),
                 port: host.map(|h| h.port.to_string()),
                 r#type: worker.get_type().unwrap().as_str_name().into(),

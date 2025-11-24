@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
-use risingwave_meta_model::{ObjectId, SinkId, SourceId, WorkerId};
+use risingwave_meta_model::{SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -694,7 +694,7 @@ impl MetadataManager {
 
     pub async fn get_job_backfill_scan_types(
         &self,
-        job_id: ObjectId,
+        job_id: JobId,
     ) -> MetaResult<HashMap<FragmentId, PbStreamScanType>> {
         let backfill_types = self
             .catalog_controller
@@ -708,7 +708,7 @@ impl MetadataManager {
     /// Wait for job finishing notification in `TrackingJob::finish`.
     /// The progress is updated per barrier.
     #[await_tree::instrument]
-    pub(crate) async fn wait_streaming_job_finished(
+    pub async fn wait_streaming_job_finished(
         &self,
         database_id: DatabaseId,
         id: JobId,
@@ -731,10 +731,5 @@ impl MetadataManager {
     pub(crate) async fn notify_finish_failed(&self, database_id: Option<DatabaseId>, err: String) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         mgr.notify_finish_failed(database_id, err);
-    }
-
-    pub(crate) async fn notify_cancelled(&self, database_id: DatabaseId, job_id: JobId) {
-        let mut mgr = self.catalog_controller.get_inner_write_guard().await;
-        mgr.notify_cancelled(database_id, job_id);
     }
 }
