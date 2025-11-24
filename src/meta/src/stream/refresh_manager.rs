@@ -262,6 +262,7 @@ impl GlobalRefreshManager {
             .refresh_cron_job_trigger_cnt
             .with_guarded_label_values(&[&table_id_str])
             .inc();
+        tracing::info!(table_id = %job.table_id, "trigger scheduled refresh at interval {:?}", interval);
 
         self.ensure_refreshable(job.table_id, associated_source_id)
             .await?;
@@ -276,7 +277,6 @@ impl GlobalRefreshManager {
         associated_source_id: SourceId,
         shared_actor_infos: &SharedActorInfos,
     ) -> MetaResult<()> {
-        let start_time = std::time::Instant::now();
         let trigger_time = Utc::now().naive_utc();
         let database_id = self
             .metadata_manager
@@ -342,8 +342,7 @@ impl GlobalRefreshManager {
 
         match result {
             Ok(_) => {
-                let duration = start_time.elapsed();
-                tracing::info!(table_id = %table_id, duration = ?duration, "refresh command scheduled");
+                tracing::info!(table_id = %table_id, "refresh command scheduled");
                 Ok(())
             }
             Err(err) => {
