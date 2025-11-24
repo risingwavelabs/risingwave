@@ -27,7 +27,6 @@ use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use thiserror_ext::AsReport;
@@ -39,7 +38,7 @@ use crate::barrier::checkpoint::recovery::{
     DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
     RecoveringStateAction,
 };
-use crate::barrier::checkpoint::state::BarrierWorkerState;
+use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::SharedActorInfos;
@@ -51,7 +50,6 @@ use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType};
-use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::fill_snapshot_backfill_epoch;
@@ -191,7 +189,7 @@ impl CheckpointControl {
                         if let Some(database) = database.running_state()
                             && database
                                 .state
-                                .inflight_graph_info
+                                .database_info
                                 .contains_job(table_id.as_job_id())
                         {
                             if let Some(committed_epoch) = database.committed_epoch {
@@ -307,7 +305,7 @@ impl CheckpointControl {
             progress.extend(
                 database_checkpoint_control
                     .state
-                    .inflight_graph_info
+                    .database_info
                     .gen_ddl_progress(),
             );
             // Progress of snapshot backfill
@@ -340,7 +338,7 @@ impl CheckpointControl {
             if !database_checkpoint_control.is_valid_after_worker_err(worker_id as _)
                 || database_checkpoint_control
                     .state
-                    .inflight_graph_info
+                    .database_info
                     .contains_worker(worker_id as _)
                 || database_checkpoint_control
                     .creating_streaming_job_controls
@@ -593,23 +591,12 @@ impl DatabaseCheckpointControl {
             .set(self.total_command_num() as i64);
     }
 
-    #[expect(clippy::type_complexity)]
-    fn jobs_to_merge(
-        &self,
-    ) -> Option<HashMap<JobId, (HashSet<TableId>, HashMap<FragmentId, InflightFragmentInfo>)>> {
+    fn jobs_to_merge(&self) -> Option<HashMap<JobId, HashSet<TableId>>> {
         let mut job_ids_to_merge = HashMap::new();
 
         for (job_id, creating_streaming_job) in &self.creating_streaming_job_controls {
-            if let Some(graph_info) = creating_streaming_job.should_merge_to_upstream() {
-                job_ids_to_merge.insert(
-                    *job_id,
-                    (
-                        creating_streaming_job
-                            .snapshot_backfill_upstream_tables
-                            .clone(),
-                        graph_info.clone(),
-                    ),
-                );
+            if let Some(upstream_table_ids) = creating_streaming_job.should_merge_to_upstream() {
+                job_ids_to_merge.insert(*job_id, upstream_table_ids.clone());
             }
         }
         if job_ids_to_merge.is_empty() {
@@ -817,7 +804,7 @@ impl DatabaseCheckpointControl {
 
                 self.handle_refresh_table_info(task, &node);
 
-                self.state.inflight_graph_info.apply_collected_command(
+                self.state.database_info.apply_collected_command(
                     node.command_ctx.command.as_ref(),
                     node.state.resps.iter(),
                     hummock_version_stats,
@@ -830,7 +817,7 @@ impl DatabaseCheckpointControl {
                         notifier.notify_collected();
                     });
                     if let Some((periodic_barriers, _)) = &mut context
-                        && self.state.inflight_graph_info.has_pending_finished_jobs()
+                        && self.state.database_info.has_pending_finished_jobs()
                         && self
                             .command_ctx_queue
                             .values()
@@ -840,8 +827,7 @@ impl DatabaseCheckpointControl {
                     }
                     continue;
                 }
-                let mut staging_commit_info =
-                    self.state.inflight_graph_info.take_staging_commit_info();
+                let mut staging_commit_info = self.state.database_info.take_staging_commit_info();
                 node.state
                     .finished_jobs
                     .drain()
@@ -879,7 +865,10 @@ impl DatabaseCheckpointControl {
                     &mut task.commit_info,
                     epoch,
                     resps,
-                    self.creating_streaming_job_controls[&job_id].state_table_ids(),
+                    self.creating_streaming_job_controls[&job_id]
+                        .state_table_ids()
+                        .iter()
+                        .copied(),
                     is_first_time,
                 );
                 let (_, creating_job_epochs) =
@@ -1052,7 +1041,7 @@ impl DatabaseCheckpointControl {
 
         let mut edges = self
             .state
-            .inflight_graph_info
+            .database_info
             .build_edge(command.as_ref(), &*control_stream_manager);
 
         // Insert newly added creating job
@@ -1123,12 +1112,10 @@ impl DatabaseCheckpointControl {
                         edges.as_mut().expect("should exist"),
                     )?;
 
-                    self.state.inflight_graph_info.shared_actor_infos.upsert(
-                        self.database_id,
-                        job.graph_info()
-                            .values()
-                            .map(|fragment| (fragment, job.job_id)),
-                    );
+                    self.state
+                        .database_info
+                        .shared_actor_infos
+                        .upsert(self.database_id, job.fragment_infos_with_job_id());
 
                     self.creating_streaming_job_controls.insert(job_id, job);
                 }
@@ -1140,8 +1127,7 @@ impl DatabaseCheckpointControl {
             if let Some(jobs_to_merge) = self.jobs_to_merge() {
                 command = Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge));
             } else {
-                let pending_backfill_nodes =
-                    self.state.inflight_graph_info.take_pending_backfill_nodes();
+                let pending_backfill_nodes = self.state.database_info.take_pending_backfill_nodes();
                 if !pending_backfill_nodes.is_empty() {
                     command = Some(Command::StartFragmentBackfill {
                         fragment_ids: pending_backfill_nodes,
@@ -1150,34 +1136,47 @@ impl DatabaseCheckpointControl {
             }
         }
 
+        let mut finished_snapshot_backfill_job_fragments = HashMap::new();
+        for (job_id, creating_job) in &mut self.creating_streaming_job_controls {
+            if let Some(finished_job_fragments) = creating_job.on_new_command(
+                control_stream_manager,
+                command.as_ref(),
+                &barrier_info,
+            )? {
+                finished_snapshot_backfill_job_fragments.insert(*job_id, finished_job_fragments);
+            }
+        }
+
         let command = command;
 
-        let (
-            pre_applied_graph_info,
+        let ApplyCommandInfo {
+            node_actors,
+            actors_to_create,
             mv_subscription_max_retention,
             table_ids_to_commit,
+            table_ids_to_sync,
             jobs_to_wait,
-            prev_paused_reason,
-        ) = self.state.apply_command(command.as_ref());
+            mutation,
+        } = self.state.apply_command(
+            command.as_ref(),
+            finished_snapshot_backfill_job_fragments,
+            &mut edges,
+            control_stream_manager,
+        );
 
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
             tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch.value().0, "new barrier enqueued");
         });
         span.record("epoch", barrier_info.curr_epoch.value().0);
-
-        for creating_job in &mut self.creating_streaming_job_controls.values_mut() {
-            creating_job.on_new_command(control_stream_manager, command.as_ref(), &barrier_info)?;
-        }
-
-        let node_to_collect = match control_stream_manager.inject_command_ctx_barrier(
+        let node_to_collect = match control_stream_manager.inject_barrier(
             self.database_id,
-            command.as_ref(),
+            None,
+            mutation,
             &barrier_info,
-            prev_paused_reason,
-            &pre_applied_graph_info,
-            &self.state.inflight_graph_info,
-            &mut edges,
+            &node_actors,
+            table_ids_to_sync.iter().copied(),
+            actors_to_create,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {

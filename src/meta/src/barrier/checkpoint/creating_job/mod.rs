@@ -29,7 +29,7 @@ use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_
 use risingwave_meta_model::{CreateType, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -61,7 +61,8 @@ pub(crate) struct CreatingStreamingJobControl {
     pub(super) snapshot_backfill_upstream_tables: HashSet<TableId>,
     backfill_epoch: u64,
 
-    fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+    node_actors: HashMap<WorkerId, HashSet<ActorId>>,
+    state_table_ids: HashSet<TableId>,
 
     barrier_control: CreatingStreamingJobBarrierControl,
     status: CreatingStreamingJobStatus,
@@ -156,14 +157,18 @@ impl CreatingStreamingJobControl {
             new_upstream_sinks: Default::default(),
         });
 
+        let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
+        let state_table_ids =
+            InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
+
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
         Self::inject_barrier(
             database_id,
             job_id,
             control_stream_manager,
             &mut barrier_control,
-            &fragment_infos,
-            Some(&fragment_infos),
+            &node_actors,
+            Some(&state_table_ids),
             initial_barrier_info,
             Some(actors_to_create),
             Some(initial_mutation),
@@ -179,7 +184,6 @@ impl CreatingStreamingJobControl {
             snapshot_backfill_upstream_tables,
             barrier_control,
             backfill_epoch,
-            fragment_infos,
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,
                 pending_upstream_barriers: vec![],
@@ -187,11 +191,14 @@ impl CreatingStreamingJobControl {
                 create_mview_tracker,
                 snapshot_backfill_actors,
                 backfill_epoch,
+                fragment_infos,
                 pending_non_checkpoint_barriers,
             },
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
+            node_actors,
+            state_table_ids,
         })
     }
 
@@ -251,7 +258,7 @@ impl CreatingStreamingJobControl {
         backfill_epoch: u64,
         committed_epoch: u64,
         upstream_curr_epoch: u64,
-        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         version_stat: &HummockVersionStats,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
         let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
@@ -259,7 +266,7 @@ impl CreatingStreamingJobControl {
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
             definition.clone(),
-            fragment_infos,
+            &fragment_infos,
             Default::default(),
             version_stat,
         );
@@ -280,9 +287,10 @@ impl CreatingStreamingJobControl {
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
                 snapshot_backfill_actors: InflightStreamingJobInfo::snapshot_backfill_actor_ids(
-                    fragment_infos,
+                    &fragment_infos,
                 )
                 .collect(),
+                fragment_infos,
                 backfill_epoch,
                 pending_non_checkpoint_barriers,
             },
@@ -296,7 +304,7 @@ impl CreatingStreamingJobControl {
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         committed_epoch: u64,
         upstream_curr_epoch: u64,
-        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
         let mut barriers_to_inject = Self::resolve_upstream_log_epochs(
             snapshot_backfill_upstream_tables,
@@ -309,15 +317,16 @@ impl CreatingStreamingJobControl {
         first_barrier.kind = BarrierKind::Initial;
         Ok((
             CreatingStreamingJobStatus::ConsumingLogStore {
-                tracking_job: TrackingJob::recovered(job_id, fragment_infos),
+                tracking_job: TrackingJob::recovered(job_id, &fragment_infos),
                 log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                    InflightStreamingJobInfo::snapshot_backfill_actor_ids(fragment_infos),
+                    InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos),
                     barriers_to_inject
                         .last()
                         .map(|info| info.prev_epoch() - committed_epoch)
                         .unwrap_or(0),
                 ),
                 barriers_to_inject: Some(barriers_to_inject),
+                fragment_infos,
             },
             first_barrier,
         ))
@@ -347,6 +356,10 @@ impl CreatingStreamingJobControl {
         let mut barrier_control =
             CreatingStreamingJobBarrierControl::new(job_id, backfill_epoch, true);
 
+        let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
+        let state_table_ids =
+            InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
+
         let (status, first_barrier_info) = if committed_epoch < backfill_epoch {
             Self::recover_consuming_snapshot(
                 job_id,
@@ -356,7 +369,7 @@ impl CreatingStreamingJobControl {
                 backfill_epoch,
                 committed_epoch,
                 upstream_curr_epoch,
-                &fragment_infos,
+                fragment_infos,
                 version_stat,
             )?
         } else {
@@ -366,17 +379,18 @@ impl CreatingStreamingJobControl {
                 upstream_table_log_epochs,
                 committed_epoch,
                 upstream_curr_epoch,
-                &fragment_infos,
+                fragment_infos,
             )?
         };
         control_stream_manager.add_partial_graph(database_id, Some(job_id));
+
         Self::inject_barrier(
             database_id,
             job_id,
             control_stream_manager,
             &mut barrier_control,
-            &fragment_infos,
-            Some(&fragment_infos),
+            &node_actors,
+            Some(&state_table_ids),
             first_barrier_info,
             Some(new_actors),
             Some(initial_mutation),
@@ -388,7 +402,8 @@ impl CreatingStreamingJobControl {
             create_type: CreateType::Background,
             snapshot_backfill_upstream_tables,
             backfill_epoch,
-            fragment_infos,
+            node_actors,
+            state_table_ids,
             barrier_control,
             status,
             upstream_lag: GLOBAL_META_METRICS
@@ -403,8 +418,13 @@ impl CreatingStreamingJobControl {
 
     pub(crate) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
         self.barrier_control.is_valid_after_worker_err(worker_id)
-            && (!self.status.is_finishing()
-                || InflightFragmentInfo::contains_worker(self.fragment_infos.values(), worker_id))
+            && self
+                .status
+                .fragment_infos()
+                .map(|fragment_infos| {
+                    InflightFragmentInfo::contains_worker(fragment_infos.values(), worker_id)
+                })
+                .unwrap_or(true)
     }
 
     pub(crate) fn gen_ddl_progress(&self) -> DdlProgress {
@@ -464,8 +484,8 @@ impl CreatingStreamingJobControl {
         job_id: JobId,
         control_stream_manager: &mut ControlStreamManager,
         barrier_control: &mut CreatingStreamingJobBarrierControl,
-        pre_applied_graph_info: &HashMap<FragmentId, InflightFragmentInfo>,
-        applied_graph_info: Option<&HashMap<FragmentId, InflightFragmentInfo>>,
+        node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
+        state_table_ids: Option<&HashSet<TableId>>,
         barrier_info: BarrierInfo,
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
@@ -475,11 +495,8 @@ impl CreatingStreamingJobControl {
             Some(job_id),
             mutation,
             &barrier_info,
-            pre_applied_graph_info.values(),
-            applied_graph_info
-                .map(|graph_info| graph_info.values())
-                .into_iter()
-                .flatten(),
+            node_actors,
+            state_table_ids.into_iter().flatten().copied(),
             new_actors,
         )?;
         barrier_control.enqueue_epoch(
@@ -495,17 +512,17 @@ impl CreatingStreamingJobControl {
         control_stream_manager: &mut ControlStreamManager,
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
-    ) -> MetaResult<()> {
-        let table_id = self.job_id;
+    ) -> MetaResult<Option<HashMap<FragmentId, InflightFragmentInfo>>> {
+        let job_id = self.job_id;
         let start_consume_upstream =
             if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
-                jobs_to_merge.contains_key(&table_id)
+                jobs_to_merge.contains_key(&job_id)
             } else {
                 false
             };
         if start_consume_upstream {
             info!(
-                job_id = %self.job_id,
+                %job_id,
                 prev_epoch = barrier_info.prev_epoch(),
                 "start consuming upstream"
             );
@@ -523,19 +540,20 @@ impl CreatingStreamingJobControl {
                 .0
                 .saturating_sub(progress_epoch) as _,
         );
-        if start_consume_upstream {
-            self.status.start_consume_upstream(barrier_info);
+        let fragment_infos = if start_consume_upstream {
+            let fragment_infos = self.status.start_consume_upstream(barrier_info);
             Self::inject_barrier(
                 self.database_id,
                 self.job_id,
                 control_stream_manager,
                 &mut self.barrier_control,
-                &self.fragment_infos,
+                &self.node_actors,
                 None,
                 barrier_info.clone(),
                 None,
                 None,
             )?;
+            Some(fragment_infos)
         } else {
             for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(barrier_info) {
                 Self::inject_barrier(
@@ -543,15 +561,16 @@ impl CreatingStreamingJobControl {
                     self.job_id,
                     control_stream_manager,
                     &mut self.barrier_control,
-                    &self.fragment_infos,
-                    Some(&self.fragment_infos),
+                    &self.node_actors,
+                    Some(&self.state_table_ids),
                     barrier_to_inject,
                     None,
                     mutation,
                 )?;
             }
-        }
-        Ok(())
+            None
+        };
+        Ok(fragment_infos)
     }
 
     pub(crate) fn collect(&mut self, resp: BarrierCompleteResponse) -> bool {
@@ -560,9 +579,7 @@ impl CreatingStreamingJobControl {
         self.should_merge_to_upstream().is_some()
     }
 
-    pub(super) fn should_merge_to_upstream(
-        &self,
-    ) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
+    pub(super) fn should_merge_to_upstream(&self) -> Option<&HashSet<TableId>> {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             log_store_progress_tracker,
             barriers_to_inject,
@@ -571,7 +588,7 @@ impl CreatingStreamingJobControl {
             && barriers_to_inject.is_none()
             && log_store_progress_tracker.is_finished()
         {
-            Some(&self.fragment_infos)
+            Some(&self.snapshot_backfill_upstream_tables)
         } else {
             None
         }
@@ -651,12 +668,17 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub fn state_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
-        InflightFragmentInfo::existing_table_ids(self.fragment_infos.values())
+    pub fn state_table_ids(&self) -> &HashSet<TableId> {
+        &self.state_table_ids
     }
 
-    pub fn graph_info(&self) -> &HashMap<FragmentId, InflightFragmentInfo> {
-        &self.fragment_infos
+    pub fn fragment_infos_with_job_id(
+        &self,
+    ) -> impl Iterator<Item = (&InflightFragmentInfo, JobId)> + '_ {
+        self.status
+            .fragment_infos()
+            .into_iter()
+            .flat_map(|fragments| fragments.values().map(|fragment| (fragment, self.job_id)))
     }
 
     pub fn into_tracking_job(self) -> TrackingJob {

@@ -59,7 +59,7 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::{BarrierKind, Command, TracedEpoch};
+use super::{BarrierKind, TracedEpoch};
 use crate::barrier::cdc_progress::CdcTableBackfillTrackerRef;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
@@ -67,8 +67,7 @@ use crate::barrier::checkpoint::{
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{
-    BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
-    SubscriberType,
+    BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
 };
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
@@ -836,13 +835,13 @@ impl ControlStreamManager {
         };
 
         let node_to_collect = {
-            let node_actors =
+            let new_actors =
                 edges.collect_actors_to_create(database_jobs.values().flat_map(move |job| {
-                    job.fragment_infos.values().map(move |fragment_info| {
+                    job.fragment_infos.values().map(move |fragment_infos| {
                         (
-                            fragment_info.fragment_id,
-                            &fragment_info.nodes,
-                            fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                            fragment_infos.fragment_id,
+                            &fragment_infos.nodes,
+                            fragment_infos.actors.iter().map(move |(actor_id, actor)| {
                                 (
                                     stream_actors.get(actor_id).expect("should exist"),
                                     actor.worker_id,
@@ -853,14 +852,17 @@ impl ControlStreamManager {
                     })
                 }));
 
+            let nodes_actors =
+                InflightFragmentInfo::actor_ids_to_collect(database_jobs.values().flatten());
+
             let node_to_collect = self.inject_barrier(
                 database_id,
                 None,
                 Some(mutation.clone()),
                 &barrier_info,
-                database_jobs.values().flatten(),
-                database_jobs.values().flatten(),
-                Some(node_actors),
+                &nodes_actors,
+                InflightFragmentInfo::existing_table_ids(database_jobs.values().flatten()),
+                Some(new_actors),
             )?;
             debug!(
                 ?node_to_collect,
@@ -875,11 +877,11 @@ impl ControlStreamManager {
         for (job_id, (info, definition, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
         {
-            let node_actors = edges.collect_actors_to_create(info.values().map(|fragment_info| {
+            let node_actors = edges.collect_actors_to_create(info.values().map(|fragment_infos| {
                 (
-                    fragment_info.fragment_id,
-                    &fragment_info.nodes,
-                    fragment_info.actors.iter().map(move |(actor_id, actor)| {
+                    fragment_infos.fragment_id,
+                    &fragment_infos.nodes,
+                    fragment_infos.actors.iter().map(move |(actor_id, actor)| {
                         (
                             stream_actors.get(actor_id).expect("should exist"),
                             actor.worker_id,
@@ -919,12 +921,8 @@ impl ControlStreamManager {
                 })
                 .chain(
                     creating_streaming_job_controls
-                        .iter()
-                        .flat_map(|(job_id, job)| {
-                            job.graph_info()
-                                .values()
-                                .map(|fragment| (fragment, *job_id))
-                        }),
+                        .values()
+                        .flat_map(|job| job.fragment_infos_with_job_id()),
                 ),
         );
 
@@ -948,31 +946,6 @@ impl ControlStreamManager {
         })
     }
 
-    pub(super) fn inject_command_ctx_barrier(
-        &mut self,
-        database_id: DatabaseId,
-        command: Option<&Command>,
-        barrier_info: &BarrierInfo,
-        is_paused: bool,
-        pre_applied_graph_info: &InflightDatabaseInfo,
-        applied_graph_info: &InflightDatabaseInfo,
-        edges: &mut Option<FragmentEdgeBuildResult>,
-    ) -> MetaResult<NodeToCollect> {
-        let mutation = command.and_then(|c| c.to_mutation(is_paused, edges, self));
-        self.inject_barrier(
-            database_id,
-            None,
-            mutation,
-            barrier_info,
-            pre_applied_graph_info.fragment_infos(),
-            applied_graph_info.fragment_infos(),
-            command
-                .as_ref()
-                .map(|command| command.actors_to_create(pre_applied_graph_info, edges, self))
-                .unwrap_or_default(),
-        )
-    }
-
     fn connected_workers(&self) -> impl Iterator<Item = (WorkerId, &ControlStreamNode)> + '_ {
         self.workers
             .iter()
@@ -984,14 +957,14 @@ impl ControlStreamManager {
             })
     }
 
-    pub(super) fn inject_barrier<'a>(
+    pub(super) fn inject_barrier(
         &mut self,
         database_id: DatabaseId,
         creating_job_id: Option<JobId>,
         mutation: Option<Mutation>,
         barrier_info: &BarrierInfo,
-        pre_applied_graph_info: impl IntoIterator<Item = &InflightFragmentInfo>,
-        applied_graph_info: impl IntoIterator<Item = &'a InflightFragmentInfo> + 'a,
+        node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
+        table_ids_to_sync: impl Iterator<Item = TableId>,
         mut new_actors: Option<StreamJobActorsToCreate>,
     ) -> MetaResult<NodeToCollect> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
@@ -999,8 +972,6 @@ impl ControlStreamManager {
         ));
 
         let partial_graph_id = to_partial_graph_id(creating_job_id);
-
-        let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
 
         for worker_id in node_actors.keys() {
             if let Some((_, worker_state)) = self.workers.get(worker_id)
@@ -1011,10 +982,8 @@ impl ControlStreamManager {
             }
         }
 
-        let table_ids_to_sync: HashSet<_> =
-            InflightFragmentInfo::existing_table_ids(applied_graph_info).collect();
-
         let mut node_need_collect = HashMap::new();
+        let table_ids_to_sync = table_ids_to_sync.collect_vec();
 
         self.connected_workers()
             .try_for_each(|(node_id, node)| {
@@ -1049,10 +1018,7 @@ impl ControlStreamManager {
                                         barrier: Some(barrier),
                                         database_id,
                                         actor_ids_to_collect,
-                                        table_ids_to_sync: table_ids_to_sync
-                                            .iter()
-                                            .cloned()
-                                            .collect(),
+                                        table_ids_to_sync: table_ids_to_sync.clone(),
                                         partial_graph_id,
                                         actors_to_build: new_actors
                                             .as_mut()

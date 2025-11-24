@@ -473,7 +473,7 @@ impl SourceManager {
     }
 }
 
-#[derive(strum::Display, Debug, Clone)]
+#[derive(strum::Display, Debug)]
 pub enum SourceChange {
     /// `CREATE SOURCE` (shared), or `CREATE MV`.
     /// This is applied after the job is successfully created (`post_collect` barrier).

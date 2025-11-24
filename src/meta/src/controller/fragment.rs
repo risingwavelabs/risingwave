@@ -86,7 +86,7 @@ use crate::stream::UpstreamSinkInfo;
 use crate::{MetaResult, model};
 
 /// Some information of running (inflight) actors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
@@ -104,15 +104,15 @@ struct ActorInfo {
     pub config_override: Arc<str>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct InflightFragmentInfo {
-    pub fragment_id: crate::model::FragmentId,
+    pub fragment_id: FragmentId,
     pub distribution_type: DistributionType,
     pub fragment_type_mask: FragmentTypeMask,
     pub vnode_count: usize,
     pub nodes: PbStreamNode,
-    pub actors: HashMap<crate::model::ActorId, InflightActorInfo>,
-    pub state_table_ids: HashSet<risingwave_common::catalog::TableId>,
+    pub actors: HashMap<ActorId, InflightActorInfo>,
+    pub state_table_ids: HashSet<TableId>,
 }
 
 #[derive(Clone, Debug)]
