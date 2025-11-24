@@ -401,13 +401,13 @@ impl CoordinationHandleManager {
                         }
                         Err(e) => {
                             tracing::error!(
-                                        error = %e.as_report(),
-                                        %self.param.sink_id,
-                                        "failed to commit epoch {}, attempt {}. Retrying after {:?}",
-                                        epoch,
-                                        self.two_phase_handler.last_attempt,
-                                        self.two_phase_handler.delay
-                                    );
+                                error = %e.as_report(),
+                                %self.param.sink_id,
+                                "failed to commit epoch {}, attempt {}. Retrying after {:?}",
+                                epoch,
+                                self.two_phase_handler.last_attempt,
+                                self.two_phase_handler.delay
+                            );
                         }
                     }
                 }
@@ -788,7 +788,6 @@ impl CoordinatorWorker {
                                 self.handle_manager
                                     .two_phase_handler
                                     .push_prepared(epoch, metadata);
-                                last_committed_epoch = Some(epoch);
                             }
                             SinkState::Aborted => {
                                 coordinator.abort(epoch, metadata).await;

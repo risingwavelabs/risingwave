@@ -81,17 +81,17 @@ pub async fn delete_aborted_and_outdated_records<C>(
 where
     C: ConnectionTrait,
 {
-    let reserved_min_epoch = last_committed_epoch
-        .map(|v| v as Epoch)
-        .unwrap_or(Epoch::MAX);
     let aborted_epochs: Vec<Epoch> = aborted_epochs.into_iter().map(|e| e as Epoch).collect();
+    let mut epoch_cond = pending_sink_state::Column::Epoch.is_in(aborted_epochs);
+    if let Some(last_committed_epoch) = last_committed_epoch {
+        epoch_cond =
+            epoch_cond.or(pending_sink_state::Column::Epoch.lt(last_committed_epoch as Epoch));
+    }
     match pending_sink_state::Entity::delete_many()
         .filter(
-            pending_sink_state::Column::SinkId.eq(sink_id).and(
-                pending_sink_state::Column::Epoch
-                    .is_in(aborted_epochs)
-                    .or(pending_sink_state::Column::Epoch.lt(reserved_min_epoch)),
-            ),
+            pending_sink_state::Column::SinkId
+                .eq(sink_id)
+                .and(epoch_cond),
         )
         .exec(db)
         .await
