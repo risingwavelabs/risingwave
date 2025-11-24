@@ -7832,12 +7832,9 @@ dependencies = [
 
 [[package]]
 name = "mach2"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1b95cd5421ec55b445b5ae102f5ea0e768de1f82bd3001e11f426c269c3aea"
-dependencies = [
- "libc",
-]
+checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "macro_magic"
@@ -8724,12 +8721,6 @@ checksum = "2819ce041d2ee131036f4fc9d6ae7ae125a3a40e97ba64d04fe799ad9dabbb44"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "number_prefix"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
 name = "oauth2"
@@ -11489,13 +11480,12 @@ dependencies = [
  "libc",
  "linkme",
  "lru 0.16.2",
- "mach2 0.5.0",
+ "mach2 0.6.0",
  "madsim-tokio",
  "memcomparable",
  "more-asserts",
  "num-integer",
  "num-traits",
- "number_prefix",
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot 0.12.1",
@@ -11551,6 +11541,7 @@ dependencies = [
  "tracing-futures",
  "tracing-opentelemetry",
  "twox-hash 2.1.0",
+ "unit-prefix",
  "url",
  "uuid",
  "workspace-hack",
@@ -11614,7 +11605,7 @@ dependencies = [
  "hytra",
  "itertools 0.14.0",
  "libc",
- "mach2 0.5.0",
+ "mach2 0.6.0",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -12572,6 +12563,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "await-tree",
+ "chrono",
  "futures",
  "itertools 0.14.0",
  "madsim-tokio",
@@ -12913,7 +12905,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "lz4",
- "mach2 0.5.0",
+ "mach2 0.6.0",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -12992,6 +12984,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
+ "moka",
  "multimap 0.10.0",
  "parking_lot 0.12.1",
  "pin-project",
@@ -16299,9 +16292,9 @@ checksum = "c7de7d73e1754487cb58364ee906a499937a0dfabd86bcb980fa99ec8c8fa2ce"
 
 [[package]]
 name = "unit-prefix"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "323402cff2dd658f39ca17c789b502021b3f18707c91cdf22e3838e1b4023817"
+checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 
 [[package]]
 name = "unsafe-libyaml"

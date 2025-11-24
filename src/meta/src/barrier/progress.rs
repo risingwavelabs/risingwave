@@ -52,7 +52,7 @@ pub(super) struct PendingBackfillFragments {
 }
 
 /// Progress of all actors containing backfill executors while creating mview.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct Progress {
     job_id: JobId,
     // `states` and `done_count` decides whether the progress is done. See `is_done`.
@@ -272,7 +272,6 @@ impl Progress {
 ///    On recovery, the stream manager will stop managing the job.
 /// 2. if `is_recovered` is true, it is a "Recovered" tracking job.
 ///    On recovery, the barrier manager will recover and start managing the job.
-#[derive(Clone)]
 pub struct TrackingJob {
     job_id: JobId,
     is_recovered: bool,
@@ -372,7 +371,7 @@ pub(super) enum UpdateProgressResult {
     BackfillNodeFinished(PendingBackfillFragments),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct CreateMviewProgressTracker {
     job_id: JobId,
     definition: String,
@@ -381,7 +380,7 @@ pub(super) struct CreateMviewProgressTracker {
     status: CreateMviewStatus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum CreateMviewStatus {
     Backfilling {
         /// Progress of the create-mview DDL.

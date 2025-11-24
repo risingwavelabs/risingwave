@@ -42,6 +42,7 @@ mod rw_materialized_views;
 mod rw_meta_snapshot;
 mod rw_rate_limit;
 mod rw_recovery_info;
+mod rw_refresh_table_state;
 mod rw_relation_info;
 mod rw_relations;
 mod rw_schemas;
