@@ -748,7 +748,7 @@ impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
         Ok(())
     }
 
-    async fn commit_directly(
+    async fn commit(
         &mut self,
         _epoch: u64,
         _metadata: Vec<SinkMetadata>,

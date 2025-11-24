@@ -821,11 +821,11 @@ pub trait SinglePhaseCommitCoordinator {
     async fn init(&mut self) -> Result<()>;
 
     /// Commit directly using single-phase strategy.
-    async fn commit_directly(
+    async fn commit(
         &mut self,
-        _epoch: u64,
-        _metadata: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
     ) -> Result<()>;
 }
 
@@ -837,16 +837,16 @@ pub trait TwoPhaseCommitCoordinator {
     /// Return serialized commit metadata to be passed to `commit`.
     async fn pre_commit(
         &mut self,
-        _epoch: u64,
-        _metadata: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
     ) -> Result<Vec<u8>>;
 
     /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
-    async fn commit(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) -> Result<()>;
+    async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
-    async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>);
+    async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);
 }
 
 impl SinkImpl {

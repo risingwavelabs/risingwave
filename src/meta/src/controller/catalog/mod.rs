@@ -40,7 +40,7 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::{RefreshState, TableType};
 use risingwave_meta_model::{
-    ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, Epoch, FragmentId, I32Array,
+    ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
     connection, database, fragment, function, index, object, object_dependency, pending_sink_state,
@@ -761,7 +761,7 @@ impl CatalogController {
 
     pub async fn fetch_sink_with_state_table_ids(
         &self,
-        sink_ids: Vec<SinkId>,
+        sink_ids: HashSet<SinkId>,
     ) -> MetaResult<HashMap<SinkId, Vec<TableId>>> {
         let inner = self.inner.read().await;
 
@@ -795,21 +795,19 @@ impl CatalogController {
         Ok(result)
     }
 
-    pub async fn list_all_pending_sink_epochs(
+    pub async fn list_all_pending_sinks(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<SinkId, Vec<u64>>> {
+    ) -> MetaResult<HashSet<SinkId>> {
         let inner = self.inner.read().await;
 
         let mut query = pending_sink_state::Entity::find()
             .select_only()
-            .columns([
-                pending_sink_state::Column::SinkId,
-                pending_sink_state::Column::Epoch,
-            ])
+            .columns([pending_sink_state::Column::SinkId])
             .filter(
                 pending_sink_state::Column::SinkState.eq(pending_sink_state::SinkState::Pending),
-            );
+            )
+            .distinct();
 
         if let Some(db_id) = database_id {
             query = query
@@ -820,25 +818,19 @@ impl CatalogController {
                 .filter(object::Column::DatabaseId.eq(db_id));
         }
 
-        let rows: Vec<(SinkId, Epoch)> = query.into_tuple().all(&inner.db).await?;
+        let result: Vec<SinkId> = query.into_tuple().all(&inner.db).await?;
 
-        let mut result: HashMap<SinkId, Vec<u64>> = HashMap::new();
-        for (sink_id, epoch) in rows {
-            result.entry(sink_id).or_default().push(epoch as u64);
-        }
-
-        Ok(result)
+        Ok(result.into_iter().collect())
     }
 
     pub async fn abort_pending_sink_epochs(
         &self,
-        to_abort_epochs: HashMap<SinkId, Vec<u64>>,
+        sink_committed_epoch: HashMap<SinkId, u64>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        for (sink_id, epochs) in to_abort_epochs {
-            let epochs: Vec<Epoch> = epochs.into_iter().map(|e| e as _).collect();
+        for (sink_id, committed_epoch) in sink_committed_epoch {
             pending_sink_state::Entity::update_many()
                 .col_expr(
                     pending_sink_state::Column::SinkState,
@@ -847,7 +839,7 @@ impl CatalogController {
                 .filter(
                     pending_sink_state::Column::SinkId
                         .eq(sink_id)
-                        .and(pending_sink_state::Column::Epoch.is_in(epochs)),
+                        .and(pending_sink_state::Column::Epoch.lt(committed_epoch as i64)),
                 )
                 .exec(&txn)
                 .await?;

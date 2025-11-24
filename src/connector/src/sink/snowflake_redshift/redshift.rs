@@ -572,7 +572,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
         Ok(())
     }
 
-    async fn commit_directly(
+    async fn commit(
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,

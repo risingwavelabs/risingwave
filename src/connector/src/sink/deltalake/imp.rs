@@ -534,7 +534,7 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
         Ok(())
     }
 
-    async fn commit_directly(
+    async fn commit(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
@@ -693,10 +693,7 @@ mod test {
             table: deltalake_table,
         };
         let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
-        committer
-            .commit_directly(1, vec![metadata], None)
-            .await
-            .unwrap();
+        committer.commit(1, vec![metadata], None).await.unwrap();
 
         // The following code is to test reading the deltalake data table written with test data.
         // To enable the following code, add `deltalake = { workspace = true, features = ["datafusion"] }`

@@ -167,7 +167,7 @@ impl MockSinkCoordinationRpcClient {
                                 SinkCommitCoordinator::SinglePhase(coordinator) => {
                                     coordinator.init().await?;
                                     coordinator
-                                        .commit_directly(epoch, vec![metadata.unwrap()], None)
+                                        .commit(epoch, vec![metadata.unwrap()], None)
                                         .await?;
                                 }
                                 SinkCommitCoordinator::TwoPhase(coordinator) => {

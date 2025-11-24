@@ -59,7 +59,7 @@ impl GlobalBarrierWorkerContextImpl {
             .reset_refreshing_tables(database_id)
             .await?;
 
-        self.resolve_pending_sink_state(database_id).await?;
+        self.abort_dirty_pending_sink_state(database_id).await?;
 
         // unregister cleaned sources.
         self.source_manager
@@ -71,24 +71,27 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn resolve_pending_sink_state(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
-        let pending_sink_epochs: HashMap<SinkId, Vec<u64>> = self
+    async fn abort_dirty_pending_sink_state(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<()> {
+        let pending_sinks: HashSet<SinkId> = self
             .metadata_manager
             .catalog_controller
-            .list_all_pending_sink_epochs(database_id)
+            .list_all_pending_sinks(database_id)
             .await?;
 
-        if pending_sink_epochs.is_empty() {
+        if pending_sinks.is_empty() {
             return Ok(());
         }
 
         let sink_with_state_tables: HashMap<SinkId, Vec<TableId>> = self
             .metadata_manager
             .catalog_controller
-            .fetch_sink_with_state_table_ids(pending_sink_epochs.keys().copied().collect())
+            .fetch_sink_with_state_table_ids(pending_sinks)
             .await?;
 
-        let mut to_abort_records: HashMap<SinkId, Vec<u64>> = HashMap::new();
+        let mut sink_committed_epoch: HashMap<SinkId, u64> = HashMap::new();
 
         for (sink_id, table_ids) in sink_with_state_tables {
             let Some(table_id) = table_ids.first() else {
@@ -98,12 +101,11 @@ impl GlobalBarrierWorkerContextImpl {
             self.hummock_manager
                 .on_current_version(|version| -> MetaResult<()> {
                     if let Some(committed_epoch) = version.table_committed_epoch(*table_id) {
-                        let pending_epochs = pending_sink_epochs.get(&sink_id).unwrap();
-                        for epoch in pending_epochs {
-                            if *epoch > committed_epoch {
-                                to_abort_records.entry(sink_id).or_default().push(*epoch);
-                            }
-                        }
+                        assert!(
+                            sink_committed_epoch
+                                .insert(sink_id, committed_epoch)
+                                .is_none()
+                        );
                         Ok(())
                     } else {
                         Err(anyhow!("cannot get committed epoch on table {}.", table_id).into())
@@ -114,7 +116,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         self.metadata_manager
             .catalog_controller
-            .abort_pending_sink_epochs(to_abort_records)
+            .abort_pending_sink_epochs(sink_committed_epoch)
             .await?;
 
         Ok(())

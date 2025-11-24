@@ -1651,7 +1651,7 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         Ok(())
     }
 
-    async fn commit_directly(
+    async fn commit(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
@@ -1660,7 +1660,7 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
 
         let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns).await? {
+            match self.pre_commit_inner(epoch, metadata, add_columns)? {
                 Some((write_results, snapshot_id)) => (write_results, snapshot_id),
                 None => {
                     tracing::debug!(?epoch, "no data to commit");
@@ -1693,7 +1693,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
 
         let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns).await? {
+            match self.pre_commit_inner(epoch, metadata, add_columns)? {
                 Some((write_results, snapshot_id)) => (write_results, snapshot_id),
                 None => {
                     tracing::debug!(?epoch, "no data to commit");
@@ -1762,7 +1762,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
 
 /// Methods Required to Achieve Exactly Once Semantics
 impl IcebergSinkCommitter {
-    async fn pre_commit_inner(
+    fn pre_commit_inner(
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,
@@ -1775,9 +1775,6 @@ impl IcebergSinkCommitter {
             )
             .into());
         }
-
-        // Check snapshot limit before proceeding with commit
-        self.wait_for_snapshot_limit().await?;
 
         let write_results: Vec<IcebergCommitResult> = metadata
             .iter()
@@ -1805,15 +1802,6 @@ impl IcebergSinkCommitter {
             )));
         }
 
-        // Load the latest table to avoid concurrent modification with the best effort.
-        self.table = Self::reload_table(
-            self.catalog.as_ref(),
-            self.table.identifier(),
-            expect_schema_id,
-            expect_partition_spec_id,
-        )
-        .await?;
-
         let txn = Transaction::new(&self.table);
         let snapshot_id = txn.generate_unique_snapshot_id();
 
@@ -1831,8 +1819,20 @@ impl IcebergSinkCommitter {
             !write_results.is_empty() && !write_results.iter().all(|r| r.data_files.is_empty())
         );
 
+        // Check snapshot limit before proceeding with commit
+        self.wait_for_snapshot_limit().await?;
+
         let expect_schema_id = write_results[0].schema_id;
         let expect_partition_spec_id = write_results[0].partition_spec_id;
+
+        // Load the latest table to avoid concurrent modification with the best effort.
+        self.table = Self::reload_table(
+            self.catalog.as_ref(),
+            self.table.identifier(),
+            expect_schema_id,
+            expect_partition_spec_id,
+        )
+        .await?;
 
         let Some(schema) = self.table.metadata().schema_by_id(expect_schema_id) else {
             return Err(SinkError::Iceberg(anyhow!(

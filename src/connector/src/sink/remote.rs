@@ -693,7 +693,7 @@ impl SinglePhaseCommitCoordinator for RemoteCoordinator {
         Ok(())
     }
 
-    async fn commit_directly(
+    async fn commit(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,

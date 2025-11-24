@@ -38,17 +38,13 @@ pub(crate) mod dummy {
 
     use anyhow::anyhow;
     use phf::{Set, phf_set};
-    use risingwave_common::catalog::Field;
-    use risingwave_pb::connector_service::SinkMetadata;
     use tokio::sync::mpsc::UnboundedSender;
 
     use crate::connector_common::IcebergSinkCompactionUpdate;
     use crate::enforce_secret::EnforceSecret;
     use crate::error::ConnectorResult;
     use crate::sink::prelude::*;
-    use crate::sink::{
-        LogSinker, SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkLogReader,
-    };
+    use crate::sink::{LogSinker, SinkCommitCoordinator, SinkLogReader};
 
     #[allow(dead_code)]
     pub fn err_feature_not_enabled(sink_name: &'static str) -> SinkError {
@@ -62,26 +58,6 @@ pub(crate) mod dummy {
     pub trait FeatureNotEnabledSinkMarker: Send + 'static {
         #[allow(dead_code)]
         const SINK_NAME: &'static str;
-    }
-
-    #[allow(dead_code)]
-    pub struct FeatureNotEnabledCoordinator<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
-    #[async_trait::async_trait]
-    impl<S: FeatureNotEnabledSinkMarker> SinglePhaseCommitCoordinator
-        for FeatureNotEnabledCoordinator<S>
-    {
-        async fn init(&mut self) -> Result<()> {
-            Err(err_feature_not_enabled(S::SINK_NAME))
-        }
-
-        async fn commit_directly(
-            &mut self,
-            _epoch: u64,
-            _metadata: Vec<SinkMetadata>,
-            _add_columns: Option<Vec<Field>>,
-        ) -> Result<()> {
-            Err(err_feature_not_enabled(S::SINK_NAME))
-        }
     }
 
     #[allow(dead_code)]

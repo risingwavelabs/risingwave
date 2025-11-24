@@ -320,7 +320,7 @@ impl SinglePhaseCommitCoordinator for TestCoordinator {
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit_directly(
+    async fn commit(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,

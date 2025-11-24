@@ -107,15 +107,13 @@ impl SinglePhaseCommitCoordinator for BoxSinglePhaseCoordinator {
         self.deref_mut().init().await
     }
 
-    async fn commit_directly(
+    async fn commit(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         add_columns: Option<Vec<Field>>,
     ) -> crate::sink::Result<()> {
-        self.deref_mut()
-            .commit_directly(epoch, metadata, add_columns)
-            .await
+        self.deref_mut().commit(epoch, metadata, add_columns).await
     }
 }
 
