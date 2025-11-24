@@ -105,7 +105,7 @@ impl ActorContext {
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         meta_client: Option<MetaClient>,
-        streaming_config: Arc<StreamingConfig>,
+        config: Arc<StreamingConfig>,
         stream_env: StreamEnvironment,
     ) -> ActorContextRef {
         Arc::new(Self {
@@ -128,7 +128,7 @@ impl ActorContext {
                 .collect(),
             initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
             meta_client,
-            config: streaming_config,
+            config,
             stream_env,
         })
     }

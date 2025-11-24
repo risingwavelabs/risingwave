@@ -684,6 +684,9 @@ for_all_wrapped_id_fields! (
         UpstreamSinkInfo {
             upstream_fragment_id: FragmentId,
         }
+        VectorIndexLookupJoinNode {
+            table_id: TableId,
+        }
     }
     stream_service {
         BarrierCompleteResponse {
@@ -923,6 +926,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.locality_provider")
         .boxed(".stream_plan.StreamNode.node_body.eowc_gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.gap_fill")
+        .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // Eq + Hash are for plan nodes to do common sub-plan detection.

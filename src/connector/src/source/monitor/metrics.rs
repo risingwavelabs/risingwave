@@ -31,6 +31,10 @@ pub struct EnumeratorMetrics {
     pub high_watermark: LabelGuardedIntGaugeVec,
     /// PostgreSQL CDC confirmed flush LSN monitoring
     pub pg_cdc_confirmed_flush_lsn: LabelGuardedIntGaugeVec,
+    /// MySQL CDC binlog file sequence number (min)
+    pub mysql_cdc_binlog_file_seq_min: LabelGuardedIntGaugeVec,
+    /// MySQL CDC binlog file sequence number (max)
+    pub mysql_cdc_binlog_file_seq_max: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
@@ -54,9 +58,27 @@ impl EnumeratorMetrics {
         )
         .unwrap();
 
+        let mysql_cdc_binlog_file_seq_min = register_guarded_int_gauge_vec_with_registry!(
+            "mysql_cdc_binlog_file_seq_min",
+            "MySQL CDC upstream binlog file sequence number (minimum/oldest)",
+            &["hostname", "port"],
+            registry,
+        )
+        .unwrap();
+
+        let mysql_cdc_binlog_file_seq_max = register_guarded_int_gauge_vec_with_registry!(
+            "mysql_cdc_binlog_file_seq_max",
+            "MySQL CDC upstream binlog file sequence number (maximum/newest)",
+            &["hostname", "port"],
+            registry,
+        )
+        .unwrap();
+
         EnumeratorMetrics {
             high_watermark,
             pg_cdc_confirmed_flush_lsn,
+            mysql_cdc_binlog_file_seq_min,
+            mysql_cdc_binlog_file_seq_max,
         }
     }
 

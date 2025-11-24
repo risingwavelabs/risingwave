@@ -162,4 +162,14 @@ sqllogictest -p 4566 -d dev './e2e_test/ldap/ldap_auth.slt'
 echo "--- Stopping RisingWave cluster"
 risedev ci-kill
 
+# Test 7: Search and Bind with search filter (without client cert)
+echo "--- Test 7: Search and Bind with search filter"
+risedev ci-start ci-ldap-search-bind-filter
+
+echo "--- Running LDAP authentication tests"
+sqllogictest -p 4566 -d dev './e2e_test/ldap/ldap_auth.slt'
+
+echo "--- Stopping RisingWave cluster"
+risedev ci-kill
+
 echo "--- LDAP E2E tests completed successfully"

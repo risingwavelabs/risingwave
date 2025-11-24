@@ -1527,7 +1527,7 @@ impl CatalogController {
 
         for fragment in root_fragment_to_jobs.keys() {
             let fragment_info = info.get_fragment(*fragment).context(format!(
-                "fragment {} not found in shared actor info",
+                "root fragment {} not found in shared actor info",
                 fragment
             ))?;
 
