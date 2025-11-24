@@ -143,6 +143,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                             "RefreshStart triggered file re-listing"
                                         );
                                         is_refreshing = true;
+                                        *is_list_finished.write() = false;
 
                                         // re-list iceberg scan tasks
                                         let iceberg_list_stream = Self::list_iceberg_scan_task(
