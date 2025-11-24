@@ -110,7 +110,15 @@ pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_ag
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
-pub const MAX_SNAPSHOTS_NUM: &str = "max_snapshots_num_before_compaction";
+pub const COMPACTION_MAX_SNAPSHOTS_NUM: &str = "compaction.max_snapshots_num";
+
+pub const COMPACTION_SMALL_FILES_THRESHOLD_MB: &str = "compaction.small_files_threshold_mb";
+
+pub const COMPACTION_DELETE_FILES_COUNT_THRESHOLD: &str = "compaction.delete_files_count_threshold";
+
+pub const COMPACTION_TRIGGER_SNAPSHOT_COUNT: &str = "compaction.trigger_snapshot_count";
+
+pub const COMPACTION_TARGET_FILE_SIZE_MB: &str = "compaction.target_file_size_mb";
 
 fn deserialize_and_normalize_string<'de, D>(
     deserializer: D,
@@ -2475,8 +2483,8 @@ mod test {
     use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
     use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
-        COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-        ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig, MAX_SNAPSHOTS_NUM,
+        COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION,
+        ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig,
         SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
         SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     };
@@ -2886,7 +2894,7 @@ mod test {
             SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
             "snapshot_expiration_clear_expired_meta_data"
         );
-        assert_eq!(MAX_SNAPSHOTS_NUM, "max_snapshots_num_before_compaction");
+        assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
     }
 
     #[test]
