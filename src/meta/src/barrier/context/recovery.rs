@@ -93,7 +93,7 @@ impl GlobalBarrierWorkerContextImpl {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_graph_info(
+    async fn resolve_database_info(
         &self,
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
@@ -266,15 +266,15 @@ impl GlobalBarrierWorkerContextImpl {
         let mut cdc_table_backfill_actors = HashMap::new();
 
         for (job_id, fragments) in jobs {
-            for fragment_info in fragments.values() {
-                if fragment_info
+            for fragment_infos in fragments.values() {
+                if fragment_infos
                     .fragment_type_mask
                     .contains(FragmentTypeFlag::StreamCdcScan)
                 {
                     cdc_table_backfill_actors
                         .entry(*job_id)
                         .or_insert_with(HashSet::new)
-                        .extend(fragment_info.actors.keys().cloned());
+                        .extend(fragment_infos.actors.keys().cloned());
                 }
             }
         }
@@ -418,7 +418,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
-                        self.resolve_graph_info(None, &active_streaming_nodes)
+                        self.resolve_database_info(None, &active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
@@ -438,7 +438,7 @@ impl GlobalBarrierWorkerContextImpl {
                             .complete_dropped_tables(dropped_table_ids)
                             .await;
                         info = self
-                            .resolve_graph_info(None, &active_streaming_nodes)
+                            .resolve_database_info(None, &active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
@@ -606,16 +606,15 @@ impl GlobalBarrierWorkerContextImpl {
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        let all_info = self
-            .resolve_graph_info(Some(database_id), &active_streaming_nodes)
+        let mut all_info = self
+            .resolve_database_info(Some(database_id), &active_streaming_nodes)
             .await
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
 
         let mut database_info = all_info
-            .get(&database_id)
-            .cloned()
+            .remove(&database_id)
             .map_or_else(HashMap::new, |table_map| {
                 HashMap::from([(database_id, table_map)])
             });
@@ -740,8 +739,8 @@ impl GlobalBarrierWorkerContextImpl {
             let job_definition = extra_info.job_definition;
             let config_override = extra_info.config_override;
 
-            for (fragment_id, fragment_info) in streaming_info {
-                for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_info.actors {
+            for (fragment_id, fragment_infos) in streaming_info {
+                for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_infos.actors {
                     stream_actors.insert(
                         *actor_id,
                         StreamActor {

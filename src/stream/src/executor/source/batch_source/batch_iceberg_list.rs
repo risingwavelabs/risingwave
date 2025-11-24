@@ -205,6 +205,10 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
         downstream_columns: Option<Vec<String>>,
         is_list_finished: Arc<RwLock<bool>>,
     ) {
+        // Reset the finish flag before we start a new listing cycle so that the
+        // caller can observe the in-progress state immediately.
+        *is_list_finished.write() = false;
+
         let table = iceberg_properties.load_table().await?;
         if let Some(start_snapshot) = table.metadata().current_snapshot() {
             let latest_snapshot = start_snapshot.snapshot_id();
