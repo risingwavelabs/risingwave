@@ -681,7 +681,6 @@ mod tests {
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,
-            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
     }
 

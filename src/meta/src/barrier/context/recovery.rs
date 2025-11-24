@@ -38,7 +38,7 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
-use crate::stream::{REFRESH_TABLE_PROGRESS_TRACKER, SourceChange, StreamFragmentGraph};
+use crate::stream::{SourceChange, StreamFragmentGraph};
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
@@ -53,8 +53,7 @@ impl GlobalBarrierWorkerContextImpl {
             .clean_dirty_creating_jobs(database_id)
             .await?;
         self.metadata_manager
-            .catalog_controller
-            .reset_refreshing_tables(database_id)
+            .reset_all_refresh_jobs_to_idle()
             .await?;
 
         // unregister cleaned sources.
@@ -698,9 +697,8 @@ impl GlobalBarrierWorkerContextImpl {
             )
         };
 
-        REFRESH_TABLE_PROGRESS_TRACKER
-            .lock()
-            .remove_tracker_by_database_id(database_id);
+        self.refresh_manager
+            .remove_trackers_by_database(database_id);
 
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,

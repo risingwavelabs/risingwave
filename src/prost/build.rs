@@ -474,6 +474,9 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             fragment_id: FragmentId,
         }
+        ListRefreshTableStatesResponse.RefreshTableState {
+            table_id: TableId,
+        }
         ListStreamingJobStatesResponse.StreamingJobState {
             table_id: JobId,
             database_id: DatabaseId,
@@ -985,7 +988,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.SourceRefreshMode", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.SourceRefreshMode.refresh_mode", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeStreaming", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullRecompute", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullReload", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalCollectionName",
             "#[derive(Eq, Hash)]",
