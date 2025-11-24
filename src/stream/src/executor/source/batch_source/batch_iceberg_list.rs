@@ -144,8 +144,6 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                                         );
                                         is_refreshing = true;
 
-                                        // Reset the finish flag before we start a new listing cycle so that the
-                                        // caller can observe the in-progress state immediately.
                                         *is_list_finished.write() = false;
 
                                         // re-list iceberg scan tasks
