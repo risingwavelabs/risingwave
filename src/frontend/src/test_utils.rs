@@ -1152,7 +1152,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_event_log(&self) -> RpcResult<Vec<EventLog>> {
-        unimplemented!()
+        Ok(vec![])
     }
 
     async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
