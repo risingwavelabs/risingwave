@@ -19,6 +19,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::WorkerId;
 use risingwave_common_service::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
@@ -57,7 +58,7 @@ pub async fn prepare_first_valid_version(
     env: MetaSrvEnv,
     hummock_manager_ref: HummockManagerRef,
     cluster_controller_ref: ClusterControllerRef,
-    worker_id: i32,
+    worker_id: WorkerId,
 ) -> (
     PinnedVersion,
     UnboundedSender<HummockVersionUpdate>,
@@ -139,7 +140,7 @@ pub async fn with_hummock_storage(
             env,
             hummock_manager_ref.clone(),
             cluster_ctl_ref,
-            worker_id as _,
+            worker_id,
         )
         .await,
     )
@@ -162,7 +163,7 @@ pub fn update_filter_key_extractor_for_table_ids(
 ) {
     for table_id in table_ids {
         let mock_table = PbTable {
-            id: table_id.as_raw_id(),
+            id: *table_id,
             read_prefix_len_hint: 0,
             maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as u32),
             ..Default::default()
@@ -190,7 +191,7 @@ pub fn update_filter_key_extractor_for_tables(
     tables: &[PbTable],
 ) {
     for table in tables {
-        compaction_catalog_manager_ref.update(table.id.into(), table.clone())
+        compaction_catalog_manager_ref.update(table.id, table.clone())
     }
 }
 pub async fn register_tables_with_catalog_for_test(
@@ -309,7 +310,7 @@ pub async fn prepare_hummock_test_env() -> HummockTestEnv {
         env,
         hummock_manager_ref.clone(),
         cluster_ctl_ref,
-        worker_id as _,
+        worker_id,
     )
     .await;
 

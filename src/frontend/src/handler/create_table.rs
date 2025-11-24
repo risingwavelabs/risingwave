@@ -26,7 +26,8 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
-    ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
+    ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::Jvm;
@@ -61,12 +62,12 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
+use super::RwPgResponse;
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use super::{RwPgResponse, alter_streaming_rate_limit};
 use crate::binder::{Clause, SecureCompareContext, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::table_catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, TableVersion};
+use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{ColumnId, DatabaseId, SchemaId, SourceId, check_column_name_not_reserved};
 use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -92,14 +93,15 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
+    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
+    COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
+    COMPACTION_TRIGGER_SNAPSHOT_COUNT, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
     ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
-    MAX_SNAPSHOTS_NUM, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
+    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+    parse_partition_by_exprs,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
-use risingwave_pb::meta::PbThrottleTarget;
 
 use crate::handler::create_sink::{SinkPlanContext, gen_sink_plan};
 
@@ -478,7 +480,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&handler_args, &format_encode, false)?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
@@ -523,6 +526,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         CreateSourceType::Table,
         rate_limit,
         sql_column_strategy,
+        refresh_mode,
     )
     .await?;
 
@@ -889,7 +893,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let cdc_table_type = ExternalCdcTableType::from_properties(&options);
     let cdc_table_desc = CdcTableDesc {
         table_id,
-        source_id: source.id.into(), // id of cdc source streaming job
+        source_id: source.id, // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: non_generated_column_descs,
@@ -1392,7 +1396,7 @@ fn bind_cdc_table_schema(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
-    mut handler_args: HandlerArgs,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
@@ -1420,21 +1424,6 @@ pub async fn handle_create_table(
         risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
     };
-    if engine == Engine::Iceberg && handler_args.with_options.get_connector().is_some() {
-        // HACK: since we don't have atomic DDL, table with connector may lose data.
-        // FIXME: remove this after https://github.com/risingwavelabs/risingwave/issues/21863
-        if let Some(_rate_limit) = handler_args.with_options.insert(
-            OverwriteOptions::SOURCE_RATE_LIMIT_KEY.to_owned(),
-            "0".to_owned(),
-        ) {
-            // prevent user specified rate limit
-            return Err(ErrorCode::NotSupported(
-                "source_rate_limit for iceberg table engine during table creation".to_owned(),
-                "Please remove source_rate_limit from WITH options.".to_owned(),
-            )
-            .into());
-        }
-    }
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
         table_name.clone(),
@@ -1477,7 +1466,7 @@ pub async fn handle_create_table(
     );
 
     let dependencies = shared_source_id
-        .map(|id| HashSet::from([id as ObjectId]))
+        .map(|id| HashSet::from([id.as_object_id()]))
         .unwrap_or_default();
 
     // Handle engine
@@ -1754,13 +1743,13 @@ pub async fn create_iceberg_engine_table(
         .unwrap_or_else(|| "60".to_owned());
     let commit_checkpoint_interval = commit_checkpoint_interval.parse::<u32>().map_err(|_| {
         ErrorCode::InvalidInputSyntax(format!(
-            "commit_checkpoint_interval must be a positive integer: {}",
+            "commit_checkpoint_interval must be greater than 0: {}",
             commit_checkpoint_interval
         ))
     })?;
 
     if commit_checkpoint_interval == 0 {
-        bail!("commit_checkpoint_interval must be a positive integer: 0");
+        bail!("commit_checkpoint_interval must be greater than 0");
     }
 
     // remove commit_checkpoint_interval from source options, otherwise it will be considered as an unknown field.
@@ -1811,12 +1800,12 @@ pub async fn create_iceberg_engine_table(
     if let Some(compaction_interval_sec) = handler_args.with_options.get(COMPACTION_INTERVAL_SEC) {
         let compaction_interval_sec = compaction_interval_sec.parse::<u64>().map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!(
-                "compaction_interval_sec must be a positive integer: {}",
+                "compaction_interval_sec must be greater than 0: {}",
                 commit_checkpoint_interval
             ))
         })?;
         if compaction_interval_sec == 0 {
-            bail!("compaction_interval_sec must be a positive integer: 0");
+            bail!("compaction_interval_sec must be greater than 0");
         }
         sink_with.insert(
             "compaction_interval_sec".to_owned(),
@@ -1963,23 +1952,141 @@ pub async fn create_iceberg_engine_table(
     }
 
     if let Some(max_snapshots_num_before_compaction) =
-        handler_args.with_options.get(MAX_SNAPSHOTS_NUM)
+        handler_args.with_options.get(COMPACTION_MAX_SNAPSHOTS_NUM)
     {
         let max_snapshots_num_before_compaction = max_snapshots_num_before_compaction
             .parse::<u32>()
             .map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(
-                    "max_snapshots_num_before_compaction must be a positive integer: {}",
-                    max_snapshots_num_before_compaction
+                    "{} must be greater than 0: {}",
+                    COMPACTION_MAX_SNAPSHOTS_NUM, max_snapshots_num_before_compaction
                 ))
             })?;
         if max_snapshots_num_before_compaction == 0 {
-            bail!("max_snapshots_num_before_compaction must be a positive integer: 0");
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_MAX_SNAPSHOTS_NUM
+            ));
         }
         sink_with.insert(
-            MAX_SNAPSHOTS_NUM.to_owned(),
+            COMPACTION_MAX_SNAPSHOTS_NUM.to_owned(),
             max_snapshots_num_before_compaction.to_string(),
         );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(COMPACTION_MAX_SNAPSHOTS_NUM));
+    }
+
+    if let Some(small_files_threshold_mb) = handler_args
+        .with_options
+        .get(COMPACTION_SMALL_FILES_THRESHOLD_MB)
+    {
+        let small_files_threshold_mb = small_files_threshold_mb.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "{} must be greater than 0: {}",
+                COMPACTION_SMALL_FILES_THRESHOLD_MB, small_files_threshold_mb
+            ))
+        })?;
+        if small_files_threshold_mb == 0 {
+            bail!(format!(
+                "{} must be a greater than 0",
+                COMPACTION_SMALL_FILES_THRESHOLD_MB
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_SMALL_FILES_THRESHOLD_MB.to_owned(),
+            small_files_threshold_mb.to_string(),
+        );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_SMALL_FILES_THRESHOLD_MB)
+        });
+    }
+
+    if let Some(delete_files_count_threshold) = handler_args
+        .with_options
+        .get(COMPACTION_DELETE_FILES_COUNT_THRESHOLD)
+    {
+        let delete_files_count_threshold =
+            delete_files_count_threshold.parse::<usize>().map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "{} must be greater than 0: {}",
+                    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, delete_files_count_threshold
+                ))
+            })?;
+        if delete_files_count_threshold == 0 {
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_DELETE_FILES_COUNT_THRESHOLD
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_DELETE_FILES_COUNT_THRESHOLD.to_owned(),
+            delete_files_count_threshold.to_string(),
+        );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_DELETE_FILES_COUNT_THRESHOLD)
+        });
+    }
+
+    if let Some(trigger_snapshot_count) = handler_args
+        .with_options
+        .get(COMPACTION_TRIGGER_SNAPSHOT_COUNT)
+    {
+        let trigger_snapshot_count = trigger_snapshot_count.parse::<usize>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "{} must be greater than 0: {}",
+                COMPACTION_TRIGGER_SNAPSHOT_COUNT, trigger_snapshot_count
+            ))
+        })?;
+        if trigger_snapshot_count == 0 {
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_TRIGGER_SNAPSHOT_COUNT
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_TRIGGER_SNAPSHOT_COUNT.to_owned(),
+            trigger_snapshot_count.to_string(),
+        );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(COMPACTION_TRIGGER_SNAPSHOT_COUNT));
+    }
+
+    if let Some(target_file_size_mb) = handler_args
+        .with_options
+        .get(COMPACTION_TARGET_FILE_SIZE_MB)
+    {
+        let target_file_size_mb = target_file_size_mb.parse::<u64>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "{} must be greater than 0: {}",
+                COMPACTION_TARGET_FILE_SIZE_MB, target_file_size_mb
+            ))
+        })?;
+        if target_file_size_mb == 0 {
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_TARGET_FILE_SIZE_MB
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_TARGET_FILE_SIZE_MB.to_owned(),
+            target_file_size_mb.to_string(),
+        );
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(COMPACTION_TARGET_FILE_SIZE_MB));
     }
 
     let partition_by = handler_args
@@ -2053,7 +2160,8 @@ pub async fn create_iceberg_engine_table(
 
     let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
-    let with_properties = bind_connector_props(&source_handler_args, &format_encode, true)?;
+    let (with_properties, refresh_mode) =
+        bind_connector_props(&source_handler_args, &format_encode, true)?;
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
     // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
@@ -2093,10 +2201,9 @@ pub async fn create_iceberg_engine_table(
         create_source_type,
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
+        refresh_mode,
     )
     .await?;
-
-    let has_connector = source.is_some();
 
     // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
     // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
@@ -2131,17 +2238,6 @@ pub async fn create_iceberg_engine_table(
                 );
             });
         res?
-    }
-
-    // TODO: remove it together with rate limit rewrite after we support atomic DDL in meta side.
-    if has_connector {
-        alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
-            handler_args,
-            PbThrottleTarget::TableWithSource,
-            table_name,
-            -1,
-        )
-        .await?;
     }
 
     Ok(())
@@ -2356,7 +2452,7 @@ pub async fn generate_stream_graph_for_replace_table(
         table.associated_source_id = Some(source_id);
 
         let source = source.as_mut().unwrap();
-        source.id = source_id.as_raw_id();
+        source.id = source_id;
         source.associated_table_id = Some(table.id());
     }
 
@@ -2420,7 +2516,7 @@ fn bind_webhook_info(
         let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
         (
             Some(PbSecretRef {
-                secret_id: secret_catalog.id.secret_id(),
+                secret_id: secret_catalog.id,
                 ref_as: match secret_ref.ref_as {
                     SecretRefAsType::Text => PbRefAsType::Text,
                     SecretRefAsType::File => PbRefAsType::File,

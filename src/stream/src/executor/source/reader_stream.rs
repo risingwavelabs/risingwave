@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
@@ -39,7 +40,7 @@ type AutoSchemaChangeSetup = (
 pub(crate) struct StreamReaderBuilder {
     pub source_desc: SourceDesc,
     pub rate_limit: Option<u32>,
-    pub source_id: TableId,
+    pub source_id: SourceId,
     pub source_name: String,
     pub reader_stream: Option<BoxSourceChunkStream>,
 
@@ -90,19 +91,17 @@ impl StreamReaderBuilder {
                 self.actor_ctx.meta_client
             {
                 let meta_client = meta_client.clone();
-                let source_id = self.source_id;
                 Some(CdcAutoSchemaChangeFailCallback::new(
-                    move |table_id: u32,
+                    move |source_id: SourceId,
                           table_name: String,
                           cdc_table_id: String,
                           upstream_ddl: String,
                           fail_info: String| {
                         let meta_client = meta_client.clone();
-                        let source_id = source_id;
                         tokio::spawn(async move {
                             if let Err(e) = meta_client
                                 .add_cdc_auto_schema_change_fail_event(
-                                    table_id,
+                                    source_id,
                                     table_name,
                                     cdc_table_id,
                                     upstream_ddl,
@@ -137,6 +136,7 @@ impl StreamReaderBuilder {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+        debug_assert!(column_ids.iter().all_unique(), "column_ids must be unique");
 
         let (schema_change_tx, on_cdc_auto_schema_change_failure) = self.setup_auto_schema_change();
 
@@ -196,7 +196,7 @@ impl StreamReaderBuilder {
             }
         };
 
-        let (Some(split_idx), Some(offset_idx)) =
+        let (Some(split_idx), Some(offset_idx), _) =
             get_split_offset_col_idx(&self.source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
@@ -234,7 +234,7 @@ impl StreamReaderBuilder {
                         error = %e.as_report(),
                         source_name = self.source_name,
                         source_id = %self.source_id,
-                        actor_id = self.actor_ctx.id,
+                        actor_id = %self.actor_ctx.id,
                         "build stream source reader error, retry in 1s"
                     );
                     GLOBAL_ERROR_METRICS.user_source_error.report([
@@ -255,7 +255,9 @@ impl StreamReaderBuilder {
             'consume: for msg in stream {
                 match msg {
                     Ok(msg) => {
-                        for (_, row) in msg.rows() {
+                        // All rows (including those visible or invisible) will be used to update the source offset.
+                        for i in 0..msg.capacity() {
+                            let (_, row, _) = msg.row_at(i);
                             let split = row.datum_at(split_idx).unwrap().into_utf8();
                             let offset = row.datum_at(offset_idx).unwrap().into_utf8();
                             latest_splits_info
@@ -269,7 +271,7 @@ impl StreamReaderBuilder {
                             error = %e.as_report(),
                             source_name = self.source_name,
                             source_id = %self.source_id,
-                            actor_id = self.actor_ctx.id,
+                            actor_id = %self.actor_ctx.id,
                             "stream source reader error"
                         );
                         GLOBAL_ERROR_METRICS.user_source_error.report([

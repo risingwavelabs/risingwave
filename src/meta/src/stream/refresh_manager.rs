@@ -12,17 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
+
 use anyhow::anyhow;
-use risingwave_common::catalog::TableId;
-use risingwave_meta_model::ObjectId;
+use parking_lot::Mutex;
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
+use risingwave_meta_model::ActorId;
 use risingwave_meta_model::table::RefreshState;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::{RefreshRequest, RefreshResponse};
 use thiserror_ext::AsReport;
 
-use crate::barrier::{BarrierScheduler, Command};
+use crate::barrier::{BarrierScheduler, Command, SharedActorInfos};
 use crate::manager::MetadataManager;
 use crate::{MetaError, MetaResult};
+
+/// Global, per-table refresh progress tracker.
+///
+/// Lifecycle for each entry (keyed by `TableId`):
+/// - Created at refresh start in `RefreshManager::refresh_table` before any `await`,
+///   populated with the expected source/fetch actor sets for that table.
+/// - Updated on each barrier in checkpoint control when executors report
+///   list/load progress; see `CheckpointControl::handle_refresh_table_info`.
+/// - Removed when the table is reported as refresh-finished by compute on a
+///   barrier (`refresh_finished_table_ids`).
+///
+/// Failure/retry notes:
+/// - If scheduling the refresh fails, the table state is reset to `Idle`
+pub static REFRESH_TABLE_PROGRESS_TRACKER: LazyLock<Mutex<GlobalRefreshTableProgressTracker>> =
+    LazyLock::new(|| Mutex::new(GlobalRefreshTableProgressTracker::default()));
+
+#[derive(Default, Debug)]
+pub struct GlobalRefreshTableProgressTracker {
+    pub inner: HashMap<TableId, SingleTableRefreshProgressTracker>,
+    pub table_id_by_database_id: HashMap<DatabaseId, HashSet<TableId>>,
+}
+
+impl GlobalRefreshTableProgressTracker {
+    pub fn remove_tracker_by_database_id(&mut self, database_id: DatabaseId) {
+        let table_ids = self
+            .table_id_by_database_id
+            .remove(&database_id)
+            .unwrap_or_default();
+        for table_id in table_ids {
+            self.inner.remove(&table_id);
+        }
+    }
+}
 
 /// # High level design for refresh table
 ///
@@ -91,9 +128,13 @@ impl RefreshManager {
     /// 3. Atomically sets the table state to REFRESHING
     /// 4. Sends a refresh command through the barrier system
     /// 5. Returns the result of the refresh operation
-    pub async fn refresh_table(&self, request: RefreshRequest) -> MetaResult<RefreshResponse> {
-        let table_id = TableId::new(request.table_id);
-        let associated_source_id = TableId::new(request.associated_source_id);
+    pub async fn refresh_table(
+        &self,
+        request: RefreshRequest,
+        shared_actor_infos: &SharedActorInfos,
+    ) -> MetaResult<RefreshResponse> {
+        let table_id = request.table_id;
+        let associated_source_id = request.associated_source_id;
 
         // Validate that the table exists and is refreshable
         self.validate_refreshable_table(table_id, associated_source_id)
@@ -105,8 +146,63 @@ impl RefreshManager {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(table_id.as_raw_id() as ObjectId)
+            .get_object_database_id(table_id)
             .await?;
+
+        // load actor info for refresh
+        let job_fragments = self
+            .metadata_manager
+            .get_job_fragments_by_id(table_id.as_job_id())
+            .await?;
+
+        {
+            let fragment_to_actor_mapping = shared_actor_infos.read_guard();
+            let mut tracker = SingleTableRefreshProgressTracker::default();
+            for (fragment_id, fragment) in &job_fragments.fragments {
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::Source)
+                    // should exclude dml fragments to avoid selecting the DML sql
+                    && !fragment.fragment_type_mask.contains(FragmentTypeFlag::Dml)
+                {
+                    let fragment_info = fragment_to_actor_mapping
+                        .get_fragment(*fragment_id)
+                        .ok_or_else(|| MetaError::fragment_not_found(*fragment_id))?;
+                    tracker.expected_list_actors.extend(
+                        fragment_info
+                            .actors
+                            .keys()
+                            .map(|actor_id| *actor_id as ActorId),
+                    );
+                }
+                if fragment
+                    .fragment_type_mask
+                    .contains(FragmentTypeFlag::FsFetch)
+                    && let Some(fragment_info) =
+                        fragment_to_actor_mapping.get_fragment(*fragment_id)
+                {
+                    tracker.expected_fetch_actors.extend(
+                        fragment_info
+                            .actors
+                            .keys()
+                            .map(|actor_id| *actor_id as ActorId),
+                    );
+                }
+            }
+
+            {
+                // Store tracker in global tracker before guard is dropped
+                let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
+                lock_handle.inner.insert(table_id, tracker);
+                lock_handle
+                    .table_id_by_database_id
+                    .entry(database_id)
+                    .or_default()
+                    .insert(table_id);
+            }
+
+            Ok::<_, MetaError>(())
+        }?;
 
         // Create refresh command
         let refresh_command = Command::Refresh {
@@ -140,6 +236,16 @@ impl RefreshManager {
                     .set_table_refresh_state(table_id, RefreshState::Idle)
                     .await?;
 
+                {
+                    let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
+                    lock_handle.inner.remove(&table_id);
+                    if let Some(table_ids) =
+                        lock_handle.table_id_by_database_id.get_mut(&database_id)
+                    {
+                        table_ids.remove(&table_id);
+                    }
+                }
+
                 Err(anyhow!(e)
                     .context(format!("Failed to refresh table {}", table_id))
                     .into())
@@ -151,7 +257,7 @@ impl RefreshManager {
     async fn validate_refreshable_table(
         &self,
         table_id: TableId,
-        associated_source_id: TableId,
+        associated_source_id: SourceId,
     ) -> MetaResult<()> {
         // Check if table exists in catalog
         let table = self
@@ -168,11 +274,7 @@ impl RefreshManager {
             )));
         }
 
-        if table.optional_associated_source_id
-            != Some(OptionalAssociatedSourceId::AssociatedSourceId(
-                associated_source_id.as_raw_id(),
-            ))
-        {
+        if table.optional_associated_source_id != Some(associated_source_id.into()) {
             return Err(MetaError::invalid_parameter(format!(
                 "Table '{}' is not associated with source '{}'. table.optional_associated_source_id: {:?}",
                 table.name, associated_source_id, table.optional_associated_source_id
@@ -204,5 +306,55 @@ impl RefreshManager {
         );
 
         Ok(())
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct SingleTableRefreshProgressTracker {
+    pub expected_list_actors: HashSet<ActorId>,
+    pub expected_fetch_actors: HashSet<ActorId>,
+    pub list_finished_actors: HashSet<ActorId>,
+    pub fetch_finished_actors: HashSet<ActorId>,
+}
+
+impl SingleTableRefreshProgressTracker {
+    pub fn report_list_finished(&mut self, actor_ids: impl Iterator<Item = ActorId>) {
+        self.list_finished_actors.extend(actor_ids);
+    }
+
+    pub fn is_list_finished(&self) -> MetaResult<bool> {
+        if self.list_finished_actors.len() >= self.expected_list_actors.len() {
+            if self.expected_list_actors == self.list_finished_actors {
+                Ok(true)
+            } else {
+                Err(MetaError::from(anyhow!(
+                    "list finished actors mismatch: expected: {:?}, actual: {:?}",
+                    self.expected_list_actors,
+                    self.list_finished_actors
+                )))
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn report_load_finished(&mut self, actor_ids: impl Iterator<Item = ActorId>) {
+        self.fetch_finished_actors.extend(actor_ids);
+    }
+
+    pub fn is_load_finished(&self) -> MetaResult<bool> {
+        if self.fetch_finished_actors.len() >= self.expected_fetch_actors.len() {
+            if self.expected_fetch_actors == self.fetch_finished_actors {
+                Ok(true)
+            } else {
+                Err(MetaError::from(anyhow!(
+                    "fetch finished actors mismatch: expected: {:?}, actual: {:?}",
+                    self.expected_fetch_actors,
+                    self.fetch_finished_actors
+                )))
+            }
+        } else {
+            Ok(false)
+        }
     }
 }

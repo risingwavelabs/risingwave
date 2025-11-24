@@ -59,7 +59,8 @@ pub use relation::{
     ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 // Re-export common types
-pub use risingwave_common::gap_fill_types::FillStrategy;
+pub use risingwave_common::gap_fill::FillStrategy;
+use risingwave_common::id::ObjectId;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
@@ -69,7 +70,7 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, ViewId};
 use crate::error::ErrorCode;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
@@ -127,7 +128,7 @@ pub struct Binder {
     shared_views: HashMap<ViewId, ShareId>,
 
     /// The included relations while binding a query.
-    included_relations: HashSet<TableId>,
+    included_relations: HashSet<ObjectId>,
 
     /// The included user-defined functions while binding a query.
     included_udfs: HashSet<FunctionId>,
@@ -317,7 +318,7 @@ impl Binder {
     /// After the plan is built, the referenced relations may be changed. We cannot rely on the
     /// collection result of plan, because we still need to record the dependencies that have been
     /// optimised away.
-    pub fn included_relations(&self) -> &HashSet<TableId> {
+    pub fn included_relations(&self) -> &HashSet<ObjectId> {
         &self.included_relations
     }
 

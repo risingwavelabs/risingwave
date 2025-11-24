@@ -53,7 +53,7 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
         ));
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, vnodes)
             .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let exec = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {

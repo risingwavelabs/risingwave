@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
@@ -96,7 +96,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         let database_name = table_config.database.clone();
 
         let external_table = ExternalStorageTable::new(
-            TableId::new(table_desc.table_id),
+            table_desc.table_id,
             schema_table_name,
             database_name,
             table_config,
@@ -111,7 +111,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             // Set state table's vnodes to None to allow splits to be assigned to any actors, without following vnode constraints.
             let vnodes = None;
             let state_table = StateTableBuilder::new(node.get_state_table()?, state_store, vnodes)
-                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
             let progress = CdcProgressReporter::new(params.local_barrier_manager.clone());
@@ -134,7 +134,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             // cdc backfill should be singleton, so vnodes must be None.
             assert_eq!(None, vnodes);
             let state_table = StateTableBuilder::new(node.get_state_table()?, state_store, vnodes)
-                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
             let exec = CdcBackfillExecutor::new(

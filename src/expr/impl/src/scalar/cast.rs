@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -164,18 +163,18 @@ pub fn int_to_bool(input: i32) -> bool {
 #[function("cast(bytea) -> varchar")]
 #[function("cast(anyarray) -> varchar")]
 #[function("cast(vector) -> varchar")]
-pub fn general_to_text(elem: impl ToText, mut writer: &mut impl Write) {
+pub fn general_to_text(elem: impl ToText, mut writer: &mut impl std::fmt::Write) {
     elem.write(&mut writer).unwrap();
 }
 
 // TODO: use `ToBinary` and support all types
 #[function("pgwire_send(int8) -> bytea")]
-fn pgwire_send(elem: i64) -> Box<[u8]> {
-    elem.to_be_bytes().into()
+fn pgwire_send(elem: i64, writer: &mut impl std::io::Write) {
+    writer.write_all(&elem.to_be_bytes()).unwrap();
 }
 
 #[function("cast(boolean) -> varchar")]
-pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
+pub fn bool_to_varchar(input: bool, writer: &mut impl std::fmt::Write) {
     writer
         .write_str(if input { "true" } else { "false" })
         .unwrap();
@@ -184,13 +183,13 @@ pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
 /// `bool_out` is different from `cast(boolean) -> varchar` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
 #[function("bool_out(boolean) -> varchar")]
-pub fn bool_out(input: bool, writer: &mut impl Write) {
+pub fn bool_out(input: bool, writer: &mut impl std::fmt::Write) {
     writer.write_str(if input { "t" } else { "f" }).unwrap();
 }
 
 #[function("cast(varchar) -> bytea")]
-pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
-    cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
+pub fn str_to_bytea(elem: &str, writer: &mut impl std::io::Write) -> Result<()> {
+    cast::str_to_bytea(elem, writer).map_err(|err| ExprError::Parse(err.into()))
 }
 
 #[function("cast(varchar) -> anyarray", type_infer = "unreachable")]

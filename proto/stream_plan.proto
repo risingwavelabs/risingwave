@@ -121,10 +121,6 @@ message ThrottleMutation {
   map<uint32, RateLimit> actor_throttle = 1;
 }
 
-message CombinedMutation {
-  repeated BarrierMutation mutations = 1;
-}
-
 message SubscriptionUpstreamInfo {
   // can either be subscription_id or table_id of creating TableFragments
   uint32 subscriber_id = 1;
@@ -194,9 +190,6 @@ message BarrierMutation {
     LoadFinishMutation load_finish = 16;
     // List finish signal for refreshing tables
     ListFinishMutation list_finish = 17;
-    // Combined mutation.
-    // Currently, it can only be Add & Update, which is for sink into table.
-    CombinedMutation combined = 100;
   }
 }
 
@@ -276,6 +269,8 @@ message StreamSource {
   map<string, secret.SecretRef> secret_refs = 10;
   // Downstream columns are used by list node to know which columns are needed.
   optional Columns downstream_columns = 11;
+  plan_common.SourceRefreshMode refresh_mode = 12;
+  optional uint32 associated_table_id = 13;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -292,6 +287,8 @@ message StreamFsFetch {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  plan_common.SourceRefreshMode refresh_mode = 11;
+  optional uint32 associated_table_id = 12;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -1004,6 +1001,11 @@ message VectorIndexWriteNode {
   catalog.Table table = 1;
 }
 
+message VectorIndexLookupJoinNode {
+  plan_common.VectorIndexReaderDesc reader_desc = 1;
+  uint32 vector_column_idx = 2;
+}
+
 message UpstreamSinkUnionNode {
   // It is always empty in the persisted metadata, and get filled before we spawn the actors.
   // The actual upstream info may be added and removed dynamically at runtime.
@@ -1101,6 +1103,7 @@ message StreamNode {
     LocalityProviderNode locality_provider = 152;
     EowcGapFillNode eowc_gap_fill = 153;
     GapFillNode gap_fill = 154;
+    VectorIndexLookupJoinNode vector_index_lookup_join = 155;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -1200,12 +1203,16 @@ message StreamActor {
   string mview_definition = 9;
   // Provide the necessary context, e.g. session info like time zone, for the actor.
   plan_common.ExprContext expr_context = 10;
+  // The config override for this actor.
+  string config_override = 11;
 }
 
 // The streaming context associated with a stream plan
 message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.
   string timezone = 1;
+  // The partial config of this job to override the global config.
+  string config_override = 2;
 }
 
 message BackfillOrder {

@@ -44,7 +44,6 @@ faiss = { workspace = true }
 fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-governor = { workspace = true }
 hashbrown = { workspace = true }
 hashbrown0_14 = { workspace = true }
 hex = "0.4.3"
@@ -60,7 +59,6 @@ linkme = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
-number_prefix = "0.4.0"
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 parking_lot = { workspace = true }
@@ -79,6 +77,7 @@ regex = { workspace = true }
 reqwest = { version = "0.12.2", features = ["json"] }
 risingwave-fields-derive = { path = "./fields-derive" }
 risingwave_common_estimate_size = { workspace = true }
+risingwave_common_log = { path = "./log" }
 risingwave_common_metrics = { path = "./metrics" }
 risingwave_common_proc_macro = { workspace = true }
 risingwave_common_secret = { path = "./secret" }
@@ -90,7 +89,6 @@ rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 rw_iter_util = { workspace = true }
 rw_resource_util = { workspace = true }
 ryu = "1.0"
-sea-orm  = { workspace = true }
 serde = { workspace = true }
 serde_bytes = "0.11"
 serde_default = "0.2"
@@ -121,8 +119,8 @@ toml = "0.9"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-opentelemetry = { workspace = true }
-tracing-subscriber = "0.3.20"
 twox-hash = "2"
+unit-prefix = "0.5.2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 
@@ -139,7 +137,7 @@ procfs = { version = "0.18", default-features = false }
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2"
-mach2 = "0.5"
+mach2 = "0.6"
 
 [dev-dependencies]
 coarsetime = "0.1"

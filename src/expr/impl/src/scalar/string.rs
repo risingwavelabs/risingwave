@@ -16,8 +16,6 @@
 //!
 //! <https://www.postgresql.org/docs/current/functions-string.html>
 
-use std::fmt::Write;
-
 use risingwave_common::util::quote_ident::QuoteIdent;
 use risingwave_expr::function;
 
@@ -32,7 +30,7 @@ use risingwave_expr::function;
 /// A
 /// ```
 #[function("chr(int4) -> varchar")]
-pub fn chr(code: i32, writer: &mut impl Write) {
+pub fn chr(code: i32, writer: &mut impl std::fmt::Write) {
     if let Some(c) = std::char::from_u32(code as u32) {
         write!(writer, "{}", c).unwrap();
     }
@@ -74,7 +72,7 @@ pub fn starts_with(s: &str, prefix: &str) -> bool {
 /// The Quick Brown Fox
 /// ```
 #[function("initcap(varchar) -> varchar")]
-pub fn initcap(s: &str, writer: &mut impl Write) {
+pub fn initcap(s: &str, writer: &mut impl std::fmt::Write) {
     let mut capitalize_next = true;
     for c in s.chars() {
         if capitalize_next {
@@ -106,7 +104,7 @@ pub fn initcap(s: &str, writer: &mut impl Write) {
 /// abc
 /// ```
 #[function("lpad(varchar, int4) -> varchar")]
-pub fn lpad(s: &str, length: i32, writer: &mut impl Write) {
+pub fn lpad(s: &str, length: i32, writer: &mut impl std::fmt::Write) {
     lpad_fill(s, length, " ", writer);
 }
 
@@ -127,7 +125,7 @@ pub fn lpad(s: &str, length: i32, writer: &mut impl Write) {
 /// hi
 /// ```
 #[function("lpad(varchar, int4, varchar) -> varchar")]
-pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
+pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl std::fmt::Write) {
     let s_len = s.chars().count();
     let fill_len = fill.chars().count();
 
@@ -170,7 +168,7 @@ pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
 /// abc
 /// ```
 #[function("rpad(varchar, int4) -> varchar")]
-pub fn rpad(s: &str, length: i32, writer: &mut impl Write) {
+pub fn rpad(s: &str, length: i32, writer: &mut impl std::fmt::Write) {
     rpad_fill(s, length, " ", writer);
 }
 
@@ -202,7 +200,7 @@ pub fn rpad(s: &str, length: i32, writer: &mut impl Write) {
 /// hi
 /// ```
 #[function("rpad(varchar, int4, varchar) -> varchar")]
-pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
+pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl std::fmt::Write) {
     let s_len = s.chars().count();
     let fill_len = fill.chars().count();
 
@@ -240,7 +238,7 @@ pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
 /// fedcba
 /// ```
 #[function("reverse(varchar) -> varchar")]
-pub fn reverse(s: &str, writer: &mut impl Write) {
+pub fn reverse(s: &str, writer: &mut impl std::fmt::Write) {
     for c in s.chars().rev() {
         write!(writer, "{}", c).unwrap();
     }
@@ -258,7 +256,7 @@ pub fn reverse(s: &str, writer: &mut impl Write) {
 /// Karel
 /// ```
 #[function("to_ascii(varchar) -> varchar")]
-pub fn to_ascii(s: &str, writer: &mut impl Write) {
+pub fn to_ascii(s: &str, writer: &mut impl std::fmt::Write) {
     for c in s.chars() {
         let ascii = match c {
             'Á' | 'À' | 'Â' | 'Ã' => 'A',
@@ -321,12 +319,12 @@ pub fn to_ascii(s: &str, writer: &mut impl Write) {
 /// 8000000000000000
 /// ```
 #[function("to_hex(int4) -> varchar")]
-pub fn to_hex_i32(n: i32, writer: &mut impl Write) {
+pub fn to_hex_i32(n: i32, writer: &mut impl std::fmt::Write) {
     write!(writer, "{:x}", n).unwrap();
 }
 
 #[function("to_hex(int8) -> varchar")]
-pub fn to_hex_i64(n: i64, writer: &mut impl Write) {
+pub fn to_hex_i64(n: i64, writer: &mut impl std::fmt::Write) {
     write!(writer, "{:x}", n).unwrap();
 }
 
@@ -366,7 +364,7 @@ pub fn to_hex_i64(n: i64, writer: &mut impl Write) {
 /// select
 /// ```
 #[function("quote_ident(varchar) -> varchar")]
-pub fn quote_ident(s: &str, writer: &mut impl Write) {
+pub fn quote_ident(s: &str, writer: &mut impl std::fmt::Write) {
     write!(writer, "{}", QuoteIdent(s)).unwrap();
 }
 
@@ -402,7 +400,7 @@ pub fn quote_ident(s: &str, writer: &mut impl Write) {
 /// (empty)
 /// ```
 #[function("left(varchar, int4) -> varchar")]
-pub fn left(s: &str, n: i32, writer: &mut impl Write) {
+pub fn left(s: &str, n: i32, writer: &mut impl std::fmt::Write) {
     let n = if n >= 0 {
         n as usize
     } else {
@@ -447,7 +445,7 @@ pub fn left(s: &str, n: i32, writer: &mut impl Write) {
 /// (empty)
 /// ```
 #[function("right(varchar, int4) -> varchar")]
-pub fn right(s: &str, n: i32, writer: &mut impl Write) {
+pub fn right(s: &str, n: i32, writer: &mut impl std::fmt::Write) {
     let skip = if n >= 0 {
         s.chars().count().saturating_sub(n as usize)
     } else {
@@ -499,7 +497,7 @@ pub fn right(s: &str, n: i32, writer: &mut impl Write) {
 /// '{"foo": 233, "hello": "world"}'
 /// ```
 #[function("quote_literal(varchar) -> varchar")]
-pub fn quote_literal(s: &str, writer: &mut impl Write) {
+pub fn quote_literal(s: &str, writer: &mut impl std::fmt::Write) {
     if s.contains('\\') {
         // use escape format: E'...'
         write!(writer, "E").unwrap();
@@ -521,7 +519,7 @@ pub fn quote_literal(s: &str, writer: &mut impl Write) {
 /// string; or, if the argument is null, return NULL.
 /// Embedded single-quotes and backslashes are properly doubled.
 #[function("quote_nullable(varchar) -> varchar")]
-pub fn quote_nullable(s: Option<&str>, writer: &mut impl Write) {
+pub fn quote_nullable(s: Option<&str>, writer: &mut impl std::fmt::Write) {
     match s {
         Some(s) => quote_literal(s, writer),
         None => write!(writer, "NULL").unwrap(),

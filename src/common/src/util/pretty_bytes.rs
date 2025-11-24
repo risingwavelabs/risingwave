@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use number_prefix::NumberPrefix;
+use unit_prefix::NumberPrefix;
 
 /// convert bytes to binary pretty format
 pub fn convert(num_bytes: f64) -> String {

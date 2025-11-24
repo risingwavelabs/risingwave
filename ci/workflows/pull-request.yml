@@ -9,12 +9,12 @@ anchors:
           limit: 3
   - plugins:
     - cargo-cache: &cargo-cache
-        nienbo/cache#v2.4.20:
+        nienbo/cache#v2.4.21:
           id: cargo
-          key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+          key: "v1-cache-cargo-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
           restore-keys:
-            - "v1-cache-{{ id }}-{{ runner.os }}-"
-            - "v1-cache-{{ id }}-"
+            - "v1-cache-cargo-{{ runner.os }}-"
+            - "v1-cache-cargo-"
           backend: s3
           s3:
             bucket: rw-ci-cache-bucket
@@ -23,6 +23,20 @@ anchors:
             - ".cargo/registry/index"
             - ".cargo/registry/cache"
             - ".cargo/git"
+    - maven-cache: &maven-cache
+        nienbo/cache#v2.4.21:
+          id: maven
+          key: >-
+            v1-cache-maven-{{ runner.os }}-{{ checksum 'ci/scripts/build-other.sh' }}-{{ checksum 'java/pom.xml' }}-{{ checksum 'e2e_test/udf/remote_java/pom.xml' }}
+          restore-keys:
+            - "v1-cache-maven-{{ runner.os }}-"
+            - "v1-cache-maven-"
+          backend: s3
+          s3:
+            bucket: rw-ci-cache-bucket
+            args: "--no-progress"
+          paths:
+            - ".m2/repository"
     # we need to override args, so didn't include image here in the anchor
     - docker-compose: &docker-compose
         run: rw-build-env
@@ -82,6 +96,7 @@ steps:
     key: "build-other"
     plugins:
       - *cargo-cache
+      - *maven-cache
       - seek-oss/aws-sm#v2.3.2:
           env:
             GITHUB_TOKEN: github-token
@@ -653,7 +668,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: source-test-env
+          run: backward-compatibility-test-env
           environment:
           - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs

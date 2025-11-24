@@ -122,7 +122,7 @@ macro_rules! def_anyhow_newtype {
 
     (
         $(#[$attr:meta])* $vis:vis $name:ident
-        $(, $from:ty => $context:tt)* $(,)?
+        $(, $(#[$attr_inner:meta])* $from:ty => $context:tt)* $(,)?
     ) => {
         #[derive(::thiserror::Error, ::std::fmt::Debug)]
         #[error(transparent)]
@@ -137,6 +137,7 @@ macro_rules! def_anyhow_newtype {
             /// Get the type name of the inner error.
             pub fn variant_name(&self) -> &'static str {
                 $(
+                    $(#[$attr_inner])*
                     if self.0.downcast_ref::<$from>().is_some() {
                         return stringify!($from);
                     }
@@ -146,6 +147,7 @@ macro_rules! def_anyhow_newtype {
         }
 
         $(
+            $(#[$attr_inner])*
             impl From<$from> for $name {
                 fn from(error: $from) -> Self {
                     def_anyhow_newtype!(@from error $context)

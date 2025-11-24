@@ -1,100 +1,96 @@
 # macOS
 **/*.DS_Store
 
-# Visual Studio Code
+# IDE & Editor Configuration
+## Visual Studio Code
 .vscode/*
 !.vscode/*.example
 .devcontainer/
 
-# JetBrains
+## JetBrains IDEs
 .idea/
 *.iml
 .fleet/
 
-# GitPod
+## Other Editors & Tools
 .gitpod.yml
-
-# CLion
 cmake-build-debug/
 /cmake-build-wsl_profile/
 
-# build
-*.exe
-*.app
-build/
-
-# Python
+# Programming Language Artifacts
+## Python
 *.pyc
 venv/
 
-# Golang
+## Go
 go/bin/
 
-# Rust
+## Rust - Compilation Artifacts
 src/**/target
 src/**/target_tarpaulin
 target/
 target-bisector-*/
+
+## Rust - Generated Code (Protocol Buffers)
 src/proto/
 src/prost/src/*.rs
 src/prost/src/sim/*.rs
 !src/prost/src/lib.rs
+!src/prost/src/id.rs
 !src/prost/src/imp.rs
 **/file_descriptor_set.bin
-# runtime log
-src/log/
-# srcy-tags
-**/srcy-tags.vi
 
-# rustc ice
+## Rust - Build Outputs & Binaries
+*.exe
+*.app
+build/
+
+## Rust - Compiler & Build Tools
 rustc-ice-*
+rustc-ice-*.txt
 
-# ctags
+# IDE Metadata & Code Analysis
+**/srcy-tags.vi
 **/tags
 
+# Logs & Traces
+src/log/
 log/
-
 *.log
+.trace
+dhat-heap.json
 
+# RisingWave Local Runtime
 .risingwave/
 .bin/
 
-# generated files
+# Generated Configuration Files
 risedev-components.user.env
 risedev-compose.yml
 risedev-profiles.user.yml
+.claude/settings.local.json
+
+# Test Generated Files & Outputs
 ft.txt
 .sqlsmith/
-# generated output from regress tests
 src/tests/regress/output/*
 src/tests/sync_point/slt/e2e_test
-# generated e2e tests
 e2e_test/generated/*
 !e2e_test/generated/README.md
-# generated scale tests by `cargo nextest`
 scale-test.tar.zst
 simulation-it-test.tar.zst
-
-# hummock-trace
-.trace
-
-# spark binary
-e2e_test/iceberg/spark-*-bin*
-e2e_test/iceberg/metastore_db
-
-**/poetry.lock
-
-**/*.sqlite
-**/*.sqlite-journal
-
 *.slt*.temp
 
+# External Service Data & Dependencies
+e2e_test/iceberg/spark-*-bin*
+e2e_test/iceberg/metastore_db
+**/*.sqlite
+**/*.sqlite-journal
+**/poetry.lock
+
+# Development Tools
 .direnv/
+book/
 
-# mdbook
-book
-
-dhat-heap.json
-
-rustc-ice-*.txt
-.claude/settings.local.json
+# Build caches
+.m2/

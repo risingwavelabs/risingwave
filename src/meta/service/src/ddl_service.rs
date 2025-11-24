@@ -26,14 +26,18 @@ use risingwave_common::id::TableId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_meta::barrier::{BarrierScheduler, Command};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
+use risingwave_meta::stream::{
+    ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy, ThrottleConfig,
+};
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
-use risingwave_meta_model::{ObjectId, StreamingParallelism};
+use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
-use risingwave_pb::catalog::{Comment, Connection, Secret, Table};
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
@@ -42,6 +46,7 @@ use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
+use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -68,6 +73,7 @@ pub struct DdlServiceImpl {
     ddl_controller: DdlController,
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
+    barrier_scheduler: BarrierScheduler,
 }
 
 impl DdlServiceImpl {
@@ -81,6 +87,7 @@ impl DdlServiceImpl {
         sink_manager: SinkCoordinatorManager,
         meta_metrics: Arc<MetaMetrics>,
         iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
+        barrier_scheduler: BarrierScheduler,
     ) -> Self {
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -97,6 +104,7 @@ impl DdlServiceImpl {
             ddl_controller,
             meta_metrics,
             iceberg_compaction_manager,
+            barrier_scheduler,
         }
     }
 
@@ -169,7 +177,7 @@ impl DdlServiceImpl {
                     let req = GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name: table.name.clone(),
+                        table_id: table.id,
                         cdc_table_change: None,
                     };
                     let resp = client
@@ -182,7 +190,7 @@ impl DdlServiceImpl {
                     ddl_controller
                         .run_command(DdlCommand::ReplaceStreamJob(replace_info))
                         .await?;
-                    tracing::info!(elapsed=?start.elapsed(), table_id=table.id, "migrated table fragments");
+                    tracing::info!(elapsed=?start.elapsed(), table_id=%table.id, "migrated table fragments");
                 }
                 tracing::info!("successfully migrated all legacy table fragments");
 
@@ -242,7 +250,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropDatabase(database_id.into()))
+            .run_command(DdlCommand::DropDatabase(database_id))
             .await?;
 
         Ok(Response::new(DropDatabaseResponse {
@@ -257,7 +265,7 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateSecretResponse>, Status> {
         let req = request.into_inner();
         let pb_secret = Secret {
-            id: 0,
+            id: 0.into(),
             name: req.get_name().clone(),
             database_id: req.get_database_id(),
             value: req.get_value().clone(),
@@ -280,7 +288,7 @@ impl DdlService for DdlServiceImpl {
         let secret_id = req.get_secret_id();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSecret(secret_id as _))
+            .run_command(DdlCommand::DropSecret(secret_id))
             .await?;
 
         Ok(Response::new(DropSecretResponse { version }))
@@ -333,7 +341,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(req.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSchema(schema_id.into(), drop_mode))
+            .run_command(DdlCommand::DropSchema(schema_id, drop_mode))
             .await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
@@ -389,7 +397,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSource(source_id as _, drop_mode))
+            .run_command(DdlCommand::DropSource(source_id, drop_mode))
             .await?;
 
         Ok(Response::new(DropSourceResponse {
@@ -408,11 +416,7 @@ impl DdlService for DdlServiceImpl {
 
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
-        let dependencies = req
-            .get_dependencies()
-            .iter()
-            .map(|id| *id as ObjectId)
-            .collect();
+        let dependencies = req.get_dependencies().iter().copied().collect();
 
         let stream_job = StreamingJob::Sink(sink);
 
@@ -441,7 +445,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
         let command = DdlCommand::DropStreamingJob {
-            job_id: StreamingJobId::Sink(sink_id as _),
+            job_id: StreamingJobId::Sink(sink_id),
             drop_mode,
         };
 
@@ -484,7 +488,7 @@ impl DdlService for DdlServiceImpl {
         let subscription_id = request.subscription_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = DdlCommand::DropSubscription(subscription_id as _, drop_mode);
+        let command = DdlCommand::DropSubscription(subscription_id, drop_mode);
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -504,11 +508,7 @@ impl DdlService for DdlServiceImpl {
         let mview = req.get_materialized_view()?.clone();
         let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
-        let dependencies = req
-            .get_dependencies()
-            .iter()
-            .map(|id| *id as ObjectId)
-            .collect();
+        let dependencies = req.get_dependencies().iter().copied().collect();
 
         let stream_job = StreamingJob::MaterializedView(mview);
         let version = self
@@ -541,7 +541,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
-                job_id: StreamingJobId::MaterializedView(TableId::new(table_id as _)),
+                job_id: StreamingJobId::MaterializedView(table_id),
                 drop_mode,
             })
             .await?;
@@ -593,7 +593,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
-                job_id: StreamingJobId::Index(index_id as _),
+                job_id: StreamingJobId::Index(index_id),
                 drop_mode,
             })
             .await?;
@@ -631,7 +631,7 @@ impl DdlService for DdlServiceImpl {
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropFunction(
-                request.function_id as _,
+                request.function_id,
                 DropMode::from_request_setting(request.cascade),
             ))
             .await?;
@@ -648,11 +648,7 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
         let job_type = request.get_job_type().unwrap_or_default();
-        let dependencies = request
-            .get_dependencies()
-            .iter()
-            .map(|id| *id as ObjectId)
-            .collect();
+        let dependencies = request.get_dependencies().iter().copied().collect();
         let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
@@ -688,8 +684,8 @@ impl DdlService for DdlServiceImpl {
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Table(
-                    source_id.map(|PbSourceId::Id(id)| id as _),
-                    TableId::new(table_id as _),
+                    source_id.map(|PbSourceId::Id(id)| id.into()),
+                    table_id,
                 ),
                 drop_mode,
             })
@@ -710,7 +706,7 @@ impl DdlService for DdlServiceImpl {
         let dependencies = req
             .get_dependencies()
             .iter()
-            .map(|id| *id as ObjectId)
+            .copied()
             .collect::<HashSet<_>>();
 
         let version = self
@@ -733,7 +729,7 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropView(view_id as _, drop_mode))
+            .run_command(DdlCommand::DropView(view_id, drop_mode))
             .await?;
         Ok(Response::new(DropViewResponse {
             status: None,
@@ -842,10 +838,7 @@ impl DdlService for DdlServiceImpl {
         } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSetSchema(
-                object.unwrap(),
-                new_schema_id.into(),
-            ))
+            .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
             .await?;
         Ok(Response::new(AlterSetSchemaResponse {
             status: None,
@@ -877,7 +870,7 @@ impl DdlService for DdlServiceImpl {
             }
             create_connection_request::Payload::ConnectionParams(params) => {
                 let pb_connection = Connection {
-                    id: 0,
+                    id: 0.into(),
                     schema_id: req.schema_id,
                     database_id: req.database_id,
                     name: req.name,
@@ -917,10 +910,7 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropConnection(
-                req.connection_id as _,
-                drop_mode,
-            ))
+            .run_command(DdlCommand::DropConnection(req.connection_id, drop_mode))
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
@@ -964,13 +954,7 @@ impl DdlService for DdlServiceImpl {
         let ret = self
             .metadata_manager
             .catalog_controller
-            .get_table_by_ids(
-                table_ids
-                    .into_iter()
-                    .map(|id| TableId::new(id as _))
-                    .collect(),
-                include_dropped_tables,
-            )
+            .get_table_by_ids(table_ids, include_dropped_tables)
             .await?;
 
         let mut tables = HashMap::default();
@@ -1032,7 +1016,7 @@ impl DdlService for DdlServiceImpl {
 
         self.ddl_controller
             .reschedule_streaming_job(
-                job_id.into(),
+                job_id,
                 ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
                 deferred,
             )
@@ -1072,12 +1056,7 @@ impl DdlService for DdlServiceImpl {
 
         let fragment_targets = fragment_ids
             .into_iter()
-            .map(|fragment_id| {
-                (
-                    fragment_id as risingwave_meta_model::FragmentId,
-                    parallelism.clone(),
-                )
-            })
+            .map(|fragment_id| (fragment_id, parallelism.clone()))
             .collect();
 
         self.ddl_controller
@@ -1187,7 +1166,7 @@ impl DdlService for DdlServiceImpl {
                     || original_columns.is_superset(&new_columns))
                 {
                     tracing::warn!(target: "auto_schema_change",
-                                    table_id = table.id,
+                                    table_id = %table.id,
                                     cdc_table_id = table.cdc_table_id,
                                     upstraem_ddl = table_change.upstream_ddl,
                                     original_columns = ?original_columns,
@@ -1212,7 +1191,7 @@ impl DdlService for DdlServiceImpl {
                 // skip the schema change if there is no change to original columns
                 if original_columns == new_columns {
                     tracing::warn!(target: "auto_schema_change",
-                                   table_id = table.id,
+                                   table_id = %table.id,
                                    cdc_table_id = table.cdc_table_id,
                                    upstraem_ddl = table_change.upstream_ddl,
                                     original_columns = ?original_columns,
@@ -1232,7 +1211,7 @@ impl DdlService for DdlServiceImpl {
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
                         owner: table.owner,
-                        table_name: table.name.clone(),
+                        table_id: table.id,
                         cdc_table_change: Some(table_change.clone()),
                     })
                     .await;
@@ -1245,7 +1224,7 @@ impl DdlService for DdlServiceImpl {
                             plan.streaming_job.table().inspect(|t| {
                                 tracing::info!(
                                     target: "auto_schema_change",
-                                    table_id = t.id,
+                                    table_id = %t.id,
                                     cdc_table_id = t.cdc_table_id,
                                     upstraem_ddl = table_change.upstream_ddl,
                                     "Start the replace config change")
@@ -1260,7 +1239,7 @@ impl DdlService for DdlServiceImpl {
                                 Ok(_) => {
                                     tracing::info!(
                                         target: "auto_schema_change",
-                                        table_id = table.id,
+                                        table_id = %table.id,
                                         cdc_table_id = table.cdc_table_id,
                                         "Table replaced success");
 
@@ -1277,7 +1256,7 @@ impl DdlService for DdlServiceImpl {
                                     tracing::error!(
                                         target: "auto_schema_change",
                                         error = %e.as_report(),
-                                        table_id = table.id,
+                                        table_id = %table.id,
                                         cdc_table_id = table.cdc_table_id,
                                         upstraem_ddl = table_change.upstream_ddl,
                                         "failed to replace the table",
@@ -1301,7 +1280,7 @@ impl DdlService for DdlServiceImpl {
                         tracing::error!(
                             target: "auto_schema_change",
                             error = %e.as_report(),
-                            table_id = table.id,
+                            table_id = %table.id,
                             cdc_table_id = table.cdc_table_id,
                             "failed to get replace table plan",
                         );
@@ -1353,7 +1332,7 @@ impl DdlService for DdlServiceImpl {
 
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id.into(),
+                table_id.as_job_id(),
                 ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
@@ -1379,7 +1358,7 @@ impl DdlService for DdlServiceImpl {
         };
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterDatabaseParam(database_id.into(), param))
+            .run_command(DdlCommand::AlterDatabaseParam(database_id, param))
             .await?;
 
         return Ok(Response::new(AlterDatabaseParamResponse {
@@ -1393,7 +1372,7 @@ impl DdlService for DdlServiceImpl {
         request: Request<CompactIcebergTableRequest>,
     ) -> Result<Response<CompactIcebergTableResponse>, Status> {
         let req = request.into_inner();
-        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+        let sink_id = req.sink_id;
 
         // Trigger manual compaction directly using the sink ID
         let task_id = self
@@ -1415,11 +1394,11 @@ impl DdlService for DdlServiceImpl {
         request: Request<ExpireIcebergTableSnapshotsRequest>,
     ) -> Result<Response<ExpireIcebergTableSnapshotsResponse>, Status> {
         let req = request.into_inner();
-        let sink_id = risingwave_connector::sink::catalog::SinkId::new(req.sink_id);
+        let sink_id = req.sink_id;
 
         // Trigger manual snapshot expiration directly using the sink ID
         self.iceberg_compaction_manager
-            .check_and_expire_snapshots(&sink_id)
+            .check_and_expire_snapshots(sink_id)
             .await
             .map_err(|e| {
                 Status::internal(format!("Failed to expire snapshots: {}", e.as_report()))
@@ -1449,10 +1428,30 @@ impl DdlService for DdlServiceImpl {
             fragment_graph,
             job_type,
         } = table_info.unwrap();
-        let table = table.unwrap();
+        let mut table = table.unwrap();
+        let mut fragment_graph = fragment_graph.unwrap();
         let database_id = table.get_database_id();
         let schema_id = table.get_schema_id();
         let table_name = table.get_name().to_owned();
+
+        // Mark table as background creation, so that it won't block sink creation.
+        table.create_type = PbCreateType::Background as _;
+
+        // Set the source rate limit to 0 and reset it back after the iceberg sink is backfilling.
+        let source_rate_limit = if let Some(source) = &source {
+            for fragment in fragment_graph.fragments.values_mut() {
+                stream_graph_visitor::visit_fragment_mut(fragment, |node| {
+                    if let NodeBody::Source(source_node) = node
+                        && let Some(inner) = &mut source_node.source_inner
+                    {
+                        inner.rate_limit = Some(0);
+                    }
+                });
+            }
+            Some(source.rate_limit)
+        } else {
+            None
+        };
 
         let stream_job =
             StreamingJob::Table(source, table, PbTableJobType::try_from(job_type).unwrap());
@@ -1460,7 +1459,7 @@ impl DdlService for DdlServiceImpl {
             .ddl_controller
             .run_command(DdlCommand::CreateStreamingJob {
                 stream_job,
-                fragment_graph: fragment_graph.unwrap(),
+                fragment_graph,
                 dependencies: HashSet::new(),
                 specific_resource_group: None,
                 if_not_exists,
@@ -1470,7 +1469,7 @@ impl DdlService for DdlServiceImpl {
         let table_catalog = self
             .metadata_manager
             .catalog_controller
-            .get_table_catalog_by_name(database_id.into(), schema_id.into(), &table_name)
+            .get_table_catalog_by_name(database_id, schema_id, &table_name)
             .await?
             .ok_or(Status::not_found("Internal error: table not found"))?;
 
@@ -1479,7 +1478,11 @@ impl DdlService for DdlServiceImpl {
             sink,
             fragment_graph,
         } = sink_info.unwrap();
-        let sink = sink.unwrap();
+        let mut sink = sink.unwrap();
+
+        // Mark sink as background creation, so that it won't block source creation.
+        sink.create_type = PbCreateType::Background as _;
+
         let mut fragment_graph = fragment_graph.unwrap();
 
         assert_eq!(fragment_graph.dependent_table_ids.len(), 1);
@@ -1521,8 +1524,8 @@ impl DdlService for DdlServiceImpl {
             });
         }
 
-        let table_id = table_catalog.id as ObjectId;
-        let dependencies = HashSet::from_iter([table_id]);
+        let table_id = table_catalog.id;
+        let dependencies = HashSet::from_iter([table_id.into(), schema_id.into()]);
         let stream_job = StreamingJob::Sink(sink);
         let res = self
             .ddl_controller
@@ -1539,7 +1542,7 @@ impl DdlService for DdlServiceImpl {
             let _ = self
                 .ddl_controller
                 .run_command(DdlCommand::DropStreamingJob {
-                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
+                    job_id: StreamingJobId::Table(None, table_id),
                     drop_mode: DropMode::Cascade,
                 })
                 .await
@@ -1551,7 +1554,35 @@ impl DdlService for DdlServiceImpl {
             res?;
         }
 
-        // 3. create iceberg source
+        // 3. reset source rate limit back to normal after sink creation
+        if let Some(source_rate_limit) = source_rate_limit
+            && source_rate_limit != Some(0)
+        {
+            let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
+                table_catalog.optional_associated_source_id.unwrap();
+            let actors_to_apply = self
+                .metadata_manager
+                .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
+                .await?;
+            let mutation: ThrottleConfig = actors_to_apply
+                .into_iter()
+                .map(|(fragment_id, actors)| {
+                    (
+                        fragment_id,
+                        actors
+                            .into_iter()
+                            .map(|actor_id| (actor_id, source_rate_limit))
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+                .collect();
+            let _ = self
+                .barrier_scheduler
+                .run_command(database_id, Command::Throttle(mutation))
+                .await?;
+        }
+
+        // 4. create iceberg source
         let iceberg_source = iceberg_source.unwrap();
         let res = self
             .ddl_controller
@@ -1561,7 +1592,7 @@ impl DdlService for DdlServiceImpl {
             let _ = self
                 .ddl_controller
                 .run_command(DdlCommand::DropStreamingJob {
-                    job_id: StreamingJobId::Table(None, TableId::new(table_id as _)),
+                    job_id: StreamingJobId::Table(None, table_id),
                     drop_mode: DropMode::Cascade,
                 })
                 .await
@@ -1582,7 +1613,7 @@ impl DdlService for DdlServiceImpl {
 
 fn add_auto_schema_change_fail_event_log(
     meta_metrics: &Arc<MetaMetrics>,
-    table_id: u32,
+    table_id: TableId,
     table_name: String,
     cdc_table_id: String,
     upstream_ddl: String,

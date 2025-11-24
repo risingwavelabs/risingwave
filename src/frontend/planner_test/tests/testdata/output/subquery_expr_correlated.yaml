@@ -899,11 +899,12 @@
       └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
         ├─StreamExchange { dist: HashShard(t1.k1) }
         │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
-          └─StreamExchange { dist: HashShard(t2.k2) }
-            └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
-              └─StreamFilter { predicate: IsNotNull(t2.k2) }
-                └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        └─StreamProject { exprs: [t2.k2, t2.v2] }
+          └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+            └─StreamExchange { dist: HashShard(t2.k2) }
+              └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
+                └─StreamFilter { predicate: IsNotNull(t2.k2) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: test ApplyTopNTransposeRule case 2
   sql: |
     create table t1 (v1 int, k1 int);
@@ -926,7 +927,7 @@
         ├─StreamExchange { dist: HashShard(t1.v1) }
         │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(t2.v2) }
-          └─StreamProject { exprs: [t2.v2, t2._row_id] }
+          └─StreamProject { exprs: [t2.v2] }
             └─StreamTopN { order: [t2.v2 ASC], limit: 1, offset: 0 }
               └─StreamExchange { dist: Single }
                 └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [_vnode] }
@@ -953,11 +954,12 @@
       └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
         ├─StreamExchange { dist: HashShard(t1.k1) }
         │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
-          └─StreamExchange { dist: HashShard(t2.k2) }
-            └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
-              └─StreamFilter { predicate: IsNotNull(t2.k2) }
-                └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        └─StreamProject { exprs: [t2.k2, t2.v2] }
+          └─StreamGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+            └─StreamExchange { dist: HashShard(t2.k2) }
+              └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
+                └─StreamFilter { predicate: IsNotNull(t2.k2) }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: test correlated input ref predicate and share operator
   sql: |
     create table t (a int, b int, c int);
@@ -2384,11 +2386,12 @@
       └─StreamHashJoin { type: Inner, predicate: t1.y IS NOT DISTINCT FROM t2.y AND t1.x = t2.x, output: [t1.x, t1.y, t1._row_id, t2.y] }
         ├─StreamExchange { dist: HashShard(t1.y) }
         │ └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamGroupTopN { order: [t2.y ASC], limit: 1, offset: 0, group_key: [t2.y] }
-          └─StreamExchange { dist: HashShard(t2.y) }
-            └─StreamProject { exprs: [t2.y, t2.x, t2._row_id] }
-              └─StreamFilter { predicate: IsNotNull(t2.y) }
-                └─StreamTableScan { table: t2, columns: [t2.x, t2.y, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        └─StreamProject { exprs: [t2.y, t2.x] }
+          └─StreamGroupTopN { order: [t2.y ASC], limit: 1, offset: 0, group_key: [t2.y] }
+            └─StreamExchange { dist: HashShard(t2.y) }
+              └─StreamProject { exprs: [t2.y, t2.x, t2._row_id] }
+                └─StreamFilter { predicate: IsNotNull(t2.y) }
+                  └─StreamTableScan { table: t2, columns: [t2.x, t2.y, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: subqueries in case when exprs
   sql: "WITH input AS (\n    SELECT\n        'Empty JSON item' AS test_case,\n        ('{}'::JSONB) AS item\n)\n\nSELECT\n    test_case,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST(JSONB_PATH_QUERY_FIRST(item, '$.binary_set_attribute'), '$.BS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT DECODE(((nested_item) #>> '{}'), 'base64') AS parsed_item\n                FROM (\n                    SELECT nested_item\n                    FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.binary_set_attribute')), '$.BS'))\n                    AS t(nested_item)\n                )\n            )\n            ORDER BY parsed_item\n        )\n    END AS binary_set_attribute,\n\n    CASE\n        WHEN JSONB_PATH_QUERY_FIRST(JSONB_PATH_QUERY_FIRST(item, '$.number_set_attribute'), '$.NS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT CAST(nested_item #>> '{}' AS BIGINT) AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n    \t\t\t\tFROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.number_set_attribute')), '$.NS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS number_set_attribute,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.float_set_attribute')), '$.NS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT CAST(nested_item #>> '{}' AS FLOAT)\n                AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n\t\t\t\t    FROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.float_set_attribute')), '$.NS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS float_set_attribute,\n\n    CASE\n\t    WHEN JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.string_set_attribute')), '$.SS') IS NULL THEN NULL\n        ELSE ARRAY(\n            SELECT parsed_item\n            FROM (\n                SELECT nested_item #>> '{}' AS parsed_item\n                FROM (\n    \t\t\t\tSELECT nested_item\n    \t\t\t\tFROM JSONB_ARRAY_ELEMENTS(JSONB_PATH_QUERY_FIRST((JSONB_PATH_QUERY_FIRST(item, '$.string_set_attribute')), '$.SS'))\n    \t\t\t\tAS t(nested_item)\n\t\t\t\t)\n            )\n            ORDER BY parsed_item\n        )\n    END AS string_set_attribute\nFROM input\n"
   batch_plan: |-

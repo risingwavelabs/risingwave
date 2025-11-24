@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use risingwave_common::catalog::FragmentTypeMask;
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
@@ -24,7 +25,7 @@ use risingwave_pb::stream_plan::{
 };
 use thiserror_ext::AsReport;
 
-pub type LocalFragmentId = u32;
+pub type LocalFragmentId = FragmentId;
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
 #[derive(Clone, Debug)]

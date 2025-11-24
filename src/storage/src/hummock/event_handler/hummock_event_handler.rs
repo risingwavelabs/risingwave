@@ -922,7 +922,7 @@ mod tests {
             HummockVersion::from_rpc_protobuf(&PbHummockVersion {
                 id: 1,
                 state_table_info: HashMap::from_iter([(
-                    TEST_TABLE_ID.as_raw_id(),
+                    TEST_TABLE_ID,
                     StateTableInfo {
                         committed_epoch: epoch0,
                         compaction_group_id: StaticCompactionGroupId::StateDefault as _,
@@ -1077,14 +1077,14 @@ mod tests {
                 id: 1,
                 state_table_info: HashMap::from_iter([
                     (
-                        table_id1.as_raw_id(),
+                        table_id1,
                         StateTableInfo {
                             committed_epoch: epoch0,
                             compaction_group_id: StaticCompactionGroupId::StateDefault as _,
                         },
                     ),
                     (
-                        table_id2.as_raw_id(),
+                        table_id2,
                         StateTableInfo {
                             committed_epoch: epoch0,
                             compaction_group_id: StaticCompactionGroupId::StateDefault as _,

@@ -22,7 +22,7 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{ActorId, JobId};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
@@ -33,6 +33,7 @@ use risingwave_connector::source::cdc::external::{
 use risingwave_connector::source::cdc::{CdcScanOptions, CdcTableSnapshotSplitAssignment};
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use risingwave_meta_model::cdc_table_snapshot_split;
+use risingwave_pb::id::TableId;
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamCdcScanNode, StreamCdcScanOptions};
@@ -45,7 +46,7 @@ use crate::model::{Fragment, StreamJobFragments};
 /// A CDC table snapshot splits can only be successfully initialized once.
 /// Subsequent attempts to write to the metastore with the same primary key will be rejected.
 pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
-    table_id: u32,
+    table_id: TableId,
     table_desc: &ExternalTableDesc,
     meta_store: &SqlMetaStore,
     per_table_options: &Option<StreamCdcScanOptions>,
@@ -106,7 +107,7 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
         let split: CdcTableSnapshotSplit = split?;
         splits_num += 1;
         insert_batch.push(cdc_table_snapshot_split::ActiveModel {
-            table_id: Set(table_id.into()),
+            table_id: Set(table_id.as_job_id()),
             split_id: Set(split.split_id.to_owned()),
             left: Set(split.left_bound_inclusive.value_serialize()),
             right: Set(split.right_bound_exclusive.value_serialize()),
@@ -188,7 +189,7 @@ pub(crate) async fn assign_cdc_table_snapshot_splits(
 }
 
 pub(crate) async fn assign_cdc_table_snapshot_splits_pairs(
-    table_id_actor_ids: impl IntoIterator<Item = (JobId, HashSet<u32>)>,
+    table_id_actor_ids: impl IntoIterator<Item = (JobId, HashSet<ActorId>)>,
     meta_store: &SqlMetaStore,
     completed_cdc_job_ids: HashSet<JobId>,
 ) -> MetaResult<CdcTableSnapshotSplitAssignment> {
@@ -209,7 +210,7 @@ pub(crate) async fn assign_cdc_table_snapshot_splits_pairs(
 
 pub(crate) async fn assign_cdc_table_snapshot_splits_impl(
     table_job_id: JobId,
-    actor_ids: HashSet<u32>,
+    actor_ids: HashSet<ActorId>,
     meta_store: &SqlMetaStore,
     completed_cdc_job_ids: Option<&HashSet<JobId>>,
 ) -> MetaResult<CdcTableSnapshotSplitAssignment> {
@@ -231,7 +232,7 @@ pub(crate) async fn assign_cdc_table_snapshot_splits_impl(
     }
     let splits_per_actor = splits.len().div_ceil(actor_ids.len());
     let mut assignments: HashMap<
-        u32,
+        ActorId,
         Vec<risingwave_connector::source::CdcTableSnapshotSplitCommon<Vec<u8>>>,
         _,
     > = HashMap::default();

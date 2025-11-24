@@ -171,7 +171,7 @@ impl DmlExecutor {
                                             tracing::info!(
                                                 old_rate_limit = ?old_rate_limit,
                                                 new_rate_limit = ?new_rate_limit,
-                                                actor_id,
+                                                %actor_id,
                                                 "dml rate limit changed",
                                             );
                                         }

@@ -19,6 +19,7 @@ use std::path::Path;
 use either::Either;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::id::TableId;
 use risingwave_common::types::{JsonbVal, ScalarRef};
 use risingwave_connector::parser::{ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig};
 use risingwave_connector::source::filesystem::OpendalFsSplit;
@@ -65,6 +66,9 @@ pub struct BatchPosixFsFetchExecutor<S: StateStore> {
     /// In-memory queue of file assignments to process (`file_path`, `split_json`).
     /// This is ephemeral and cleared on recovery and `RefreshStart` mutations.
     file_queue: VecDeque<(String, JsonbVal)>,
+
+    /// Associated table ID for reporting load finished
+    associated_table_id: TableId,
 }
 
 /// Fetched data from a file, along with file path for logging
@@ -83,7 +87,9 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         upstream: Executor,
         rate_limit_rps: Option<u32>,
         barrier_manager: LocalBarrierManager,
+        associated_table_id: Option<TableId>,
     ) -> Self {
+        assert!(associated_table_id.is_some());
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
@@ -91,6 +97,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             rate_limit_rps,
             barrier_manager,
             file_queue: VecDeque::new(),
+            associated_table_id: associated_table_id.unwrap(),
         }
     }
 
@@ -218,7 +225,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -289,7 +296,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     {
                                         tracing::info!(
                                             ?barrier.epoch,
-                                            actor_id = actor_ctx.id,
+                                            actor_id = %actor_ctx.id,
                                             source_id = %core.source_id,
                                             queue_len = file_queue.len(),
                                             files_in_progress,
@@ -314,7 +321,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                         {
                                             tracing::info!(
                                                 ?barrier.epoch,
-                                                actor_id = actor_ctx.id,
+                                                actor_id = %actor_ctx.id,
                                                 source_id = %core.source_id,
                                                 "received ListFinish mutation"
                                             );
@@ -338,18 +345,19 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                 && file_queue.is_empty()
                                 && list_finished
                                 && is_refreshing
+                                && barrier.is_checkpoint()
                             {
                                 tracing::info!(
                                     ?epoch,
-                                    actor_id = actor_ctx.id,
+                                    actor_id = %actor_ctx.id,
                                     source_id = %core.source_id,
                                     "Reporting source load finished"
                                 );
                                 barrier_manager.report_source_load_finished(
                                     epoch,
                                     actor_ctx.id,
+                                    self.associated_table_id,
                                     core.source_id,
-                                    core.source_id.as_raw_id(),
                                 );
                                 // Reset the flag to avoid duplicate reports
                                 list_finished = false;
@@ -381,7 +389,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                             }
 
                             tracing::debug!(
-                                actor_id = actor_ctx.id,
+                                actor_id = %actor_ctx.id,
                                 queue_len = file_queue.len(),
                                 "Added file assignments to queue"
                             );
@@ -401,8 +409,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                         for chunk in chunks {
                             let chunk = prune_additional_cols(
                                 &chunk,
-                                split_idx,
-                                offset_idx,
+                                &[split_idx, offset_idx],
                                 &source_desc.columns,
                             );
                             yield Message::Chunk(chunk);

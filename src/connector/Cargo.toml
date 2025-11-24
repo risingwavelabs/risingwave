@@ -9,16 +9,37 @@ repository = { workspace = true }
 
 [features]
 default = []
-all-sinks = ["sink-deltalake"]
+all-sinks = [
+    "sink-bigquery",
+    "sink-deltalake",
+    "sink-google_pubsub",
+    "sink-clickhouse",
+    "sink-doris",
+    "sink-starrocks",
+]
 all-sources = []
+sink-bigquery = [
+    "dep:gcp-bigquery-client",
+    "dep:google-cloud-bigquery",
+    "dep:google-cloud-gax",
+    "dep:google-cloud-googleapis",
+]
 sink-deltalake = ["dep:deltalake"]
+sink-google_pubsub = [
+    # "dep:google-cloud-pubsub",
+    "dep:google-cloud-gax",
+    "dep:google-cloud-googleapis",
+]
+sink-clickhouse = ["dep:clickhouse"]
+sink-doris = []
+sink-starrocks = []
 
 [dependencies]
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = { version = "0.44", features = ["websockets"] }
+async-nats = { version = "0.45", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -39,14 +60,11 @@ byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 cfg-if = "1"
 cfg-or-panic = "0.2"
-chrono = { workspace = true, features = [
-    "clock",
-    "std",
-] }
+chrono = { workspace = true, features = ["clock", "std"] }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
     "time",
     "rustls-tls",
-] }
+], optional = true }
 csv = "1.4"
 deltalake = { workspace = true, optional = true }
 duration-str = "0.17.0"
@@ -56,16 +74,16 @@ elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcp-bigquery-client = "0.18.0"
+gcp-bigquery-client = { version = "0.18.0", optional = true }
 glob = "0.3"
 google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", features = [
     "auth",
-] }
-google-cloud-gax = { package = "gcloud-gax", version = "1" }
+], optional = true }
+google-cloud-gax = { package = "gcloud-gax", version = "1", optional = true }
 google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", features = [
     "pubsub",
     "bigquery",
-] }
+], optional = true }
 google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
@@ -110,6 +128,8 @@ pulsar = { version = "6.3", default-features = false, features = [
     "lz4",
     "zstd",
 ] }
+# should align with pulsar's prost version
+pulsar-prost = { package = "prost", version = "0.11.9" }
 rdkafka = { workspace = true, features = [
     "cmake-build",
     "ssl",
@@ -123,6 +143,7 @@ redis = { workspace = true, features = [
     "tokio-rustls-comp",
     "cluster-async",
     "geospatial",
+    "streams",
 ] }
 regex = { workspace = true }
 reqwest = { workspace = true }

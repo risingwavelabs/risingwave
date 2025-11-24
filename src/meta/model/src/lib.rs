@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-pub use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+pub use risingwave_common::id::*;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
@@ -70,20 +70,8 @@ pub mod view;
 pub mod worker;
 pub mod worker_property;
 
-pub type WorkerId = i32;
-
 pub type TransactionId = i32;
 
-type RawObjectId = i32;
-pub type ObjectId = RawObjectId;
-pub type SourceId = RawObjectId;
-pub type SinkId = RawObjectId;
-pub type SubscriptionId = RawObjectId;
-pub type IndexId = RawObjectId;
-pub type ViewId = RawObjectId;
-pub type FunctionId = RawObjectId;
-pub type ConnectionId = RawObjectId;
-pub type SecretId = RawObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;
@@ -93,9 +81,6 @@ pub type Epoch = i64;
 pub type CompactionGroupId = i64;
 pub type CompactionTaskId = i64;
 pub type HummockSstableObjectId = i64;
-
-pub type FragmentId = i32;
-pub type ActorId = i32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
@@ -335,6 +320,8 @@ macro_rules! derive_btreemap_from_blob {
 
 pub(crate) use {derive_array_from_blob, derive_from_blob};
 
+derive_from_json_struct!(TableIdArray, Vec<TableId>);
+
 derive_from_json_struct!(I32Array, Vec<i32>);
 
 impl From<Vec<u32>> for I32Array {
@@ -346,18 +333,6 @@ impl From<Vec<u32>> for I32Array {
 impl I32Array {
     pub fn into_u32_array(self) -> Vec<u32> {
         self.0.into_iter().map(|id| id as _).collect()
-    }
-}
-
-derive_from_json_struct!(ActorUpstreamActors, BTreeMap<FragmentId, Vec<ActorId>>);
-
-impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
-    fn from(val: BTreeMap<u32, Vec<u32>>) -> Self {
-        let mut map = BTreeMap::new();
-        for (k, v) in val {
-            map.insert(k as _, v.into_iter().map(|a| a as _).collect());
-        }
-        Self(map)
     }
 }
 
@@ -422,6 +397,10 @@ derive_from_blob!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);
 derive_from_blob!(ActorMapping, risingwave_pb::stream_plan::PbActorMapping);
 derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
+derive_from_blob!(
+    SourceRefreshMode,
+    risingwave_pb::plan_common::PbSourceRefreshMode
+);
 
 derive_array_from_blob!(
     TypePairArray,

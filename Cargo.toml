@@ -12,6 +12,7 @@ members = [
     "src/common/estimate_size",
     "src/common/fields-derive",
     "src/common/heap_profiling",
+    "src/common/log",
     "src/common/metrics",
     "src/common/telemetry_event",
     "src/compute",
@@ -167,19 +168,19 @@ hashbrown0_14 = { package = "hashbrown", version = "0.14", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
 
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
-jsonbb = { version = "0.2.2", features = ["float_roundtrip"] }
+jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
@@ -420,3 +421,8 @@ bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-jso
 # why this patch work with zstd-sys < 2.0.15?
 # in the last release v4.8.0+2.3.0, the zstd-sys requirement is 2.0.6 < 2.0.13, and the release does not contain zstd related changes
 rdkafka-sys = { git = "https://github.com/risingwavelabs/rust-rdkafka", package = "rdkafka-sys", branch = "downgrade-zstd" }
+
+prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
+prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
+prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
+prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }

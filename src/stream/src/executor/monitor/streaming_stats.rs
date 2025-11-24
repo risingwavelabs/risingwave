@@ -91,7 +91,7 @@ pub struct StreamingMetrics {
 
     // Backpressure
     pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
-    actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec,
+    actor_input_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
 
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec,
@@ -218,6 +218,10 @@ pub struct StreamingMetrics {
     pub pg_cdc_state_table_lsn: LabelGuardedIntGaugeVec,
     pub pg_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
 
+    // MySQL CDC binlog monitoring
+    pub mysql_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
+    pub mysql_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
+
     // Gap Fill
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
 }
@@ -318,6 +322,22 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let mysql_cdc_state_binlog_file_seq = register_guarded_int_gauge_vec_with_registry!(
+            "stream_mysql_cdc_state_binlog_file_seq",
+            "Current binlog file sequence number stored in MySQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let mysql_cdc_state_binlog_position = register_guarded_int_gauge_vec_with_registry!(
+            "stream_mysql_cdc_state_binlog_position",
+            "Current binlog position stored in MySQL CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
             "Total size of chunks buffered in a barrier",
@@ -352,7 +372,9 @@ impl StreamingMetrics {
                 &["actor_id", "fragment_id", "upstream_fragment_id"],
                 registry
             )
-            .unwrap();
+            .unwrap()
+            // mask the first label `actor_id` if the level is less verbose than `Debug`
+            .relabel_debug_1(level);
 
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
@@ -1338,6 +1360,8 @@ impl StreamingMetrics {
             materialize_current_epoch,
             pg_cdc_state_table_lsn,
             pg_cdc_jni_commit_offset_lsn,
+            mysql_cdc_state_binlog_file_seq,
+            mysql_cdc_state_binlog_position,
             gap_fill_generated_rows_count,
         }
     }

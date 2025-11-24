@@ -1,0 +1,6 @@
+# Ignore generated TLS certificates
+certs/
+
+# Ignore docker volumes
+ldap_data/
+ldap_config/

@@ -89,24 +89,46 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                                            panels.timeseries_count(
-                                "PostgreSQL CDC LSN Progression",
-                                "LSN progression through the CDC pipeline by source_id",
-                                [
-                                    panels.target(
-                                        f"{metric('stream_pg_cdc_state_table_lsn')}",
-                                        "source_id {{source_id}} - State Table LSN",
-                                    ),
-                                    panels.target(
-                                        f"{metric('stream_pg_cdc_jni_commit_offset_lsn')}",
-                                        "source_id {{source_id}} - JNI Commit Offset LSN",
-                                    ),
-                                    panels.target(
-                                        f"{metric('pg_cdc_confirmed_flush_lsn')}",
-                                                                                 "slot {{slot_name}} source_id {{source_id}} - Confirmed Flush LSN",
-                                    ),
-                                ],
-                            ),
+                panels.timeseries_count(
+                    "PostgreSQL CDC LSN Progression",
+                    "LSN progression through the CDC pipeline by source_id",
+                    [
+                        panels.target(
+                            f"{metric('stream_pg_cdc_state_table_lsn')}",
+                            "source_id {{source_id}} - State Table LSN",
+                        ),
+                        panels.target(
+                            f"{metric('stream_pg_cdc_jni_commit_offset_lsn')}",
+                            "source_id {{source_id}} - JNI Commit Offset LSN",
+                        ),
+                        panels.target(
+                            f"{metric('pg_cdc_confirmed_flush_lsn')}",
+                            "slot {{slot_name}} source_id {{source_id}} - Confirmed Flush LSN",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "MySQL CDC Binlog Progression",
+                    "Binlog file sequence and position progression by source_id",
+                    [
+                        panels.target(
+                            f"{metric('stream_mysql_cdc_state_binlog_file_seq')}",
+                            "source_id {{source_id}} - State Table Binlog File Seq",
+                        ),
+                        panels.target(
+                            f"{metric('stream_mysql_cdc_state_binlog_position')}",
+                            "source_id {{source_id}} - State Table Binlog Position (bytes)",
+                        ),
+                        panels.target(
+                            f"{metric('mysql_cdc_binlog_file_seq_min')}",
+                            "{{hostname}}:{{port}} - Upstream Binlog File Min Seq (oldest)",
+                        ),
+                        panels.target(
+                            f"{metric('mysql_cdc_binlog_file_seq_max')}",
+                            "{{hostname}}:{{port}} - Upstream Binlog File Max Seq (newest)",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]

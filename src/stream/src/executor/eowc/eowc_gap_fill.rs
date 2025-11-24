@@ -15,9 +15,12 @@
 use std::collections::HashMap;
 
 use risingwave_common::array::Op;
+use risingwave_common::gap_fill::{
+    FillStrategy, apply_interpolation_step, calculate_interpolation_step,
+};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{CheckedAdd, Decimal, ToOwnedDatum};
+use risingwave_common::types::{CheckedAdd, ToOwnedDatum};
 use risingwave_expr::ExprError;
 use risingwave_expr::expr::NonStrictExpression;
 use tracing::warn;
@@ -29,8 +32,6 @@ pub struct EowcGapFillExecutor<S: StateStore> {
     input: Executor,
     inner: ExecutorInner<S>,
 }
-
-use risingwave_common::gap_fill_types::FillStrategy;
 
 pub struct EowcGapFillExecutorArgs<S: StateStore> {
     pub actor_ctx: ActorContextRef,
@@ -70,50 +71,6 @@ struct ExecutionVars<S: StateStore> {
 }
 
 impl<S: StateStore> ExecutorInner<S> {
-    fn calculate_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: usize) -> Datum {
-        let (Some(s1), Some(s2)) = (d1, d2) else {
-            return None;
-        };
-        if steps == 0 {
-            return None;
-        }
-        match (s1, s2) {
-            (ScalarRefImpl::Int16(v1), ScalarRefImpl::Int16(v2)) => {
-                Some(ScalarImpl::Int16((v2 - v1) / steps as i16))
-            }
-            (ScalarRefImpl::Int32(v1), ScalarRefImpl::Int32(v2)) => {
-                Some(ScalarImpl::Int32((v2 - v1) / steps as i32))
-            }
-            (ScalarRefImpl::Int64(v1), ScalarRefImpl::Int64(v2)) => {
-                Some(ScalarImpl::Int64((v2 - v1) / steps as i64))
-            }
-            (ScalarRefImpl::Float32(v1), ScalarRefImpl::Float32(v2)) => {
-                Some(ScalarImpl::Float32((v2 - v1) / steps as f32))
-            }
-            (ScalarRefImpl::Float64(v1), ScalarRefImpl::Float64(v2)) => {
-                Some(ScalarImpl::Float64((v2 - v1) / steps as f64))
-            }
-            (ScalarRefImpl::Decimal(v1), ScalarRefImpl::Decimal(v2)) => {
-                Some(ScalarImpl::Decimal((v2 - v1) / Decimal::from(steps)))
-            }
-            _ => None,
-        }
-    }
-
-    fn apply_step(current: &mut Datum, step: &ScalarImpl) {
-        if let Some(curr) = current.as_mut() {
-            match (curr, step) {
-                (ScalarImpl::Int16(v1), &ScalarImpl::Int16(v2)) => *v1 += v2,
-                (ScalarImpl::Int32(v1), &ScalarImpl::Int32(v2)) => *v1 += v2,
-                (ScalarImpl::Int64(v1), &ScalarImpl::Int64(v2)) => *v1 += v2,
-                (ScalarImpl::Float32(v1), &ScalarImpl::Float32(v2)) => *v1 += v2,
-                (ScalarImpl::Float64(v1), &ScalarImpl::Float64(v2)) => *v1 += v2,
-                (ScalarImpl::Decimal(v1), &ScalarImpl::Decimal(v2)) => *v1 = *v1 + v2,
-                _ => (),
-            }
-        };
-    }
-
     fn generate_filled_rows(
         prev_row: &OwnedRow,
         curr_row: &OwnedRow,
@@ -201,7 +158,7 @@ impl<S: StateStore> ExecutorInner<S> {
         for i in 0..prev_row.len() {
             if let Some(strategy) = fill_columns.get(&i) {
                 if matches!(strategy, FillStrategy::Interpolate) {
-                    let step = Self::calculate_step(
+                    let step = calculate_interpolation_step(
                         prev_row.datum_at(i),
                         curr_row.datum_at(i),
                         row_count + 1,
@@ -244,7 +201,7 @@ impl<S: StateStore> ExecutorInner<S> {
                         FillStrategy::Interpolate => {
                             // Apply interpolation step and update cumulative value
                             if let Some(step) = &interpolation_steps[col_idx] {
-                                Self::apply_step(&mut interpolation_states[col_idx], step);
+                                apply_interpolation_step(&mut interpolation_states[col_idx], step);
                                 interpolation_states[col_idx].clone()
                             } else {
                                 // If interpolation step is None, fill with NULL

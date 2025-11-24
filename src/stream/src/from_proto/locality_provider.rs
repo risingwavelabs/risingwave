@@ -52,20 +52,20 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             store.clone(),
             vnodes.clone(),
         )
-        .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+        .enable_preload_all_rows_by_config(&params.config)
         .build()
         .await;
 
         // Create progress table for tracking backfill progress
         let progress_table =
             StateTableBuilder::new(node.get_progress_table().unwrap(), store, vnodes)
-                .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+                .enable_preload_all_rows_by_config(&params.config)
                 .build()
                 .await;
 
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id);
+            .register_create_mview_progress(&params.actor_context);
 
         let exec = LocalityProviderExecutor::new(
             input,
@@ -75,7 +75,7 @@ impl ExecutorBuilder for LocalityProviderBuilder {
             input_schema,
             progress,
             params.executor_stats.clone(),
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             params.actor_context.fragment_id,
         );
 

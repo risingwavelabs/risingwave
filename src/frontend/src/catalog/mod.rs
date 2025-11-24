@@ -50,16 +50,16 @@ pub use table_catalog::TableCatalog;
 
 use crate::user::UserId;
 
-pub(crate) type ConnectionId = u32;
-pub(crate) type SourceId = u32;
-pub(crate) type SinkId = u32;
-pub(crate) type SubscriptionId = u32;
-pub(crate) type ViewId = u32;
+pub(crate) type ConnectionId = risingwave_common::id::ConnectionId;
+pub(crate) type SourceId = risingwave_common::id::SourceId;
+pub(crate) type SinkId = risingwave_common::id::SinkId;
+pub(crate) type SubscriptionId = risingwave_common::id::SubscriptionId;
+pub(crate) type ViewId = risingwave_common::id::ViewId;
 pub(crate) type DatabaseId = risingwave_common::catalog::DatabaseId;
 pub(crate) type SchemaId = risingwave_common::catalog::SchemaId;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
-pub(crate) type FragmentId = u32;
+pub(crate) type FragmentId = risingwave_common::id::FragmentId;
 pub(crate) type SecretId = risingwave_common::catalog::SecretId;
 
 /// Check if the column name does not conflict with the internally reserved column name.

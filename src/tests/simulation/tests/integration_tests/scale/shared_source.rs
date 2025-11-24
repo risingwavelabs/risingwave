@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
+use risingwave_pb::id::ActorId;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::DispatcherType;
 use risingwave_simulation::cluster::{Cluster, Configuration};
@@ -33,7 +34,7 @@ CREATE SOURCE s(v1 int, v2 varchar) WITH (
 fn source_backfill_upstream(
     source_backfill_fragment: &Fragment,
     source_fragment: &Fragment,
-) -> Vec<(u32, u32)> {
+) -> Vec<(ActorId, ActorId)> {
     let mut no_shuffle_downstream_to_upstream = HashMap::new();
     for source_actor in &source_fragment.actors {
         for dispatcher in &source_actor.dispatcher {

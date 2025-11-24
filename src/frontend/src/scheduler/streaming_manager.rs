@@ -79,8 +79,8 @@ impl CreatingStreamingJobInfo {
         Self {
             session_id,
             info: CreatingJobInfo {
-                database_id: database_id.as_raw_id(),
-                schema_id: schema_id.as_raw_id(),
+                database_id,
+                schema_id,
                 name,
             },
         }
