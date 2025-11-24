@@ -212,6 +212,11 @@ impl TwoPhaseCommitHandler {
         self.pending_epochs.push_back((epoch, metadata));
     }
 
+    // Only used when initializing from store.
+    fn push_prepared(&mut self, epoch: u64, metadata: Vec<u8>) {
+        self.prepared_epochs.push_back((epoch, metadata));
+    }
+
     fn commit_succeeded(&mut self, epoch: u64) {
         self.delay = Duration::from_secs(1);
         self.last_attempt = 0;
@@ -780,7 +785,9 @@ impl CoordinatorWorker {
                                 last_committed_epoch = Some(epoch);
                             }
                             SinkState::Pending => {
-                                coordinator.commit(epoch, metadata).await?;
+                                self.handle_manager
+                                    .two_phase_handler
+                                    .push_prepared(epoch, metadata);
                                 last_committed_epoch = Some(epoch);
                             }
                             SinkState::Aborted => {
@@ -799,10 +806,6 @@ impl CoordinatorWorker {
                         last_committed_epoch,
                     )
                     .await?;
-
-                    if let Some(last_committed_epoch) = last_committed_epoch {
-                        mark_record_committed(&txn, sink_id, last_committed_epoch).await?;
-                    }
                     txn.commit().await?;
 
                     coordinator.init().await?;
