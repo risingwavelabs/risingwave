@@ -54,12 +54,13 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(u
 RUN pip3 install --break-system-packages pytest
 
 # Install SQL Server client (mssql-tools and unixodbc-dev)
-RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg && \
-    curl -fsSL https://packages.microsoft.com/config/ubuntu/24.04/prod.list | tee /etc/apt/sources.list.d/mssql-release.list && \
-    sed -i 's|deb |deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] |' /etc/apt/sources.list.d/mssql-release.list && \
-    apt-get update -y && \
-    ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev && \
-    rm -rf /var/lib/{apt,dpkg,cache,log}/
+RUN apt-get update && apt-get install -y curl gnupg apt-transport-https software-properties-common && \
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg && \
+    curl https://packages.microsoft.com/config/ubuntu/24.04/prod.list -o /etc/apt/sources.list.d/mssql-release.list && \
+    apt-get update && ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools18 unixodbc-dev && \
+    ln -s /opt/mssql-tools18 /opt/mssql-tools
+ENV PATH="$PATH:/opt/mssql-tools18/bin"
+
 
 # Install mongosh
 RUN wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb && \
@@ -70,9 +71,6 @@ RUN wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-or
 COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --break-system-packages -r /tmp/requirements.txt && \
     rm /tmp/requirements.txt
-
-# Add mssql-tools to PATH
-ENV PATH="/opt/mssql-tools/bin/:$PATH"
 
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
