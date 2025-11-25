@@ -348,7 +348,7 @@ if __name__ == "__main__":
     )
     # clean up s3 files
     for idx, _ in enumerate(formatted_files):
-        client.remove_object("hummock001", _s3(idx, 0))
+        client.remove_object(bucket_name="hummock001", object_name=_s3(idx, 0))
 
     # test file source handle incremental files
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
@@ -380,4 +380,4 @@ if __name__ == "__main__":
     _s3 = lambda idx, start_bias: f"test_incremental/{run_id}_data_{idx + start_bias}.{fmt}"
     # clean up s3 files in test_incremental dir
     for idx, _ in enumerate(formatted_files):
-        client.remove_object("hummock001", _s3(idx, 0))
+        client.remove_object(bucket_name="hummock001", object_name=_s3(idx, 0))

@@ -491,7 +491,7 @@ def test_file_sink_batching():
     objects = client.list_objects("hummock001", prefix="test_file_sink_batching/", recursive=True)
 
     for obj in objects:
-        client.remove_object("hummock001", obj.object_name)
+        client.remove_object(bucket_name="hummock001", object_name=obj.object_name)
         print(f"Deleted: {obj.object_name}")
 
 
@@ -543,13 +543,13 @@ if __name__ == "__main__":
 
     # clean up s3 files
     for idx, _ in enumerate(data):
-       client.remove_object("hummock001", _s3(idx))
+       client.remove_object(bucket_name="hummock001", object_name=_s3(idx))
 
     do_sink(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
     # clean up s3 files
     for idx, _ in enumerate(data):
-       client.remove_object("hummock001", _s3(idx))
+       client.remove_object(bucket_name="hummock001", object_name=_s3(idx))
 
     # test file sink batching
     test_file_sink_batching()
