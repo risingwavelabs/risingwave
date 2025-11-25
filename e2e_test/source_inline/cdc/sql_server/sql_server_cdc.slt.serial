@@ -647,22 +647,22 @@ select count(*) from shared_orders_schema_table;
 ----
 6
 
-query I
+query I retry 5 backoff 1s
 select count(*) from shared_orders_table_only;
 ----
 6
 
-query I
+query I retry 5 backoff 1s
 select count(*) from shared_orders_full_format;
 ----
 6
 
-query I
+query I retry 5 backoff 1s
 select count(*) from shared_single_type_custom_schema;
 ----
 2
 
-query I
+query I retry 5 backoff 1s
 select count(*) from shared_single_type_table_only;
 ----
 2

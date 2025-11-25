@@ -103,7 +103,7 @@ select count(*) from single_partition_rw;
 25
 
 # Verify data synchronization for sub-partitioned table
-query I
+query I retry 10 backoff 1s
 select count(*) from sub_partition_rw;
 ----
 25
@@ -136,7 +136,7 @@ select count(*) from single_partition_rw;
 27
 
 # Verify CDC operations on sub-partitioned table
-query I
+query I retry 10 backoff 1s
 select count(*) from sub_partition_rw;
 ----
 26
