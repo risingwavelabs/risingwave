@@ -25,6 +25,12 @@ jobs:
               - 'java/**'
             proto:
               - 'proto/**'
+      - name: Check disk space
+        run: |
+          echo "--- Disk Space on /tmp ---"
+          df -h /tmp
+          echo "--- Disk Space on Workspace ---"
+          df -h .
       - name: Set up JDK ${{ matrix.java }}
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         uses: actions/setup-java@v5
@@ -46,6 +52,10 @@ jobs:
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: |
           set -ex
+
+          # Set TMPDIR to a directory in the workspace to avoid running out of space in /tmp
+          export TMPDIR=${PWD}/tmp
+          mkdir -p ${TMPDIR}
 
           RISINGWAVE_ROOT=${PWD}
 
