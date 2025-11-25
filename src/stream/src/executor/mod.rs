@@ -120,6 +120,7 @@ mod wrapper;
 
 mod approx_percentile;
 
+mod nested_loop_join;
 mod row_merge;
 
 #[cfg(test)]
@@ -160,6 +161,7 @@ pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
 pub(crate) use merge::{MergeExecutorInput, MergeExecutorUpstream};
 pub use mview::*;
+pub use nested_loop_join::NestedLoopJoinExecutor;
 pub use nested_loop_temporal_join::NestedLoopTemporalJoinExecutor;
 pub use no_op::NoOpExecutor;
 pub use now::*;
