@@ -706,9 +706,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     state_table.write_chunk(chunk);
                 }
 
-                let post_commit1 = state_table
-                    .commit(barrier.epoch)
-                    .await?;
+                let post_commit1 = state_table.commit(barrier.epoch).await?;
 
                 // Update progress with current epoch and snapshot read count
                 // Report both consumed rows and buffered rows separately for precise progress
