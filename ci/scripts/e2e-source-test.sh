@@ -137,8 +137,7 @@ echo "--- re-starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
-# remove this part for already covered by source-inline tests
-# risedev slt './e2e_test/source_inline/cdc/cdc_inline/**/*.slt'
+risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
 
 echo "--- mysql & postgres cdc validate test"
 risedev slt './e2e_test/source_legacy/cdc/cdc.validate.mysql.slt'
