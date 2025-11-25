@@ -120,6 +120,22 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
             match msg {
                 Err(e) => {
                     tracing::warn!(error = %e.as_report(), "encountered an error in batch iceberg list");
+                    if is_refreshing {
+                        tracing::info!(
+                            source_id = %self.stream_source_core.source_id,
+                            table_id = %self.associated_table_id,
+                            "re-listing iceberg scan tasks due to error"
+                        );
+                        let iceberg_list_stream = Self::list_iceberg_scan_task(
+                            *iceberg_properties.clone(),
+                            downstream_columns.clone(),
+                            is_list_finished.clone(),
+                        )
+                        .boxed();
+                        stream.replace_data_stream(iceberg_list_stream);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     return Err(e);
                 }
                 Ok(msg) => match msg {
