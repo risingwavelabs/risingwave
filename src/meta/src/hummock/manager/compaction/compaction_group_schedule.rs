@@ -150,7 +150,7 @@ impl HummockManager {
             || contains_creating_table(&member_table_ids_2, &created_tables)
         {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge creating group {} next_group {} member_table_ids_1 {:?} member_table_ids_2 {:?}",
+                "Cannot merge creating group {} next_group {} member_table_ids_1 {:?} member_table_ids_2 {:?}",
                 group_1, group_2, member_table_ids_1, member_table_ids_2
             )));
         }
@@ -1054,7 +1054,7 @@ impl GroupMergeValidator {
             != next_group.compaction_group_config.compaction_config
         {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge group {} and next_group {} with different compaction configs",
+                "Cannot merge group {} and next_group {} with different compaction configs",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1062,7 +1062,7 @@ impl GroupMergeValidator {
         // do not merge the compaction group which is creating
         if Self::check_is_creating_compaction_group(group, created_tables) {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge creating group {} next_group {}",
+                "Cannot merge creating group {} next_group {}",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1074,7 +1074,7 @@ impl GroupMergeValidator {
             opts,
         ) {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge high throughput group {} next_group {}",
+                "Cannot merge high throughput group {} next_group {}",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1084,7 +1084,7 @@ impl GroupMergeValidator {
 
         if (group.group_size + next_group.group_size) > size_limit {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
+                "Cannot merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
                 group.group_id,
                 group.group_size,
                 next_group.group_id,
@@ -1095,7 +1095,7 @@ impl GroupMergeValidator {
 
         if Self::check_is_creating_compaction_group(next_group, created_tables) {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge creating group {} next group {}",
+                "Cannot merge creating group {} next group {}",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1106,7 +1106,7 @@ impl GroupMergeValidator {
             opts,
         ) {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge high throughput group {} next group {}",
+                "Cannot merge high throughput group {} next group {}",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1117,14 +1117,14 @@ impl GroupMergeValidator {
             let levels = &versioning_guard.current_version.levels;
             if !levels.contains_key(&group.group_id) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge group {} not exist",
+                    "Cannot merge group {} not exist",
                     group.group_id
                 )));
             }
 
             if !levels.contains_key(&next_group.group_id) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge next group {} not exist",
+                    "Cannot merge next group {} not exist",
                     next_group.group_id
                 )));
             }
@@ -1144,7 +1144,7 @@ impl GroupMergeValidator {
 
             if group_state.is_write_stop() || group_state.is_emergency() {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit group {} next group {}",
+                    "Cannot merge write limit group {} next group {}",
                     group.group_id, next_group.group_id
                 )));
             }
@@ -1159,7 +1159,7 @@ impl GroupMergeValidator {
 
             if next_group_state.is_write_stop() || next_group_state.is_emergency() {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit next group {} group {}",
+                    "Cannot merge write limit next group {} group {}",
                     next_group.group_id, group.group_id
                 )));
             }
@@ -1173,7 +1173,7 @@ impl GroupMergeValidator {
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit group {} next group {}, will trigger write stop after merge",
+                    "Cannot merge write limit group {} next group {}, will trigger write stop after merge",
                     group.group_id, next_group.group_id
                 )));
             }
@@ -1186,7 +1186,7 @@ impl GroupMergeValidator {
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit next group {} group {}, will trigger write stop after merge",
+                    "Cannot merge write limit next group {} group {}, will trigger write stop after merge",
                     next_group.group_id, group.group_id
                 )));
             }
@@ -1200,7 +1200,7 @@ impl GroupMergeValidator {
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit next group {} group {}, will trigger write stop after merge",
+                    "Cannot merge write limit next group {} group {}, will trigger write stop after merge",
                     next_group.group_id, group.group_id
                 )));
             }
@@ -1212,7 +1212,7 @@ impl GroupMergeValidator {
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge emergency group {} next group {}, will trigger emergency after merge",
+                    "Cannot merge emergency group {} next group {}, will trigger emergency after merge",
                     group.group_id, next_group.group_id
                 )));
             }
