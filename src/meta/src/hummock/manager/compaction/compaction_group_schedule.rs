@@ -1047,9 +1047,15 @@ impl GroupMergeValidator {
             )));
         }
 
-        // do not merge compaction groups with different compaction configs
-        // different configs lead to different max_estimated_group_size calculations,
-        // which can cause scheduling conflicts (continuous split/merge cycles)
+        // Do not merge compaction groups with different compaction configs.
+        // Different configs lead to different max_estimated_group_size calculations,
+        // which can cause scheduling conflicts (continuous split/merge cycles).
+        // The following fields in CompactionConfig affect max_estimated_group_size:
+        //   - max_bytes_for_level_base
+        //   - max_bytes_for_level_multiplier
+        //   - max_compaction_bytes
+        //   - sub_level_max_compaction_bytes
+        // If any of these fields differ, the groups may have incompatible scheduling.
         if group.compaction_group_config.compaction_config
             != next_group.compaction_group_config.compaction_config
         {
