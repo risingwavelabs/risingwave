@@ -700,11 +700,14 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                             Self::mark_chunk(chunk.clone(), &backfill_state, &state_table)?;
                         yield Message::Chunk(marked_chunk);
                     }
+
+                    // Persist buffered upstream chunk into state table so subsequent snapshot
+                    // iterations see the latest writes.
+                    state_table.write_chunk(chunk);
                 }
 
-                // no-op commit state table
-                state_table
-                    .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                let post_commit1 = state_table
+                    .commit(barrier.epoch)
                     .await?;
 
                 // Update progress with current epoch and snapshot read count
@@ -730,7 +733,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 // Persist backfill progress
                 Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;
                 let barrier_epoch = barrier.epoch;
-                let post_commit = progress_table.commit(barrier_epoch).await?;
+                let post_commit2 = progress_table.commit(barrier_epoch).await?;
 
                 metrics
                     .backfill_snapshot_read_row_count
@@ -740,7 +743,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     .inc_by(cur_barrier_upstream_processed_rows);
 
                 yield Message::Barrier(barrier);
-                post_commit.post_yield_barrier(None).await?;
+                post_commit1.post_yield_barrier(None).await?;
+                post_commit2.post_yield_barrier(None).await?;
             }
         }
 
