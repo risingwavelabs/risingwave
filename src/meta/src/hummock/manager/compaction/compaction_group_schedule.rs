@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, can_concat};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
-    CompatibilityVersion, PbGroupConstruct, PbGroupMerge, PbStateTableInfoDelta,
+    CompactionConfig, CompatibilityVersion, PbGroupConstruct, PbGroupMerge, PbStateTableInfoDelta,
 };
 use thiserror_ext::AsReport;
 
@@ -922,6 +922,41 @@ impl HummockManager {
 #[derive(Debug, Default)]
 struct GroupMergeValidator {}
 
+macro_rules! for_each_config_field {
+    ($macro:ident $(, $args:tt)*) => {
+        $macro!(max_bytes_for_level_base $(, $args)*);
+        $macro!(max_level $(, $args)*);
+        $macro!(max_bytes_for_level_multiplier $(, $args)*);
+        $macro!(max_compaction_bytes $(, $args)*);
+        $macro!(sub_level_max_compaction_bytes $(, $args)*);
+        $macro!(level0_tier_compact_file_number $(, $args)*);
+        $macro!(compaction_mode $(, $args)*);
+        $macro!(compression_algorithm $(, $args)*);
+        $macro!(target_file_size_base $(, $args)*);
+        $macro!(compaction_filter_mask $(, $args)*);
+        $macro!(max_sub_compaction $(, $args)*);
+        $macro!(max_space_reclaim_bytes $(, $args)*);
+        $macro!(split_by_state_table $(, $args)*);
+        $macro!(split_weight_by_vnode $(, $args)*);
+        $macro!(level0_stop_write_threshold_sub_level_number $(, $args)*);
+        $macro!(level0_max_compact_file_number $(, $args)*);
+        $macro!(level0_sub_level_compact_level_count $(, $args)*);
+        $macro!(level0_overlapping_sub_level_compact_level_count $(, $args)*);
+        $macro!(tombstone_reclaim_ratio $(, $args)*);
+        $macro!(enable_emergency_picker $(, $args)*);
+        $macro!(max_l0_compact_level_count $(, $args)*);
+        $macro!(sst_allowed_trivial_move_min_size $(, $args)*);
+        $macro!(disable_auto_group_scheduling $(, $args)*);
+        $macro!(max_overlapping_level_size $(, $args)*);
+        $macro!(emergency_level0_sst_file_count $(, $args)*);
+        $macro!(emergency_level0_sub_level_partition $(, $args)*);
+        $macro!(level0_stop_write_threshold_max_sst_count $(, $args)*);
+        $macro!(level0_stop_write_threshold_max_size $(, $args)*);
+        $macro!(sst_allowed_trivial_move_max_count $(, $args)*);
+        $macro!(enable_optimize_l0_interval_selection $(, $args)*);
+    };
+}
+
 impl GroupMergeValidator {
     /// Check if the table is high write throughput with the given threshold and ratio.
     pub fn is_table_high_write_throughput(
@@ -1003,6 +1038,27 @@ impl GroupMergeValidator {
             .any(|table_id| !created_tables.contains(table_id))
     }
 
+    fn diff_compaction_config(lhs: &CompactionConfig, rhs: &CompactionConfig) -> Vec<String> {
+        let mut diffs = Vec::new();
+
+        macro_rules! push_diff {
+            ($field:ident, $lhs:expr, $rhs:expr, $diffs:expr) => {
+                if $lhs.$field != $rhs.$field {
+                    $diffs.push(format!(
+                        "{}: {:?} vs {:?}",
+                        stringify!($field),
+                        $lhs.$field,
+                        $rhs.$field
+                    ));
+                }
+            };
+        }
+
+        for_each_config_field!(push_diff, lhs, rhs, diffs);
+
+        diffs
+    }
+
     async fn validate_group_merge(
         group: &CompactionGroupStatistic,
         next_group: &CompactionGroupStatistic,
@@ -1059,9 +1115,26 @@ impl GroupMergeValidator {
         if group.compaction_group_config.compaction_config
             != next_group.compaction_group_config.compaction_config
         {
+            let diff = Self::diff_compaction_config(
+                group.compaction_group_config.compaction_config.as_ref(),
+                next_group
+                    .compaction_group_config
+                    .compaction_config
+                    .as_ref(),
+            );
+
+            tracing::warn!(
+                group_id = group.group_id,
+                next_group_id = next_group.group_id,
+                diff = %diff.join(", "),
+                "compaction config mismatch detected while merging compaction groups"
+            );
+
             return Err(Error::CompactionGroup(format!(
-                "Cannot merge group {} and next_group {} with different compaction configs",
-                group.group_id, next_group.group_id
+                "Cannot merge group {} and next_group {} with different compaction configs: {}",
+                group.group_id,
+                next_group.group_id,
+                diff.join(", ")
             )));
         }
 
@@ -1225,5 +1298,158 @@ impl GroupMergeValidator {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! compaction_config_sample_value {
+        (max_bytes_for_level_base) => {
+            1_u64
+        };
+        (max_level) => {
+            2_u64
+        };
+        (max_bytes_for_level_multiplier) => {
+            3_u64
+        };
+        (max_compaction_bytes) => {
+            4_u64
+        };
+        (sub_level_max_compaction_bytes) => {
+            5_u64
+        };
+        (level0_tier_compact_file_number) => {
+            6_u64
+        };
+        (compaction_mode) => {
+            risingwave_pb::hummock::compaction_config::CompactionMode::Range as i32
+        };
+        (compression_algorithm) => {
+            vec!["lz4".to_string()]
+        };
+        (target_file_size_base) => {
+            7_u64
+        };
+        (compaction_filter_mask) => {
+            8_u32
+        };
+        (max_sub_compaction) => {
+            9_u32
+        };
+        (max_space_reclaim_bytes) => {
+            10_u64
+        };
+        (split_by_state_table) => {
+            true
+        };
+        (split_weight_by_vnode) => {
+            11_u32
+        };
+        (level0_stop_write_threshold_sub_level_number) => {
+            12_u64
+        };
+        (level0_max_compact_file_number) => {
+            13_u64
+        };
+        (level0_sub_level_compact_level_count) => {
+            14_u32
+        };
+        (level0_overlapping_sub_level_compact_level_count) => {
+            15_u32
+        };
+        (tombstone_reclaim_ratio) => {
+            16_u32
+        };
+        (enable_emergency_picker) => {
+            true
+        };
+        (max_l0_compact_level_count) => {
+            Some(17_u32)
+        };
+        (sst_allowed_trivial_move_min_size) => {
+            Some(18_u64)
+        };
+        (disable_auto_group_scheduling) => {
+            Some(true)
+        };
+        (max_overlapping_level_size) => {
+            Some(19_u64)
+        };
+        (emergency_level0_sst_file_count) => {
+            Some(20_u32)
+        };
+        (emergency_level0_sub_level_partition) => {
+            Some(21_u32)
+        };
+        (level0_stop_write_threshold_max_sst_count) => {
+            Some(22_u32)
+        };
+        (level0_stop_write_threshold_max_size) => {
+            Some(23_u64)
+        };
+        (sst_allowed_trivial_move_max_count) => {
+            Some(24_u32)
+        };
+        (enable_optimize_l0_interval_selection) => {
+            Some(true)
+        };
+    }
+
+    fn assert_compaction_config_fields(config: &CompactionConfig) {
+        macro_rules! touch_field {
+            ($field:ident, $cfg:expr) => {
+                let _ = &$cfg.$field;
+            };
+        }
+
+        for_each_config_field!(touch_field, config);
+    }
+
+    #[test]
+    fn diff_compaction_config_reports_all_fields() {
+        let base = CompactionConfig::default();
+        let mut modified = base.clone();
+
+        macro_rules! set_non_default_value {
+            ($field:ident, $cfg:expr) => {
+                $cfg.$field = compaction_config_sample_value!($field);
+            };
+        }
+
+        for_each_config_field!(set_non_default_value, modified);
+
+        let diffs = GroupMergeValidator::diff_compaction_config(&base, &modified);
+
+        macro_rules! assert_has_diff {
+            ($field:ident, $diffs:expr) => {
+                assert!(
+                    $diffs
+                        .iter()
+                        .any(|entry| entry.starts_with(concat!(stringify!($field), ": "))),
+                    "missing diff for `{}`",
+                    stringify!($field)
+                );
+            };
+        }
+
+        for_each_config_field!(assert_has_diff, diffs);
+
+        let mut expected_field_count = 0_usize;
+
+        macro_rules! count_field {
+            ($field:ident, $count:expr) => {
+                $count += 1;
+            };
+        }
+
+        for_each_config_field!(count_field, expected_field_count);
+
+        assert_eq!(diffs.len(), expected_field_count);
+
+        assert_compaction_config_fields(&base);
+        assert_compaction_config_fields(&modified);
     }
 }
