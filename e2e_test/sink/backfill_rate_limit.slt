@@ -2,33 +2,70 @@ statement ok
 set sink_decouple = true;
 
 statement ok
-CREATE TABLE t1(v1 int, v2 int);
+create table t1 (v1 int);
 
 statement ok
-CREATE SINK s1 AS select * from t1 WITH (
-    connector = 'blackhole'
+insert into t1 select * from generate_series(1, 1000);
+
+statement ok
+create sink kafaka_sink
+AS
+SELECT * FROM t1
+with (
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test_sink_backfill_rate_limit',
+    type = 'append-only',
+    force_append_only='true',
+    connector = 'kafka',
+    backfill_rate_limit = 0,
 );
 
 statement ok
-SET BACKFILL_RATE_LIMIT TO 100;
+create table kafka_source (v1 int) with (
+  connector = 'kafka',
+  topic = 'kafka_source',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest',
+) FORMAT PLAIN ENCODE JSON
 
 statement ok
-SET BACKFILL_RATE_LIMIT TO 0;
+flush;
+
+sleep 3s
+
+query I
+select count(*) from kafka_source;
+----
+0
 
 statement ok
-SET BACKFILL_RATE_LIMIT TO default;
+INSERT TABLE t VALUES (1001);
 
 statement ok
-ALTER SINK s1 SET BACKFILL_RATE_LIMIT = 1000;
+flush;
+
+query I
+select count(*) from kafka_source;
+----
+0
+
+query I
+alter sink kafka_sink set backfill_rate_limit to 1000;
+
+
+sleep 3s
+
+
+query I
+select count(*) > 1 from kafka_source;
+----
+t
 
 statement ok
-ALTER SINK s1 SET BACKFILL_RATE_LIMIT = 0;
+DROP TABLE kafka_source;
 
 statement ok
-ALTER SINK s1 SET BACKFILL_RATE_LIMIT = default;
-
-statement ok
-DROP SINK s1;
+DROP SINK kafaka_sink;
 
 statement ok
 DROP TABLE t1;
