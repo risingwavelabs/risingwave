@@ -378,7 +378,7 @@ impl TwoPhaseCommitCoordinator for SimulationTestIcebergCommitter {
         let snapshot_id = generate_unique_snapshot_id();
 
         let mut pre_commit_metadata_bytes = Vec::new();
-        for metadata in metadatas.clone() {
+        for metadata in metadatas {
             let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
 
             pre_commit_metadata_bytes.push(serialized.metadata);
