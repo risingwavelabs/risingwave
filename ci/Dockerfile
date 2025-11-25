@@ -66,9 +66,9 @@ RUN wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-or
     rm mongodb-mongosh_2.5.8_amd64.deb
 
 # Copy and install e2e test Python requirements (merged from all sub-requirements)
-COPY e2e_test/requirements.txt /tmp/e2e_requirements.txt
-RUN pip3 install --break-system-packages -r /tmp/e2e_requirements.txt && \
-    rm /tmp/e2e_requirements.txt
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --break-system-packages -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
 
 # Add mssql-tools to PATH
 ENV PATH="/opt/mssql-tools/bin/:$PATH"
