@@ -1919,7 +1919,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -6773,7 +6773,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -7901,7 +7901,38 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "libc",
- "madsim-macros",
+ "madsim-macros 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "naive-timer",
+ "panic-message",
+ "rand 0.8.5",
+ "rand_xoshiro",
+ "rustversion",
+ "serde",
+ "spin 0.9.8",
+ "tokio",
+ "tokio-util",
+ "toml 0.9.8",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "madsim"
+version = "0.2.34"
+source = "git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48#8c5a80504d0921232a721bb360388acfc2e2aa48"
+dependencies = [
+ "ahash 0.8.11",
+ "async-channel 2.2.1",
+ "async-stream",
+ "async-task",
+ "bincode 1.3.3",
+ "bytes",
+ "downcast-rs 1.2.1",
+ "errno",
+ "futures-util",
+ "lazy_static",
+ "libc",
+ "madsim-macros 0.2.12 (git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48)",
  "naive-timer",
  "panic-message",
  "rand 0.8.5",
@@ -7929,7 +7960,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "http 1.3.1",
- "madsim",
+ "madsim 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
  "spin 0.9.8",
  "tracing",
 ]
@@ -7947,10 +7978,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "madsim-macros"
+version = "0.2.12"
+source = "git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48#8c5a80504d0921232a721bb360388acfc2e2aa48"
+dependencies = [
+ "darling 0.14.4",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2490d64ab39a227e00ea40aa9eec250061f282a3c95e5a8528b3f19881d9f12e"
+source = "git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48#8c5a80504d0921232a721bb360388acfc2e2aa48"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -7958,7 +7999,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
- "madsim",
+ "madsim 0.2.34 (git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48)",
  "rdkafka-sys",
  "serde",
  "serde_derive",
@@ -7976,7 +8017,7 @@ version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d3eb2acc57c82d21d699119b859e2df70a91dbdb84734885a1e72be83bdecb5"
 dependencies = [
- "madsim",
+ "madsim 0.2.34 (registry+https://github.com/rust-lang/crates.io-index)",
  "spin 0.9.8",
  "tokio",
 ]
@@ -7984,13 +8025,12 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.5.1+0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c668c82f0c2aca7ffed3235047f2539e6e41278c7c47a822999f3b7a067887"
+source = "git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48#8c5a80504d0921232a721bb360388acfc2e2aa48"
 dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
- "madsim",
+ "madsim 0.2.34 (git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48)",
  "tokio",
  "tonic",
  "tower 0.4.13",
@@ -7999,9 +8039,8 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.5.0+0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f271a476bbaa9d2139e1e1a5beb869c6119e805a0b67ad2b2857e4a8785b111a"
+version = "0.5.1+0.12.3"
+source = "git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48#8c5a80504d0921232a721bb360388acfc2e2aa48"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -8707,7 +8746,7 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e878c846a8abae00dd069496dbe8751b16ac1c3d6bd2a7283a938e8228f90d"
 dependencies = [
- "proc-macro-crate 3.1.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.107",
@@ -10246,10 +10285,10 @@ name = "prost-build"
 version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.13.0",
+ "heck 0.4.1",
+ "itertools 0.10.5",
  "log",
- "multimap 0.10.0",
+ "multimap 0.8.3",
  "once_cell",
  "petgraph 0.6.5",
  "prettyplease 0.2.15",
@@ -10279,7 +10318,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.107",
@@ -12613,7 +12652,7 @@ dependencies = [
  "hyper 0.14.27",
  "hyper-rustls 0.24.2",
  "itertools 0.14.0",
- "madsim",
+ "madsim 0.2.34 (git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48)",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
@@ -12767,7 +12806,7 @@ dependencies = [
  "glob",
  "indexmap 2.12.0",
  "itertools 0.14.0",
- "madsim",
+ "madsim 0.2.34 (git+https://github.com/madsim-rs/madsim?rev=8c5a80504d0921232a721bb360388acfc2e2aa48)",
  "madsim-rdkafka",
  "madsim-tokio",
  "maplit",
@@ -14439,7 +14478,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.107",
