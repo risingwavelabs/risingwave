@@ -32,9 +32,7 @@ jobs:
       - name: Show available storage
         run: df -h
       - name: Install tools for building docs
-        uses: taiki-e/install-action@v2
-        with:
-          tool: mdbook,mdbook-toc,mdbook-linkcheck
+        run: cargo binstall -y --locked mdbook@0.5 mdbook-toc@0.15 mdbook-linkcheck2@0.11
       - name: build developer doc
         run: |
           cd docs/dev
