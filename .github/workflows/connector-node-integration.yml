@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: risingwave-large # this runner comes with more disk space, necessary for workflows that build RW
     strategy:
       matrix:
         java: [ '17', '21' ]
