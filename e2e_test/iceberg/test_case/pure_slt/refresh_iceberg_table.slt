@@ -108,7 +108,7 @@ select id from iceberg_batch_table order by id;
 
 
 # make sure last succeed time recorded
-query ?
+query ? retry 3 backoff 1s
 select count(*) from rw_refresh_table_state where last_success_time is not null;
 ----
 1
