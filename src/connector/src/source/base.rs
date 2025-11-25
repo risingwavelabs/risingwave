@@ -762,10 +762,11 @@ impl ConnectorProperties {
 
     pub fn unique_key_under_connection(&self) -> Option<String> {
         if let ConnectorProperties::Kafka(k) = self {
-            Some(k.common.topic.clone())
-        } else {
-            None
+            if k.enable_mux_reader.unwrap_or(false) {
+                return Some(k.common.topic.clone());
+            }
         }
+        None
     }
 
     pub async fn create_split_enumerator(

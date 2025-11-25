@@ -787,6 +787,16 @@ impl DdlController {
         connection_id: ConnectionId,
         new_source: &PbSource,
     ) -> MetaResult<()> {
+        let new_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(new_source.with_properties.clone()),
+            false,
+        )?;
+
+        let Some(new_key) = new_props.unique_key_under_connection() else {
+            // Only Kafka sources with mux reader enabled need validation.
+            return Ok(());
+        };
+
         let sources = self
             .metadata_manager
             .catalog_controller
@@ -813,14 +823,7 @@ impl DdlController {
             }
         }
 
-        let new_props = ConnectorProperties::extract(
-            WithOptionsSecResolved::without_secrets(new_source.with_properties.clone()),
-            false,
-        )?;
-
-        if let Some(new_key) = new_props.unique_key_under_connection()
-            && existing_keys.contains(&new_key)
-        {
+        if existing_keys.contains(&new_key) {
             bail!(
                 "Duplicate unique key `{}` found in connection `{}`",
                 new_key,
