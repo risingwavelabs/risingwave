@@ -391,6 +391,7 @@ fn clone_fragment(
                 vnode_bitmap: actor.vnode_bitmap.clone(),
                 mview_definition: actor.mview_definition.clone(),
                 expr_context: actor.expr_context.clone(),
+                config_override: actor.config_override.clone(),
             })
             .collect(),
         state_table_ids: fragment.state_table_ids.clone(),

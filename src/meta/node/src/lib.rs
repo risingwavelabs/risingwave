@@ -498,6 +498,10 @@ pub fn start(
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
                 split_group_size_ratio: config.meta.split_group_size_ratio,
+                refresh_scheduler_interval_sec: config
+                    .streaming
+                    .developer
+                    .refresh_scheduler_interval_sec,
                 table_stat_high_write_throughput_ratio_for_split: config
                     .meta
                     .table_stat_high_write_throughput_ratio_for_split,

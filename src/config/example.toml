@@ -210,7 +210,7 @@ stream_switch_jdbc_pg_to_native = false
 stream_max_barrier_batch_size = 1024
 stream_hash_join_entry_state_max_rows = 30000
 stream_enable_explain_analyze_stats = true
-stream_iceberg_list_interval_sec = 1
+stream_iceberg_list_interval_sec = 10
 stream_iceberg_fetch_batch_size = 1024
 stream_iceberg_sink_positional_delete_cache_size = 1024
 stream_iceberg_sink_write_parquet_max_row_group_rows = 100000
@@ -218,6 +218,7 @@ stream_default_enable_mem_preload_state_table = false
 stream_mem_preload_state_table_ids_whitelist = []
 stream_mem_preload_state_table_ids_blacklist = []
 stream_aggressive_noop_update_elimination = false
+stream_refresh_scheduler_interval_sec = 60
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5
@@ -403,7 +404,7 @@ pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
-adaptive_parallelism_strategy = "Auto"
+adaptive_parallelism_strategy = "AUTO"
 per_database_isolation = true
 enforce_secret = false
 

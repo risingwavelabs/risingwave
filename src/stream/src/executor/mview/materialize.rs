@@ -963,7 +963,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                 // Advance main iterator
                 processed_rows += 1;
-                tracing::info!(
+                tracing::debug!(
                     "set progress table: vnode = {:?}, processed_rows = {:?}",
                     vnode,
                     processed_rows
