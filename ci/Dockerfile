@@ -54,8 +54,9 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(u
 RUN pip3 install --break-system-packages pytest
 
 # Install SQL Server client (mssql-tools and unixodbc-dev)
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
-    curl https://packages.microsoft.com/config/ubuntu/24.04/prod.list | tee /etc/apt/sources.list.d/msprod.list && \
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg && \
+    curl -fsSL https://packages.microsoft.com/config/ubuntu/24.04/prod.list | tee /etc/apt/sources.list.d/mssql-release.list && \
+    sed -i 's|deb |deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] |' /etc/apt/sources.list.d/mssql-release.list && \
     apt-get update -y && \
     ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev && \
     rm -rf /var/lib/{apt,dpkg,cache,log}/
