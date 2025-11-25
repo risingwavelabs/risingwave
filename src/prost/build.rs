@@ -1079,7 +1079,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the proto files.
     tonic_config
         .out_dir(out_dir.as_path())
-        .compile_protos_with_config(prost_config, &protos, &[proto_dir.to_owned()])
+        .compile_with_config(prost_config, &protos, &[proto_dir.to_owned()])
         .expect("Failed to compile grpc!");
 
     // Implement `serde::Serialize` on those structs.

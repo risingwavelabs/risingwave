@@ -7886,8 +7886,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.32"
-source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
+version = "0.2.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18351aac4194337d6ea9ffbd25b3d1540ecc0754142af1bff5ba7392d1f6f771"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7896,6 +7897,7 @@ dependencies = [
  "bincode 1.3.3",
  "bytes",
  "downcast-rs 1.2.1",
+ "errno",
  "futures-util",
  "lazy_static",
  "libc",
@@ -7909,7 +7911,7 @@ dependencies = [
  "spin 0.9.8",
  "tokio",
  "tokio-util",
- "toml 0.8.12",
+ "toml 0.9.8",
  "tracing",
  "tracing-subscriber",
 ]
@@ -7917,7 +7919,8 @@ dependencies = [
 [[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.5.0+1"
-source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b442215f0047e7e7df7b98991129c43ee5fb186ce899e8f7e27515bc99de508"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http 0.60.12",
@@ -7934,7 +7937,8 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7945,7 +7949,8 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2490d64ab39a227e00ea40aa9eec250061f282a3c95e5a8528b3f19881d9f12e"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -7968,7 +7973,8 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d3eb2acc57c82d21d699119b859e2df70a91dbdb84734885a1e72be83bdecb5"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -7978,7 +7984,8 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.5.1+0.12.0"
-source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61c668c82f0c2aca7ffed3235047f2539e6e41278c7c47a822999f3b7a067887"
 dependencies = [
  "async-stream",
  "chrono",
@@ -7992,8 +7999,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.5.1+0.12.3"
-source = "git+https://github.com/shanicky/madsim?rev=748713733f51fb63d84739ec5e1a9028b3ea9872#748713733f51fb63d84739ec5e1a9028b3ea9872"
+version = "0.5.0+0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f271a476bbaa9d2139e1e1a5beb869c6119e805a0b67ad2b2857e4a8785b111a"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",

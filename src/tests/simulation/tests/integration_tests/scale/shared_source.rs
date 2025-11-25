@@ -161,7 +161,7 @@ async fn wait_for_row_count(cluster: &mut Cluster, sql: &str, expected: usize) -
     Ok(())
 }
 
-fn ensure_unique_assignments(assignments: &BTreeMap<u32, String>) -> Result<()> {
+fn ensure_unique_assignments<K: Ord>(assignments: &BTreeMap<K, String>) -> Result<()> {
     let mut seen = HashSet::new();
     for splits in assignments.values() {
         for split in splits.split(',').map(str::trim).filter(|s| !s.is_empty()) {
