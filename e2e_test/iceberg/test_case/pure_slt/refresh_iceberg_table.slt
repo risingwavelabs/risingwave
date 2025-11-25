@@ -87,7 +87,8 @@ select current_status from rw_refresh_table_state;
 REFRESHING
 
 
-query I retry 10 backoff 1s
+# changes on the original table should be available very soon
+query I retry 3 backoff 1s
 select id from t_refresh order by id;
 ----
 1
@@ -95,7 +96,9 @@ select id from t_refresh order by id;
 3
 5
 
-query I
+
+# wait for refresh
+query I retry 10 backoff 1s
 select id from iceberg_batch_table order by id;
 ----
 1
