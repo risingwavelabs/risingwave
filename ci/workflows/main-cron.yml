@@ -963,6 +963,27 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "Connector Node Build & Test (Java {{matrix.java}})"
+    command: "ci/scripts/connector-node-build-and-test.sh -v {{matrix.java}}"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-connector-node-tests"
+      || build.env("CI_STEPS") =~ /(^|,)connector-node-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: rw-build-env
+      - ./ci/plugins/upload-failure-logs
+    matrix:
+      setup:
+        java:
+          - "17"
+          - "21"
+    timeout_in_minutes: 20
+    retry: *auto-retry
+
   - label: "release amd64 (dry-run)"
     command: "SKIP_RELEASE=1 ci/scripts/release.sh"
     if: |

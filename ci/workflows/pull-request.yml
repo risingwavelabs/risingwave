@@ -266,6 +266,29 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "Connector Node Build & Test (Java {{matrix.java}})"
+    command: "ci/scripts/connector-node-build-and-test.sh -v {{matrix.java}}"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-connector-node-tests"
+      || build.env("CI_STEPS") =~ /(^|,)connector-node-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - *cargo-cache
+      - *maven-cache
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: rw-build-env
+      - ./ci/plugins/upload-failure-logs
+    matrix:
+      setup:
+        java:
+          - "17"
+          - "21"
+    timeout_in_minutes: 20
+    retry: *auto-retry
+
   - label: "end-to-end iceberg test"
     if: build.pull_request.labels includes "ci/run-e2e-iceberg-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-tests?(,|$$)/
     command: "ci/scripts/e2e-iceberg-test.sh -p ci-dev"
