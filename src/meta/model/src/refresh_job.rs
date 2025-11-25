@@ -72,6 +72,7 @@ pub struct Model {
     pub last_trigger_time: Option<i64>, // timestamp in millis
     pub trigger_interval_secs: Option<i64>,
     pub current_status: RefreshState,
+    pub last_success_time: Option<i64>, // timestamp in millis
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

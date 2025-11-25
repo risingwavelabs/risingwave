@@ -285,6 +285,7 @@ impl CatalogController {
                         last_trigger_time: Set(None),
                         trigger_interval_secs: Set(trigger_interval_secs),
                         current_status: Set(RefreshState::Idle),
+                        last_success_time: Set(None),
                     })
                     .exec(&txn)
                     .await?;

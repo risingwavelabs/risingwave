@@ -928,6 +928,7 @@ impl CatalogController {
             last_trigger_time: Set(None),
             trigger_interval_secs: Set(None),
             current_status: Set(RefreshState::Idle),
+            last_success_time: Set(None),
         };
         match RefreshJob::insert(active)
             .on_conflict(
@@ -953,6 +954,7 @@ impl CatalogController {
         table_id: TableId,
         status: RefreshState,
         trigger_time: Option<DateTime>,
+        is_success: bool,
     ) -> MetaResult<()> {
         self.ensure_refresh_job(table_id).await?;
         let inner = self.inner.read().await;
@@ -964,6 +966,11 @@ impl CatalogController {
             current_status: Set(status),
             last_trigger_time: if trigger_time.is_some() {
                 Set(trigger_time.map(|t| t.and_utc().timestamp_millis()))
+            } else {
+                NotSet
+            },
+            last_success_time: if is_success {
+                Set(Some(chrono::Utc::now().timestamp_millis()))
             } else {
                 NotSet
             },

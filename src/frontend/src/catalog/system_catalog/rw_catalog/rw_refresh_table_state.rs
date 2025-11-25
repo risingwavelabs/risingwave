@@ -24,6 +24,7 @@ struct RwRefreshTableState {
     table_id: i32,
     current_status: String,
     last_trigger_time: Option<String>,
+    last_success_time: Option<String>,
     trigger_interval_secs: Option<i64>,
 }
 
@@ -39,6 +40,7 @@ async fn read_rw_refresh_table_state(
             current_status: state.current_status,
             last_trigger_time: state.last_trigger_time,
             trigger_interval_secs: state.trigger_interval_secs,
+            last_success_time: state.last_success_time,
         })
         .collect())
 }
