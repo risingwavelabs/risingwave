@@ -466,12 +466,19 @@ impl HummockManager {
         let (new_compaction_group_id, config) = {
             // All NewCompactionGroup pairs are mapped to one new compaction group.
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-            // The new config will be persisted later.
+            // Inherit config from parent group
             let config = self
                 .compaction_group_manager
                 .read()
                 .await
-                .default_compaction_config()
+                .try_get_compaction_group_config(parent_group_id)
+                .ok_or_else(|| {
+                    Error::CompactionGroup(format!(
+                        "parent group {} config not found",
+                        parent_group_id
+                    ))
+                })?
+                .compaction_config()
                 .as_ref()
                 .clone();
 
@@ -1036,6 +1043,18 @@ impl GroupMergeValidator {
         {
             return Err(Error::CompactionGroup(format!(
                 "group-{} or group-{} disable_auto_group_scheduling",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        // do not merge compaction groups with different compaction configs
+        // different configs lead to different max_estimated_group_size calculations,
+        // which can cause scheduling conflicts (continuous split/merge cycles)
+        if group.compaction_group_config.compaction_config
+            != next_group.compaction_group_config.compaction_config
+        {
+            return Err(Error::CompactionGroup(format!(
+                "Not Merge group {} and next_group {} with different compaction configs",
                 group.group_id, next_group.group_id
             )));
         }
