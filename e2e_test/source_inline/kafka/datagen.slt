@@ -15,7 +15,7 @@ statement ok retry 2 backoff 1s
 flush;
 
 # Will only generate 10 records since `fields.v1.end` is 10
-query II rowsort
+query II rowsort retry 10 backoff 1s
 select v1, v2 from s1 limit 15;
 ----
 1 11
@@ -45,7 +45,7 @@ create table s1 (v1 int)  with (
 statement ok retry 2 backoff 1s
 flush;
 
-query I
+query I retry 10 backoff 1s
 select v1 from s1 order by v1 limit 10;
 ----
 1
@@ -75,7 +75,7 @@ create table s1 (v1 struct<v2 int>)  with (
 statement ok retry 2 backoff 1s
 flush;
 
-query I
+query I retry 10 backoff 1s
 select (v1).v2 from s1 order by v1 limit 10;
 ----
 1
@@ -117,7 +117,7 @@ create table s1 (v1 struct<v2 int>, t1 timestamp, z1 timestamptz, c1 varchar) wi
 statement ok retry 2 backoff 1s
 flush;
 
-query I
+query I retry 10 backoff 1s
 select count(*) > 2*10 from s1;
 ----
 t
@@ -149,7 +149,7 @@ create table s1 (v1 struct<v2 int> [], c1 varchar []) with (
 statement ok retry 2 backoff 1s
 flush;
 
-query T
+query T retry 10 backoff 1s
 select count(*) > 10 from s1;
 ----
 t

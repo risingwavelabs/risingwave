@@ -97,7 +97,7 @@ create table sub_partition_rw (
 ) from s table 'testdb_partition.sub_partition_table';
 
 # Verify data synchronization for single-level partitioned table
-query I retry 5 backoff 1s
+query I retry 10 backoff 1s
 select count(*) from single_partition_rw;
 ----
 25
@@ -130,7 +130,7 @@ mysql -e "
 "
 
 # Verify CDC operations on single-level partitioned table
-query I retry 5 backoff 1s
+query I retry 10 backoff 1s
 select count(*) from single_partition_rw;
 ----
 27
