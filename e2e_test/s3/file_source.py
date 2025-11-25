@@ -298,9 +298,9 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        "127.0.0.1:9301",
-        "hummockadmin",
-        "hummockadmin",
+        endpoint="127.0.0.1:9301",
+        access_key="hummockadmin",
+        secret_key="hummockadmin",
         secure=False,
     )
     run_id = str(random.randint(1000, 9999))
