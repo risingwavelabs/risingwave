@@ -79,10 +79,7 @@ public class DbzChangeEventConsumer
         this.schemaChangeTopic = schemaChangeTopic;
         LOG.info("heartbeat topic: {}, trnx topic: {}", heartbeatTopicPrefix, transactionTopic);
 
-        // The default JSON converter will output the schema field in the JSON which is unnecessary
-        // to source parser, we use a customized JSON converter to avoid outputting the `schema`
-        // field.
-        var payloadConverter = new DbzJsonConverter();
+        var payloadConverter = new JsonConverter();
         final HashMap<String, Object> configs = new HashMap<>(2);
         // only serialize the value part
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
@@ -91,7 +88,7 @@ public class DbzChangeEventConsumer
         payloadConverter.configure(configs);
         this.payloadConverter = payloadConverter;
 
-        var keyConverter = new DbzJsonConverter();
+        var keyConverter = new JsonConverter();
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.KEY.getName());
         keyConverter.configure(configs);
         this.keyConverter = keyConverter;
