@@ -488,7 +488,7 @@ def test_file_sink_batching():
         secret_key="hummockadmin",
         secure=False,
     )
-    objects = client.list_objects("hummock001", prefix="test_file_sink_batching/", recursive=True)
+    objects = client.list_objects(bucket_name="hummock001", prefix="test_file_sink_batching/", recursive=True)
 
     for obj in objects:
         client.remove_object(bucket_name="hummock001", object_name=obj.object_name)
