@@ -518,9 +518,9 @@ if __name__ == "__main__":
         pq.write_table(table, _local(idx))
 
         client.fput_object(
-            "hummock001",
-            _s3(idx),
-            _local(idx)
+            bucket_name="hummock001",
+            object_name=_s3(idx),
+            file_path=_local(idx),
         )
     # put parquet file to test table function file scan
     if data:
@@ -533,9 +533,9 @@ if __name__ == "__main__":
         pq.write_table(first_table, "data_0.parquet")
 
         client.fput_object(
-            "hummock001",
-            first_file_path,
-            "data_0.parquet"
+            bucket_name="hummock001",
+            object_name=first_file_path,
+            file_path="data_0.parquet",
         )
 
     # do test

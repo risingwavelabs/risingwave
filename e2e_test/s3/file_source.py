@@ -258,7 +258,9 @@ def upload_to_s3_bucket(config, minio_client, run_id, files, start_bias, dir):
             os.fsync(f.fileno())
 
         minio_client.fput_object(
-            "hummock001", _s3(idx, start_bias), _local(idx, start_bias)
+            bucket_name="hummock001",
+            object_name=_s3(idx, start_bias),
+            file_path=_local(idx, start_bias),
         )
 
 
@@ -315,9 +317,9 @@ if __name__ == "__main__":
                     os.fsync(f.fileno())
 
             client.fput_object(
-                "hummock001",
-                _s3(idx),
-                _local(idx) + '.gz'
+                bucket_name="hummock001",
+                object_name=_s3(idx),
+                file_path=_local(idx) + '.gz',
             )
     else:
         _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
@@ -327,9 +329,9 @@ if __name__ == "__main__":
                 os.fsync(f.fileno())
 
             client.fput_object(
-                "hummock001",
-                _s3(idx),
-                _local(idx)
+                bucket_name="hummock001",
+                object_name=_s3(idx),
+                file_path=_local(idx),
             )
 
     # do test
