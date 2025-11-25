@@ -1570,6 +1570,40 @@ where
             .map_ok(|(_, row)| row))
     }
 
+    pub async fn iter_epoch_with_vnode(
+        &self, /* Optional vnode that returns an iterator only over the given range under that vnode. */
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTableInner` owns.
+        vnode: VirtualNode,
+        epoch: HummockReadEpoch,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl RowStream<'static>> {
+        let read_options = ReadOptions {
+            prefix_hint: None,
+            retention_seconds: self.row_store.table_option.retention_seconds,
+            prefetch_options,
+            cache_policy: CachePolicy::Fill(Hint::Normal),
+        };
+
+        let range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let snapshot = self
+            .store
+            .new_read_snapshot(
+                epoch,
+                NewReadSnapshotOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await?;
+        let serde = self.row_store.row_serde.clone();
+        Ok(snapshot
+            .iter(prefixed_range_with_vnode(range, vnode), read_options)
+            .await?
+            .into_stream(move |(_, value)| Ok(serde.deserialize(value).map(OwnedRow::new)?))
+            .map_err(Into::into))
+    }
+
     pub async fn iter_keyed_row_with_vnode(
         &self,
         vnode: VirtualNode,
