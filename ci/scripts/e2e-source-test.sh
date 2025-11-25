@@ -31,25 +31,7 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
-echo "--- Install dependencies"
-python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt &
-PIP_PID=$!
-
-echo "install sqlserver client"
-(curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
-apt-get update -y
-ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev) &
-MSSQL_PID=$!
-
-# install mongosh
-(wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb
-dpkg -i mongodb-mongosh_2.5.8_amd64.deb) &
-MONGOSH_PID=$!
-
-wait $MSSQL_PID $PIP_PID $MONGOSH_PID
-
-export PATH="/opt/mssql-tools/bin/:$PATH"
+echo "--- Set SQL Server environment variables"
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
 
 echo "--- Setup HashiCorp Vault for testing"

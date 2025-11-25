@@ -53,6 +53,26 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.29.0/buf-$(u
 # install python dependencies
 RUN pip3 install --break-system-packages pytest
 
+# Install SQL Server client (mssql-tools and unixodbc-dev)
+RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - && \
+    curl https://packages.microsoft.com/config/ubuntu/24.04/prod.list | tee /etc/apt/sources.list.d/msprod.list && \
+    apt-get update -y && \
+    ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev && \
+    rm -rf /var/lib/{apt,dpkg,cache,log}/
+
+# Install mongosh
+RUN wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb && \
+    dpkg -i mongodb-mongosh_2.5.8_amd64.deb && \
+    rm mongodb-mongosh_2.5.8_amd64.deb
+
+# Copy and install e2e test Python requirements (merged from all sub-requirements)
+COPY e2e_test/requirements.txt /tmp/e2e_requirements.txt
+RUN pip3 install --break-system-packages -r /tmp/e2e_requirements.txt && \
+    rm /tmp/e2e_requirements.txt
+
+# Add mssql-tools to PATH
+ENV PATH="/opt/mssql-tools/bin/:$PATH"
+
 # Install poetry
 RUN curl -sSL https://install.python-poetry.org | python3 -
 # Install rpk

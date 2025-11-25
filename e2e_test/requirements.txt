@@ -1,5 +1,10 @@
--r source_legacy/requirements.txt
--r source_inline/requirements.txt
+# Merged from source_inline/requirements.txt
+nats-py==2.9.0
+psycopg[binary]
+psycopg2-binary==2.9.10
+paho-mqtt==2.1.0
+
+# Main e2e test dependencies
 requests
 authlib==1.6.5
 confluent_kafka==2.10.1
