@@ -37,9 +37,7 @@ CREATE TABLE table_t (
   table.name = 'tt1',
 );
 
-sleep 1s
-
-query I
+query I retry 1 backoff 1s
 select count(*) from table_t;
 ----
 2
@@ -57,9 +55,7 @@ mysql -e "
     INSERT INTO tt1 VALUES (3, '2023-10-23 10:00:00'), (4, '2023-10-23 11:00:00');
 "
 
-sleep 1s
-
-query I
+query I retry 1 backoff 1s
 select count(*) from table_t;
 ----
 2

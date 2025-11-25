@@ -47,12 +47,8 @@ format plain encode protobuf (
   schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
   message = 'test.Event');
 
-
-sleep 1s
-
-
 # create sink to produce messages with text payload (text arm is non-null, empty arm is null)
-statement ok
+statement ok retry 1 backoff 1s
 create sink sk_text as select
   2 as event_id,
   null::struct< > as empty,
@@ -64,12 +60,8 @@ format plain encode protobuf (
   schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
   message = 'test.Event');
 
-
-sleep 2s
-
-
 # reading messages with oneof containing empty message should work
-query III
+query III retry 2 backoff 1s
 select event_id, empty, text from s order by event_id;
 ----
 1	()	NULL

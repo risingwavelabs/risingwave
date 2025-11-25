@@ -108,10 +108,8 @@ cat << EOF | rpk topic produce test_alter_non_shared_source -X brokers=message_q
 {"x": 9}
 EOF
 
-sleep 5s
-
 # the alter source connector applies to existing stream jobs
-query I retry 3 backoff 1s
+query I retry 8 backoff 1s
 select * from non_shared_source_1_mv order by x;
 ----
 1

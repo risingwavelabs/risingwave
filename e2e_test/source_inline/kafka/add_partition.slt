@@ -29,9 +29,7 @@ a
 b
 c
 
-sleep 2s
-
-query ?
+query ? retry 2 backoff 1s
 SELECT * FROM mv order by x;
 ----
 a

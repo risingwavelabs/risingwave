@@ -30,10 +30,8 @@ CREATE SOURCE diamonds_source (
 statement ok
 create materialized view diamonds_mv as select * from diamonds_source;
 
-sleep 1s
-
 # no output due to rate limit
-statement count 0
+statement count 0 retry 1 backoff 1s
 select * from diamonds;
 
 

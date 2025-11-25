@@ -42,9 +42,7 @@ create materialized view mv1 as select * from s1;
 statement ok
 create materialized view mv2 as select * from s2;
 
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query I
@@ -83,9 +81,7 @@ create materialized view mv4 as select * from s2;
 statement ok
 alter table t add column v2 varchar;
 
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query IT
@@ -130,9 +126,7 @@ alter source s1 add column v3 int;
 statement ok
 create materialized view mv5 as select * from s1;
 
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query ITI
@@ -168,10 +162,7 @@ cat <<EOF | rpk topic produce kafka_alter -f "%v\n"
 {"v1": 2, "v2": "22", "v3": 222}
 EOF
 
-
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query IT rowsort
@@ -258,9 +249,7 @@ cat <<EOF | rpk topic produce kafka_alter -f "%v\n"
 {"v1": 3, "v2": "33", "v3": 333}
 EOF
 
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query IT rowsort

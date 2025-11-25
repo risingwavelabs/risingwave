@@ -11,10 +11,7 @@ create table s1 (v1 int, v2 float) with (
     datagen.split.num = '1'
 );
 
-# Wait enough time to ensure Datagen connector generate data
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 # Will only generate 10 records since `fields.v1.end` is 10
@@ -45,10 +42,7 @@ create table s1 (v1 int)  with (
     datagen.split.num = '5'
 );
 
-# Wait enough time to ensure Datagen connector generate data
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query I
@@ -78,10 +72,7 @@ create table s1 (v1 struct<v2 int>)  with (
     datagen.split.num = '5'
 ) FORMAT PLAIN ENCODE JSON;
 
-# Wait enough time to ensure Datagen connector generate data
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query I
@@ -123,10 +114,7 @@ create table s1 (v1 struct<v2 int>, t1 timestamp, z1 timestamptz, c1 varchar) wi
     datagen.split.num = '5'
 ) FORMAT PLAIN ENCODE JSON;
 
-# Wait enough time to ensure Datagen connector generate data
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query I
@@ -158,10 +146,7 @@ create table s1 (v1 struct<v2 int> [], c1 varchar []) with (
     datagen.split.num = '5'
 ) FORMAT PLAIN ENCODE JSON;
 
-# Wait enough time to ensure Datagen connector generate data
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query T

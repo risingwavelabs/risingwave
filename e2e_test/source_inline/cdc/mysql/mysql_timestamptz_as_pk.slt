@@ -75,9 +75,7 @@ mysql -e "
         (FROM_UNIXTIME(1700000050), 50, 'backfill');
 "
 
-sleep 2s
-
-statement ok
+statement ok retry 3 backoff 1s
 create source s_ts_pk with (
   ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
   username = '${RISEDEV_MYSQL_USER}',
@@ -85,9 +83,7 @@ create source s_ts_pk with (
   database.name = 'risedev'
 );
 
-sleep 2s
-
-statement ok
+statement ok retry 3 backoff 1s
 create table rw_ts_pk (
   t TIMESTAMPTZ,
   id BIGINT,
@@ -112,10 +108,8 @@ mysql -e "
         (FROM_UNIXTIME(1700001005), 1005, 'debezium');
 "
 
-sleep 3s
-
 # Verify total count in RisingWave
-query I
+query I retry 3 backoff 1s
 select count(*) as row_cnt from rw_ts_pk;
 ----
 55

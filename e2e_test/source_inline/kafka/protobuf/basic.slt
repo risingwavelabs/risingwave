@@ -49,11 +49,8 @@ FORMAT upsert ENCODE protobuf(
         message = 'test.User'
     );
 
-# Wait for source
-sleep 2s
-
 # Flush into storage
-statement ok
+statement ok retry 2 backoff 1s
 flush;
 
 query I

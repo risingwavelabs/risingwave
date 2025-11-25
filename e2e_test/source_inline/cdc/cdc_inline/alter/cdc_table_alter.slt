@@ -116,10 +116,7 @@ create materialized view enriched_orders as SELECT o.*, p.name, p.description, s
  LEFT JOIN my_products AS p ON o.product_id = p.id
  LEFT JOIN pg_shipments AS s ON o.order_id = s.order_id;
 
-
-sleep 3s
-
-query III
+query III retry 3 backoff 1s
 select order_id, product_id, shipment_id from enriched_orders order by order_id;
 ----
 10001  102   1001
@@ -142,10 +139,7 @@ ALTER TABLE my_products ADD COLUMN weight DECIMAL DEFAULT 1.1;
 statement ok
 ALTER TABLE my_orders ADD COLUMN order_comment VARCHAR;
 
-# wait alter ddl
-sleep 3s
-
-query ITTT
+query ITTT retry 3 backoff 1s
 SELECT id,name,description,weight FROM my_products order by id limit 3
 ----
 101 scooter Small 2-wheel scooter 1.1
@@ -162,9 +156,7 @@ mysql -e "
   UPDATE orders SET order_comment = 'very good' WHERE order_id = 10001;
 "
 
-sleep 3s
-
-query ITTT
+query ITTT retry 3 backoff 1s
 SELECT id,name,description,weight FROM my_products order by id limit 3
 ----
 101 scooter Small 2-wheel scooter 10.50

@@ -22,9 +22,7 @@ KAFKA t
 statement ok
 create materialized view mv_before_produce as select * from s_before_produce;
 
-sleep 2s
-
-statement ok
+statement ok retry 2 backoff 1s
 set STREAMING_USE_SNAPSHOT_BACKFILL TO true;
 
 statement error Not supported: Snapshot backfill with shared source backfill is not supported
@@ -66,9 +64,7 @@ select count(*) from rw_internal_tables where name like '%s0%';
 ----
 1
 
-sleep 1s
-
-statement ok
+statement ok retry 1 backoff 1s
 flush;
 
 # SourceExecutor's starts from latest.
@@ -84,15 +80,11 @@ internal_table.mjs --name s0 --type source
 statement ok
 create materialized view mv_1 as select * from s0;
 
-# Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 2s
-
-
 # SourceBackfill starts from offset 0, with backfill_info: HasDataToBackfill { latest_offset: "0" } (decided by kafka high watermark).
 # (meaning upstream already consumed offset 0, so we only need to backfill to offset 0)
 # After backfilling offset 0, it enters SourceCachingUp state. Now the backfill is finished.
 # We wait for SourceExecutor to produce offset > 0.
-system ok
+system ok retry 2 backoff 1s
 internal_table.mjs --name mv_1 --type sourcebackfill
 ----
 0,"{""num_consumed_rows"": 1, ""state"": {""SourceCachingUp"": ""0""}, ""target_offset"": ""0""}"
@@ -111,10 +103,7 @@ create materialized view mv_2 as select * from s0;
 statement ok
 SET streaming_use_shared_source TO true;
 
-
-sleep 2s
-
-query ?? rowsort
+query ?? rowsort retry 2 backoff 1s
 select v1, v2 from s0;
 ----
 1	a

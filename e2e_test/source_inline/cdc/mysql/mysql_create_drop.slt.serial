@@ -53,22 +53,17 @@ SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sou
 ----
 CREATE SOURCE s
 
-sleep 2s
-
-
-statement ok
+statement ok retry 3 backoff 1s
 create table tt1_shared (v1 int,
   v2 timestamptz,
   PRIMARY KEY (v1)
 ) from s table 'testdb1.tt1';
 
-sleep 2s
-
 # The source is resumed.
 # SourceExecutor does not handle historical data, and only receives new data after it's created.
 # But it can receive offset update at the beginning and periodically
 # via the heartbeat message.
-system ok
+system ok retry 2 backoff 1s
 internal_table.mjs --name s --type '' --count
 ----
 count: 1

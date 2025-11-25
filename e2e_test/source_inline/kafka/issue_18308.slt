@@ -27,9 +27,7 @@ CREATE SINK table_sink INTO compact_table AS SELECT * FROM kafkasource;
 system ok
 echo '{ "id": 1, "name": "xxchan" }' | rpk topic produce test-topic-18308
 
-sleep 5s
-
-statement ok
+statement ok retry 5 backoff 1s
 flush;
 
 query IT

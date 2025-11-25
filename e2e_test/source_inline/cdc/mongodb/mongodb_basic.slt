@@ -87,11 +87,9 @@ SELECT
 FROM
     per_field;
 
-sleep 5s
-
 control substitution off
 
-query TTT
+query TTT retry 5 backoff 1s
 select _id, database_name, collection_name from all_types_extjson;
 ----
 {"$oid": "6911a33502454e0f774f8803"} test all_types
@@ -150,10 +148,7 @@ db.all_types.insertOne({
 });
 EOF
 
-
-sleep 3s
-
-query TTTT
+query TTTT retry 3 backoff 1s
 select
   _id, database_name, collection_name,
   commit_ts > (select at from phases where name = '03_ingested')
