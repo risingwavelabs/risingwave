@@ -60,16 +60,12 @@ primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
-sleep 2s
-
-query TTTTTTTTTTTTT
+query TTTTTTTTTTTTT retry 2 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
 1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
 2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
 3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
-
-sleep 3s
 
 system ok
 psql -c "
@@ -80,10 +76,8 @@ psql -c "
     INSERT INTO test_schema_change (id,name,age) values (11,'aaa', 11);
 "
 
-sleep 3s
-
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 3 backoff 1s
 describe rw_test_schema_change;
 ----
 id integer false NULL
@@ -127,11 +121,8 @@ psql -c "
     INSERT INTO test_schema_change (id,name,age) values (12,'bbb', 12);
 "
 
-sleep 3s
-
-
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 3 backoff 1s
 describe rw_test_schema_change;
 ----
 id integer false NULL

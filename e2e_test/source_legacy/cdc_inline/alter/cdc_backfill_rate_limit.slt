@@ -52,9 +52,7 @@ create table my_orders (
    PRIMARY KEY (order_id)
 ) from mysql_source table 'testdb2.orders';
 
-sleep 3s
-
-query I
+query I retry 3 backoff 1s
 select count(*) from my_orders;
 ----
 0
@@ -63,10 +61,7 @@ select count(*) from my_orders;
 statement ok
 ALTER TABLE my_orders SET backfill_rate_limit = 1000;
 
-# wait alter ddl
-sleep 3s
-
-query I
+query I retry 3 backoff 1s
 select count(*) from my_orders;
 ----
 3

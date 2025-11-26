@@ -81,9 +81,7 @@ mysql -e "
         (18446251075179777772, 4294967295, 65535, 255, 'backfill');
 "
 
-sleep 2s
-
-statement ok
+statement ok retry 3 backoff 1s
 create source s_unsigned_int_upcast with (
   ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
   username = '${RISEDEV_MYSQL_USER}',
@@ -100,9 +98,7 @@ create source s_unsigned_int_to_signed with (
   database.name = 'risedev'
 );
 
-sleep 2s
-
-statement ok
+statement ok retry 3 backoff 1s
 create table rw_unsigned_int_upcast (
   id DECIMAL,
   unsigned_bigint DECIMAL,
@@ -139,10 +135,8 @@ mysql -e "
         (18446251075179777772, 4294967295, 65535, 255, 'debezium');
 "
 
-sleep 3s
-
 # Verify total count in RisingWave (50 backfill + 3 debezium = 53)
-query I
+query I retry 4 backoff 1s
 select count(*) as row_cnt from rw_unsigned_int_upcast;
 ----
 53

@@ -31,20 +31,8 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
-echo "--- Install dependencies"
-python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
-
-echo "install sqlserver client"
-curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
-apt-get update -y
-ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev
-export PATH="/opt/mssql-tools/bin/:$PATH"
+echo "--- Set SQL Server environment variables"
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
-
-# install mongosh
-wget --no-verbose https://repo.mongodb.org/apt/ubuntu/dists/noble/mongodb-org/8.0/multiverse/binary-amd64/mongodb-mongosh_2.5.8_amd64.deb
-dpkg -i mongodb-mongosh_2.5.8_amd64.deb
 
 echo "--- Setup HashiCorp Vault for testing"
 # Set vault environment variables, used in `ci/scripts/setup-vault.sh`
@@ -69,6 +57,13 @@ echo "--- Run mqtt test done"
 echo "--- Run kafka sasl test"
 risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 echo "--- Run kafka sasl test done"
+
+# MongoDB debug message
+echo '> ping mongodb'
+echo 'db.runCommand({ping: 1})' | mongosh mongodb://mongodb:27017
+echo '> rs config'
+echo 'rs.conf()' | mongosh mongodb://mongodb:27017
+echo '> run test..'
 
 risedev slt './e2e_test/source_inline/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
@@ -113,17 +108,6 @@ echo "--- starting risingwave cluster"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
-
-echo "--- mongodb cdc test"
-
-echo '> ping mongodb'
-echo 'db.runCommand({ping: 1})' | mongosh mongodb://mongodb:27017
-echo '> rs config'
-echo 'rs.conf()' | mongosh mongodb://mongodb:27017
-echo '> run test..'
-# This is actually redundant. `source_inline` is already executed above.
-risedev slt './e2e_test/source_inline/cdc/mongodb/**/*.slt'
-
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 
@@ -136,7 +120,6 @@ RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=
 risedev ci-start ci-1cn-1fe-with-recovery
 
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
-
 
 echo "--- mysql & postgres cdc validate test"
 risedev slt './e2e_test/source_legacy/cdc/cdc.validate.mysql.slt'

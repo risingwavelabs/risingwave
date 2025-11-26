@@ -36,12 +36,10 @@ sleep 10s
 system ok
 sqlcmd -C -d sqlserver_timestamp_db -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_insert.sql -b
 
-sleep 10s
-
 # ------------ check initial data stage ------------
 
-# Check initial data (6 rows)
-query II
+# Check initial data (6 rows) - ensure the data is consumed from Debezium message instead of backfill
+query II retry 10 backoff 1s
 select id, timestamp from timestamp_test order by id;
 ----
 1 9999-01-01 00:00:00
@@ -55,12 +53,10 @@ select id, timestamp from timestamp_test order by id;
 system ok
 sqlcmd -C -d sqlserver_timestamp_db -i e2e_test/source_inline/cdc/sql_server/sql_server_timestamp_update.sql -b
 
-sleep 10s
-
 # ------------ check after update stage ------------
 
 # Check all data after update (should show updated IDs)
-query III
+query III retry 10 backoff 1s
 select id, timestamp, time_col from timestamp_test order by id;
 ----
 4 8000-06-01 12:00:00 12:00:00

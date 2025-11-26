@@ -63,12 +63,8 @@ format plain encode protobuf (
   schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
   message = 'test.TestMessage');
 
-
-sleep 1s
-
-
 # create sink to produce messages with only regular fields (others should be missing)
-statement ok
+statement ok retry 3 backoff 1s
 create sink sk_minimal as select
   99 as regular_int,
   'world' as regular_string,
@@ -87,12 +83,8 @@ format plain encode protobuf (
   schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
   message = 'test.TestMessage');
 
-
-sleep 1s
-
-
 # create sink to produce messages with oneof_int field set
-statement ok
+statement ok retry 3 backoff 1s
 create sink sk_oneof_int as select
   77 as regular_int,
   'oneof test' as regular_string,
@@ -136,12 +128,8 @@ format plain encode protobuf (
   schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
   message = 'test.TestMessage');
 
-
-sleep 2s
-
-
 # Test 1: Verify all messages are received correctly
-query ITTITTTIII rowsort
+query ITTITTTIII rowsort retry 2 backoff 1s
 select
   regular_int,
   regular_string,

@@ -20,9 +20,7 @@ WITH (
     slot.name = 'alter_test'
 )
 
-sleep 5s
-
-query IT
+query IT retry 5 backoff 1s
 SELECT * FROM alter_test ORDER BY k
 ----
 1 a
@@ -37,9 +35,7 @@ INSERT INTO alter_test VALUES (3, 'c');
 "
 
 # FIXME: after schema change in RisingWave, why does it take so long to get the new data?
-sleep 20s
-
-query ITT
+query ITT retry 20 backoff 1s
 SELECT * FROM alter_test ORDER BY k
 ----
 1 a NULL
@@ -52,9 +48,7 @@ ALTER TABLE alter_test ADD COLUMN v2 CHARACTER VARYING;
 INSERT INTO alter_test VALUES (4, 'd', 'dd');
 "
 
-sleep 5s
-
-query ITT
+query ITT retry 5 backoff 1s
 SELECT * FROM alter_test ORDER BY k
 ----
 1 a NULL
@@ -72,9 +66,7 @@ INSERT INTO alter_test VALUES (5, 'ee');
 "
 
 # FIXME: after schema change in RisingWave, why does it take so long to get the new data?
-sleep 20s
-
-query IT
+query IT retry 20 backoff 1s
 SELECT * FROM alter_test ORDER BY k
 ----
 1 NULL

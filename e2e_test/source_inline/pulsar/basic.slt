@@ -126,9 +126,7 @@ python3 e2e_test/commands/pulsar_util.py produce -t "non-persistent://public/def
 {"f1":17,"f2":"bar"}
 EOF
 
-sleep 1s
-
-query IT rowsort retry 3 backoff 2s
+query IT rowsort retry 4 backoff 1s
 select * from t_non_persistent;
 ----
 12 foo

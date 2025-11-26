@@ -18,15 +18,11 @@ create table t_rabbitmq_mqtt (
   qos = 'at_least_once'
 ) format plain encode json;
 
-sleep 1s
-
 # Produce initial messages
-system ok
+system ok retry 3 backoff 1s
 python3 e2e_test/source_inline/mqtt/rabbitmq_operation.py produce test_topic_1 100
 
-sleep 3s
-
-statement ok
+statement ok retry 3 backoff 1s
 flush;
 
 # Verify we received at least 100 messages (at least once semantics)

@@ -15,9 +15,7 @@ ln -s 1 schema_registry_root/apis/ccompat/v6/subjects/dummy_topic-value/versions
 system ok
 python3 -m http.server -d schema_registry_root/ 9000 > /dev/null 2>&1 < /dev/null &
 
-sleep 1s
-
-system ok retry 3 backoff 2s
+system ok retry 4 backoff 1s
 curl --fail-with-body 'http://localhost:9000/apis/ccompat/v6/subjects/dummy_topic-value/versions/latest'
 
 statement ok
