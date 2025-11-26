@@ -25,6 +25,7 @@ use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 
 use super::*;
+use crate::error::bail_invalid_parameter;
 
 impl CatalogController {
     async fn alter_database_name(
@@ -964,9 +965,20 @@ impl CatalogController {
         let updated_config_override = toml::Value::Table(table).to_string();
 
         // Validate the config override by trying to merge it to the default config.
+        // Reject unrecognized entries.
         {
-            merge_streaming_config_section(&StreamingConfig::default(), &updated_config_override)
-                .context("invalid streaming job config override")?;
+            let merged = merge_streaming_config_section(
+                &StreamingConfig::default(),
+                &updated_config_override,
+            )
+            .context("invalid streaming job config override")?;
+
+            if let Some(merged) = merged {
+                let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+                if !unrecognized_keys.is_empty() {
+                    bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
+                }
+            }
         }
 
         streaming_job::ActiveModel {

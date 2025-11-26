@@ -33,6 +33,11 @@ impl<T> std::fmt::Debug for Unrecognized<T> {
 
 impl<T> Unrecognized<T> {
     /// Returns all unrecognized fields as a map.
+    pub fn inner(&self) -> &BTreeMap<String, Value> {
+        &self.inner
+    }
+
+    /// Returns all unrecognized fields as a map.
     pub fn into_inner(self) -> BTreeMap<String, Value> {
         self.inner
     }

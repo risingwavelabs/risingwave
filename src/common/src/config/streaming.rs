@@ -247,6 +247,23 @@ pub struct StreamingDeveloperConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+impl StreamingConfig {
+    /// Returns the dot-separated keys of all unrecognized fields, including those in `developer` section.
+    pub fn unrecognized_keys(&self) -> impl Iterator<Item = String> {
+        std::iter::from_coroutine(
+            #[coroutine]
+            || {
+                for k in self.unrecognized.inner().keys() {
+                    yield format!("streaming.{k}");
+                }
+                for k in self.developer.unrecognized.inner().keys() {
+                    yield format!("streaming.developer.{k}");
+                }
+            },
+        )
+    }
+}
+
 pub mod default {
     pub use crate::config::default::developer;
 

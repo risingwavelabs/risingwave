@@ -23,6 +23,7 @@ mod transaction_isolation_level;
 mod visibility_mode;
 
 use chrono_tz::Tz;
+use itertools::Itertools;
 pub use opt::OptionConfig;
 pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
@@ -562,13 +563,9 @@ impl SessionConfig {
             let merged =
                 merge_streaming_config_section(&StreamingConfig::default(), res.as_str())?.unwrap();
 
-            for u in [
-                merged.unrecognized.into_inner(),
-                merged.developer.unrecognized.into_inner(),
-            ] {
-                if !u.is_empty() {
-                    bail!("unrecognized config entries: {:?}", u);
-                }
+            let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+            if !unrecognized_keys.is_empty() {
+                bail!("unrecognized configs: {:?}", unrecognized_keys);
             }
         }
 
