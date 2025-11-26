@@ -1068,9 +1068,23 @@ impl DdlService for DdlServiceImpl {
 
     async fn alter_streaming_job_config(
         &self,
-        _request: Request<AlterStreamingJobConfigRequest>,
+        request: Request<AlterStreamingJobConfigRequest>,
     ) -> Result<Response<AlterStreamingJobConfigResponse>, Status> {
-        Err(Status::unimplemented("alter streaming job config"))
+        let AlterStreamingJobConfigRequest {
+            job_id,
+            entries_to_add,
+            keys_to_remove,
+        } = request.into_inner();
+
+        self.ddl_controller
+            .run_command(DdlCommand::AlterStreamingJobConfig(
+                job_id,
+                entries_to_add,
+                keys_to_remove,
+            ))
+            .await?;
+
+        Ok(Response::new(AlterStreamingJobConfigResponse {}))
     }
 
     /// Auto schema change for cdc sources,
