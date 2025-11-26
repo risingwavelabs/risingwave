@@ -962,7 +962,7 @@ impl CatalogController {
                 .with_context(|| format!("failed to reset config path {key}"))?;
         }
 
-        let updated_config_override = toml::Value::Table(table).to_string();
+        let updated_config_override = table.to_string();
 
         // Validate the config override by trying to merge it to the default config.
         // Reject unrecognized entries.
