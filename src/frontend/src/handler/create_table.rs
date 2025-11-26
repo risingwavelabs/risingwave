@@ -93,11 +93,13 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    COMPACTION_INTERVAL_SEC, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
+    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
+    COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
+    COMPACTION_TRIGGER_SNAPSHOT_COUNT, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
     ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
-    MAX_SNAPSHOTS_NUM, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
+    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+    parse_partition_by_exprs,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -1950,97 +1952,141 @@ pub async fn create_iceberg_engine_table(
     }
 
     if let Some(max_snapshots_num_before_compaction) =
-        handler_args.with_options.get(MAX_SNAPSHOTS_NUM)
+        handler_args.with_options.get(COMPACTION_MAX_SNAPSHOTS_NUM)
     {
         let max_snapshots_num_before_compaction = max_snapshots_num_before_compaction
             .parse::<u32>()
             .map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(
-                    "max_snapshots_num_before_compaction must be greater than 0: {}",
-                    max_snapshots_num_before_compaction
+                    "{} must be greater than 0: {}",
+                    COMPACTION_MAX_SNAPSHOTS_NUM, max_snapshots_num_before_compaction
                 ))
             })?;
         if max_snapshots_num_before_compaction == 0 {
-            bail!("max_snapshots_num_before_compaction must be greater than 0");
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_MAX_SNAPSHOTS_NUM
+            ));
         }
         sink_with.insert(
-            MAX_SNAPSHOTS_NUM.to_owned(),
+            COMPACTION_MAX_SNAPSHOTS_NUM.to_owned(),
             max_snapshots_num_before_compaction.to_string(),
         );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(COMPACTION_MAX_SNAPSHOTS_NUM));
     }
 
-    if let Some(small_files_threshold_mb) =
-        handler_args.with_options.get("small_files_threshold_mb")
+    if let Some(small_files_threshold_mb) = handler_args
+        .with_options
+        .get(COMPACTION_SMALL_FILES_THRESHOLD_MB)
     {
         let small_files_threshold_mb = small_files_threshold_mb.parse::<u64>().map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!(
-                "small_files_threshold_mb must be greater than 0: {}",
-                small_files_threshold_mb
+                "{} must be greater than 0: {}",
+                COMPACTION_SMALL_FILES_THRESHOLD_MB, small_files_threshold_mb
             ))
         })?;
         if small_files_threshold_mb == 0 {
-            bail!("small_files_threshold_mb must be a greater than 0");
+            bail!(format!(
+                "{} must be a greater than 0",
+                COMPACTION_SMALL_FILES_THRESHOLD_MB
+            ));
         }
         sink_with.insert(
-            "small_files_threshold_mb".to_owned(),
+            COMPACTION_SMALL_FILES_THRESHOLD_MB.to_owned(),
             small_files_threshold_mb.to_string(),
         );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_SMALL_FILES_THRESHOLD_MB)
+        });
     }
 
     if let Some(delete_files_count_threshold) = handler_args
         .with_options
-        .get("delete_files_count_threshold")
+        .get(COMPACTION_DELETE_FILES_COUNT_THRESHOLD)
     {
         let delete_files_count_threshold =
             delete_files_count_threshold.parse::<usize>().map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!(
-                    "delete_files_count_threshold must be greater than 0: {}",
-                    delete_files_count_threshold
+                    "{} must be greater than 0: {}",
+                    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, delete_files_count_threshold
                 ))
             })?;
         if delete_files_count_threshold == 0 {
-            bail!("delete_files_count_threshold must be greater than 0");
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_DELETE_FILES_COUNT_THRESHOLD
+            ));
         }
         sink_with.insert(
-            "delete_files_count_threshold".to_owned(),
+            COMPACTION_DELETE_FILES_COUNT_THRESHOLD.to_owned(),
             delete_files_count_threshold.to_string(),
         );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_DELETE_FILES_COUNT_THRESHOLD)
+        });
     }
 
-    if let Some(trigger_snapshot_count) = handler_args.with_options.get("trigger_snapshot_count") {
+    if let Some(trigger_snapshot_count) = handler_args
+        .with_options
+        .get(COMPACTION_TRIGGER_SNAPSHOT_COUNT)
+    {
         let trigger_snapshot_count = trigger_snapshot_count.parse::<usize>().map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!(
-                "trigger_snapshot_count must be greater than 0: {}",
-                trigger_snapshot_count
+                "{} must be greater than 0: {}",
+                COMPACTION_TRIGGER_SNAPSHOT_COUNT, trigger_snapshot_count
             ))
         })?;
         if trigger_snapshot_count == 0 {
-            bail!("trigger_snapshot_count must be greater than 0");
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_TRIGGER_SNAPSHOT_COUNT
+            ));
         }
         sink_with.insert(
-            "trigger_snapshot_count".to_owned(),
+            COMPACTION_TRIGGER_SNAPSHOT_COUNT.to_owned(),
             trigger_snapshot_count.to_string(),
         );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(COMPACTION_TRIGGER_SNAPSHOT_COUNT));
     }
 
-    if let Some(target_file_size_mb) = handler_args.with_options.get("target_file_size_mb") {
+    if let Some(target_file_size_mb) = handler_args
+        .with_options
+        .get(COMPACTION_TARGET_FILE_SIZE_MB)
+    {
         let target_file_size_mb = target_file_size_mb.parse::<u64>().map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!(
-                "target_file_size_mb must be greater than 0: {}",
-                target_file_size_mb
+                "{} must be greater than 0: {}",
+                COMPACTION_TARGET_FILE_SIZE_MB, target_file_size_mb
             ))
         })?;
         if target_file_size_mb == 0 {
-            bail!("target_file_size_mb must be greater than 0");
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_TARGET_FILE_SIZE_MB
+            ));
         }
         sink_with.insert(
-            "target_file_size_mb".to_owned(),
+            COMPACTION_TARGET_FILE_SIZE_MB.to_owned(),
             target_file_size_mb.to_string(),
         );
         // remove from source options, otherwise it will be considered as an unknown field.
         source
             .as_mut()
-            .map(|x| x.with_properties.remove("target_file_size_mb"));
+            .map(|x| x.with_properties.remove(COMPACTION_TARGET_FILE_SIZE_MB));
     }
 
     let partition_by = handler_args
