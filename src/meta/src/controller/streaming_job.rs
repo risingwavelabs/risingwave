@@ -35,6 +35,7 @@ use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
+use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
@@ -47,6 +48,9 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
+use risingwave_pb::plan_common::source_refresh_mode::{
+    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
+};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -260,6 +264,30 @@ impl CatalogController {
                 }
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
+
+                if table.refreshable {
+                    let trigger_interval_secs = src
+                        .as_ref()
+                        .and_then(|source_catalog| source_catalog.refresh_mode)
+                        .and_then(
+                            |source_refresh_mode| match source_refresh_mode.refresh_mode {
+                                Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
+                                    refresh_interval_sec,
+                                })) => refresh_interval_sec,
+                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})) => None,
+                                None => None,
+                            },
+                        );
+
+                    RefreshJob::insert(refresh_job::ActiveModel {
+                        table_id: Set(table.id),
+                        last_trigger_time: Set(None),
+                        trigger_interval_secs: Set(trigger_interval_secs),
+                        current_status: Set(RefreshState::Idle),
+                    })
+                    .exec(&txn)
+                    .await?;
+                }
             }
             StreamingJob::Index(index, table) => {
                 ensure_object_id(ObjectType::Table, index.primary_table_id, &txn).await?;

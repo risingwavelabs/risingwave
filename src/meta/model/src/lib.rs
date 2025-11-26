@@ -53,6 +53,7 @@ pub mod iceberg_tables;
 pub mod index;
 pub mod object;
 pub mod object_dependency;
+pub mod refresh_job;
 pub mod schema;
 pub mod secret;
 pub mod serde_seaql_migration;

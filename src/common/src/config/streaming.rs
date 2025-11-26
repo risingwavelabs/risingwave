@@ -248,6 +248,10 @@ pub struct StreamingDeveloperConfig {
     /// only if it's confirmed that no-op updates are causing significant streaming amplification.
     #[serde(default)]
     pub aggressive_noop_update_elimination: bool,
+
+    /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
+    #[serde(default = "default::developer::refresh_scheduler_interval_sec")]
+    pub refresh_scheduler_interval_sec: u64,
 }
 
 pub mod default {

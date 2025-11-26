@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_common::id::JobId;
+use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::prelude::DateTime;
 
 use super::*;
@@ -22,6 +23,37 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.inner.read().await.list_time_travel_table_ids().await
+    }
+
+    pub async fn list_refresh_jobs(&self) -> MetaResult<Vec<refresh_job::Model>> {
+        let inner = self.inner.read().await;
+        Ok(RefreshJob::find().all(&inner.db).await?)
+    }
+
+    pub async fn get_refresh_job_state_by_table_id(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<RefreshState> {
+        let inner = self.inner.read().await;
+        let (refresh_job_state,): (RefreshState,) = RefreshJob::find_by_id(table_id)
+            .select_only()
+            .select_column(refresh_job::Column::CurrentStatus)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("refresh_job", table_id))?;
+        Ok(refresh_job_state)
+    }
+
+    pub async fn list_refreshable_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        let inner = self.inner.read().await;
+        Ok(Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::Refreshable.eq(true))
+            .into_tuple()
+            .all(&inner.db)
+            .await?)
     }
 
     pub async fn list_stream_job_desc_for_telemetry(
