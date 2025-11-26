@@ -807,23 +807,6 @@ do
   echo
 done
 
-echo "install: $(tput setaf 4)GNU Parallel$(tput sgr0)"
-UNAME=$(uname | tr "[:lower:]" "[:upper:]" )
-case $UNAME in
-  DARWIN)
-    if ! command -v brew >/dev/null 2>&1 ; then
-      echo "Installing Homebrew (https://brew.sh/)"
-      bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    fi
-    brew update
-    brew install parallel
-    ;;
-  LINUX)
-    sudo apt update -y
-    sudo apt install -y parallel
-    ;;
-esac
-
 echo "check: $(tput setaf 4)${TMUX} >= v3.2a$(tput sgr0)"
 ${TMUX} -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
 echo
