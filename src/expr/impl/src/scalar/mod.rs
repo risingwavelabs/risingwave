@@ -26,6 +26,7 @@ mod array_positions;
 mod array_range_access;
 mod array_remove;
 mod array_replace;
+mod array_reverse;
 mod array_sort;
 mod array_sum;
 mod array_to_string;
