@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -30,6 +31,7 @@ use super::{
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
@@ -69,8 +71,42 @@ impl StreamAsOfJoin {
             &core,
         );
 
-        // TODO: derive watermarks
-        let watermark_columns = WatermarkColumns::new();
+        let watermark_columns = {
+            let l2i = core.l2i_col_mapping();
+            let r2i = core.r2i_col_mapping();
+            let mut watermark_columns = WatermarkColumns::new();
+            for (left_idx, right_idx) in
+                eq_join_predicate
+                    .eq_indexes()
+                    .into_iter()
+                    .chain(std::iter::once((
+                        inequality_desc.left_idx as usize,
+                        inequality_desc.right_idx as usize,
+                    )))
+            {
+                if let Some(l_wtmk_group) = core.left.watermark_columns().get_group(left_idx)
+                    && let Some(r_wtmk_group) = core.right.watermark_columns().get_group(right_idx)
+                {
+                    if let Some(internal) = l2i.try_map(left_idx) {
+                        watermark_columns.insert(
+                            internal,
+                            l_wtmk_group.same_or_else(r_wtmk_group, || {
+                                core.ctx().next_watermark_group_id()
+                            }),
+                        );
+                    }
+                    if let Some(internal) = r2i.try_map(right_idx) {
+                        watermark_columns.insert(
+                            internal,
+                            l_wtmk_group.same_or_else(r_wtmk_group, || {
+                                core.ctx().next_watermark_group_id()
+                            }),
+                        );
+                    }
+                }
+            }
+            watermark_columns.map_clone(&core.i2o_col_mapping())
+        };
 
         // TODO: derive from input
         let base = PlanBase::new_stream_with_core(
