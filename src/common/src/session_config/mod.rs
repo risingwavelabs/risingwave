@@ -424,7 +424,7 @@ pub struct SessionConfig {
     enable_index_selection: bool,
 
     /// Enable locality backfill for streaming queries. Defaults to false.
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     enable_locality_backfill: bool,
 
     /// Duration in seconds before notifying the user that a long-running DDL operation (e.g., DROP TABLE, CANCEL JOBS)
