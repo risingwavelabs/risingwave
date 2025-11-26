@@ -14,14 +14,14 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
-use std::future::{Future, poll_fn, ready};
+use std::future::{Future, poll_fn};
 use std::pin::pin;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use futures::future::{Either, pending, select};
-use futures::{FutureExt, pin_mut};
+use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
@@ -40,7 +40,7 @@ use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
-// use tokio_retry::strategy::{ExponentialBackoff, jitter};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Status;
 use tracing::{error, warn};
 
@@ -112,7 +112,8 @@ impl<R> AligningRequests<R> {
     }
 }
 
-// type RetryBackoffStrategy = impl Iterator<Item = std::pin::Pin<Box<tokio::time::Sleep>>> + Send + 'static;
+type RetryBackoffFuture = std::pin::Pin<Box<tokio::time::Sleep>>;
+type RetryBackoffStrategy = impl Iterator<Item = RetryBackoffFuture> + Send + 'static;
 
 struct TwoPhaseCommitHandler {
     db: DatabaseConnection,
@@ -122,10 +123,7 @@ struct TwoPhaseCommitHandler {
     last_committed_epoch: Option<u64>,
     pending_epochs: VecDeque<(u64, Vec<u8>)>,
     prepared_epochs: VecDeque<(u64, Vec<u8>)>,
-    delay: Duration,
-    max_backoff: Duration,
-    last_attempt: u32,
-    // backoff_state: Option<RetryBackoffStrategy>,
+    backoff_state: Option<(RetryBackoffFuture, RetryBackoffStrategy)>,
 }
 
 impl TwoPhaseCommitHandler {
@@ -144,40 +142,34 @@ impl TwoPhaseCommitHandler {
             last_committed_epoch,
             pending_epochs: VecDeque::new(),
             prepared_epochs: VecDeque::new(),
-            delay: Duration::from_secs(1),
-            max_backoff: Duration::from_secs(60),
-            last_attempt: 0,
+            backoff_state: None,
         }
     }
 
-    // #[define_opaque(RetryBackoffStrategy)]
-    // fn get_retry_backoff_strategy() -> RetryBackoffStrategy {
-    //     ExponentialBackoff::from_millis(1000)
-    //         .max_delay(Duration::from_millis(60000))
-    //         .map(jitter)
-    //         .map(|delay| Box::pin(tokio::time::sleep(delay)))
-    // }
+    #[define_opaque(RetryBackoffStrategy)]
+    fn get_retry_backoff_strategy() -> RetryBackoffStrategy {
+        ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(60))
+            .map(jitter)
+            .map(|delay| Box::pin(tokio::time::sleep(delay)))
+    }
 
     async fn next_to_commit(&mut self) -> anyhow::Result<(u64, Vec<u8>)> {
         loop {
-            let delay_fut = {
+            let wait_backoff = async {
                 if self.prepared_epochs.is_empty() {
-                    pending::<()>().boxed()
-                } else {
-                    // For the first attempt, return 0 to avoid delay.
-                    if self.last_attempt == 0 {
-                        ready(()).boxed()
-                    } else {
-                        sleep(self.delay).boxed()
-                    }
+                    pending::<()>().await;
+                } else if let Some((backoff_fut, _)) = &mut self.backoff_state {
+                    backoff_fut.await;
                 }
             };
 
             select! {
-                _ = delay_fut => {
+                _ = wait_backoff => {
                     let (epoch, metadata) = self.prepared_epochs.front().cloned().expect("non-empty");
                     return Ok((epoch, metadata));
                 }
+
                 recv_epoch = self.job_committed_epoch_rx.recv() => {
                     let Some(recv_epoch) = recv_epoch else {
                         return Err(anyhow!(
@@ -204,8 +196,7 @@ impl TwoPhaseCommitHandler {
     }
 
     async fn ack_committed(&mut self, epoch: u64) -> anyhow::Result<()> {
-        self.delay = Duration::from_secs(1);
-        self.last_attempt = 0;
+        self.backoff_state = None;
         let (last_epoch, _) = self.prepared_epochs.pop_front().expect("non-empty");
         assert_eq!(last_epoch, epoch);
 
@@ -215,17 +206,19 @@ impl TwoPhaseCommitHandler {
     }
 
     fn failed_committed(&mut self, epoch: u64, err: SinkError) {
-        if self.last_attempt > 0 {
-            self.delay = std::cmp::min(self.delay * 2, self.max_backoff);
+        if let Some((prev_fut, strategy)) = &mut self.backoff_state {
+            let new_fut = strategy.next().expect("infinite");
+            *prev_fut = new_fut;
+        } else {
+            let mut strategy = Self::get_retry_backoff_strategy();
+            let backoff_fut = strategy.next().expect("infinite");
+            self.backoff_state = Some((backoff_fut, strategy));
         }
-        self.last_attempt += 1;
         tracing::error!(
             error = %err.as_report(),
             %self.sink_id,
-            "failed to commit epoch {}, attempt {}. Retrying after {:?}",
+            "failed to commit epoch {}, Retrying after backoff",
             epoch,
-            self.last_attempt,
-            self.delay
         );
     }
 }
@@ -578,6 +571,7 @@ impl CoordinatorWorker {
                 let (handle_id, event) = next_handle_event?;
                 Ok(CoordinatorWorkerEvent::HandleManagerEvent(handle_id, event))
             }
+
             next_item_to_commit = two_phase_next_fut => {
                 let (epoch, metadata) = next_item_to_commit?;
                 Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata))

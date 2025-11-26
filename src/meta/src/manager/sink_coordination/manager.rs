@@ -266,7 +266,7 @@ impl ManagerWorker {
                                     if let Err(e) = res {
                                         error!(
                                             "fail to wait for resetting sink manager worker: {}",
-                                            e
+                                            e.as_report()
                                         );
                                     }
                                 }
@@ -1894,8 +1894,8 @@ mod tests {
             .unwrap();
 
         // wait max 10 seconds for the commit to be processed
-        for _ in 0..10 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+        for _ in 0..100 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             let rows = list_rows(&db).await;
             if rows[0].2 == "COMMITTED" {
                 break;
