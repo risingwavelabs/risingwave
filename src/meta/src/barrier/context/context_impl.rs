@@ -480,8 +480,6 @@ impl CommandContext {
                     .await?
             }
             Command::DropSubscription { .. } => {}
-            Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::StartFragmentBackfill { .. } => {}
             Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
         }
 
