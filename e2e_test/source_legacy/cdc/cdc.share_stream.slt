@@ -284,10 +284,9 @@ create table orders_no_backfill (
   snapshot = 'false'
 ) from mysql_mytest table 'mytest.orders';
 
-sleep 5s
 
 # table without backfill should not contain historical records
-query I
+query I retry 6 backoff 1s
 select count(*) from orders_no_backfill
 ----
 0
@@ -410,9 +409,8 @@ WITH (
 )
 FROM pg_source TABLE 'parallelized_cdc.parallelized_cdc_backfill_test';
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 12
@@ -427,9 +425,8 @@ psql -c "
 insert into parallelized_cdc.parallelized_cdc_backfill_test values (20,22),(30,33),(40,44),(50,55),(60,66),(70,77),(80,88),(90,99),(100,1010),(110,1111),(120,1212);
 "
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 23
@@ -529,9 +526,8 @@ CREATE TABLE partitioned_timestamp_table_2023_shared(
 statement ok
 CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_new;
 
-sleep 3s
 
-query TTTTTTT
+query TTTTTTT retry 4 backoff 1s
 SELECT c_boolean,c_date,c_time,c_timestamp,c_jsonb,c_smallint_array,c_timestamp_array,c_uuid FROM postgres_all_types where c_bigint=-9223372036854775807
 ----
 f 0001-01-01 00:00:00 2001-01-01 00:00:00 {} {-32767} {"2001-01-01 00:00:00"} bb488f9b-330d-4012-b849-12adeb49e57e
@@ -545,10 +541,9 @@ INSERT INTO person VALUES (1101, 'white', 'myc@xpmpe.com', '8157 6974', 'se');
 INSERT INTO person VALUES (1102, 'spencer', 'wip@dkaap.com', '9481 6270', 'angeles');
 "
 
-sleep 3s
 
 # 3 history, 3 new rows
-query I
+query I retry 4 backoff 1s
 SELECT * from person_new_cnt
 ----
 6
@@ -675,9 +670,8 @@ insert into numeric_list values(3, '{3.14, 6, 5789604461865809771178549250434395
 INSERT INTO numeric_list values(4, '{nan, infinity, 524596}');
 "
 
-sleep 3s
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_to_varchar_shared order by id;
 ----
 1   3.14

@@ -276,10 +276,9 @@ psql -c "
     );
 "
 
-sleep 5s
 
 # Verify schema change worked and new column exists
-query TTTT
+query TTTT retry 6 backoff 1s
 describe t;
 ----
 v1 bigint false NULL

@@ -26,9 +26,8 @@ statement ok
 create materialized view mv_before_alter_2 as select * from s;
 
 
-sleep 2s
 
-query ?? rowsort
+query ?? rowsort retry 4 backoff 1s
 select * from s;
 ----
 1 a
@@ -107,9 +106,8 @@ cat << EOF | rpk topic produce shared_source_alter -f "%p %v\n" -p 0
 3 {"v1": 8, "v2": "h", "v3": "h1"}
 EOF
 
-sleep 5s
 
-query ??? rowsort
+query ??? rowsort retry 6 backoff 1s
 select * from mv_after_alter;
 ----
 1 a a1

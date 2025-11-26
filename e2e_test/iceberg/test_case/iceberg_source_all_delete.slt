@@ -58,9 +58,8 @@ DELETE FROM s1 WHERE i1 > 4;
 statement ok
 flush
 
-sleep 16s
 
-query I
+query I retry 17 backoff 1s
 select * from iceberg_t1_source order by i1 limit 5;
 ----
 3 3 3

@@ -29,15 +29,14 @@ select * from eowc_mv;
 statement ok
 insert into stream values (2, 2, 2, '2023-09-14 06:00:25');
 
-sleep 10s
 
-query IIII rowsort
+query IIII rowsort retry 11 backoff 1s
 select * from temporal_join_mv;
 ----
 1 1 NULL 2023-09-14 06:00:00+00:00
 2 2 NULL 2023-09-14 06:00:25+00:00
 
-query IIII rowsort
+query IIII rowsort retry 11 backoff 1s
 select * from eowc_mv;
 ----
 2023-09-14 06:00:00+00:00 1
@@ -45,9 +44,8 @@ select * from eowc_mv;
 statement ok
 insert into stream values (3, 3, 3, '2023-09-14 06:00:45');
 
-sleep 10s
 
-query IIII rowsort
+query IIII rowsort retry 11 backoff 1s
 select * from temporal_join_mv;
 ----
 1 1 NULL 2023-09-14 06:00:00+00:00

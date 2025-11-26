@@ -156,9 +156,8 @@ key encode text;
 statement ok
 delete from into_kafka where bool_field;
 
-sleep 2s
 
-query TTTRRIIIIIITTTI
+query TTTRRIIIIIITTTI retry 4 backoff 1s
 select
   bool_field,
   string_field,

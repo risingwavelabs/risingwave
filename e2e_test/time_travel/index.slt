@@ -26,9 +26,8 @@ query I
 SELECT *  FROM t FOR SYSTEM_TIME AS OF now() - '5' second WHERE k=1;
 ----
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 SELECT *  FROM t FOR SYSTEM_TIME AS OF now() - '5' second WHERE k=1;
 ----
 1

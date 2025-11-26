@@ -66,9 +66,8 @@ ABC	1
 statement ok
 create materialized view mv as select * from s;
 
-sleep 2s
 
-query ??
+query ?? retry 4 backoff 1s
 select * from mv
 ----
 ABC	1

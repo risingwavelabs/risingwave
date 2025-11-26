@@ -34,9 +34,8 @@ SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_tab
 ----
 CREATE TABLE t (bar INT, foo CHARACTER VARYING, gen_col INT AS bar + 1)
 
-sleep 4s
 
-query ?
+query ? retry 5 backoff 1s
 select * from t
 ----
 1 ABC 2
@@ -86,9 +85,8 @@ select * from t
 system ok
 echo '{"foo":"DEF", "bar":2, "nested":{"Nested":{"baz":2}}}' | rpk topic produce --schema-id=topic avro_alter_table_test
 
-sleep 4s
 
-query TTTT rowsort
+query TTTT rowsort retry 5 backoff 1s
 select * from t
 ----
 1 ABC NULL 2
@@ -106,9 +104,8 @@ ALTER TABLE t REFRESH SCHEMA;
 system ok
 echo '{"foo":"GHI", "bar":4, "nested":{"Nested":{"baz":5, "qux":"hello"}}}' | rpk topic produce --schema-id=topic avro_alter_table_test
 
-sleep 4s
 
-query TTTT rowsort
+query TTTT rowsort retry 5 backoff 1s
 select * from t
 ----
 1	ABC	NULL	    2

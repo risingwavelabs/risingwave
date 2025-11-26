@@ -36,9 +36,8 @@ statement ok
 INSERT INTO t6 VALUES (1, 1, 50, '1-50', '2022-03-11');
 
 
-sleep 10s
 
-query I
+query I retry 11 backoff 1s
 select count(*) from t6;
 ----
 7

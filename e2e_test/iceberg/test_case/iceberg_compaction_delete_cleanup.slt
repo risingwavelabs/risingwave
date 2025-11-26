@@ -66,9 +66,8 @@ insert into t_compaction_delete values (5, 'eve', 500), (6, 'frank', 999);
 statement ok
 FLUSH;
 
-sleep 5s
 
-query III rowsort
+query III rowsort retry 6 backoff 1s
 select * from t_compaction_delete;
 ----
 1 alice 100
@@ -86,9 +85,8 @@ delete from t_compaction_delete where v = 999;
 statement ok
 FLUSH;
 
-sleep 5s
 
-query III rowsort
+query III rowsort retry 6 backoff 1s
 select * from t_compaction_delete;
 ----
 1 alice 100
@@ -102,9 +100,8 @@ update t_compaction_delete set v = 111 where id = 1;
 statement ok
 FLUSH;
 
-sleep 5s
 
-query III rowsort
+query III rowsort retry 6 backoff 1s
 select * from t_compaction_delete;
 ----
 1 alice 111
@@ -142,9 +139,8 @@ and source_name = '__iceberg_source_t_compaction_delete';
 statement ok
 VACUUM FULL t_compaction_delete;
 
-sleep 5s
 
-query III rowsort
+query III rowsort retry 6 backoff 1s
 select * from t_compaction_delete;
 ----
 1 alice 111
@@ -183,9 +179,8 @@ insert into t_compaction_delete values (9, 'iris', 900), (10, 'jack', 1000);
 statement ok
 FLUSH;
 
-sleep 5s
 
-query III rowsort
+query III rowsort retry 6 backoff 1s
 select * from t_compaction_delete;
 ----
 1 alice 111
@@ -200,9 +195,8 @@ select * from t_compaction_delete;
 statement ok
 VACUUM FULL t_compaction_delete;
 
-sleep 5s
 
-query III rowsort
+query III rowsort retry 6 backoff 1s
 select * from t_compaction_delete;
 ----
 1 alice 111

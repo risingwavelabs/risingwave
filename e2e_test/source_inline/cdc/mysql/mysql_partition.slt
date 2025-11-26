@@ -98,10 +98,9 @@ create table sub_partition_rw (
   snapshot.batch_size = 10000
 ) from s table 'testdb_partition.sub_partition_table';
 
-sleep 5s
 
 # Verify data synchronization for single-level partitioned table
-query I
+query I retry 6 backoff 1s
 select count(*) from single_partition_rw;
 ----
 25
@@ -133,10 +132,9 @@ mysql -e "
     DELETE FROM sub_partition_table WHERE id = 2;
 "
 
-sleep 5s
 
 # Verify CDC operations on single-level partitioned table
-query I
+query I retry 6 backoff 1s
 select count(*) from single_partition_rw;
 ----
 27

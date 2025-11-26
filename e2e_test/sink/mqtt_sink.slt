@@ -124,9 +124,8 @@ VALUES( ROW('13', null), 24.0 );
 statement ok
 FLUSH;
 
-sleep 15s
 
-query IT rowsort
+query IT rowsort retry 16 backoff 1s
 SELECT device_id, temperature FROM mqtt ORDER BY device_id, temperature;
 ----
 fixed/12 59

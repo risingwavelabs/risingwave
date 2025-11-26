@@ -32,9 +32,8 @@ FORMAT PLAIN ENCODE JSON;
 statement ok
 flush;
 
-sleep 1s
 
-query I
+query I retry 4 backoff 1s
 SELECT count(*) FROM plain_students;
 ----
 5
@@ -60,10 +59,9 @@ cat <<EOF | rpk topic produce 'test_alter_table_drop_connector' -f "%k^%v\n"
 {"ID": 8}^{"ID": 8, "firstName": "Ava", "lastName": "Garcia", "age": 21, "height": 5.2, "weight": 115}
 EOF
 
-sleep 1s
 
 # the streaming job does not intake new data
-query I
+query I retry 4 backoff 1s
 SELECT count(*) FROM plain_students;
 ----
 5
@@ -117,10 +115,9 @@ ABC	1
 system ok
 echo '{"foo":"DEF", "bar":2}' | rpk topic produce --schema-id=topic avro_drop_table_connector_test
 
-sleep 1s
 
 # the new message is not ingested
-query ??
+query ?? retry 4 backoff 1s
 select foo, bar from avro_drop_table_connector_test_table
 ----
 ABC	1

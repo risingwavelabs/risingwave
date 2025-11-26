@@ -219,9 +219,8 @@ SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sou
 CREATE TABLE additional_columns (a INT) INCLUDE key AS key_col INCLUDE partition AS partition_col INCLUDE offset AS offset_col INCLUDE timestamp AS timestamp_col INCLUDE header AS header_col_combined INCLUDE header 'header1' AS header_col_1 INCLUDE header 'header2' AS header_col_2 INCLUDE header 'header2' CHARACTER VARYING AS header_col_3 INCLUDE header 'header3' AS header_col_4
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 3s
 
-query ?
+query ? retry 4 backoff 1s
 select count(rw_key) from plain_students
 ----
 15

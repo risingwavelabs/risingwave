@@ -39,9 +39,8 @@ statement ok
 recover;
 
 onlyif can-use-recover
-sleep 10s
 
-query I
+query I retry 11 backoff 1s
 select * from m1;
 ----
 -982.5779489474152 0 0 2983.5779489474152

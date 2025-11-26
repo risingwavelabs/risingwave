@@ -12,11 +12,10 @@ statement ok
 insert into t values (4e28), (4e28);
 
 # Wait for recovery to complete.
-sleep 15s
 
 # Check that there's a log entry for barrier collection failure on the mata node.
 # Extract the message to check that it contains the root cause of the failure.
-query T
+query T retry 16 backoff 1s
 with error as (
     select info->'collectBarrierFail'->'error' #>> '{}' as error
     from rw_catalog.rw_event_logs

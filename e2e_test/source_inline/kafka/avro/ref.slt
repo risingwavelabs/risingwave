@@ -124,10 +124,9 @@ create sink sk as select
 (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
 
-sleep 1s
 
 
-query IIIIIIII rowsort
+query IIIIIIII rowsort retry 4 backoff 1s
 select
   (foo).a.x,
   (foo).a.y,

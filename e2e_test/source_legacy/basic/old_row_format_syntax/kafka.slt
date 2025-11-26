@@ -399,9 +399,8 @@ statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 1s
 
-query IT rowsort
+query IT rowsort retry 4 backoff 1s
 select v1, v2 from s0;
 ----
 1 1

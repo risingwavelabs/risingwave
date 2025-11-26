@@ -99,10 +99,9 @@ SELECT * from test_default order by id;
 statement ok
 create table rw_postgres_types_test (*) from pg_source table 'public.postgres_types_test';
 
-sleep 3s
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_postgres_types_test;
 ----
 c_boolean boolean false NULL

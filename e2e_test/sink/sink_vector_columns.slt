@@ -26,9 +26,8 @@ with (
     refresh.interval.sec = 1
 ) format plain encode parquet;
 
-sleep 3s
 
-query
+query ?? retry 4 backoff 1s
 SELECT id, embedding FROM embedding_file_table ORDER BY id;
 ----
 1 {1,2,3}

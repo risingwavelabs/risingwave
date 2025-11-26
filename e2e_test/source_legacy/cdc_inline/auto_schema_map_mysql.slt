@@ -81,9 +81,8 @@ ALTER SYSTEM SET license_key TO DEFAULT;
 statement ok
 create table test_default (*) from mysql_source table 'mytest.test_default';
 
-sleep 3s
 
-query TTTTTTTTTTTTT
+query TTTTTTTTTTTTT retry 4 backoff 1s
 SELECT count(*) FROM test_default;
 ----
 2
@@ -120,10 +119,9 @@ table description rw_customers NULL NULL
 statement ok
 create table rw_mysql_types_test (*) from mysql_source table 'mytest.mysql_types_test';
 
-sleep 3s
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_mysql_types_test;
 ----
 c_boolean smallint false NULL

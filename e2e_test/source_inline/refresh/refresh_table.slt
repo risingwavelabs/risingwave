@@ -138,10 +138,9 @@ echo "3,charlie" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file3.csv
 system ok
 echo "4,david" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new_file.csv
 
-sleep 2s
 
 # won't see new data after load finish, before next refresh
-query II rowsort
+query II rowsort retry 4 backoff 1s
 SELECT * FROM refresh_fs_t;
 ----
 1 alice

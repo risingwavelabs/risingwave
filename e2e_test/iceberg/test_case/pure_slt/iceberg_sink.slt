@@ -116,9 +116,8 @@ INSERT INTO t6 VALUES (1, 2, '1-2'), (2, 2, '2-2'), (3, 2, '3-2'), (5, 2, '5-2')
 statement ok
 FLUSH;
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 select count(*) from rw_iceberg_snapshots where source_name = 'iceberg_demo_source';
 ----
 1

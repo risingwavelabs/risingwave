@@ -60,9 +60,8 @@ primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
-sleep 2s
 
-query TTTTTTTTTTTTT
+query TTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
 1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
@@ -80,10 +79,9 @@ psql -c "
     INSERT INTO test_schema_change (id,name,age) values (11,'aaa', 11);
 "
 
-sleep 3s
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_test_schema_change;
 ----
 id integer false NULL
@@ -127,11 +125,10 @@ psql -c "
     INSERT INTO test_schema_change (id,name,age) values (12,'bbb', 12);
 "
 
-sleep 3s
 
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_test_schema_change;
 ----
 id integer false NULL
@@ -195,10 +192,9 @@ create table rw_test_include_ts (*)
 INCLUDE TIMESTAMP as cdc_timestamp
 from pg_source_ts table 'public.test_include_ts';
 
-sleep 2s
 
 # Verify initial data has timestamp
-query I
+query I retry 4 backoff 1s
 SELECT count(*) from rw_test_include_ts WHERE cdc_timestamp IS NOT NULL;
 ----
 1
@@ -211,10 +207,9 @@ psql -c "
     SELECT pg_switch_wal();
     CHECKPOINT;
 "
-sleep 10s
 
 # Verify both rows exist with correct data including new column
-query ITTT
+query ITTT retry 11 backoff 1s
 SELECT id, name, description, new_col from rw_test_include_ts order by id;
 ----
 1 name1 name1 new_column_default_value

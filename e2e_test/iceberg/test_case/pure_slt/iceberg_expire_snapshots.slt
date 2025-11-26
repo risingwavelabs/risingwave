@@ -72,9 +72,8 @@ update t_vacuum_test set v1 = 250 where id = 2;
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ?
+query ? retry 6 backoff 1s
 select count(*) from rw_iceberg_snapshots where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test';
 ----
 5

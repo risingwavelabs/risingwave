@@ -44,9 +44,8 @@ WITH (
     table.name = 'test_connection_table',
 );
 
-sleep 2s
 
-query I
+query I retry 4 backoff 1s
 select * from iceberg_t1_source order by i1 limit 5;
 ----
 1 1 1

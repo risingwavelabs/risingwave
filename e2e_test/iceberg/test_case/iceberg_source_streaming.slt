@@ -99,9 +99,8 @@ select * from mv3 order by i2;
 statement ok
 DELETE FROM s1 WHERE i1 < 3;
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 select count(*) from iceberg_t1_source;
 ----
 3
@@ -121,9 +120,8 @@ select count(*) from mv3;
 statement ok
 INSERT INTO s1 (i1, i2, i3) values(6,'6','6'),(7,'7','7'),(8,'8','8'),(9,'9','9'),(10,'10','10');
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 select count(*) from iceberg_t1_source;
 ----
 8
@@ -143,9 +141,8 @@ select count(*) from mv3;
 statement ok
 INSERT INTO s1 (i1, i2, i3) values(9,'9','99'),(10,'10','1010'), (11,'11','1111');
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 select * from iceberg_t1_source order by i1;
 ----
 3 3 3
@@ -188,9 +185,8 @@ RECOVER;
 statement ok
 INSERT INTO s1 (i1, i2, i3) values(12,'12','1212'),(13,'13','1313'),(14,'14','1414'),(15,'15','1515'),(16,'16','1616');
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 select count(*) from iceberg_t1_source;
 ----
 14
@@ -209,9 +205,8 @@ select count(*) from mv3;
 statement ok
 INSERT INTO s1 (i1, i2, i3) select 1, i::varchar, i::varchar from generate_series(10001, 20000) as i;
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 select count(*) from iceberg_t1_source;
 ----
 10014

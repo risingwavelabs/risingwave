@@ -3,9 +3,8 @@
 statement ok
 CREATE MATERIALIZED VIEW kafka_mv2 as SELECT * FROM kafka_source;
 
-sleep 5s
 
-query I rowsort
+query I rowsort retry 6 backoff 1s
 SELECT * FROM kafka_mv2;
 ----
 6786745ge 6 NULL NULL 3 NULL

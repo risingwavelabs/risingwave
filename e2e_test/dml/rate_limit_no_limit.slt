@@ -6,9 +6,8 @@ alter table t set parallelism to 1;
 
 include ./inserts.slt.part
 
-sleep 3s
 
-query I
+query I retry 4 backoff 1s
 select count(*) from t;
 ----
 30

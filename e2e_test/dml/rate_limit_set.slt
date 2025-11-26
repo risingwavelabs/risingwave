@@ -9,9 +9,8 @@ alter table t set parallelism to 1;
 
 include ./inserts.slt.part
 
-sleep 3s
 
-query II
+query II retry 6 backoff 1s
 select case when count(*) between 2 and 10 then 6 else 0 end from t;
 ----
 6

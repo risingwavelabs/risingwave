@@ -131,9 +131,8 @@ format plain encode avro (
   force_append_only = true,
   schema.registry = 'http://schemaregistry:8082');
 
-sleep 2s
 
-query ITT
+query ITT retry 4 backoff 1s
 select
   int32_field,
   string_field,

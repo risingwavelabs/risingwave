@@ -70,9 +70,8 @@ set backfill_rate_limit=1;
 statement ok
 create materialized view m1 as select * from t where v1 >= now() and v2 >= now();
 
-sleep 2s
 
-query I
+query I retry 4 backoff 1s
 select count(*) from rw_catalog.rw_ddl_progress;
 ----
 1
@@ -80,9 +79,8 @@ select count(*) from rw_catalog.rw_ddl_progress;
 statement ok
 recover;
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 select count(*) from rw_catalog.rw_ddl_progress;
 ----
 1

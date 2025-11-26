@@ -145,9 +145,8 @@ EOF
 statement ok
 create table v2 with (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'dbserver1.inventory.t') format debezium encode avro (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
-sleep 3s
 
-query TTT rowsort
+query TTT rowsort retry 4 backoff 1s
 select * from v1;
 ----
 1 zxc 3

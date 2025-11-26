@@ -112,10 +112,9 @@ mysql -e "
         (FROM_UNIXTIME(1700001005), 1005, 'debezium');
 "
 
-sleep 3s
 
 # Verify total count in RisingWave
-query I
+query I retry 4 backoff 1s
 select count(*) as row_cnt from rw_ts_pk;
 ----
 55
