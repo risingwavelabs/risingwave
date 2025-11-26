@@ -1,0 +1,41 @@
+statement ok
+set RW_IMPLICIT_FLUSH = true;
+
+statement ok
+create table t (k int primary key, v int);
+
+statement ok
+create table s (k int);
+
+statement ok
+create sink sk into t as select max(k) as k, 114514 as v from s;
+
+query II
+select * from t;
+----
+NULL 114514
+
+statement ok
+insert into s values (1);
+
+query II
+select * from t;
+----
+1 114514
+
+statement ok
+insert into s values (2);
+
+query II
+select * from t;
+----
+2 114514
+
+statement ok
+drop sink sk;
+
+statement ok
+drop table t;
+
+statement ok
+drop table s;
