@@ -15,6 +15,7 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_expr::bail;
+
 use super::stream::StreamPlanNodeMetadata;
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, ExprVisitable, Logical, LogicalFilter,
