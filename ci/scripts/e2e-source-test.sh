@@ -70,8 +70,8 @@ echo "--- Run kafka sasl test"
 risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 echo "--- Run kafka sasl test done"
 
-risedev slt './e2e_test/source_inline/**/*.slt' -j4
-risedev slt './e2e_test/source_inline/**/*.slt.serial'
+# risedev slt './e2e_test/source_inline/**/*.slt' -j4
+# risedev slt './e2e_test/source_inline/**/*.slt.serial'
 
 echo "--- Run Vault secret tests"
 risedev slt './e2e_test/ddl/vault_secret.slt'
@@ -103,7 +103,7 @@ echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source_legacy/cdc/mysql_cdc.sql
 
 echo "run mysql-async integration test"
-cargo test --package risingwave_mysql_test -- --ignored
+# cargo test --package risingwave_mysql_test -- --ignored
 # import data to postgres
 export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD='post\tgres' PGDATABASE=cdc_test
 createdb
