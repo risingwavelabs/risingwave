@@ -74,7 +74,7 @@ impl MockHummockMetaClient {
         MockHummockMetaClient {
             hummock_manager,
             context_id,
-            compact_context_id: AtomicU32::new(context_id),
+            compact_context_id: AtomicU32::new(context_id.as_raw_id()),
             sst_offset: 0,
         }
     }
@@ -87,7 +87,7 @@ impl MockHummockMetaClient {
         Self {
             hummock_manager,
             context_id,
-            compact_context_id: AtomicU32::new(context_id),
+            compact_context_id: AtomicU32::new(context_id.as_raw_id()),
             sst_offset,
         }
     }
@@ -266,13 +266,13 @@ impl HummockMetaClient for MockHummockMetaClient {
             .hummock_manager
             .compactor_manager
             .clone()
-            .add_compactor(context_id as _);
+            .add_compactor(context_id);
 
         let (request_sender, mut request_receiver) =
             unbounded_channel::<SubscribeCompactionEventRequest>();
 
         self.compact_context_id
-            .store(context_id as _, Ordering::Release);
+            .store(context_id.as_raw_id(), Ordering::Release);
 
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
 

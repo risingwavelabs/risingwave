@@ -70,7 +70,6 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
-use risingwave_common::catalog::TableId;
 mod common;
 pub mod iceberg;
 mod manager;
@@ -82,6 +81,7 @@ use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use risingwave_common::row::OwnedRow;
+use risingwave_pb::id::SourceId;
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
@@ -254,6 +254,6 @@ pub type CdcTableSnapshotSplit = CdcTableSnapshotSplitCommon<OwnedRow>;
 pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;
 
 #[inline]
-pub fn build_pulsar_ack_channel_id(source_id: &TableId, split_id: &SplitId) -> String {
+pub fn build_pulsar_ack_channel_id(source_id: SourceId, split_id: &SplitId) -> String {
     format!("{}-{}", source_id, split_id)
 }

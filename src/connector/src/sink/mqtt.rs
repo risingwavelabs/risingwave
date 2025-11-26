@@ -280,7 +280,7 @@ impl MqttSinkWriter {
 
         let (client, mut eventloop) = config
             .common
-            .build_client(actor_id, sink_id.sink_id)
+            .build_client(actor_id, sink_id.as_raw_id())
             .map_err(|e| SinkError::Mqtt(anyhow!(e)))?;
 
         let stopped = Arc::new(AtomicBool::new(false));

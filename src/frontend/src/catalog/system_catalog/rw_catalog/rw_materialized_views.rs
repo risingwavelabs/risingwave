@@ -52,9 +52,9 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
             schema
                 .iter_all_mvs_with_acl(current_user)
                 .map(|table| RwMaterializedView {
-                    id: table.id.as_raw_id() as i32,
+                    id: table.id.as_i32_id(),
                     name: table.name().into(),
-                    schema_id: schema.id().as_raw_id() as i32,
+                    schema_id: schema.id().as_i32_id(),
                     owner: table.owner as i32,
                     definition: table.create_sql(),
                     append_only: table.append_only,

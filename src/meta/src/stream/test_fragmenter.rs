@@ -19,6 +19,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::WorkerId;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::worker_node::Property;
@@ -32,19 +33,19 @@ use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ExprContext, Field};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode,
-    PbDispatchOutputMapping, ProjectNode, SimpleAggNode, SourceNode, StreamContext,
+    PbDispatchOutputMapping, PbStreamContext, ProjectNode, SimpleAggNode, SourceNode,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource, agg_call_state,
 };
 
 use crate::MetaResult;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::model::StreamJobFragments;
+use crate::model::{StreamContext, StreamJobFragments};
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
@@ -209,7 +210,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(Box::new(SourceNode {
             source_inner: Some(StreamSource {
-                source_id: 1,
+                source_id: 1.into(),
                 state_table: Some(make_source_internal_table(0)),
                 columns,
                 ..Default::default()
@@ -412,7 +413,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
-        ctx: Some(StreamContext::default()),
+        ctx: Some(PbStreamContext::default()),
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
@@ -422,10 +423,10 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes: HashMap<u32, WorkerNode> = std::iter::once((
-        0,
+    let worker_nodes: HashMap<WorkerId, WorkerNode> = std::iter::once((
+        0.into(),
         WorkerNode {
-            id: 0,
+            id: 0.into(),
             property: Some(Property {
                 parallelism: 8,
                 resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),
@@ -453,10 +454,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
     let graph = make_stream_graph();
-    let expr_context = ExprContext {
-        time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
-        strict_mode: false,
-    };
+    let ctx = StreamContext::from_protobuf(graph.ctx.as_ref().unwrap());
     let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
     let internal_tables = fragment_graph.incomplete_internal_tables();
 
@@ -472,7 +470,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         upstream_fragment_downstreams,
         downstream_fragment_relations,
         ..
-    } = actor_graph_builder.generate_graph(&env, &job, expr_context)?;
+    } = actor_graph_builder.generate_graph(&env, &job, ctx)?;
 
     let new_fragment_relation = || {
         upstream_fragment_downstreams

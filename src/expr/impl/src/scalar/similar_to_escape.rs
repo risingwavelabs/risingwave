@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::{ExprError, Result, function};
 
 // escape `similar-to` pattern to POSIX regex pattern
@@ -22,7 +20,7 @@ use risingwave_expr::{ExprError, Result, function};
 fn similar_escape_internal(
     pat: &str,
     esc_text: Option<char>,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> std::result::Result<(), ExprError> {
     macro_rules! write_ {
         ($s:expr) => {
@@ -104,7 +102,7 @@ fn similar_escape_internal(
     // x SIMILAR TO y -> x ~ similar_to_escape(y)
     "similar_to_escape(varchar) -> varchar",
 )]
-fn similar_to_escape_default(pat: &str, writer: &mut impl Write) -> Result<()> {
+fn similar_to_escape_default(pat: &str, writer: &mut impl std::fmt::Write) -> Result<()> {
     similar_escape_internal(pat, Some('\\'), writer)
 }
 
@@ -115,7 +113,7 @@ fn similar_to_escape_default(pat: &str, writer: &mut impl Write) -> Result<()> {
 fn similar_to_escape_with_escape_text(
     pat: &str,
     esc_text: &str,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     if esc_text.chars().nth(1).is_some() {
         return Err(ExprError::InvalidParam {

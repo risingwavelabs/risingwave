@@ -34,7 +34,7 @@ fn read_table_stats(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTableStats>> 
     let mut rows = vec![];
     for (id, stats) in &table_stats.table_stats {
         rows.push(RwTableStats {
-            id: id.as_raw_id() as i32,
+            id: id.as_i32_id(),
             total_key_count: stats.total_key_count,
             total_key_size: stats.total_key_size,
             total_value_size: stats.total_value_size,

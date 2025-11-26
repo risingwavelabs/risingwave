@@ -96,7 +96,7 @@ pub async fn handle_create_view(
     }
 
     let view = PbView {
-        id: 0,
+        id: 0.into(),
         schema_id,
         database_id,
         name: view_name,
@@ -108,13 +108,7 @@ pub async fn handle_create_view(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_view(
-            view,
-            dependent_relations
-                .into_iter()
-                .map(|t| t.as_raw_id())
-                .collect(),
-        )
+        .create_view(view, dependent_relations.into_iter().collect())
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))

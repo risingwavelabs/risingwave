@@ -12,6 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub type WorkerNodeId = u32;
+pub use crate::id::WorkerId as WorkerNodeId;
 
 pub const DEFAULT_RESOURCE_GROUP: &str = "default";

@@ -2355,7 +2355,7 @@ pub(crate) mod tests {
         let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
-            worker_id as u32,
+            worker_id,
         ));
 
         // Set up two table IDs, but only one will be in existing_table_ids

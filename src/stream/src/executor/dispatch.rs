@@ -345,28 +345,6 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::AddAndUpdate(
-                AddMutation { adds, .. },
-                UpdateMutation {
-                    dispatchers,
-                    actor_new_dispatchers: actor_dispatchers,
-                    ..
-                },
-            ) => {
-                if let Some(new_dispatchers) = adds.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers).await?;
-                }
-
-                if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
-                    self.add_dispatchers(new_dispatchers).await?;
-                }
-
-                if let Some(updates) = dispatchers.get(&self.actor_id) {
-                    for update in updates {
-                        self.pre_update_dispatcher(update).await?;
-                    }
-                }
-            }
             _ => {}
         }
 
@@ -392,15 +370,7 @@ impl DispatchExecutorInner {
                 dispatchers,
                 dropped_actors,
                 ..
-            })
-            | Mutation::AddAndUpdate(
-                _,
-                UpdateMutation {
-                    dispatchers,
-                    dropped_actors,
-                    ..
-                },
-            ) => {
+            }) => {
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.post_update_dispatcher(update)?;

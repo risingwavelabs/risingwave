@@ -288,6 +288,8 @@ pub struct MetaOpts {
     pub cdc_table_split_init_sleep_interval_splits: u64,
     pub cdc_table_split_init_sleep_duration_millis: u64,
     pub cdc_table_split_init_insert_batch_size: u64,
+
+    pub enable_legacy_table_migration: bool,
 }
 
 impl MetaOpts {
@@ -380,6 +382,7 @@ impl MetaOpts {
             cdc_table_split_init_sleep_interval_splits: 1000,
             cdc_table_split_init_sleep_duration_millis: 10,
             cdc_table_split_init_insert_batch_size: 1000,
+            enable_legacy_table_migration: true,
         }
     }
 }

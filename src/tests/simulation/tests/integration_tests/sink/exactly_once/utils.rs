@@ -357,13 +357,13 @@ impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
         subscriber: SinkCommittedEpochSubscriber,
     ) -> risingwave_connector::sink::Result<Option<u64>> {
         self.committed_epoch_subscriber = Some(subscriber);
-        if iceberg_sink_has_pre_commit_metadata(&self.db, self.sink_id.sink_id()).await? {
+        if iceberg_sink_has_pre_commit_metadata(&self.db, self.sink_id).await? {
             println!(
                 "Sink id = {}: System table not empty! Recovery occurs!",
-                self.sink_id.sink_id()
+                self.sink_id
             );
             let ordered_metadata_list_by_end_epoch =
-                get_pre_commit_info_by_sink_id(&self.db, self.sink_id.sink_id()).await?;
+                get_pre_commit_info_by_sink_id(&self.db, self.sink_id).await?;
             let mut last_recommit_epoch = 0;
             for (end_epoch, sealized_bytes, snapshot_id, committed) in
                 ordered_metadata_list_by_end_epoch
@@ -390,18 +390,18 @@ impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
                     (true, _) => {
                         println!(
                             "Sink id = {}: all data in log store has been written into external sink, do nothing when recovery.",
-                            self.sink_id.sink_id()
+                            self.sink_id
                         );
                     }
                     (false, true) => {
                         // skip
                         println!(
                             "Sink id = {}: all pre-commit files have been successfully committed into iceberg and do not need to be committed again, mark it as committed.",
-                            self.sink_id.sink_id()
+                            self.sink_id
                         );
                         mark_row_is_committed_by_sink_id_and_end_epoch(
                             &self.db,
-                            self.sink_id.sink_id(),
+                            self.sink_id,
                             end_epoch,
                         )
                         .await?;
@@ -409,7 +409,7 @@ impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
                     (false, false) => {
                         println!(
                             "Sink id = {}: there are files that were not successfully committed; re-commit these files.",
-                            self.sink_id.sink_id()
+                            self.sink_id
                         );
                         self.re_commit(end_epoch, sink_metadatas, snapshot_id)
                             .await?;
@@ -420,14 +420,13 @@ impl SinkCommitCoordinator for SimulationTestIcebergCommitter {
             }
             println!(
                 "Sink id = {}: Recovery finished! Rewind log store from end_epoch = {}",
-                self.sink_id.sink_id(),
-                last_recommit_epoch
+                self.sink_id, last_recommit_epoch
             );
             return Ok(Some(last_recommit_epoch));
         } else {
             println!(
                 "Sink id = {}: init iceberg coodinator, and system table is empty.",
-                self.sink_id.sink_id()
+                self.sink_id
             );
             return Ok(None);
         }
@@ -515,7 +514,7 @@ impl SimulationTestIcebergCommitter {
             let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
 
             persist_pre_commit_metadata(
-                self.sink_id.sink_id(),
+                self.sink_id,
                 self.db.clone(),
                 self.last_commit_epoch,
                 epoch,
@@ -558,8 +557,7 @@ impl SimulationTestIcebergCommitter {
             )));
         }
 
-        mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id.sink_id(), epoch)
-            .await?;
+        mark_row_is_committed_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch).await?;
         println!(
             "Sink id = {}: succeeded mark pre commit metadata in epoch {} to deleted.",
             self.sink_id, epoch
@@ -576,7 +574,7 @@ impl SimulationTestIcebergCommitter {
             )));
         }
 
-        delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id.sink_id(), epoch).await?;
+        delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch).await?;
         self.store.inner().err_events.push('x');
         Ok(())
     }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::ICEBERG_SINK_PREFIX;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -56,11 +57,19 @@ pub async fn handle_drop_sink(
         sink
     };
 
+    if sink_name.starts_with(ICEBERG_SINK_PREFIX) {
+        return Err(crate::error::ErrorCode::NotSupported(
+            "Dropping Iceberg sinks is not supported".to_owned(),
+            "Please use DROP TABLE command.".to_owned(),
+        )
+        .into());
+    }
+
     let sink_id = sink.id;
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(
-        catalog_writer.drop_sink(sink_id.sink_id, cascade),
+        catalog_writer.drop_sink(sink_id, cascade),
         &session,
         "DROP SINK",
     )

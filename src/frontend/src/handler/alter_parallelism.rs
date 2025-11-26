@@ -88,14 +88,14 @@ pub async fn handle_alter_parallelism(
                 }
 
                 session.check_privilege_for_drop_alter(schema_name, &**source)?;
-                source.id.into()
+                source.id.as_share_source_job_id()
             }
             StatementType::ALTER_SINK => {
                 let (sink, schema_name) =
                     reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
 
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-                sink.id.sink_id().into()
+                sink.id.as_job_id()
             }
             // TODO: support alter parallelism for shared source
             _ => bail!(

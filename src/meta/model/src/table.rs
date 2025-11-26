@@ -15,9 +15,7 @@
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
-use risingwave_pb::catalog::table::{
-    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
-};
+use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, PbEngine, PbTableType};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable, PbVectorIndexInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
@@ -362,10 +360,8 @@ impl From<PbTable> for ActiveModel {
             .map(|x| Set(Some(x)))
             .unwrap_or_default();
         let optional_associated_source_id =
-            if let Some(OptionalAssociatedSourceId::AssociatedSourceId(src_id)) =
-                pb_table.optional_associated_source_id
-            {
-                Set(Some(src_id as SourceId))
+            if let Some(src_id) = pb_table.optional_associated_source_id {
+                Set(Some(src_id.into()))
             } else {
                 NotSet
             };

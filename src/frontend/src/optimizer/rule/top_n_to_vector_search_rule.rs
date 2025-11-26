@@ -18,9 +18,9 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::common::PbDistanceType;
 
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprType, InputRef};
 use crate::optimizer::LogicalPlanRef;
-use crate::optimizer::plan_node::generic::TopNLimit;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
 use crate::optimizer::plan_node::{
     LogicalPlanRef as PlanRef, LogicalProject, LogicalTopN, LogicalVectorSearch, PlanTreeNodeUnary,
 };
@@ -47,7 +47,13 @@ fn merge_consecutive_projections(input: LogicalPlanRef) -> Option<(Vec<ExprImpl>
 }
 
 impl TopNToVectorSearchRule {
-    fn resolve_vector_search(top_n: &LogicalTopN) -> Option<(LogicalVectorSearch, Vec<ExprImpl>)> {
+    #[expect(clippy::type_complexity)]
+    pub(super) fn resolve_vector_search(
+        top_n: &LogicalTopN,
+    ) -> Option<(
+        (u64, PbDistanceType, ExprImpl, ExprImpl, PlanRef),
+        Vec<ExprImpl>,
+    )> {
         if !top_n.group_key().is_empty() {
             // vector search applies for only singleton top n
             return None;
@@ -109,18 +115,9 @@ impl TopNToVectorSearchRule {
         assert_matches!(left.return_type(), DataType::Vector(_));
         assert_matches!(right.return_type(), DataType::Vector(_));
 
-        let vector_search = LogicalVectorSearch::new(
-            limit,
-            distance_type,
-            left.clone(),
-            right.clone(),
-            (0..projection_input.schema().len()).collect(),
-            projection_input.clone(),
-        );
-        let mut i2o_mapping = vector_search.i2o_mapping();
         let mut output_exprs = Vec::with_capacity(exprs.len());
         for expr in &exprs[0..order.column_index] {
-            output_exprs.push(i2o_mapping.rewrite_expr(expr.clone()));
+            output_exprs.push(expr.clone());
         }
         output_exprs.push(ExprImpl::InputRef(
             InputRef {
@@ -130,9 +127,18 @@ impl TopNToVectorSearchRule {
             .into(),
         ));
         for expr in &exprs[order.column_index + 1..exprs.len()] {
-            output_exprs.push(i2o_mapping.rewrite_expr(expr.clone()));
+            output_exprs.push(expr.clone());
         }
-        Some((vector_search, output_exprs))
+        Some((
+            (
+                limit,
+                distance_type,
+                left.clone(),
+                right.clone(),
+                projection_input,
+            ),
+            output_exprs,
+        ))
     }
 }
 
@@ -149,7 +155,9 @@ impl TopNToVectorSearchRule {
 impl Rule<Logical> for TopNToVectorSearchRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_n = plan.as_logical_top_n()?;
-        let (vector_search, project_exprs) = Self::resolve_vector_search(top_n)?;
+        let ((top_n, distance_type, left, right, input), project_exprs) =
+            TopNToVectorSearchRule::resolve_vector_search(top_n)?;
+        let vector_search = LogicalVectorSearch::new(top_n, distance_type, left, right, input);
         Some(LogicalProject::create(vector_search.into(), project_exprs))
     }
 }

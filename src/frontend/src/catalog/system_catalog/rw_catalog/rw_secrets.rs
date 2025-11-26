@@ -14,7 +14,6 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -45,16 +44,11 @@ fn read_rw_secret_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
             schema
                 .iter_secret_with_acl(current_user)
                 .map(|secret| RwSecret {
-                    id: secret.id.secret_id() as i32,
-                    schema_id: secret.schema_id.as_raw_id() as i32,
+                    id: secret.id.as_i32_id(),
+                    schema_id: secret.schema_id.as_i32_id(),
                     name: secret.name.clone(),
                     owner: secret.owner as i32,
-                    acl: get_acl_items(
-                        GrantObject::SecretId(secret.id.secret_id()),
-                        false,
-                        &users,
-                        username_map,
-                    ),
+                    acl: get_acl_items(secret.id, false, &users, username_map),
                 })
         })
         .collect())

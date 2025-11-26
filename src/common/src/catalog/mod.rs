@@ -39,7 +39,9 @@ pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_te
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
-pub use crate::id::{DatabaseId, SchemaId, TableId};
+pub use crate::id::{
+    ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, TableId,
+};
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
@@ -137,6 +139,9 @@ pub const CDC_OFFSET_COLUMN_NAME: &str = "_rw_offset";
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
 pub const CDC_TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
+pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
+pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
+
 /// The local system catalog reader in the frontend node.
 pub trait SysCatalogReader: Sync + Send + 'static {
     /// Reads the data of the system catalog table.
@@ -144,8 +149,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
-
-pub type ObjectId = u32;
 
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
@@ -172,75 +175,6 @@ impl TableOption {
     pub fn new(retention_seconds: Option<u32>) -> Self {
         // now we only support ttl for TableOption
         TableOption { retention_seconds }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq)]
-#[display("{index_id}")]
-pub struct IndexId {
-    pub index_id: u32,
-}
-
-impl IndexId {
-    pub const fn new(index_id: u32) -> Self {
-        IndexId { index_id }
-    }
-
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        IndexId {
-            index_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn index_id(&self) -> u32 {
-        self.index_id
-    }
-}
-
-impl From<u32> for IndexId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-impl From<IndexId> for u32 {
-    fn from(id: IndexId) -> Self {
-        id.index_id
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct FunctionId(pub u32);
-
-impl FunctionId {
-    pub const fn new(id: u32) -> Self {
-        FunctionId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        FunctionId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn function_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for FunctionId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for FunctionId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<FunctionId> for u32 {
-    fn from(id: FunctionId) -> Self {
-        id.0
     }
 }
 
@@ -277,76 +211,6 @@ impl From<&u32> for UserId {
 impl From<UserId> for u32 {
     fn from(id: UserId) -> Self {
         id.user_id
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct ConnectionId(pub u32);
-
-impl ConnectionId {
-    pub const fn new(id: u32) -> Self {
-        ConnectionId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        ConnectionId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn connection_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for ConnectionId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for ConnectionId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<ConnectionId> for u32 {
-    fn from(id: ConnectionId) -> Self {
-        id.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-pub struct SecretId(pub u32);
-
-impl SecretId {
-    pub const fn new(id: u32) -> Self {
-        SecretId(id)
-    }
-
-    pub const fn placeholder() -> Self {
-        SecretId(OBJECT_ID_PLACEHOLDER)
-    }
-
-    pub fn secret_id(&self) -> u32 {
-        self.0
-    }
-}
-
-impl From<u32> for SecretId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for SecretId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<SecretId> for u32 {
-    fn from(id: SecretId) -> Self {
-        id.0
     }
 }
 

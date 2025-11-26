@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
 use std::sync::Arc;
 
 use risingwave_expr::{ExprError, Result, capture_context, function};
@@ -22,7 +21,7 @@ use super::context::META_CLIENT;
 use crate::meta_client::FrontendMetaClient;
 
 #[function("rw_recovery_status() -> varchar", volatile)]
-async fn rw_recovery_status(writer: &mut impl Write) -> Result<()> {
+async fn rw_recovery_status(writer: &mut impl std::fmt::Write) -> Result<()> {
     writer
         .write_str(
             rw_recovery_status_impl_captured()

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use anyhow::anyhow;
 use risingwave_expr::{ExprError, Result, capture_context, function};
 use risingwave_sqlparser::ast::Statement;
@@ -22,12 +20,12 @@ use super::context::{CATALOG_READER, DB_NAME};
 use crate::catalog::CatalogReader;
 
 #[function("pg_get_viewdef(int4) -> varchar")]
-fn pg_get_viewdef(oid: i32, writer: &mut impl Write) -> Result<()> {
+fn pg_get_viewdef(oid: i32, writer: &mut impl std::fmt::Write) -> Result<()> {
     pg_get_viewdef_pretty(oid, false, writer)
 }
 
 #[function("pg_get_viewdef(int4, boolean) -> varchar")]
-fn pg_get_viewdef_pretty(oid: i32, _pretty: bool, writer: &mut impl Write) -> Result<()> {
+fn pg_get_viewdef_pretty(oid: i32, _pretty: bool, writer: &mut impl std::fmt::Write) -> Result<()> {
     pg_get_viewdef_impl_captured(oid, writer)
 }
 
@@ -36,7 +34,7 @@ fn pg_get_viewdef_impl(
     catalog: &CatalogReader,
     db_name: &str,
     oid: i32,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     let catalog_reader = catalog.read_guard();
 

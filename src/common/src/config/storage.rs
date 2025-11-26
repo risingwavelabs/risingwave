@@ -196,8 +196,6 @@ pub struct StorageConfig {
     pub time_travel_version_cache_capacity: u64,
 
     // iceberg compaction
-    #[serde(default = "default::storage::iceberg_compaction_target_file_size_mb")]
-    pub iceberg_compaction_target_file_size_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
     #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
@@ -224,10 +222,6 @@ pub struct StorageConfig {
     /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
     #[serde(default = "default::storage::iceberg_compaction_size_estimation_smoothing_factor")]
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
-    // For Small File Compaction
-    /// The threshold for small file compaction in MB.
-    #[serde(default = "default::storage::iceberg_compaction_small_file_threshold_mb")]
-    pub iceberg_compaction_small_file_threshold_mb: u32,
     /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
     /// Effective pending budget = `ceil(max_task_parallelism * multiplier)`. Default 4.0.
     /// Set < 1.0 to reduce buffering (may increase `PullTask` RPC frequency); set higher to batch more tasks.
@@ -1033,10 +1027,6 @@ pub mod default {
             10
         }
 
-        pub fn iceberg_compaction_target_file_size_mb() -> u32 {
-            1024
-        }
-
         pub fn iceberg_compaction_enable_validate() -> bool {
             false
         }
@@ -1075,10 +1065,6 @@ pub mod default {
 
         pub fn iceberg_compaction_size_estimation_smoothing_factor() -> f64 {
             0.3
-        }
-
-        pub fn iceberg_compaction_small_file_threshold_mb() -> u32 {
-            32
         }
 
         pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {

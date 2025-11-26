@@ -30,7 +30,7 @@ pub struct SecretCatalog {
 impl From<&PbSecret> for SecretCatalog {
     fn from(value: &PbSecret) -> Self {
         Self {
-            id: SecretId::new(value.id),
+            id: value.id,
             database_id: value.database_id,
             owner: value.owner,
             name: value.name.clone(),

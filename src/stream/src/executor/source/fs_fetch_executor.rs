@@ -19,8 +19,9 @@ use either::Either;
 use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
@@ -195,7 +196,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     fn build_source_ctx(
         &self,
         source_desc: &SourceDesc,
-        source_id: TableId,
+        source_id: SourceId,
         source_name: &str,
     ) -> SourceContext {
         SourceContext::new(

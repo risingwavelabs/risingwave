@@ -71,8 +71,7 @@ pub async fn handle_refresh(
         table_id,
         associated_source_id: table_catalog
             .associated_source_id()
-            .context("Table is not associated with a refreshable source")?
-            .as_raw_id(),
+            .context("Table is not associated with a refreshable source")?,
     };
 
     // Send refresh command to meta service via stream manager

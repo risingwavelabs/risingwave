@@ -34,8 +34,8 @@ use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResp
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
 
+use crate::catalog::FragmentId;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{FragmentId, SecretId};
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 
@@ -290,7 +290,7 @@ impl FrontendObserverNode {
                             ),
                             Operation::Update => {
                                 let old_fragment_id = catalog_guard
-                                    .get_any_table_by_id(&table.id)
+                                    .get_any_table_by_id(table.id)
                                     .unwrap()
                                     .fragment_id;
                                 catalog_guard.update_table(table);
@@ -336,7 +336,7 @@ impl FrontendObserverNode {
                             Operation::Delete => catalog_guard.drop_index(
                                 index.database_id,
                                 index.schema_id,
-                                index.id.into(),
+                                index.id,
                             ),
                             Operation::Update => catalog_guard.update_index(index),
                             _ => panic!("receive an unsupported notify {:?}", resp),
@@ -354,7 +354,7 @@ impl FrontendObserverNode {
                             Operation::Delete => catalog_guard.drop_function(
                                 function.database_id,
                                 function.schema_id,
-                                function.id.into(),
+                                function.id,
                             ),
                             Operation::Update => catalog_guard.update_function(function),
                             _ => panic!("receive an unsupported notify {:?}", resp),
@@ -379,7 +379,7 @@ impl FrontendObserverNode {
                                 Operation::Delete => catalog_guard.drop_secret(
                                     secret.database_id,
                                     secret.schema_id,
-                                    SecretId::new(secret.id),
+                                    secret.id,
                                 ),
                                 Operation::Update => catalog_guard.update_secret(&secret),
                                 _ => panic!("receive an unsupported notify {:?}", resp),
@@ -393,7 +393,7 @@ impl FrontendObserverNode {
                 Operation::Delete => catalog_guard.drop_function(
                     function.database_id,
                     function.schema_id,
-                    function.id.into(),
+                    function.id,
                 ),
                 Operation::Update => catalog_guard.update_function(function),
                 _ => panic!("receive an unsupported notify {:?}", resp),
@@ -414,11 +414,9 @@ impl FrontendObserverNode {
                 secret.value = "SECRET VALUE SHOULD NOT BE REVEALED".as_bytes().to_vec();
                 match resp.operation() {
                     Operation::Add => catalog_guard.create_secret(&secret),
-                    Operation::Delete => catalog_guard.drop_secret(
-                        secret.database_id,
-                        secret.schema_id,
-                        SecretId::new(secret.id),
-                    ),
+                    Operation::Delete => {
+                        catalog_guard.drop_secret(secret.database_id, secret.schema_id, secret.id)
+                    }
                     Operation::Update => catalog_guard.update_secret(&secret),
                     _ => panic!("receive an unsupported notify {:?}", resp),
                 }

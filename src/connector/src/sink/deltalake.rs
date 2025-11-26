@@ -56,6 +56,8 @@ use crate::sink::{
 pub const DEFAULT_REGION: &str = "us-east-1";
 pub const GCS_SERVICE_ACCOUNT: &str = "service_account_key";
 
+pub const DELTALAKE_SINK: &str = "deltalake";
+
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct DeltaLakeCommon {
@@ -328,7 +330,7 @@ impl Sink for DeltaLakeSink {
     type Coordinator = DeltaLakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
-    const SINK_NAME: &'static str = super::DELTALAKE_SINK;
+    const SINK_NAME: &'static str = DELTALAKE_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let inner = DeltaLakeSinkWriter::new(
@@ -620,8 +622,14 @@ impl DeltaLakeWriteResult {
     }
 }
 
+impl From<::deltalake::DeltaTableError> for SinkError {
+    fn from(value: ::deltalake::DeltaTableError) -> Self {
+        SinkError::DeltaLake(anyhow!(value))
+    }
+}
+
 #[cfg(all(test, not(madsim)))]
-mod test {
+mod tests {
     use deltalake::kernel::DataType as SchemaDataType;
     use deltalake::operations::create::CreateBuilder;
     use maplit::btreemap;

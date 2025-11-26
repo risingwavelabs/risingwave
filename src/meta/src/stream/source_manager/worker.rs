@@ -180,7 +180,7 @@ pub fn create_source_worker_async(
     });
 
     managed_sources.insert(
-        source_id as SourceId,
+        source_id,
         ConnectorSourceWorkerHandle {
             handle,
             command_tx,
@@ -203,7 +203,7 @@ impl ConnectorSourceWorker {
             .create_split_enumerator(Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
-                    source_id: self.source_id as u32,
+                    source_id: self.source_id,
                 },
             }))
             .await
@@ -239,7 +239,7 @@ impl ConnectorSourceWorker {
             .with_guarded_label_values(&[source.id.to_string().as_str(), &source.name]);
 
         Ok(Self {
-            source_id: source.id as SourceId,
+            source_id: source.id,
             source_name: source.name.clone(),
             current_splits: splits,
             enumerator,

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use risingwave_pb::id::*;
 pub use {Source as SourceModel, Table as TableModel};
 
 pub use super::catalog_version::Entity as CatalogVersion;

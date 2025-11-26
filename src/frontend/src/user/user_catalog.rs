@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
+use risingwave_common::id::ObjectId;
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 use risingwave_pb::user::{PbAction, PbAuthInfo, PbGrantPrivilege, PbUserInfo};
 
@@ -205,7 +206,7 @@ impl UserCatalog {
         action_map.values().all(|&found| found)
     }
 
-    pub fn check_object_visibility(&self, obj_id: u32) -> bool {
+    pub fn check_object_visibility(&self, obj_id: ObjectId) -> bool {
         if self.is_super {
             return true;
         }
@@ -213,10 +214,12 @@ impl UserCatalog {
         // `Select` and `Execute` are the minimum required privileges for object visibility.
         // `Execute` is required for functions.
         // `Usage` is required for connections and secrets.
-        self.object_acls.get(&obj_id).is_some_and(|acl_set| {
-            acl_set.has_mode(AclMode::Select)
-                || acl_set.has_mode(AclMode::Execute)
-                || acl_set.has_mode(AclMode::Usage)
-        })
+        self.object_acls
+            .get(&obj_id.as_raw_id())
+            .is_some_and(|acl_set| {
+                acl_set.has_mode(AclMode::Select)
+                    || acl_set.has_mode(AclMode::Execute)
+                    || acl_set.has_mode(AclMode::Usage)
+            })
     }
 }

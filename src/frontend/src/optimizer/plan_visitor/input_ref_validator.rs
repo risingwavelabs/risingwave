@@ -28,7 +28,10 @@ struct ExprVis<'a> {
 
 impl ExprVisitor for ExprVis<'_> {
     fn visit_input_ref(&mut self, input_ref: &crate::expr::InputRef) {
-        if input_ref.data_type != self.schema[input_ref.index].data_type {
+        if !input_ref
+            .data_type
+            .equals_datatype(&self.schema[input_ref.index].data_type)
+        {
             self.string.replace(format!(
                 "InputRef#{} has type {}, but its type is {} in the input schema",
                 input_ref.index, input_ref.data_type, self.schema[input_ref.index].data_type

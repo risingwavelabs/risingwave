@@ -901,6 +901,7 @@ impl StateStore for HummockStorage {
             self.context.sstable_store.clone(),
             self.object_id_manager.clone(),
             self.hummock_event_sender.clone(),
+            self.hummock_version_reader.stats().clone(),
             self.context.storage_opts.clone(),
         )
     }

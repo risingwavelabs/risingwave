@@ -84,7 +84,7 @@ fn new_committed_epoch_subscriber(
         let metadata_manager = metadata_manager.clone();
         async move {
             let state_table_ids = metadata_manager
-                .get_sink_state_table_ids(sink_id.sink_id as _)
+                .get_sink_state_table_ids(sink_id)
                 .await
                 .map_err(SinkError::from)?;
             let Some(table_id) = state_table_ids.first() else {
@@ -271,7 +271,7 @@ impl ManagerWorker {
                             } else {
                                 debug!(
                                     "sink coordinator of {} is not running. Notify finish directly",
-                                    sink_id.sink_id
+                                    sink_id
                                 );
                                 send_with_err_check!(finish_notifier, ());
                             }
@@ -344,13 +344,13 @@ impl ManagerWorker {
         match join_result {
             Ok(()) => {
                 info!(
-                    id = sink_id.sink_id,
+                    id = %sink_id,
                     "sink coordinator has gracefully finished",
                 );
             }
             Err(err) => {
                 error!(
-                    id = sink_id.sink_id,
+                    id = %sink_id,
                     error = %err.as_report(),
                     "sink coordinator finished with error",
                 );

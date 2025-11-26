@@ -23,6 +23,7 @@ use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
+use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
@@ -30,7 +31,6 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse, create_mv, declare_cursor};
 use crate::binder::{Binder, BoundCreateView, BoundStatement};
-use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::flush::do_flush;
@@ -215,7 +215,7 @@ pub struct BoundResult {
     pub(crate) bound: BoundStatement,
     pub(crate) param_types: Vec<DataType>,
     pub(crate) parsed_params: Option<Vec<Datum>>,
-    pub(crate) dependent_relations: HashSet<TableId>,
+    pub(crate) dependent_relations: HashSet<ObjectId>,
     /// TODO(rc): merge with `dependent_relations`
     pub(crate) dependent_udfs: HashSet<FunctionId>,
 }
@@ -246,7 +246,7 @@ pub struct BatchQueryPlanResult {
     // Note that these relations are only resolved in the binding phase, and it may only be a
     // subset of the final one. i.e. the final one may contain more implicit dependencies on
     // indices.
-    pub(crate) dependent_relations: Vec<TableId>,
+    pub(crate) dependent_relations: Vec<ObjectId>,
 }
 
 fn gen_batch_query_plan(

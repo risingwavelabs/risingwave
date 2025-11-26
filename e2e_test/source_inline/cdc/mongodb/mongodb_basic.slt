@@ -1,0 +1,210 @@
+# CDC source basic test
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table phases (name varchar primary key, at timestamptz);
+
+statement ok
+insert into phases values ('00_begin', now());
+
+system ok
+mongosh 'mongodb://mongodb:27017' <<EOF
+db.all_types.insertOne({
+  _id: ObjectId('6911a33502454e0f774f8803'),
+  f01a_double   : Double(2.5),
+  // f01b_double   : Double('-Infinity'), // #21414
+  f02_string    : 'Rising',
+  f03_object    : {foo: true, bar: false},
+  f04_array     : ['e0', 'e1'],
+  f05a_binData  : Binary.createFromHexString('deadbeef'),
+  f05b_binData  : UUID('00112233-4455-6677-8899-aabbccddeeff'),
+  f05c_binData  : Binary.fromFloat32Array(new Float32Array([2, 3])),
+  // f06_undefined           // deprecated
+  // f07_objectId            // see _id
+  f08_bool      : false,
+  f09a_date     : ISODate(1),
+  f09b_date     : ISODate('1965-08-09T02:00:00Z'),
+  f10_null      : null,
+  f11_regex     : /ab+c/i,
+  // f12_dbPointer           // deprecated
+  f13_javascript: Code("function() {}"),
+  // f14_symbol              // deprecated
+  // f15_javascriptWithScope // deprecated
+  f16_int       : Int32(42),
+  f17_timestamp : Timestamp({'t': 4, 'i': 7}),
+  f18_long      : Long('9007199254740993'),
+  f19_decimal   : Decimal128('0.12345678901234567'),
+});
+EOF
+
+
+statement ok
+insert into phases values ('01_inserted', now());
+
+statement ok
+CREATE TABLE all_types_extjson (_id JSONB PRIMARY KEY, payload JSONB)
+INCLUDE TIMESTAMP as commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE COLLECTION_NAME as collection_name
+WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+  collection.name = 'test.all_types'
+);
+
+statement ok
+insert into phases values ('02_created', now());
+
+statement ok
+CREATE MATERIALIZED VIEW all_types_access AS
+WITH per_field AS (SELECT *, unnest(ARRAY[
+  'f01a_double',
+  -- 'f01b_double',
+  'f02_string',
+  'f03_object',
+  'f04_array',
+  'f05a_binData',
+  'f05b_binData',
+  'f05c_binData',
+  'f08_bool',
+  'f09a_date',
+  'f09b_date',
+  'f10_null',
+  'f11_regex',
+  'f13_javascript',
+  'f16_int',
+  'f17_timestamp',
+  'f18_long',
+  'f19_decimal'
+]) AS field FROM all_types_extjson)
+SELECT
+    _id,
+    field,
+    payload -> field AS extjson
+FROM
+    per_field;
+
+sleep 5s
+
+control substitution off
+
+query TTT
+select _id, database_name, collection_name from all_types_extjson;
+----
+{"$oid": "6911a33502454e0f774f8803"} test all_types
+
+statement ok
+insert into phases values ('03_ingested', now());
+
+query TTT
+select * from all_types_access order by _id, field;
+----
+{"$oid": "6911a33502454e0f774f8803"} f01a_double    2.5
+{"$oid": "6911a33502454e0f774f8803"} f02_string     "Rising"
+{"$oid": "6911a33502454e0f774f8803"} f03_object     {"bar": false, "foo": true}
+{"$oid": "6911a33502454e0f774f8803"} f04_array      ["e0", "e1"]
+{"$oid": "6911a33502454e0f774f8803"} f05a_binData   {"$binary": "3q2+7w==", "$type": "00"}
+{"$oid": "6911a33502454e0f774f8803"} f05b_binData   {"$binary": "ABEiM0RVZneImaq7zN3u/w==", "$type": "04"}
+{"$oid": "6911a33502454e0f774f8803"} f05c_binData   {"$binary": "JwAAAABAAABAQA==", "$type": "09"}
+{"$oid": "6911a33502454e0f774f8803"} f08_bool       false
+{"$oid": "6911a33502454e0f774f8803"} f09a_date      {"$date": 1}
+{"$oid": "6911a33502454e0f774f8803"} f09b_date      {"$date": -138751200000}
+{"$oid": "6911a33502454e0f774f8803"} f10_null       null
+{"$oid": "6911a33502454e0f774f8803"} f11_regex      {"$options": "i", "$regex": "ab+c"}
+{"$oid": "6911a33502454e0f774f8803"} f13_javascript {"$code": "function() {}"}
+{"$oid": "6911a33502454e0f774f8803"} f16_int        42
+{"$oid": "6911a33502454e0f774f8803"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
+{"$oid": "6911a33502454e0f774f8803"} f18_long       {"$numberLong": "9007199254740993"}
+{"$oid": "6911a33502454e0f774f8803"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
+
+system ok
+mongosh 'mongodb://mongodb:27017' <<EOF
+db.all_types.insertOne({
+  _id: ObjectId('6911a33502454e0f774f8804'),
+  f01a_double   : Double(2.5),
+  // f01b_double   : Double('-Infinity'), // #21414
+  f02_string    : 'Rising',
+  f03_object    : {foo: true, bar: false},
+  f04_array     : ['e0', 'e1'],
+  f05a_binData  : Binary.createFromHexString('deadbeef'),
+  f05b_binData  : UUID('00112233-4455-6677-8899-aabbccddeeff'),
+  f05c_binData  : Binary.fromFloat32Array(new Float32Array([2, 3])),
+  // f06_undefined           // deprecated
+  // f07_objectId            // see _id
+  f08_bool      : false,
+  f09a_date     : ISODate(1),
+  f09b_date     : ISODate('1965-08-09T02:00:00Z'),
+  f10_null      : null,
+  f11_regex     : /ab+c/i,
+  // f12_dbPointer           // deprecated
+  f13_javascript: Code("function() {}"),
+  // f14_symbol              // deprecated
+  // f15_javascriptWithScope // deprecated
+  f16_int       : Int32(42),
+  f17_timestamp : Timestamp({'t': 4, 'i': 7}),
+  f18_long      : Long('9007199254740993'),
+  f19_decimal   : Decimal128('0.12345678901234567'),
+});
+EOF
+
+
+sleep 3s
+
+query TTTT
+select
+  _id, database_name, collection_name,
+  commit_ts > (select at from phases where name = '03_ingested')
+from all_types_extjson order by commit_ts;
+----
+{"$oid": "6911a33502454e0f774f8803"} test all_types f
+{"$oid": "6911a33502454e0f774f8804"} test all_types t
+
+query TTT
+select * from all_types_access order by _id, field;
+----
+{"$oid": "6911a33502454e0f774f8803"} f01a_double    2.5
+{"$oid": "6911a33502454e0f774f8803"} f02_string     "Rising"
+{"$oid": "6911a33502454e0f774f8803"} f03_object     {"bar": false, "foo": true}
+{"$oid": "6911a33502454e0f774f8803"} f04_array      ["e0", "e1"]
+{"$oid": "6911a33502454e0f774f8803"} f05a_binData   {"$binary": "3q2+7w==", "$type": "00"}
+{"$oid": "6911a33502454e0f774f8803"} f05b_binData   {"$binary": "ABEiM0RVZneImaq7zN3u/w==", "$type": "04"}
+{"$oid": "6911a33502454e0f774f8803"} f05c_binData   {"$binary": "JwAAAABAAABAQA==", "$type": "09"}
+{"$oid": "6911a33502454e0f774f8803"} f08_bool       false
+{"$oid": "6911a33502454e0f774f8803"} f09a_date      {"$date": 1}
+{"$oid": "6911a33502454e0f774f8803"} f09b_date      {"$date": -138751200000}
+{"$oid": "6911a33502454e0f774f8803"} f10_null       null
+{"$oid": "6911a33502454e0f774f8803"} f11_regex      {"$options": "i", "$regex": "ab+c"}
+{"$oid": "6911a33502454e0f774f8803"} f13_javascript {"$code": "function() {}"}
+{"$oid": "6911a33502454e0f774f8803"} f16_int        42
+{"$oid": "6911a33502454e0f774f8803"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
+{"$oid": "6911a33502454e0f774f8803"} f18_long       {"$numberLong": "9007199254740993"}
+{"$oid": "6911a33502454e0f774f8803"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
+{"$oid": "6911a33502454e0f774f8804"} f01a_double    2.5
+{"$oid": "6911a33502454e0f774f8804"} f02_string     "Rising"
+{"$oid": "6911a33502454e0f774f8804"} f03_object     {"bar": false, "foo": true}
+{"$oid": "6911a33502454e0f774f8804"} f04_array      ["e0", "e1"]
+{"$oid": "6911a33502454e0f774f8804"} f05a_binData   {"$binary": "3q2+7w==", "$type": "00"}
+{"$oid": "6911a33502454e0f774f8804"} f05b_binData   {"$binary": "ABEiM0RVZneImaq7zN3u/w==", "$type": "04"}
+{"$oid": "6911a33502454e0f774f8804"} f05c_binData   {"$binary": "JwAAAABAAABAQA==", "$type": "09"}
+{"$oid": "6911a33502454e0f774f8804"} f08_bool       false
+{"$oid": "6911a33502454e0f774f8804"} f09a_date      {"$date": 1}
+{"$oid": "6911a33502454e0f774f8804"} f09b_date      {"$date": -138751200000}
+{"$oid": "6911a33502454e0f774f8804"} f10_null       null
+{"$oid": "6911a33502454e0f774f8804"} f11_regex      {"$options": "i", "$regex": "ab+c"}
+{"$oid": "6911a33502454e0f774f8804"} f13_javascript {"$code": "function() {}"}
+{"$oid": "6911a33502454e0f774f8804"} f16_int        42
+{"$oid": "6911a33502454e0f774f8804"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
+{"$oid": "6911a33502454e0f774f8804"} f18_long       {"$numberLong": "9007199254740993"}
+{"$oid": "6911a33502454e0f774f8804"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
+
+statement ok
+DROP TABLE all_types_extjson cascade;
+
+statement ok
+DROP TABLE phases;
+
+system ok
+mongosh 'mongodb://mongodb:27017' <<< 'db.all_types.drop();'

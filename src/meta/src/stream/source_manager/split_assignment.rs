@@ -98,7 +98,7 @@ impl SourceManager {
                 let actor_count = empty_actor_splits.keys().len();
                 let splits = handle.discovered_splits(source_id, actor_count).await?;
                 if splits.is_empty() {
-                    tracing::warn!(?stream_job_id, source_id, "no splits detected");
+                    tracing::warn!(?stream_job_id, %source_id, "no splits detected");
                     continue 'loop_source;
                 }
                 if let Some(diff) = reassign_splits(

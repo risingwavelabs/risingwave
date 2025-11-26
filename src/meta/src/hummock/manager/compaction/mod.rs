@@ -54,8 +54,8 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockCompactionTaskId, HummockSstableId, HummockSstableObjectId,
-    HummockVersionId, compact_task_to_string, statistics_compact_task,
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
+    HummockSstableObjectId, HummockVersionId, compact_task_to_string, statistics_compact_task,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
@@ -252,7 +252,7 @@ impl HummockManager {
     pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         compactor_streams_change_rx: UnboundedReceiver<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Vec<(JoinHandle<()>, Sender<()>)> {
@@ -289,7 +289,7 @@ impl HummockManager {
 
     pub fn add_compactor_stream(
         &self,
-        context_id: u32,
+        context_id: HummockContextId,
         req_stream: Streaming<SubscribeCompactionEventRequest>,
     ) {
         self.compactor_streams_change_tx
@@ -1268,7 +1268,7 @@ impl HummockManager {
                 task_id,
                 CompactTaskAssignment {
                     compact_task: Some(task.into()),
-                    context_id: 0,
+                    context_id: 0.into(),
                 },
             );
         }

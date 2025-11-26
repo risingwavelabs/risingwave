@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
 use std::str::FromStr;
 
 use risingwave_common::row::Row;
@@ -40,7 +39,7 @@ use super::string::quote_ident;
     "format(varchar, variadic anyarray) -> varchar",
     prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_report_string().into()))?"
 )]
-fn format(row: impl Row, formatter: &Formatter, writer: &mut impl Write) -> Result<()> {
+fn format(row: impl Row, formatter: &Formatter, writer: &mut impl std::fmt::Write) -> Result<()> {
     let mut args = row.iter();
     for node in &formatter.nodes {
         match node {

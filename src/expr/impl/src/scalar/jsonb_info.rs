@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_common::types::JsonbRef;
 use risingwave_expr::{ExprError, Result, function};
 
 #[function("jsonb_typeof(jsonb) -> varchar")]
-pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut impl Write) {
+pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut impl std::fmt::Write) {
     writer.write_str(v.type_name()).unwrap()
 }
 
@@ -70,6 +68,6 @@ pub fn is_json_type(s: &str, t: &str) -> bool {
 /// ]
 /// ```
 #[function("jsonb_pretty(jsonb) -> varchar")]
-pub fn jsonb_pretty(v: JsonbRef<'_>, writer: &mut impl Write) {
+pub fn jsonb_pretty(v: JsonbRef<'_>, writer: &mut impl std::fmt::Write) {
     v.pretty(writer).unwrap()
 }

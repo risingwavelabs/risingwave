@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use jsonbb::ValueRef;
-use risingwave_common::types::{JsonbRef, JsonbVal, ListRef};
+use risingwave_common::types::{JsonbRef, ListRef};
 use risingwave_expr::{ExprError, Result, function};
 
 /// Returns `target` with the item designated by `path` replaced by `new_value`, or with `new_value`
@@ -45,7 +45,8 @@ fn jsonb_set4(
     path: ListRef<'_>,
     new_value: JsonbRef<'_>,
     create_if_missing: bool,
-) -> Result<JsonbVal> {
+    writer: &mut jsonbb::Builder,
+) -> Result<()> {
     if target.is_scalar() {
         return Err(ExprError::InvalidParam {
             name: "jsonb",
@@ -54,9 +55,8 @@ fn jsonb_set4(
     }
     let target: ValueRef<'_> = target.into();
     let new_value: ValueRef<'_> = new_value.into();
-    let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(target.capacity());
-    jsonbb_set_path(target, path, 0, new_value, create_if_missing, &mut builder)?;
-    Ok(JsonbVal::from(builder.finish()))
+    jsonbb_set_path(target, path, 0, new_value, create_if_missing, writer)?;
+    Ok(())
 }
 
 #[function("jsonb_set(jsonb, varchar[], jsonb) -> jsonb")]
@@ -64,8 +64,9 @@ fn jsonb_set3(
     target: JsonbRef<'_>,
     path: ListRef<'_>,
     new_value: JsonbRef<'_>,
-) -> Result<JsonbVal> {
-    jsonb_set4(target, path, new_value, true)
+    writer: &mut jsonbb::Builder,
+) -> Result<()> {
+    jsonb_set4(target, path, new_value, true, writer)
 }
 
 /// Recursively set `path[i..]` in `target` to `new_value` and write the result to `builder`.

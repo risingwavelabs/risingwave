@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::function;
 
 #[function("repeat(varchar, int4) -> varchar")]
-pub fn repeat(s: &str, count: i32, writer: &mut impl Write) {
+pub fn repeat(s: &str, count: i32, writer: &mut impl std::fmt::Write) {
     for _ in 0..count {
         writer.write_str(s).unwrap();
     }
