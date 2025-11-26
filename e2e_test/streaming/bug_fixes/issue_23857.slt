@@ -7,6 +7,8 @@ create table t (k int primary key, v int);
 statement ok
 create table s (k int);
 
+# The stream key is empty ([]) as the output of simple agg.
+# The downstream pk is [k], following the table's definition.
 statement ok
 create sink sk into t as select max(k) as k, 114514 as v from s;
 
