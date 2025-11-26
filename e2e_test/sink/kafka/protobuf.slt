@@ -179,19 +179,19 @@ select
 t Rising \x6130   3.5 4.25 22 23 24  0 26 27 (1,"")  {4,0,4} (1136239445,0) DEFAULT 42
 f Wave   \x5a4446 1.5 0    11 12 13 14 15 16 (4,foo) {}               NULL  OPTION2 NULL
 
-query T
+query T retry 4 backoff 1s
 select field_a from from_kafka_csr_trivial order by 1;
 ----
 Rising
 Wave
 
-query I
+query I retry 4 backoff 1s
 select field_i from from_kafka_csr_nested order by 1;
 ----
 13
 24
 
-query T
+query T retry 4 backoff 1s
 select convert_from(kafka_key, 'utf-8') from from_kafka_raw where kafka_value is null;
 ----
 Rising

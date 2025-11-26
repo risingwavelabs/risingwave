@@ -336,7 +336,7 @@ distribution key v1 NULL NULL
 table description t NULL NULL
 
 # Verify all rows exist with the new column
-query I
+query I retry 6 backoff 1s
 SELECT count(*) from t;
 ----
 3

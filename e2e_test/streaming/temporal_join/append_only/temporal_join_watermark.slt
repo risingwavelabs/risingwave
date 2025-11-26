@@ -52,7 +52,7 @@ select * from temporal_join_mv;
 2 2 NULL 2023-09-14 06:00:25+00:00
 3 3 NULL 2023-09-14 06:00:45+00:00
 
-query IIII rowsort
+query IIII rowsort retry 11 backoff 1s
 select * from eowc_mv;
 ----
 2023-09-14 06:00:00+00:00 1

@@ -77,7 +77,7 @@ select count(*) > 1 from rw_iceberg_files where schema_name = 'public' and sourc
 ----
 t
 
-query ??? rowsort
+query ??? rowsort retry 6 backoff 1s
 select * from t_vacuum_test;
 ----
 1 alice 150
@@ -92,7 +92,7 @@ select * from t_vacuum_test;
 statement ok
 VACUUM t_vacuum_test;
 
-query ?
+query ? retry 6 backoff 1s
 select count(*) > 1 from rw_iceberg_files where schema_name = 'public' and source_name = '__iceberg_source_t_vacuum_test';
 ----
 t
