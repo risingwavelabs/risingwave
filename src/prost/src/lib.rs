@@ -529,6 +529,50 @@ impl catalog::Sink {
     }
 }
 
+impl catalog::Table {
+    /// Get clean watermark column indices with backward compatibility.
+    /// Returns the new `clean_watermark_indices` if set, otherwise derives it from the old
+    /// `clean_watermark_index_in_pk` by converting PK index to column index.
+    #[expect(deprecated)]
+    pub fn get_clean_watermark_column_indices(&self) -> Vec<u32> {
+        if !self.clean_watermark_indices.is_empty() {
+            // New format: directly return clean_watermark_indices
+            self.clean_watermark_indices.clone()
+        } else if let Some(pk_idx) = self.clean_watermark_index_in_pk {
+            // Old format: convert PK index to column index
+            // The pk_idx is the position in the PK, we need to find the corresponding column index
+            if let Some(col_order) = self.pk.get(pk_idx as usize) {
+                vec![col_order.column_index]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    }
+
+    /// Convert clean watermark column indices to PK indices and return the minimum.
+    /// Returns None if no clean watermark is configured.
+    /// This is a backward-compatible method to replace the deprecated `clean_watermark_index_in_pk` field.
+    /// TODO: remove this method after totally deprecating `clean_watermark_index_in_pk`.
+    pub fn get_clean_watermark_pk_index_compat(&self) -> Option<usize> {
+        let clean_watermark_column_indices = self.get_clean_watermark_column_indices();
+
+        // Convert column indices to PK indices
+        let clean_watermark_indices_in_pk: Vec<usize> = clean_watermark_column_indices
+            .iter()
+            .filter_map(|&col_idx| {
+                self.pk
+                    .iter()
+                    .position(|col_order| col_order.column_index == col_idx)
+            })
+            .collect();
+
+        // Return the minimum PK index
+        clean_watermark_indices_in_pk.iter().min().copied()
+    }
+}
+
 impl std::fmt::Debug for meta::SystemParams {
     /// Directly formatting `SystemParams` can be inaccurate or leak sensitive information.
     ///
