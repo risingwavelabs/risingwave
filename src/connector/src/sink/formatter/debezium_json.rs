@@ -27,7 +27,7 @@ use crate::sink::encoder::{
 use crate::tri;
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
-pub(crate) const KEY_SCHEMA_ENABLE: &str = "key.schema.enable";
+pub(crate) const KEY_SCHEMA_ENABLE: &str = "schemas.enable";
 
 pub struct DebeziumAdapterOpts {
     gen_tombstone: bool,
