@@ -391,6 +391,7 @@ impl StreamMaterialize {
                 }
             },
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            clean_watermark_indices: vec![],   // TODO: fill this field
             refreshable,
             vector_index_info: None,
             cdc_table_type: None,
@@ -440,6 +441,7 @@ impl StreamMaterialize {
             job_id,
             engine,
             clean_watermark_index_in_pk,
+            clean_watermark_indices,
             refreshable,
             vector_index_info,
             cdc_table_type,
@@ -509,6 +511,7 @@ impl StreamMaterialize {
             job_id,
             engine,
             clean_watermark_index_in_pk,
+            clean_watermark_indices,
             refreshable: false,
             vector_index_info,
             cdc_table_type,
