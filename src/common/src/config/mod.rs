@@ -37,6 +37,7 @@ pub use storage::{
     extract_storage_memory_config,
 };
 pub mod merge;
+pub mod mutate;
 pub mod system;
 pub mod utils;
 
