@@ -105,7 +105,7 @@ distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
 
-query TTTTTTTTTTTTTTT
+query TTTTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
 1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
@@ -150,7 +150,7 @@ distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
 
-query TTTTTTTTTTTTTTT
+query TTTTTTTTTTTTTTT retry 4 backoff 1s
 SELECT * from rw_test_schema_change order by id;
 ----
 1 name1 20 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
