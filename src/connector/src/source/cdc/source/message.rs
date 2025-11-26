@@ -78,41 +78,37 @@ impl DebeziumCdcMeta {
     /// - **MySQL**: `"database.table"` (1 dot, 2 parts)
     ///   - Example: `"risedev.orders"`
     ///   - User provides: `"risedev.orders"` (same format)
-    ///   - Result: Keep entire string → `prefix_len` = 0
+    ///   - Result: `database_name` = "risedev", `table_name` = "orders"
+    ///   - Note: MySQL CDC typically doesn't use the `database_name` column separately
+    ///
+    /// - **`MongoDB`**: `"database.collection"` (1 dot, 2 parts)
+    ///   - Example: `"random_data.users"`
+    ///   - User can include: `DATABASE_NAME` and `COLLECTION_NAME`
+    ///   - Result: `database_name` = `"random_data"`, collection parsed from payload
     ///
     /// - **Postgres**: `"database.schema.table"` (2 dots, 3 parts)
     ///   - Example: `"mydb.public.users"`
     ///   - User provides: `"public.users"` (database already in source config)
-    ///   - Result: Skip "mydb." → `prefix_len` = 5
+    ///   - Result: `database_name` = "mydb", `table_name` = "public.users"
     ///
     /// - **SQL Server**: `"database.schema.table"` (2 dots, 3 parts)
     ///   - Example: `"mydb.dbo.orders"`
     ///   - User provides: `"dbo.orders"` (database already in source config)
-    ///   - Result: Skip "mydb." → `prefix_len` = 5
-    ///
-    /// # Why the difference?
-    ///
-    /// - **MySQL** has no schema concept, so the "table name" IS `database.table`
-    /// - **Postgres/SQL Server** have schemas, and the database is specified in the source,
-    ///   so the "table name" is just `schema.table`
+    ///   - Result: `database_name` = "mydb", `table_name` = "dbo.orders"
     ///
     /// # Returns
     ///
     /// The number of characters to skip from the start of `full_table_name` when calling
-    /// `extract_table_name()`. This value is used to strip the database prefix for
-    /// Postgres/SQL Server while keeping the full name for MySQL.
+    /// `extract_table_name()`. This is always the position after the first dot to extract
+    /// the database portion for `extract_database_name()`.
     fn extract_db_name_prefix_len_from_full_table_name(full_table_name: &str) -> usize {
         if let Some(first_dot) = full_table_name.find('.') {
-            // Check if there's a second dot after the first one
-            if full_table_name[first_dot + 1..].find('.').is_some() {
-                // Found 2 dots (3 parts): Postgres/SQL Server format "database.schema.table"
-                // Return position after first dot to skip "database." part
-                first_dot + 1
-            } else {
-                // Found 1 dot (2 parts): MySQL format "database.table"
-                // Return 0 to keep the entire string (no prefix to skip)
-                0
-            }
+            // Return position after first dot to extract database prefix
+            // This works for all formats:
+            // - MySQL: "database.table" → database_name = "database", table_name = "table"
+            // - MongoDB: "database.collection" → database_name = "database"
+            // - Postgres/SQL Server: "database.schema.table" → database_name = "database", table_name = "schema.table"
+            first_dot + 1
         } else {
             // No dot found (should not happen in practice for valid CDC messages)
             0
