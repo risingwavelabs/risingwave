@@ -102,6 +102,17 @@ async fn handle_alter_source_props_inner(
         .into());
     }
 
+    // Validate debezium.max.queue.size if present
+    if let Some(queue_size_value) = changed_props.get("debezium.max.queue.size")
+        && queue_size_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "debezium.max.queue.size".to_owned(),
+            config_value: queue_size_value.to_owned(),
+        }
+        .into());
+    }
+
     meta_client
         .alter_source_connector_props(
             source_id,

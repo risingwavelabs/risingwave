@@ -258,5 +258,21 @@ pub fn validate_compatibility(
         .into());
     }
 
+    // Validate debezium.max.queue.size for all CDC connectors
+    if (connector == MYSQL_CDC_CONNECTOR
+        || connector == POSTGRES_CDC_CONNECTOR
+        || connector == CITUS_CDC_CONNECTOR
+        || connector == MONGODB_CDC_CONNECTOR
+        || connector == SQL_SERVER_CDC_CONNECTOR)
+        && let Some(queue_size_value) = props.get("debezium.max.queue.size")
+        && queue_size_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "debezium.max.queue.size".to_owned(),
+            config_value: queue_size_value.to_owned(),
+        }
+        .into());
+    }
+
     Ok(())
 }
