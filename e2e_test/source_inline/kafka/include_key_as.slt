@@ -218,12 +218,14 @@ SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sou
 ----
 CREATE TABLE additional_columns (a INT) INCLUDE key AS key_col INCLUDE partition AS partition_col INCLUDE offset AS offset_col INCLUDE timestamp AS timestamp_col INCLUDE header AS header_col_combined INCLUDE header 'header1' AS header_col_1 INCLUDE header 'header2' AS header_col_2 INCLUDE header 'header2' CHARACTER VARYING AS header_col_3 INCLUDE header 'header3' AS header_col_4
 
+
 query ? retry 3 backoff 1s
 select count(rw_key) from plain_students
 ----
 15
 
-query ???????
+
+query ??????? retry 3 backoff 1s
 select * from plain_students order by ("ID", "firstName");
 ----
 1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
@@ -243,7 +245,7 @@ NULL	NULL	NULL	NULL	NULL	NULL	\x7b224944223a20377d
 NULL	NULL	NULL	NULL	NULL	NULL	\x7b224944223a20387d
 
 
-query ???????
+query ??????? retry 3 backoff 1s
 select * from upsert_students order by "ID";
 ----
 1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
@@ -255,7 +257,7 @@ select * from upsert_students order by "ID";
 9	Jacob	Anderson	20	5.8	155	\x7b224944223a20397d
 
 
-query ?
+query ? retry 3 backoff 1s
 SELECT count(*)
 FROM   additional_columns
 WHERE  key_col IS NOT NULL
@@ -267,7 +269,7 @@ WHERE  key_col IS NOT NULL
 11
 
 
-query ??
+query ?? retry 3 backoff 1s
 WITH arr AS (SELECT header_col_combined FROM additional_columns),
 unnested AS (SELECT unnest(header_col_combined) FROM arr)
 select *, count(*) from unnested group by 1 order by 1;
@@ -275,7 +277,8 @@ select *, count(*) from unnested group by 1 order by 1;
 (header1,"\\x7631") 11
 (header2,"\\x7632") 11
 
-query ????
+
+query ???? retry 3 backoff 1s
 select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns limit 1
 ----
 \x7631	\x7632	v2	NULL

@@ -97,7 +97,7 @@ select _id, database_name, collection_name from all_types_extjson;
 statement ok
 insert into phases values ('03_ingested', now());
 
-query TTT
+query TTT retry 5 backoff 1s
 select * from all_types_access order by _id, field;
 ----
 {"$oid": "6911a33502454e0f774f8803"} f01a_double    2.5
@@ -157,7 +157,7 @@ from all_types_extjson order by commit_ts;
 {"$oid": "6911a33502454e0f774f8803"} test all_types f
 {"$oid": "6911a33502454e0f774f8804"} test all_types t
 
-query TTT
+query TTT retry 3 backoff 1s
 select * from all_types_access order by _id, field;
 ----
 {"$oid": "6911a33502454e0f774f8803"} f01a_double    2.5

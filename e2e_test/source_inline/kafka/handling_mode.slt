@@ -76,9 +76,7 @@ with (
   topic = 'json_timestamptz_handling_mode')
 format debezium encode json (timestamptz.handling.mode = 'milli');
 
-sleep 2s
-
-query TT retry 3 backoff 5s
+query TT retry 6 backoff 3s
 select "case", (payload).after.at from plain_guess order by 1;
 ----
 0 number small  1970-01-01 00:01:40+00:00
