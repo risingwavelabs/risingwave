@@ -292,7 +292,7 @@ select count(*) from orders_no_backfill
 0
 
 
-query IT
+query IT retry 6 backoff 1s
 select * from kt1 order by id;
 ----
 1 aaa
@@ -302,24 +302,24 @@ select * from kt1 order by id;
 
 
 # check ingestion results
-query I
+query I retry 6 backoff 1s
 SELECT * from products_test_cnt
 ----
 11
 
-query I
+query I retry 6 backoff 1s
 SELECT * from orders_test_cnt
 ----
 4
 
-query ITT
+query ITT retry 6 backoff 1s
 SELECT id,name,description FROM rw.products_test order by id limit 3
 ----
 101 scooter Small 2-wheel scooter
 102 car battery 12V car battery
 103 12-pack drill bits 12-pack of drill bits with sizes ranging from #40 to #3
 
-query TT
+query TT retry 6 backoff 1s
 select database_name, table_name from rw.products_test limit 3;
 ----
 mytest products
@@ -328,26 +328,26 @@ mytest products
 
 
 # commit_ts of historical records should be '1970-01-01 00:00:00+00:00'
-query I
+query I retry 6 backoff 1s
 SELECT count(*) as cnt from rw.products_test where commit_ts = '1970-01-01 00:00:00+00:00'
 ----
 9
 
 # commit_ts of new records should greater than '1970-01-01 00:00:00+00:00'
-query TTT
+query TTT retry 6 backoff 1s
 SELECT name,description FROM rw.products_test where commit_ts > '1970-01-01 00:00:00+00:00' order by id
 ----
 Milk Milk is a white liquid food
 Juice 100ml Juice
 
-query ITTT
+query ITTT retry 6 backoff 1s
 SELECT order_id,order_date,customer_name,product_id,next_order_id FROM orders_test order by order_id limit 3
 ----
 10001 2020-07-30 10:08:22 Jark 102 10002
 10002 2020-07-30 10:11:09 Sally 105 10003
 10003 2020-07-30 12:00:30 Edward 106 10004
 
-query IIIIITTTTTTTTT
+query IIIIITTTTTTTTT retry 6 backoff 1s
 SELECT c_boolean, c_bit, c_tinyint, c_smallint, c_mediumint, c_integer, c_bigint, c_decimal, c_float, c_double, c_char_255, c_varchar_10000, c_date, c_time, c_datetime, c_timestamp FROM mysql_all_types order by c_bigint;
 ----
 t t -128 -32767 -8388608 -2147483647 -9223372036854775807 -10 -10000 -10000 a b 1001-01-01 00:00:00 1998-01-01 00:00:00 1970-01-01 00:00:01+00:00
@@ -548,7 +548,7 @@ SELECT * from person_new_cnt
 ----
 6
 
-query TTT
+query TTT retry 4 backoff 1s
 SELECT database_name,schema_name,table_name from person_new limit 3;
 ----
 cdc_test public person
@@ -556,7 +556,7 @@ cdc_test public person
 cdc_test public person
 
 
-query ITTTT
+query ITTTT retry 4 backoff 1s
 SELECT id,name,email_address,credit_card,city,next_id from person_new order by id;
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne 1001
@@ -567,7 +567,7 @@ SELECT id,name,email_address,credit_card,city,next_id from person_new order by i
 1102 spencer wip@dkaap.com 9481 6270 angeles 1103
 
 # historical data
-query ITTTT
+query ITTTT retry 4 backoff 1s
 SELECT id,name,email_address,credit_card,city,next_id from person_new where commit_ts = '1970-01-01 00:00:00+00:00' order by id;
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne 1001
@@ -575,7 +575,7 @@ SELECT id,name,email_address,credit_card,city,next_id from person_new where comm
 1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles 1003
 
 # incremental data
-query ITTTT
+query ITTTT retry 4 backoff 1s
 SELECT id,name,email_address,credit_card,city from person_new where commit_ts > '1970-01-01 00:00:00+00:00' order by id;
 ----
 1100 noris ypl@qbxfg.com 1864 2539 enne
@@ -689,7 +689,7 @@ select * from numeric_to_varchar_shared order by id;
 107 POSITIVE_INFINITY
 
 # The invalid data for rw_int256 is converted to NULL
-query II
+query II retry 4 backoff 1s
 select * from numeric_to_rw_int256_shared order by id;
 ----
 1   NULL
@@ -706,7 +706,7 @@ select * from numeric_to_rw_int256_shared order by id;
 106 NULL
 107 NULL
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_to_numeric_shared order by id;
 ----
 1   3.14
@@ -792,7 +792,7 @@ SET RW_IMPLICIT_FLUSH=true;
 statement ok
 INSERT INTO test_pg_default_value VALUES (2, 'jack');
 
-query II
+query II retry 4 backoff 1s
 select * from test_pg_default_value order by id asc;
 ----
 1 bugen Shanghai
@@ -801,7 +801,7 @@ select * from test_pg_default_value order by id asc;
 statement ok
 INSERT INTO test_pg_default_value_disorderd (id) VALUES (2);
 
-query II
+query II retry 4 backoff 1s
 select * from test_pg_default_value_disorderd order by id asc;
 ----
 Shanghai 1

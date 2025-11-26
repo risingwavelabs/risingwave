@@ -62,6 +62,9 @@ select count(*) from my_orders;
 statement ok
 ALTER TABLE my_orders SET backfill_rate_limit = 1000;
 
+statement ok
+flush;
+
 # wait alter ddl
 
 query I retry 10 backoff 1s
