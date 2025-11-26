@@ -140,13 +140,13 @@ select count(*) from single_partition_rw;
 27
 
 # Verify CDC operations on sub-partitioned table
-query I
+query I retry 6 backoff 1s
 select count(*) from sub_partition_rw;
 ----
 26
 
 # Verify partition data distribution for single-level partitioned table
-query IT
+query IT retry 6 backoff 1s
 select
     created_at,
     count(*) as count
@@ -159,7 +159,7 @@ order by created_at;
 1735862399000 6
 
 # Verify partition data distribution for sub-partitioned table
-query IT
+query IT retry 6 backoff 1s
 select
     created_at,
     count(*) as count
