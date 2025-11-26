@@ -119,7 +119,7 @@ select * from all_types_access order by _id, field;
 {"$oid": "6911a33502454e0f774f8803"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
 
 # so that incremental rows are inserted at least 1s later
-sleep 1s
+# sleep 1s
 
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF

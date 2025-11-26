@@ -122,7 +122,11 @@ echo '> rs config'
 echo 'rs.conf()' | mongosh mongodb://mongodb:27017
 echo '> run test..'
 # This is actually redundant. `source_inline` is already executed above.
-risedev slt './e2e_test/source_inline/cdc/mongodb/**/*.slt'
+for i in {1..50}
+do
+  echo "LOOPING: #$i"
+  risedev slt './e2e_test/source_inline/cdc/mongodb/**/*.slt'
+done
 
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
