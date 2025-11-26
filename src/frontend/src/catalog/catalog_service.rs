@@ -627,9 +627,7 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         self.meta_client
             .alter_parallelism(job_id, parallelism, deferred)
-            .await
-            .map_err(|e| anyhow!(e))?;
-
+            .await?;
         Ok(())
     }
 
@@ -641,9 +639,7 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         self.meta_client
             .alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
-            .await
-            .map_err(|e| anyhow!(e))?;
-
+            .await?;
         Ok(())
     }
 

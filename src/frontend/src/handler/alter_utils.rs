@@ -21,7 +21,7 @@ use crate::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::error::{ErrorCode, Result, bail_invalid_input_syntax};
+use crate::error::{Result, bail_invalid_input_syntax};
 use crate::session::SessionImpl;
 
 /// Resolve the **streaming** job id for alter operations.
@@ -57,14 +57,12 @@ pub(super) fn resolve_streaming_job_id_for_alter(
                 | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
                 | (TableType::Index, StatementType::ALTER_INDEX) => {}
                 _ => {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "cannot alter {} of {} {} by {}",
-                        alter_target,
+                    bail_invalid_input_syntax!(
+                        "cannot alter {alter_target} of {} {} by {}",
                         table.table_type().to_prost().as_str_name(),
                         table.name(),
                         alter_stmt_type,
-                    ))
-                    .into());
+                    );
                 }
             }
 
@@ -77,11 +75,9 @@ pub(super) fn resolve_streaming_job_id_for_alter(
 
             if !source.info.is_shared() {
                 bail_invalid_input_syntax!(
-                    "cannot alter {} of non-shared source.\n\
-                    Use `ALTER MATERIALIZED VIEW SET {}` to alter the materialized view using the source instead.",
-                    alter_target,
-                    alter_target.to_uppercase()
-                )
+                    "cannot alter {alter_target} of non-shared source.\n\
+                     Use `ALTER MATERIALIZED VIEW` to alter the materialized view using the source instead."
+                );
             }
 
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
@@ -92,11 +88,10 @@ pub(super) fn resolve_streaming_job_id_for_alter(
                 reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
 
             session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-            sink.id.sink_id().into()
+            sink.id.as_job_id()
         }
         _ => bail!(
-            "invalid statement type for alter {}: {:?}",
-            alter_target,
+            "invalid statement type for alter {alter_target}: {:?}",
             alter_stmt_type
         ),
     };

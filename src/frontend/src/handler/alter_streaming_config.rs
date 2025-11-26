@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use pgwire::pg_response::StatementType;
-use risingwave_sqlparser::ast::{self, ObjectName, SqlOption, SqlOptionValue};
+use risingwave_sqlparser::ast::{ObjectName, SqlOption, SqlOptionValue, Value as AstValue};
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 
@@ -24,6 +24,7 @@ use crate::error::{Result, bail_invalid_input_syntax};
 use crate::handler::alter_utils::resolve_streaming_job_id_for_alter;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
+/// A diff of a TOML map. `None` means the key should be removed.
 type TomlMapDiff = TomlMap<String, Option<TomlValue>>;
 
 fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
@@ -36,15 +37,15 @@ fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
         };
 
         let value = match value {
-            ast::Value::Number(n) => {
+            AstValue::Number(n) => {
                 let n: TomlValue = n.parse().context("Invalid number for ALTER CONFIG")?;
                 Some(n)
             }
-            ast::Value::SingleQuotedString(s) | ast::Value::DoubleQuotedString(s) => {
+            AstValue::SingleQuotedString(s) | AstValue::DoubleQuotedString(s) => {
                 Some(TomlValue::String(s))
             }
-            ast::Value::Boolean(b) => Some(TomlValue::Boolean(b)),
-            ast::Value::Null => None,
+            AstValue::Boolean(b) => Some(TomlValue::Boolean(b)),
+            AstValue::Null => None,
             _ => bail_invalid_input_syntax!("Unsupported value for ALTER CONFIG: {}", value),
         };
 
@@ -101,5 +102,6 @@ pub async fn handle_alter_streaming_reset_config(
         })
         .collect();
 
+    // Simply delegate to `handle_alter_streaming_set_config` with all values set to `NULL`.
     handle_alter_streaming_set_config(handler_args, obj_name, entries, stmt_type).await
 }
