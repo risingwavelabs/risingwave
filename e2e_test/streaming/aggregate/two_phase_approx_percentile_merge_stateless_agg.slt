@@ -100,19 +100,15 @@ insert into t select 0.0001, 1 from generate_series(1, 501);
 statement ok
 flush;
 
-query ????????
+query ????
 select
  round(p01::numeric, 6),
  round(s::numeric, 6),
  round(p50::numeric, 6),
- round(p99::numeric, 6) as p99_plus_sum,
- p01,
- s,
- p50,
- p99
+ round(p99::numeric, 6) as p99_plus_sum
  from m1;
 ----
-0.000100 0.050100 0.000100 501.000100 <slt:ignore> <slt:ignore> <slt:ignore> <slt:ignore>
+0.000100 0.050100 0.000100 501.000100
 
 statement ok
 drop materialized view m1;
