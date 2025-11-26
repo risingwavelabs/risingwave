@@ -31,6 +31,7 @@ use super::{
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
@@ -89,15 +90,17 @@ impl StreamAsOfJoin {
                     if let Some(internal) = l2i.try_map(left_idx) {
                         watermark_columns.insert(
                             internal,
-                            l_wtmk_group
-                                .same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
+                            l_wtmk_group.same_or_else(r_wtmk_group, || {
+                                core.ctx().next_watermark_group_id()
+                            }),
                         );
                     }
                     if let Some(internal) = r2i.try_map(right_idx) {
                         watermark_columns.insert(
                             internal,
-                            l_wtmk_group
-                                .same_or_else(r_wtmk_group, || ctx.next_watermark_group_id()),
+                            l_wtmk_group.same_or_else(r_wtmk_group, || {
+                                core.ctx().next_watermark_group_id()
+                            }),
                         );
                     }
                 }
