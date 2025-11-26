@@ -808,14 +808,14 @@ do
 done
 
 echo "install: $(tput setaf 4)GNU Parallel$(tput sgr0)"
-UNAME=$(uname | tr "[:lower:]" "[:upper:]" ) 
-case $UNAME in 
-  DARWIN) 
+UNAME=$(uname | tr "[:lower:]" "[:upper:]" )
+case $UNAME in
+  DARWIN)
     if ! command -v brew >/dev/null 2>&1 ; then
-      echo "Installing Homebrew (https://brew.sh/)" 
-      bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" 
-    fi 
-    brew update 
+      echo "Installing Homebrew (https://brew.sh/)"
+      bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
+    brew update
     brew install parallel
     ;;
   LINUX)
