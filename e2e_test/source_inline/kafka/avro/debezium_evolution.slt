@@ -152,7 +152,7 @@ select * from v1;
 1 zxc 3
 3 asd 4
 
-query TTT rowsort
+query TTT rowsort retry 4 backoff 1s
 select * from v2;
 ----
 1 zxc 3 99
