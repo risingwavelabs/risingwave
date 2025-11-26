@@ -15,21 +15,19 @@
 use risingwave_meta_model::pending_sink_state::{self};
 use risingwave_meta_model::{Epoch, SinkId};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect, Set,
+    ColumnTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect, Set,
+    TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
 // This file contains methods for accessing system tables in the meta store with two-phase commit sink support.
 
-pub async fn persist_pre_commit_metadata<C>(
-    db: &C,
+pub async fn persist_pre_commit_metadata(
+    db: &DatabaseConnection,
     sink_id: SinkId,
     epoch: u64,
     commit_metadata: Vec<u8>,
-) -> anyhow::Result<()>
-where
-    C: ConnectionTrait,
-{
+) -> anyhow::Result<()> {
     let m = pending_sink_state::ActiveModel {
         sink_id: Set(sink_id),
         epoch: Set(epoch as Epoch),
@@ -48,19 +46,34 @@ where
     }
 }
 
-pub async fn mark_record_committed<C>(db: &C, sink_id: SinkId, epoch: u64) -> anyhow::Result<()>
-where
-    C: ConnectionTrait,
-{
-    match pending_sink_state::Entity::update(pending_sink_state::ActiveModel {
+pub async fn commit_and_prune_epoch(
+    db: &DatabaseConnection,
+    sink_id: SinkId,
+    epoch: u64,
+    prev_epoch: Option<u64>,
+) -> anyhow::Result<()> {
+    let txn = db.begin().await?;
+    pending_sink_state::Entity::update(pending_sink_state::ActiveModel {
         sink_id: Set(sink_id),
         epoch: Set(epoch as Epoch),
         sink_state: Set(pending_sink_state::SinkState::Committed),
         ..Default::default()
     })
-    .exec(db)
-    .await
-    {
+    .exec(&txn)
+    .await?;
+
+    if let Some(prev_epoch) = prev_epoch {
+        pending_sink_state::Entity::delete_many()
+            .filter(
+                pending_sink_state::Column::SinkId
+                    .eq(sink_id)
+                    .and(pending_sink_state::Column::Epoch.eq(prev_epoch as Epoch)),
+            )
+            .exec(&txn)
+            .await?;
+    }
+
+    match txn.commit().await {
         Ok(_) => Ok(()),
         Err(e) => {
             tracing::error!(
@@ -72,26 +85,16 @@ where
     }
 }
 
-pub async fn delete_aborted_and_outdated_records<C>(
-    db: &C,
+pub async fn clean_aborted_records(
+    db: &DatabaseConnection,
     sink_id: SinkId,
     aborted_epochs: Vec<u64>,
-    last_committed_epoch: Option<u64>,
-) -> anyhow::Result<()>
-where
-    C: ConnectionTrait,
-{
-    let aborted_epochs: Vec<Epoch> = aborted_epochs.into_iter().map(|e| e as Epoch).collect();
-    let mut epoch_cond = pending_sink_state::Column::Epoch.is_in(aborted_epochs);
-    if let Some(last_committed_epoch) = last_committed_epoch {
-        epoch_cond =
-            epoch_cond.or(pending_sink_state::Column::Epoch.lt(last_committed_epoch as Epoch));
-    }
+) -> anyhow::Result<()> {
     match pending_sink_state::Entity::delete_many()
         .filter(
             pending_sink_state::Column::SinkId
                 .eq(sink_id)
-                .and(epoch_cond),
+                .and(pending_sink_state::Column::Epoch.is_in(aborted_epochs)),
         )
         .exec(db)
         .await
@@ -107,13 +110,10 @@ where
     }
 }
 
-pub async fn list_sink_states_ordered_by_epoch<C>(
-    db: &C,
+pub async fn list_sink_states_ordered_by_epoch(
+    db: &DatabaseConnection,
     sink_id: SinkId,
-) -> anyhow::Result<Vec<(u64, pending_sink_state::SinkState, Vec<u8>)>>
-where
-    C: ConnectionTrait,
-{
+) -> anyhow::Result<Vec<(u64, pending_sink_state::SinkState, Vec<u8>)>> {
     let rows: Vec<(Epoch, pending_sink_state::SinkState, Vec<u8>)> =
         match pending_sink_state::Entity::find()
             .select_only()

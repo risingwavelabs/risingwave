@@ -42,9 +42,10 @@ use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
-    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
-    connection, database, fragment, function, index, object, object_dependency, pending_sink_state,
-    schema, secret, sink, source, streaming_job, subscription, table, user_privilege, view,
+    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, TableIdArray,
+    UserId, ViewId, connection, database, fragment, function, index, object, object_dependency,
+    pending_sink_state, schema, secret, sink, source, streaming_job, subscription, table,
+    user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -743,22 +744,13 @@ impl CatalogController {
                     .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
             );
 
-        let rows: Vec<(JobId, I32Array)> = query.into_tuple().all(&inner.db).await?;
+        let rows: Vec<(JobId, TableIdArray)> = query.into_tuple().all(&inner.db).await?;
 
         debug_assert!(rows.iter().map(|(job_id, _)| job_id).all_unique());
 
         let result = rows
             .into_iter()
-            .map(|(job_id, table_id_array)| {
-                (
-                    job_id.as_sink_id(),
-                    table_id_array
-                        .into_inner()
-                        .into_iter()
-                        .map(|id| TableId::new(id as _))
-                        .collect::<Vec<_>>(),
-                )
-            })
+            .map(|(job_id, table_id_array)| (job_id.as_sink_id(), table_id_array.0))
             .collect::<HashMap<_, _>>();
 
         Ok(result)
@@ -808,7 +800,7 @@ impl CatalogController {
                 .filter(
                     pending_sink_state::Column::SinkId
                         .eq(sink_id)
-                        .and(pending_sink_state::Column::Epoch.lt(committed_epoch as i64)),
+                        .and(pending_sink_state::Column::Epoch.gt(committed_epoch as i64)),
                 )
                 .exec(&txn)
                 .await?;

@@ -901,6 +901,10 @@ mod tests {
         ) -> MetaResult<()> {
             unimplemented!()
         }
+
+        async fn reset_sink_coordinator(&self, _database_id: Option<DatabaseId>) -> MetaResult<()> {
+            unimplemented!()
+        }
     }
 
     #[tokio::test]

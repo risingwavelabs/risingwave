@@ -38,6 +38,7 @@ use crate::barrier::{
     DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
@@ -99,6 +100,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         &self,
         refresh_finished_table_job_ids: Vec<JobId>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    fn reset_sink_coordinator(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {
@@ -120,6 +126,8 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
     barrier_scheduler: BarrierScheduler,
 
     pub(super) refresh_manager: GlobalRefreshManagerRef,
+
+    sink_manager: SinkCoordinatorManager,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -133,6 +141,7 @@ impl GlobalBarrierWorkerContextImpl {
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
+        sink_manager: SinkCoordinatorManager,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -144,6 +153,7 @@ impl GlobalBarrierWorkerContextImpl {
             env,
             barrier_scheduler,
             refresh_manager,
+            sink_manager,
         }
     }
 

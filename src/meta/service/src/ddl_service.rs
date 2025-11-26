@@ -452,7 +452,7 @@ impl DdlService for DdlServiceImpl {
         let version = self.ddl_controller.run_command(command).await?;
 
         self.sink_manager
-            .stop_sink_coordinator(SinkId::from(sink_id))
+            .stop_sink_coordinator(vec![SinkId::from(sink_id)])
             .await;
 
         Ok(Response::new(DropSinkResponse {

@@ -48,7 +48,6 @@ use crate::barrier::{
 };
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::hummock::CommitEpochInfo;
-use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{ActiveStreamingWorkerNodes, MetaOpts, MetaSrvEnv};
 use crate::model::StreamActor;
 
@@ -153,6 +152,10 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     ) -> MetaResult<()> {
         unimplemented!()
     }
+
+    async fn reset_sink_coordinator(&self, _database_id: Option<DatabaseId>) -> MetaResult<()> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -164,8 +167,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     })
     .await;
     let (_request_tx, request_rx) = mpsc::unbounded_channel();
-    let sink_manager = SinkCoordinatorManager::for_test();
-    let mut worker = GlobalBarrierWorker::new_inner(env, sink_manager, request_rx, context).await;
+    let mut worker = GlobalBarrierWorker::new_inner(env, request_rx, context).await;
     let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
     let _join_handle = tokio::spawn(async move {

@@ -17,7 +17,7 @@ use std::pin::pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::future::{BoxFuture, Either, select};
+use futures::future::{BoxFuture, Either, join_all, select};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
@@ -29,9 +29,9 @@ use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse, co
 use rw_futures_util::pending_on_none;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot::{Receiver, Sender, channel};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
@@ -66,7 +66,7 @@ enum ManagerRequest {
     StopCoordinator {
         finish_notifier: Sender<()>,
         /// sink id to stop. When `None`, stop all sink coordinator
-        sink_id: Option<SinkId>,
+        sink_ids: Option<Vec<SinkId>>,
     },
 }
 
@@ -100,25 +100,6 @@ fn new_committed_epoch_subscriber(
 }
 
 impl SinkCoordinatorManager {
-    #[cfg(test)]
-    pub(crate) fn for_test() -> Self {
-        let (request_tx, mut request_rx) = mpsc::channel(BOUNDED_CHANNEL_SIZE);
-        let _join_handle = tokio::spawn(async move {
-            while let Some(req) = request_rx.recv().await {
-                let ManagerRequest::StopCoordinator {
-                    finish_notifier,
-                    sink_id,
-                } = req
-                else {
-                    unreachable!()
-                };
-                assert_eq!(sink_id, None);
-                finish_notifier.send(()).unwrap();
-            }
-        });
-        SinkCoordinatorManager { request_tx }
-    }
-
     pub fn start_worker(
         db: DatabaseConnection,
         hummock_manager: HummockManagerRef,
@@ -184,27 +165,27 @@ impl SinkCoordinatorManager {
         Ok(UnboundedReceiverStream::new(response_rx))
     }
 
-    async fn stop_coordinator(&self, sink_id: Option<SinkId>) {
+    async fn stop_coordinator(&self, sink_ids: Option<Vec<SinkId>>) {
         let (tx, rx) = channel();
         send_await_with_err_check!(
             self.request_tx,
             ManagerRequest::StopCoordinator {
                 finish_notifier: tx,
-                sink_id,
+                sink_ids: sink_ids.clone(),
             }
         );
         if rx.await.is_err() {
             error!("fail to wait for resetting sink manager worker");
         }
-        info!("successfully stop coordinator: {:?}", sink_id);
+        info!("successfully stop coordinator: {:?}", sink_ids);
     }
 
     pub async fn reset(&self) {
         self.stop_coordinator(None).await;
     }
 
-    pub async fn stop_sink_coordinator(&self, sink_id: SinkId) {
-        self.stop_coordinator(Some(sink_id)).await;
+    pub async fn stop_sink_coordinator(&self, sink_ids: Vec<SinkId>) {
+        self.stop_coordinator(Some(sink_ids)).await;
     }
 }
 
@@ -256,25 +237,41 @@ impl ManagerWorker {
                     }
                     ManagerRequest::StopCoordinator {
                         finish_notifier,
-                        sink_id,
+                        sink_ids,
                     } => {
-                        if let Some(sink_id) = sink_id {
-                            if let Some(worker_handle) =
-                                self.running_coordinator_worker.get_mut(&sink_id)
-                            {
-                                if let Some(sender) = worker_handle.request_sender.take() {
-                                    // drop the sender as a signal to notify the coordinator worker
-                                    // to stop
-                                    drop(sender);
+                        if let Some(sink_ids) = sink_ids {
+                            let mut rxs = Vec::with_capacity(sink_ids.len());
+                            for sink_id in sink_ids {
+                                if let Some(worker_handle) =
+                                    self.running_coordinator_worker.get_mut(&sink_id)
+                                {
+                                    let (tx, rx) = oneshot::channel();
+                                    rxs.push(rx);
+                                    worker_handle.finish_notifiers.push(tx);
+                                    if let Some(sender) = worker_handle.request_sender.take() {
+                                        // drop the sender as a signal to notify the coordinator worker
+                                        // to stop
+                                        drop(sender);
+                                    }
+                                } else {
+                                    debug!(
+                                        "sink coordinator of {} is not running, skip it",
+                                        sink_id
+                                    );
                                 }
-                                worker_handle.finish_notifiers.push(finish_notifier);
-                            } else {
-                                debug!(
-                                    "sink coordinator of {} is not running. Notify finish directly",
-                                    sink_id
-                                );
-                                send_with_err_check!(finish_notifier, ());
                             }
+                            tokio::spawn(async move {
+                                let notify_res = join_all(rxs).await;
+                                for res in notify_res {
+                                    if let Err(e) = res {
+                                        error!(
+                                            "fail to wait for resetting sink manager worker: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                                send_with_err_check!(finish_notifier, ());
+                            });
                         } else {
                             self.clean_up().await;
                             send_with_err_check!(finish_notifier, ());
@@ -500,11 +497,20 @@ mod tests {
             [vec![1u8, 2u8], vec![3u8, 4u8]],
             [vec![5u8, 6u8], vec![7u8, 8u8]],
         ];
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-
-            async move { Ok((1, receiver)) }.boxed()
-        });
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
 
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
@@ -694,11 +700,20 @@ mod tests {
         let vnode = build_bitmap(&all_vnode);
 
         let metadata = [vec![1u8, 2u8], vec![3u8, 4u8]];
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-
-            async move { Ok((1, receiver)) }.boxed()
-        });
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
@@ -833,11 +848,20 @@ mod tests {
         let vnode1 = build_bitmap(first);
         let vnode2 = build_bitmap(second);
 
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-
-            async move { Ok((1, receiver)) }.boxed()
-        });
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
@@ -928,11 +952,20 @@ mod tests {
         };
         let vnode1 = build_bitmap(first);
         let vnode2 = build_bitmap(second);
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-
-            async move { Ok((1, receiver)) }.boxed()
-        });
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
@@ -1048,11 +1081,20 @@ mod tests {
 
         let metadata_scale_out = [vec![9u8, 10u8], vec![11u8, 12u8], vec![13u8, 14u8]];
         let metadata_scale_in = [vec![13u8, 14u8], vec![15u8, 16u8]];
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-
-            async move { Ok((1, receiver)) }.boxed()
-        });
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((1, receiver))
+                }
+                .boxed()
+            })
+        };
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
@@ -1490,11 +1532,20 @@ mod tests {
         let vnode = build_bitmap(&all_vnode);
 
         let metadata = vec![1u8, 2u8];
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-
-            async move { Ok((epoch1, receiver)) }.boxed()
-        });
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((epoch1, receiver))
+                }
+                .boxed()
+            })
+        };
 
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
@@ -1594,17 +1645,15 @@ mod tests {
 
         let metadata = vec![1u8, 2u8];
 
-        let senders = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
         let mock_subscriber: SinkCommittedEpochSubscriber = {
-            let senders = senders.clone();
+            let captured_sender = sender.clone();
             Arc::new(move |_sink_id: SinkId| {
-                let senders = senders.clone();
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
                 async move {
-                    let (sender, receiver) = unbounded_channel();
-                    let mut senders = senders.lock().await;
-                    senders.push(sender);
-
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
                     Ok((epoch0, receiver))
                 }
                 .boxed()
@@ -1692,8 +1741,8 @@ mod tests {
             assert_eq!(rows[0].1, epoch1 as i64);
             assert_eq!(rows[0].2, "PENDING");
 
-            let _guard = senders.lock().await;
-            let sender = _guard.first().unwrap().clone();
+            let guard = sender.lock().await;
+            let sender = guard.as_ref().unwrap().clone();
             sender.send(233).unwrap();
         }
 
@@ -1743,11 +1792,20 @@ mod tests {
         let vnode = build_bitmap(&all_vnode);
 
         let metadata = vec![1u8, 2u8];
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-
-            async move { Ok((epoch1, receiver)) }.boxed()
-        });
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((epoch1, receiver))
+                }
+                .boxed()
+            })
+        };
 
         let commit_attempt = Arc::new(AtomicI32::new(0));
 
@@ -1885,11 +1943,20 @@ mod tests {
 
         let metadata = vec![1u8, 2u8];
 
-        let mock_subscriber: SinkCommittedEpochSubscriber = Arc::new(move |_sink_id: SinkId| {
-            let (_sender, receiver) = unbounded_channel();
-
-            async move { Ok((epoch0, receiver)) }.boxed()
-        });
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((epoch0, receiver))
+                }
+                .boxed()
+            })
+        };
 
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
@@ -1966,7 +2033,7 @@ mod tests {
             .await
             .unwrap();
 
-        manager.stop_sink_coordinator(SinkId::from(1)).await;
+        manager.stop_sink_coordinator(vec![SinkId::from(1)]).await;
 
         {
             let rows = list_rows(&db).await;
