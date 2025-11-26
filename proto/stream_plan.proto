@@ -575,7 +575,8 @@ message HashJoinNode {
   bool is_append_only = 14;
 
   // Which encoding will be used to encode join rows in operator cache.
-  JoinEncodingType join_encoding_type = 15;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  JoinEncodingType join_encoding_type = 15 [deprecated = true];
 }
 
 message AsOfJoinNode {
@@ -599,7 +600,8 @@ message AsOfJoinNode {
   repeated bool null_safe = 9;
   optional plan_common.AsOfJoinDesc asof_desc = 10;
   // Which encoding will be used to encode join rows in operator cache.
-  JoinEncodingType join_encoding_type = 11;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  JoinEncodingType join_encoding_type = 11 [deprecated = true];
 }
 
 message TemporalJoinNode {
@@ -1001,6 +1003,11 @@ message VectorIndexWriteNode {
   catalog.Table table = 1;
 }
 
+message VectorIndexLookupJoinNode {
+  plan_common.VectorIndexReaderDesc reader_desc = 1;
+  uint32 vector_column_idx = 2;
+}
+
 message UpstreamSinkUnionNode {
   // It is always empty in the persisted metadata, and get filled before we spawn the actors.
   // The actual upstream info may be added and removed dynamically at runtime.
@@ -1098,6 +1105,7 @@ message StreamNode {
     LocalityProviderNode locality_provider = 152;
     EowcGapFillNode eowc_gap_fill = 153;
     GapFillNode gap_fill = 154;
+    VectorIndexLookupJoinNode vector_index_lookup_join = 155;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -1197,12 +1205,16 @@ message StreamActor {
   string mview_definition = 9;
   // Provide the necessary context, e.g. session info like time zone, for the actor.
   plan_common.ExprContext expr_context = 10;
+  // The config override for this actor.
+  string config_override = 11;
 }
 
 // The streaming context associated with a stream plan
 message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.
   string timezone = 1;
+  // The partial config of this job to override the global config.
+  string config_override = 2;
 }
 
 message BackfillOrder {

@@ -38,8 +38,8 @@ use super::{
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::starrocks::_default_stream_load_http_timeout_ms;
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{Sink, SinkParam, SinkWriter, SinkWriterParam};
+use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
+use crate::sink::{Sink, SinkParam, SinkWriterParam};
 
 pub const DORIS_SINK: &str = "doris";
 

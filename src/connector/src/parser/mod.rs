@@ -250,45 +250,27 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
 
         let batch = batch?;
         let batch_len = batch.len();
-
         if batch_len == 0 {
             continue;
         }
 
-        if batch.iter().all(|msg| msg.is_cdc_heartbeat()) {
-            // This `.iter().all(...)` will short-circuit after seeing the first `false`, so in
-            // normal cases, this should only involve a constant time cost.
-
-            // Now we know that there is no data message in the batch, let's just emit the latest
-            // heartbeat message. Note that all messages in `batch` should belong to the same
-            // split, so we don't have to do a split to heartbeats mapping here.
-
-            let heartbeat_msg = batch.last().unwrap();
-            tracing::debug!(
-                offset = heartbeat_msg.offset,
-                "handling a heartbeat message"
-            );
-            chunk_builder.heartbeat(MessageMeta {
-                source_meta: &heartbeat_msg.meta,
-                split_id: &heartbeat_msg.split_id,
-                offset: &heartbeat_msg.offset,
-            });
-
-            for chunk in chunk_builder.consume_ready_chunks() {
-                yield chunk;
-            }
-            continue; // continue to next batch
-        }
-
-        // When we reach here, there is at least one data message in the batch. We should ignore all
-        // heartbeat messages.
-
         let mut txn_started_in_last_batch = chunk_builder.is_in_transaction();
         let process_time_ms = chrono::Utc::now().timestamp_millis();
-
+        let mut is_heartbeat_emitted = false;
         for msg in batch {
             if msg.is_cdc_heartbeat() {
-                // ignore heartbeat messages
+                if !is_heartbeat_emitted {
+                    tracing::debug!(offset = msg.offset, "handling a heartbeat message");
+                    chunk_builder.heartbeat(MessageMeta {
+                        source_meta: &msg.meta,
+                        split_id: &msg.split_id,
+                        offset: &msg.offset,
+                    });
+                    for chunk in chunk_builder.consume_ready_chunks() {
+                        yield chunk;
+                    }
+                    is_heartbeat_emitted = true;
+                }
                 continue;
             }
 
