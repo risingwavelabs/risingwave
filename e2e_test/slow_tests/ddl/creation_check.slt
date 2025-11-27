@@ -2,6 +2,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+set enable_locality_backfill = false;
+
+statement ok
 create table t(v1 int);
 
 statement ok
