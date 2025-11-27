@@ -34,7 +34,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
+use crate::barrier::{Command, Reschedule, SharedActorInfo, SharedFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
     find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
@@ -79,21 +79,21 @@ pub struct ScaleController {
     pub reschedule_lock: RwLock<()>,
 }
 
-fn actor_info_equal(prev: &InflightActorInfo, curr: &InflightActorInfo) -> bool {
+fn actor_info_equal(prev: &SharedActorInfo, curr: &InflightActorInfo) -> bool {
     prev.worker_id == curr.worker_id
         && prev.vnode_bitmap == curr.vnode_bitmap
         && prev.splits == curr.splits
 }
 
 fn actors_equivalent_ignore_id(
-    prev: &HashMap<ActorId, InflightActorInfo>,
+    prev: &HashMap<ActorId, SharedActorInfo>,
     curr: &HashMap<ActorId, InflightActorInfo>,
 ) -> bool {
     if prev.len() != curr.len() {
         return false;
     }
 
-    let mut prev_by_worker: BTreeMap<WorkerId, Vec<&InflightActorInfo>> = BTreeMap::new();
+    let mut prev_by_worker: BTreeMap<WorkerId, Vec<&SharedActorInfo>> = BTreeMap::new();
     let mut curr_by_worker: BTreeMap<WorkerId, Vec<&InflightActorInfo>> = BTreeMap::new();
 
     for info in prev.values() {
@@ -860,11 +860,27 @@ impl ScaleController {
 mod tests {
     use std::collections::HashMap;
 
+    use risingwave_common::bitmap::Bitmap;
+
     use super::*;
 
-    fn info(worker_id: WorkerId, vnode_bitmap: Option<Bitmap>) -> InflightActorInfo {
+    fn inflight_info(
+        worker_id: impl Into<WorkerId>,
+        vnode_bitmap: Option<Bitmap>,
+    ) -> InflightActorInfo {
         InflightActorInfo {
-            worker_id,
+            worker_id: worker_id.into(),
+            vnode_bitmap,
+            splits: vec![],
+        }
+    }
+
+    fn shared_info(
+        worker_id: impl Into<WorkerId>,
+        vnode_bitmap: Option<Bitmap>,
+    ) -> SharedActorInfo {
+        SharedActorInfo {
+            worker_id: worker_id.into(),
             vnode_bitmap,
             splits: vec![],
         }
@@ -873,8 +889,8 @@ mod tests {
     #[test]
     fn actors_equivalent_ignore_id_simple() {
         let bitmap = Bitmap::from_indices(8, &[1, 3, 5]);
-        let prev = HashMap::from([(1, info(100, Some(bitmap.clone())))]);
-        let curr = HashMap::from([(7, info(100, Some(bitmap)))]);
+        let prev = HashMap::from([(1.into(), shared_info(100, Some(bitmap.clone())))]);
+        let curr = HashMap::from([(7.into(), inflight_info(100, Some(bitmap)))]);
 
         assert!(actors_equivalent_ignore_id(&prev, &curr));
     }
@@ -885,12 +901,12 @@ mod tests {
         let bitmap_b = Bitmap::from_indices(8, &[1, 3]);
 
         let prev = HashMap::from([
-            (1, info(100, Some(bitmap_a.clone()))),
-            (2, info(100, Some(bitmap_b.clone()))),
+            (1.into(), shared_info(100, Some(bitmap_a.clone()))),
+            (2.into(), shared_info(100, Some(bitmap_b.clone()))),
         ]);
         let curr = HashMap::from([
-            (10, info(100, Some(bitmap_b))),
-            (11, info(100, Some(bitmap_a))),
+            (10.into(), inflight_info(100, Some(bitmap_b))),
+            (11.into(), inflight_info(100, Some(bitmap_a))),
         ]);
 
         assert!(actors_equivalent_ignore_id(&prev, &curr));
@@ -899,8 +915,8 @@ mod tests {
     #[test]
     fn actors_equivalent_ignore_id_detects_differences() {
         let bitmap = Bitmap::from_indices(8, &[1, 3, 5]);
-        let prev = HashMap::from([(1, info(100, Some(bitmap.clone())))]);
-        let curr = HashMap::from([(7, info(200, Some(bitmap)))]);
+        let prev = HashMap::from([(1.into(), shared_info(100, Some(bitmap.clone())))]);
+        let curr = HashMap::from([(7.into(), inflight_info(200, Some(bitmap)))]);
 
         assert!(!actors_equivalent_ignore_id(&prev, &curr));
     }
@@ -908,10 +924,10 @@ mod tests {
     #[test]
     fn actors_equivalent_ignore_id_requires_same_count() {
         let bitmap = Bitmap::from_indices(8, &[1, 3]);
-        let prev = HashMap::from([(1, info(100, Some(bitmap.clone())))]);
+        let prev = HashMap::from([(1.into(), shared_info(100, Some(bitmap.clone())))]);
         let curr = HashMap::from([
-            (7, info(100, Some(bitmap.clone()))),
-            (8, info(100, Some(bitmap))),
+            (7.into(), inflight_info(100, Some(bitmap.clone()))),
+            (8.into(), inflight_info(100, Some(bitmap))),
         ]);
 
         assert!(!actors_equivalent_ignore_id(&prev, &curr));
