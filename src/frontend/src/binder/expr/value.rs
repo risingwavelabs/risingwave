@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::{
     DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl, StructType,
@@ -281,8 +280,7 @@ impl Binder {
             .iter()
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
-        let data_type =
-            StructType::unnamed(exprs.iter().map(|e| e.return_type()).collect_vec()).into();
+        let data_type = StructType::unnamed(exprs.iter().map(|e| e.return_type())).into();
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }

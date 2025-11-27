@@ -89,7 +89,7 @@ impl StructType {
     }
 
     /// Creates a struct type with unnamed fields. The names will be assigned `f1`, `f2`, etc.
-    pub fn unnamed(fields: Vec<DataType>) -> Self {
+    pub fn unnamed(fields: impl IntoIterator<Item = DataType>) -> Self {
         let fields = fields
             .into_iter()
             .enumerate()
