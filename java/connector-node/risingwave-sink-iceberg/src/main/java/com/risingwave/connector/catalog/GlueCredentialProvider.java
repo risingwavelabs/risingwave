@@ -21,6 +21,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sts.StsClient;
@@ -44,18 +45,15 @@ public class GlueCredentialProvider implements AwsCredentialsProvider {
 
     public static GlueCredentialProvider create(Map<String, String> config) {
         Validate.notNull(config, "Config must not be null");
-        String accessKey =
-                Validate.notNull(
-                        config.get("glue.access-key-id"),
-                        "Glue access key must not be null.",
-                        new Object[0]);
-        String secretKey =
-                Validate.notNull(
-                        config.get("glue.secret-access-key"),
-                        "Glue secret key must not be null.",
-                        new Object[0]);
+        String accessKey = config.get("glue.access-key-id");
+        String secretKey = config.get("glue.secret-access-key");
+        boolean useDefaultChain =
+                Boolean.parseBoolean(
+                        config.getOrDefault(
+                                "glue.use-default-credential-chain", Boolean.FALSE.toString()));
 
-        AwsCredentials baseCredentials = AwsBasicCredentials.create(accessKey, secretKey);
+        AwsCredentials baseCredentials =
+                resolveBaseCredentials(accessKey, secretKey, useDefaultChain);
         String assumeRoleArn = config.get("glue.iam-role-arn");
         if (StringUtils.isBlank(assumeRoleArn)) {
             return new GlueCredentialProvider(baseCredentials);
@@ -68,6 +66,22 @@ public class GlueCredentialProvider implements AwsCredentialsProvider {
                         config.get("glue.iam-role-session-name"),
                         config.get("glue.region"));
         return new GlueCredentialProvider(assumed);
+    }
+
+    private static AwsCredentials resolveBaseCredentials(
+            String accessKey, String secretKey, boolean useDefaultChain) {
+        if (!StringUtils.isBlank(accessKey) && !StringUtils.isBlank(secretKey)) {
+            return AwsBasicCredentials.create(accessKey, secretKey);
+        }
+
+        if (useDefaultChain) {
+            AwsCredentialsProvider provider = DefaultCredentialsProvider.create();
+            return provider.resolveCredentials();
+        }
+
+        Validate.notNull(accessKey, "Glue access key must not be null.", new Object[0]);
+        Validate.notNull(secretKey, "Glue secret key must not be null.", new Object[0]);
+        return AwsBasicCredentials.create(accessKey, secretKey);
     }
 
     private static AwsCredentials assumeRole(
