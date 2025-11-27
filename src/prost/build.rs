@@ -660,6 +660,7 @@ for_all_wrapped_id_fields! (
             associated_table_id: TableId,
         }
         SubscriptionUpstreamInfo {
+            subscriber_id: SubscriberId,
             upstream_mv_table_id: TableId,
         }
         ThrottleMutation {
@@ -734,6 +735,7 @@ for_all_wrapped_id_fields! (
         InjectBarrierRequest.BuildActorInfo {
             fragment_upstreams: FragmentId,
             actor_id: ActorId,
+            initial_subscriber_ids: SubscriberId,
         }
         InjectBarrierRequest.FragmentBuildActorInfo {
             fragment_id: FragmentId,
