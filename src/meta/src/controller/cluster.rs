@@ -734,12 +734,30 @@ impl ClusterControllerInner {
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             } else if worker.worker_type == WorkerType::Compactor {
-                let property = property.unwrap();
-                let mut property: worker_property::ActiveModel = property.into();
-                property.is_iceberg_compactor = Set(add_property.is_iceberg_compactor);
-                property.internal_rpc_host_addr = Set(Some(add_property.internal_rpc_host_addr));
+                if let Some(property) = property {
+                    let mut property: worker_property::ActiveModel = property.into();
+                    property.is_iceberg_compactor = Set(add_property.is_iceberg_compactor);
+                    property.internal_rpc_host_addr =
+                        Set(Some(add_property.internal_rpc_host_addr));
 
-                WorkerProperty::update(property).exec(&txn).await?;
+                    WorkerProperty::update(property).exec(&txn).await?;
+                } else {
+                    let property = worker_property::ActiveModel {
+                        worker_id: Set(worker.worker_id),
+                        parallelism: Set(add_property
+                            .parallelism
+                            .try_into()
+                            .expect("invalid parallelism")),
+                        is_streaming: Set(false),
+                        is_serving: Set(false),
+                        is_unschedulable: Set(false),
+                        internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                        resource_group: Set(None),
+                        is_iceberg_compactor: Set(add_property.is_iceberg_compactor),
+                    };
+
+                    WorkerProperty::insert(property).exec(&txn).await?;
+                }
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
