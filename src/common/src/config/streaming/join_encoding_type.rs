@@ -15,11 +15,26 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
-#[derive(Copy, Default, Debug, Clone, PartialEq, Eq, Hash)]
+use risingwave_pb::stream_plan::PbJoinEncodingType;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
+
+#[derive(
+    Copy, Default, Debug, Clone, PartialEq, Eq, Hash, SerializeDisplay, DeserializeFromStr,
+)]
 pub enum JoinEncodingType {
     #[default]
     Memory = 1,
     Cpu = 2,
+}
+
+impl From<PbJoinEncodingType> for JoinEncodingType {
+    fn from(value: PbJoinEncodingType) -> Self {
+        match value {
+            PbJoinEncodingType::Unspecified => Self::default(),
+            PbJoinEncodingType::MemoryOptimized => Self::Memory,
+            PbJoinEncodingType::CpuOptimized => Self::Cpu,
+        }
+    }
 }
 
 impl FromStr for JoinEncodingType {

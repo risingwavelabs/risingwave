@@ -15,13 +15,14 @@
 use std::cmp::min;
 use std::sync::Arc;
 
+use risingwave_common::config::streaming::JoinEncodingType;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{
     InputRefExpression, NonStrictExpression, build_func_non_strict, build_non_strict_from_prost,
 };
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_pb::stream_plan::{HashJoinNode, JoinEncodingType as JoinEncodingTypeProto};
+use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::*;
 use crate::common::table::state_table::{StateTable, StateTableBuilder};
@@ -142,9 +143,12 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .build()
             .await;
 
+        // Previously, the `join_encoding_type` is persisted in the plan node.
+        // Now it's always `Unspecified` and we should refer to the job's config override.
+        #[allow(deprecated)]
         let join_encoding_type = node
             .get_join_encoding_type()
-            .unwrap_or(JoinEncodingTypeProto::MemoryOptimized);
+            .map_or(params.config.developer.join_encoding_type, Into::into);
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -199,7 +203,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     join_key_data_types: Vec<DataType>,
     chunk_size: usize,
     high_join_amplification_threshold: usize,
-    join_encoding_type: JoinEncodingTypeProto,
+    join_encoding_type: JoinEncodingType,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
@@ -241,11 +245,10 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                 match (self.join_type_proto, self.join_encoding_type) {
                     (JoinTypeProto::AsofInner, _)
                     | (JoinTypeProto::AsofLeftOuter, _)
-                    | (JoinTypeProto::Unspecified, _)
-                    | (_, JoinEncodingTypeProto::Unspecified ) => unreachable!(),
+                    | (JoinTypeProto::Unspecified, _) => unreachable!(),
                     $(
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::MemoryOptimized) => build!($join_type, MemoryEncoding),
-                        (JoinTypeProto::$join_type, JoinEncodingTypeProto::CpuOptimized) => build!($join_type, CpuEncoding),
+                        (JoinTypeProto::$join_type, JoinEncodingType::Memory) => build!($join_type, MemoryEncoding),
+                        (JoinTypeProto::$join_type, JoinEncodingType::Cpu) => build!($join_type, CpuEncoding),
                     )*
                 }
             };

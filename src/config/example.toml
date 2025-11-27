@@ -219,6 +219,7 @@ stream_mem_preload_state_table_ids_whitelist = []
 stream_mem_preload_state_table_ids_blacklist = []
 stream_aggressive_noop_update_elimination = false
 stream_refresh_scheduler_interval_sec = 60
+stream_join_encoding_type = "memory_optimized"
 
 [streaming.developer.stream_compute_client_config]
 connect_timeout_secs = 5

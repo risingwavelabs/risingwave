@@ -5,7 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-VERSION=11
+VERSION=17
 
 while getopts 'p:v:' opt; do
     case ${opt} in
@@ -31,11 +31,12 @@ RISINGWAVE_ROOT=${PWD}
 
 echo "--- install java"
 sudo apt-get update -y
-if [ "$VERSION" = "11" ]; then
-  echo "The test imgae default java version is 11, no need to install"
+if [ "$VERSION" = "17" ] || [ "$VERSION" = "21" ]; then
+  echo "The test image default java version is 11, need to install java $VERSION"
+  sudo apt install openjdk-"$VERSION"-jdk openjdk-"$VERSION"-jre -y
 else
-  echo "The test imgae default java version is 11, need to install java 17"
-  sudo apt install openjdk-17-jdk openjdk-17-jre -y
+  echo "Error: Java version $VERSION is not supported"
+  exit 1
 fi
 java_version=$(java --version 2>&1)
 echo "$java_version"
