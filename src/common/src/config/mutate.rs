@@ -18,6 +18,7 @@ use serde::Serialize;
 use toml::{Table, Value};
 
 def_anyhow_newtype! {
+    /// Error type for mutating a configuration [`toml::Table`].
     pub ConfigMutateError,
 
     toml::ser::Error => transparent,
@@ -28,6 +29,9 @@ enum Op {
     Delete,
 }
 
+/// Mutate a [`toml::Table`] at the given dot-separated path.
+///
+/// Returns an error if the path is invalid.
 fn mutate(map: &mut Table, path: &str, op: Op) -> Result<(), ConfigMutateError> {
     let segments = path.split('.').collect_vec();
     let (key, segments) = segments.split_last().context("empty path")?;
@@ -67,12 +71,16 @@ fn mutate(map: &mut Table, path: &str, op: Op) -> Result<(), ConfigMutateError> 
 #[easy_ext::ext(TomlTableMutateExt)]
 impl Table {
     /// Upsert a value at the given dot-separated path.
+    ///
+    /// Returns an error if the path or the value is invalid.
     pub fn upsert(&mut self, path: &str, value: impl Serialize) -> Result<(), ConfigMutateError> {
         let value = Value::try_from(value)?;
         mutate(self, path, Op::Upsert(value))
     }
 
     /// Delete a value at the given path.
+    ///
+    /// Returns an error if the path is invalid.
     pub fn delete(&mut self, path: &str) -> Result<(), ConfigMutateError> {
         mutate(self, path, Op::Delete)
     }

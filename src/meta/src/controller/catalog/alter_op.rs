@@ -947,6 +947,7 @@ impl CatalogController {
         let mut table: toml::Table =
             toml::from_str(&config_override).context("invalid streaming job config")?;
 
+        // The frontend guarantees that there's no duplicated keys in `to_add` and `to_remove`.
         for (key, value) in entries_to_add {
             let value: toml::Value = value
                 .parse()
@@ -955,7 +956,6 @@ impl CatalogController {
                 .upsert(&key, value)
                 .with_context(|| format!("failed to set config path {key}"))?;
         }
-
         for key in keys_to_remove {
             table
                 .delete(&key)
@@ -965,7 +965,6 @@ impl CatalogController {
         let updated_config_override = table.to_string();
 
         // Validate the config override by trying to merge it to the default config.
-        // Reject unrecognized entries.
         {
             let merged = merge_streaming_config_section(
                 &StreamingConfig::default(),
@@ -973,6 +972,9 @@ impl CatalogController {
             )
             .context("invalid streaming job config override")?;
 
+            // Reject unrecognized entries.
+            // Note: If these unrecognized entries are pre-existing, we also reject them here.
+            // Users are able to fix them by issuing a `RESET` first.
             if let Some(merged) = merged {
                 let unrecognized_keys = merged.unrecognized_keys().collect_vec();
                 if !unrecognized_keys.is_empty() {
