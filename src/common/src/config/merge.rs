@@ -128,8 +128,8 @@ mod tests {
             unsafe_enable_strict_consistency = false
 
             [streaming.developer]
-            stream_chunk_size = 114514
-            stream_compute_client_config = { connect_timeout_secs = 114514 }
+            chunk_size = 114514
+            compute_client_config = { connect_timeout_secs = 114514 }
         "#;
         let merged = merge_streaming_config_section(&base, partial)
             .unwrap()
@@ -160,7 +160,7 @@ mod tests {
         let base = StreamingConfig::default();
         let partial = r#"
             [batch.developer]
-            batch_chunk_size = 114514
+            chunk_size = 114514
         "#;
         let merged = merge_streaming_config_section(&base, partial).unwrap();
         assert!(
@@ -210,12 +210,12 @@ mod tests {
         let base = StreamingConfig::default();
         let partial = r#"
             [streaming.developer]
-            stream_chunk_size = "omakase"
+            chunk_size = "omakase"
         "#;
         let error = merge_streaming_config_section(&base, partial).unwrap_err();
         expect_test::expect![[r#"
             failed to deserialize merged config: invalid type: string "omakase", expected usize
-            in `developer.stream_chunk_size`
+            in `developer.chunk_size`
         "#]]
         .assert_eq(&error.to_report_string());
     }
