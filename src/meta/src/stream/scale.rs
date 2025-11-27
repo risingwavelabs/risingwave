@@ -222,6 +222,64 @@ pub fn rebalance_actor_vnode(
 
     let (prev_expected, _) = vnode_count.div_rem(&actors.len());
 
+    // Guard rail: if any existing actor (excluding the ones to remove) holds fewer than
+    // `prev_expected` vnodes, the historical distribution is already invalid. Instead of
+    // panicking, rebuild a fresh even distribution across the surviving + new actors so that
+    // meta can proceed.
+    let has_under_allocated = actors
+        .iter()
+        .filter(|actor| !actors_to_remove.contains(&actor.actor_id))
+        .any(|actor| {
+            let count = actor
+                .vnode_bitmap
+                .as_ref()
+                .expect("vnode bitmap unset")
+                .count_ones();
+            count < prev_expected
+        });
+
+    if has_under_allocated {
+        tracing::warn!(
+            ?prev_expected,
+            actors = actors.len(),
+            actors_to_remove = actors_to_remove.len(),
+            actors_to_create = actors_to_create.len(),
+            "rebalance_actor_vnode detected under-allocated actors; rebuild distribution evenly"
+        );
+
+        let mut future_actors: Vec<_> = actors
+            .iter()
+            .filter(|actor| !actors_to_remove.contains(&actor.actor_id))
+            .map(|actor| actor.actor_id as ActorId)
+            .collect();
+        future_actors.extend(actors_to_create.iter().copied());
+        future_actors.sort_unstable();
+        future_actors.dedup();
+
+        assert!(
+            !future_actors.is_empty(),
+            "should have at least one actor after rebuild"
+        );
+
+        let mut builders: HashMap<ActorId, BitmapBuilder> = future_actors
+            .iter()
+            .map(|id| (*id, BitmapBuilder::zeroed(vnode_count)))
+            .collect();
+
+        for vnode in 0..vnode_count {
+            let actor_id = future_actors[vnode % future_actors.len()];
+            builders
+                .get_mut(&actor_id)
+                .expect("builder must exist")
+                .set(vnode, true);
+        }
+
+        return builders
+            .into_iter()
+            .map(|(actor_id, builder)| (actor_id, builder.finish()))
+            .collect();
+    }
+
     let prev_remain = removed
         .iter()
         .map(|(_, bitmap)| {
