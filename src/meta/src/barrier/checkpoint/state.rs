@@ -19,6 +19,7 @@ use std::mem::take;
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
 use risingwave_pb::stream_plan::{
     PbDropSubscriptionsMutation, PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo,
@@ -26,8 +27,7 @@ use risingwave_pb::stream_plan::{
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::checkpoint::DatabaseCheckpointControl;
-use crate::barrier::edge_builder::FragmentEdgeBuildResult;
+use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
 };
@@ -35,6 +35,7 @@ use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::utils::NodeToCollect;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::stream::fill_snapshot_backfill_epoch;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(in crate::barrier) struct BarrierWorkerState {
@@ -122,6 +123,7 @@ pub(super) struct ApplyCommandInfo {
     pub table_ids_to_commit: HashSet<TableId>,
     pub jobs_to_wait: HashSet<JobId>,
     pub node_to_collect: NodeToCollect,
+    pub command: Option<Command>,
 }
 
 impl DatabaseCheckpointControl {
@@ -129,11 +131,77 @@ impl DatabaseCheckpointControl {
     /// will be removed from the state after the info get resolved.
     pub(super) fn apply_command(
         &mut self,
-        command: Option<&Command>,
+        mut command: Option<Command>,
         barrier_info: &BarrierInfo,
-        edges: &mut Option<FragmentEdgeBuildResult>,
         control_stream_manager: &mut ControlStreamManager,
+        hummock_version_stats: &HummockVersionStats,
     ) -> MetaResult<ApplyCommandInfo> {
+        let mut edges = self
+            .database_info
+            .build_edge(command.as_ref(), &*control_stream_manager);
+
+        // Insert newly added snapshot backfill job
+        if let &mut Some(Command::CreateStreamingJob {
+            ref mut job_type,
+            ref mut info,
+            ref cross_db_snapshot_backfill_info,
+        }) = &mut command
+        {
+            match job_type {
+                CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
+                    for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
+                        fill_snapshot_backfill_epoch(
+                            &mut fragment.nodes,
+                            None,
+                            cross_db_snapshot_backfill_info,
+                        )?;
+                    }
+                }
+                CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
+                    assert!(!self.state.is_paused());
+                    // set snapshot epoch of upstream table for snapshot backfill
+                    for snapshot_backfill_epoch in snapshot_backfill_info
+                        .upstream_mv_table_id_to_backfill_epoch
+                        .values_mut()
+                    {
+                        assert_eq!(
+                            snapshot_backfill_epoch.replace(barrier_info.prev_epoch()),
+                            None,
+                            "must not set previously"
+                        );
+                    }
+                    for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
+                        fill_snapshot_backfill_epoch(
+                            &mut fragment.nodes,
+                            Some(snapshot_backfill_info),
+                            cross_db_snapshot_backfill_info,
+                        )?;
+                    }
+                    let job_id = info.stream_job_fragments.stream_job_id();
+                    let snapshot_backfill_upstream_tables = snapshot_backfill_info
+                        .upstream_mv_table_id_to_backfill_epoch
+                        .keys()
+                        .cloned()
+                        .collect();
+
+                    let job = CreatingStreamingJobControl::new(
+                        info,
+                        snapshot_backfill_upstream_tables,
+                        barrier_info.prev_epoch(),
+                        hummock_version_stats,
+                        control_stream_manager,
+                        edges.as_mut().expect("should exist"),
+                    )?;
+
+                    self.database_info
+                        .shared_actor_infos
+                        .upsert(self.database_id, job.fragment_infos_with_job_id());
+
+                    self.creating_streaming_job_controls.insert(job_id, job);
+                }
+            }
+        }
+
         // update the fragment_infos outside pre_apply
         let post_apply_changes = if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(_),
@@ -142,7 +210,7 @@ impl DatabaseCheckpointControl {
         {
             None
         } else if let Some((new_job, fragment_changes)) =
-            command.and_then(Command::fragment_changes)
+            command.as_ref().and_then(Command::fragment_changes)
         {
             Some(self.database_info.pre_apply(new_job, fragment_changes))
         } else {
@@ -182,7 +250,7 @@ impl DatabaseCheckpointControl {
 
         let mut table_ids_to_commit: HashSet<_> = self.database_info.existing_table_ids().collect();
         let actors_to_create = command.as_ref().and_then(|command| {
-            command.actors_to_create(&self.database_info, edges, control_stream_manager)
+            command.actors_to_create(&self.database_info, &mut edges, control_stream_manager)
         });
         let node_actors =
             InflightFragmentInfo::actor_ids_to_collect(self.database_info.fragment_infos());
@@ -202,7 +270,7 @@ impl DatabaseCheckpointControl {
         let mutation = if let Some(c) = &command {
             c.to_mutation(
                 prev_is_paused,
-                edges,
+                &mut edges,
                 control_stream_manager,
                 &mut self.database_info,
             )?
@@ -303,6 +371,7 @@ impl DatabaseCheckpointControl {
             table_ids_to_commit,
             jobs_to_wait: finished_snapshot_backfill_jobs,
             node_to_collect,
+            command,
         })
     }
 }

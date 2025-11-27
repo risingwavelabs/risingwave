@@ -29,7 +29,6 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
-use thiserror_ext::AsReport;
 use tracing::{debug, warn};
 
 use crate::barrier::cdc_progress::CdcProgress;
@@ -52,7 +51,6 @@ use crate::barrier::utils::{
 use crate::barrier::{Command, CreateStreamingJobType};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::fill_snapshot_backfill_epoch;
 use crate::{MetaError, MetaResult};
 
 pub(crate) struct CheckpointControl {
@@ -964,7 +962,7 @@ impl DatabaseCheckpointControl {
     ) -> MetaResult<()> {
         let curr_epoch = self.state.in_flight_prev_epoch().next();
 
-        let (mut command, mut notifiers) = if let Some((command, notifiers)) = command {
+        let (command, mut notifiers) = if let Some((command, notifiers)) = command {
             (Some(command), notifiers)
         } else {
             (None, vec![])
@@ -1007,7 +1005,9 @@ impl DatabaseCheckpointControl {
             return Ok(());
         }
 
-        if self.database_info.is_empty() {
+        if !matches!(&command, Some(Command::CreateStreamingJob { .. }))
+            && self.database_info.is_empty()
+        {
             assert!(
                 self.creating_streaming_job_controls.is_empty(),
                 "should not have snapshot backfill job when there is no normal job in database"
@@ -1020,106 +1020,40 @@ impl DatabaseCheckpointControl {
             return Ok(());
         };
 
+        if let Some(Command::CreateStreamingJob {
+            job_type: CreateStreamingJobType::SnapshotBackfill(_),
+            ..
+        }) = &command
+            && self.state.is_paused()
+        {
+            warn!("cannot create streaming job with snapshot backfill when paused");
+            for notifier in notifiers {
+                notifier.notify_start_failed(
+                    anyhow!("cannot create streaming job with snapshot backfill when paused",)
+                        .into(),
+                );
+            }
+            return Ok(());
+        }
+
         let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
-            tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch.value().0, "new barrier enqueued");
-        });
+                tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch.value().0, "new barrier enqueued");
+            });
         span.record("epoch", barrier_info.curr_epoch.value().0);
-
-        let mut edges = self
-            .database_info
-            .build_edge(command.as_ref(), &*control_stream_manager);
-
-        // Insert newly added creating job
-        if let Some(Command::CreateStreamingJob {
-            job_type,
-            info,
-            cross_db_snapshot_backfill_info,
-        }) = &mut command
-        {
-            match job_type {
-                CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
-                    for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
-                        fill_snapshot_backfill_epoch(
-                            &mut fragment.nodes,
-                            None,
-                            cross_db_snapshot_backfill_info,
-                        )?;
-                    }
-                }
-                CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
-                    if self.state.is_paused() {
-                        warn!("cannot create streaming job with snapshot backfill when paused");
-                        for notifier in notifiers {
-                            notifier.notify_start_failed(
-                                anyhow!("cannot create streaming job with snapshot backfill when paused",)
-                                    .into(),
-                            );
-                        }
-                        return Ok(());
-                    }
-                    // set snapshot epoch of upstream table for snapshot backfill
-                    for snapshot_backfill_epoch in snapshot_backfill_info
-                        .upstream_mv_table_id_to_backfill_epoch
-                        .values_mut()
-                    {
-                        assert_eq!(
-                            snapshot_backfill_epoch.replace(barrier_info.prev_epoch()),
-                            None,
-                            "must not set previously"
-                        );
-                    }
-                    for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
-                        if let Err(e) = fill_snapshot_backfill_epoch(
-                            &mut fragment.nodes,
-                            Some(snapshot_backfill_info),
-                            cross_db_snapshot_backfill_info,
-                        ) {
-                            warn!(e = %e.as_report(), "failed to fill snapshot backfill epoch");
-                            for notifier in notifiers {
-                                notifier.notify_start_failed(e.clone());
-                            }
-                            return Ok(());
-                        };
-                    }
-                    let job_id = info.stream_job_fragments.stream_job_id();
-                    let snapshot_backfill_upstream_tables = snapshot_backfill_info
-                        .upstream_mv_table_id_to_backfill_epoch
-                        .keys()
-                        .cloned()
-                        .collect();
-
-                    let job = CreatingStreamingJobControl::new(
-                        info,
-                        snapshot_backfill_upstream_tables,
-                        barrier_info.prev_epoch(),
-                        hummock_version_stats,
-                        control_stream_manager,
-                        edges.as_mut().expect("should exist"),
-                    )?;
-
-                    self.database_info
-                        .shared_actor_infos
-                        .upsert(self.database_id, job.fragment_infos_with_job_id());
-
-                    self.creating_streaming_job_controls.insert(job_id, job);
-                }
-            }
-        }
-
-        let command = command;
 
         let ApplyCommandInfo {
             mv_subscription_max_retention,
             table_ids_to_commit,
             jobs_to_wait,
             node_to_collect,
+            command,
         } = match self.apply_command(
-            command.as_ref(),
+            command,
             &barrier_info,
-            &mut edges,
             control_stream_manager,
+            hummock_version_stats,
         ) {
             Ok(info) => info,
             Err(err) => {
