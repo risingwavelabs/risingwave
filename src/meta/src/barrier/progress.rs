@@ -433,9 +433,12 @@ impl CreateMviewProgressTracker {
                     version_stats,
                     backfill_order_state,
                 );
+                let pending_backfill_nodes = progress
+                    .backfill_order_state
+                    .current_backfill_node_fragment_ids();
                 CreateMviewStatus::Backfilling {
                     progress,
-                    pending_backfill_nodes: vec![],
+                    pending_backfill_nodes,
                     table_ids_to_truncate: vec![],
                 }
             };
@@ -628,6 +631,9 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             backfill_order_state,
         );
+        let pending_backfill_nodes = progress
+            .backfill_order_state
+            .current_backfill_node_fragment_ids();
         Self {
             job_id,
             definition,
@@ -635,7 +641,7 @@ impl CreateMviewProgressTracker {
             tracking_job,
             status: CreateMviewStatus::Backfilling {
                 progress,
-                pending_backfill_nodes: vec![],
+                pending_backfill_nodes,
                 table_ids_to_truncate: vec![],
             },
         }
