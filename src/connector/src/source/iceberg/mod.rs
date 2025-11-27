@@ -260,6 +260,13 @@ pub struct IcebergSplitEnumerator {
     config: IcebergProperties,
 }
 
+#[derive(Debug, Clone)]
+pub struct IcebergDeleteParameters {
+    pub equality_delete_columns: Vec<String>,
+    pub has_position_delete: bool,
+    pub snapshot_id: Option<i64>,
+}
+
 #[async_trait]
 impl SplitEnumerator for IcebergSplitEnumerator {
     type Properties = IcebergProperties;
@@ -552,16 +559,24 @@ impl IcebergSplitEnumerator {
     pub async fn get_delete_parameters(
         &self,
         time_travel_info: Option<IcebergTimeTravelInfo>,
-    ) -> ConnectorResult<(Vec<String>, bool, Option<i64>)> {
+    ) -> ConnectorResult<IcebergDeleteParameters> {
         let table = self.config.load_table().await?;
         let snapshot_id = Self::get_snapshot_id(&table, time_travel_info)?;
         match snapshot_id {
             Some(snapshot_id) => {
                 let (delete_columns, have_position_delete) =
                     Self::all_delete_parameters(&table, snapshot_id).await?;
-                Ok((delete_columns, have_position_delete, Some(snapshot_id)))
+                Ok(IcebergDeleteParameters {
+                    equality_delete_columns: delete_columns,
+                    has_position_delete: have_position_delete,
+                    snapshot_id: Some(snapshot_id),
+                })
             }
-            None => Ok((vec![], false, None)),
+            None => Ok(IcebergDeleteParameters {
+                equality_delete_columns: vec![],
+                has_position_delete: false,
+                snapshot_id: None,
+            }),
         }
     }
 
