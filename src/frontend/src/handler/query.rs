@@ -48,21 +48,71 @@ use crate::scheduler::{
 };
 use crate::session::SessionImpl;
 
+/// Choice between running RisingWave's own batch executor (Rw) or a `DataFusion` (DF) logical plan.
+pub enum BatchPlanChoice {
+    Rw(BatchQueryPlanResult),
+    #[cfg(feature = "datafusion")]
+    Df {
+        df_plan: Arc<datafusion::logical_expr::LogicalPlan>,
+        stmt_type: StatementType,
+    },
+}
+
+impl BatchPlanChoice {
+    pub fn unwrap_rw(self) -> BatchQueryPlanResult {
+        match self {
+            BatchPlanChoice::Rw(result) => result,
+            #[cfg(feature = "datafusion")]
+            BatchPlanChoice::Df { .. } => {
+                panic!("called `BatchPlanChoice::unwrap_rw()` on a `DataFusion` plan")
+            }
+        }
+    }
+}
+
 pub async fn handle_query(
     handler_args: HandlerArgs,
     stmt: Statement,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
-        // Time zone is used by Hummock time travel query.
-        risingwave_expr::expr_context::TIME_ZONE::sync_scope(session.config().timezone(), || {
-            gen_batch_plan_fragmenter(&session, plan_result)
-        })?
-    };
-    execute(session, plan_fragmenter_result, formats).await
+    let context = OptimizerContext::from_handler_args(handler_args);
+
+    #[cfg(feature = "datafusion")]
+    {
+        // We construct a future manually here to make sure this async function is `Send`.
+        // `BatchPlanChoice` is non-Send, and rust cannot prove it has dropped before await point.
+        // See more details in https://github.com/rust-lang/rust/issues/128095
+        use futures::FutureExt;
+
+        let future = match gen_batch_plan_by_statement(&session, context.into(), stmt)? {
+            BatchPlanChoice::Rw(plan_result) => {
+                let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                    session.config().timezone(),
+                    || gen_batch_plan_fragmenter(&session, plan_result),
+                )?;
+                execute_risingwave_plan(session, plan_fragmenter_result, formats).left_future()
+            }
+            BatchPlanChoice::Df { df_plan, stmt_type } => {
+                execute_datafusion_plan(session, df_plan, stmt_type, formats).right_future()
+            }
+        };
+        future.await
+    }
+
+    #[cfg(not(feature = "datafusion"))]
+    {
+        let future = match gen_batch_plan_by_statement(&session, context.into(), stmt)? {
+            BatchPlanChoice::Rw(plan_result) => {
+                let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                    session.config().timezone(),
+                    || gen_batch_plan_fragmenter(&session, plan_result),
+                )?;
+                execute_risingwave_plan(session, plan_fragmenter_result, formats)
+            }
+        };
+        future.await
+    }
 }
 
 fn handle_parse_inner(binder: Binder, statement: Statement) -> Result<PrepareStatement> {
@@ -113,14 +163,15 @@ pub async fn handle_execute(
             let session = handler_args.session.clone();
             let plan_fragmenter_result = {
                 let context = OptimizerContext::from_handler_args(handler_args);
-                let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                let plan_result =
+                    gen_batch_query_plan(&session, context.into(), bound_result)?.unwrap_rw();
                 // Time zone is used by Hummock time travel query.
                 risingwave_expr::expr_context::TIME_ZONE::sync_scope(
                     session.config().timezone(),
                     || gen_batch_plan_fragmenter(&session, plan_result),
                 )?
             };
-            execute(session, plan_fragmenter_result, result_formats).await
+            execute_risingwave_plan(session, plan_fragmenter_result, result_formats).await
         }
         Statement::CreateView { materialized, .. } if materialized => {
             // Execute a CREATE MATERIALIZED VIEW
@@ -174,7 +225,8 @@ pub async fn handle_execute(
                 let session = handler_args.session.clone();
                 let plan_fragmenter_result = {
                     let context = OptimizerContext::from_handler_args(handler_args.clone());
-                    let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                    let plan_result =
+                        gen_batch_query_plan(&session, context.into(), bound_result)?.unwrap_rw();
                     gen_batch_plan_fragmenter(&session, plan_result)?
                 };
                 declare_cursor::handle_bound_declare_query_cursor(
@@ -202,7 +254,7 @@ pub fn gen_batch_plan_by_statement(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-) -> Result<BatchQueryPlanResult> {
+) -> Result<BatchPlanChoice> {
     let binder = Binder::new_for_batch(session);
     let bound_result = gen_bound(binder, stmt)?;
     gen_batch_query_plan(session, context, bound_result)
@@ -253,7 +305,7 @@ fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     bind_result: BoundResult,
-) -> Result<BatchQueryPlanResult> {
+) -> Result<BatchPlanChoice> {
     let BoundResult {
         stmt_type,
         must_dist,
@@ -270,7 +322,21 @@ fn gen_batch_query_plan(
 
     let logical = planner.plan(bound)?;
     let schema = logical.schema();
-    let batch_plan = logical.gen_batch_plan()?;
+    let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
+
+    #[cfg(feature = "datafusion")]
+    {
+        use crate::optimizer::{LogicalIcebergScanExt, LogicalPlanToDataFusionExt};
+
+        if session.config().enable_datafusion_engine()
+            && optimized_logical.plan.contains_iceberg_scan()
+        {
+            let df_plan = optimized_logical.plan.to_datafusion_logical_plan()?;
+            return Ok(BatchPlanChoice::Df { df_plan, stmt_type });
+        }
+    }
+
+    let batch_plan = optimized_logical.gen_batch_plan()?;
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
@@ -299,13 +365,14 @@ fn gen_batch_query_plan(
         QueryMode::Distributed => batch_plan.gen_batch_distributed_plan()?,
     };
 
-    Ok(BatchQueryPlanResult {
+    let result = BatchQueryPlanResult {
         plan: physical,
         query_mode,
         schema,
         stmt_type,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
-    })
+    };
+    Ok(BatchPlanChoice::Rw(result))
 }
 
 fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
@@ -454,7 +521,7 @@ pub async fn create_stream(
     Ok((row_stream, pg_descs))
 }
 
-async fn execute(
+async fn execute_risingwave_plan(
     session: Arc<SessionImpl>,
     plan_fragmenter_result: BatchPlanFragmenterResult,
     formats: Vec<Format>,
@@ -568,4 +635,122 @@ pub async fn local_execute(
     );
 
     Ok(execution.stream_rows())
+}
+
+#[cfg(feature = "datafusion")]
+pub async fn execute_datafusion_plan(
+    session: Arc<SessionImpl>,
+    plan: Arc<datafusion::logical_expr::LogicalPlan>,
+    stmt_type: StatementType,
+    formats: Vec<Format>,
+) -> Result<RwPgResponse> {
+    use datafusion::physical_plan::execute_stream;
+    use datafusion::prelude::*;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::array::arrow::IcebergArrowConvert;
+    use risingwave_common::error::BoxedError;
+    use tokio::sync::mpsc;
+
+    use crate::scheduler::SchedulerError;
+
+    let ctx = SessionContext::new();
+    let state = ctx.state();
+
+    // TODO: update datafusion context with risingwave session info
+
+    let rw_fields = plan
+        .schema()
+        .fields()
+        .iter()
+        .map(|arrow_field| {
+            Ok(risingwave_common::catalog::Field::new(
+                arrow_field.name(),
+                IcebergArrowConvert.type_from_field(arrow_field)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let rw_schema = Schema::new(rw_fields);
+
+    let pg_descs: Vec<PgFieldDescriptor> = rw_schema.fields().iter().map(to_pg_field).collect();
+
+    let column_types = rw_schema
+        .fields()
+        .iter()
+        .map(|f| f.data_type())
+        .collect_vec();
+
+    // avoid optimizing by datafusion
+    let physical_plan = state
+        .query_planner()
+        .create_physical_plan(&plan, &state)
+        .await?;
+    let data_stream = execute_stream(physical_plan, ctx.task_ctx())
+        .map_err(|e| RwError::from(BoxedError::from(e)))?;
+
+    let compute_runtime = session.env().compute_runtime();
+    let (sender1, receiver) = mpsc::channel(10);
+    let shutdown_rx = session.reset_cancel_query_flag();
+    let sender2 = sender1.clone();
+    let exec = async move {
+        #[futures_async_stream::for_await]
+        for record in data_stream {
+            // append a query cancelled error if the query is cancelled.
+            let res: std::result::Result<DataChunk, BoxedError> = (|| {
+                let record = record?;
+                if shutdown_rx.is_cancelled() {
+                    Err(SchedulerError::QueryCancelled(
+                        "Cancelled by user".to_owned(),
+                    ))?;
+                }
+                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record)?;
+                Ok(chunk)
+            })();
+            if sender2.send(res).await.is_err() {
+                tracing::info!("Receiver closed.");
+                return;
+            }
+        }
+    };
+    let timeout = if cfg!(madsim) {
+        None
+    } else {
+        Some(session.statement_timeout())
+    };
+    if let Some(timeout) = timeout {
+        let exec = async move {
+            if let Err(_e) = tokio::time::timeout(timeout, exec).await {
+                tracing::error!(
+                    "Datafusion query execution timeout after {} seconds",
+                    timeout.as_secs()
+                );
+                if sender1
+                    .send(Err(Box::new(SchedulerError::QueryCancelled(format!(
+                        "timeout after {} seconds",
+                        timeout.as_secs(),
+                    ))) as BoxedError))
+                    .await
+                    .is_err()
+                {
+                    tracing::info!("Receiver closed.");
+                }
+            }
+        };
+        compute_runtime.spawn(exec);
+    } else {
+        compute_runtime.spawn(exec);
+    }
+
+    let row_stream = PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
+        receiver.into(),
+        column_types,
+        formats.clone(),
+        session.clone(),
+    ));
+
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
+
+    Ok(PgResponse::builder(stmt_type)
+        .row_cnt_format_opt(Some(first_field_format))
+        .values(row_stream, pg_descs)
+        .into())
 }

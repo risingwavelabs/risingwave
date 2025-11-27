@@ -438,6 +438,11 @@ pub struct SessionConfig {
     /// if there is any row INSERT/UPDATE/DELETE operation corresponding to the ttled primary key.
     #[parameter(default = false)]
     unsafe_enable_storage_retention_for_non_append_only_tables: bool,
+
+    /// Enable DataFusion Engine
+    /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
+    #[parameter(default = false)]
+    enable_datafusion_engine: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
