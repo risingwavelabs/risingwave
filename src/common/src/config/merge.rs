@@ -188,6 +188,9 @@ mod tests {
         let partial = r#"
             [streaming]
             no_such_entry = 114514
+
+            [streaming.developer]
+            no_such_dev_entry = 1919810
         "#;
         let merged = merge_config(&base, partial, ["streaming"])
             .unwrap()
@@ -196,6 +199,10 @@ mod tests {
         let unrecognized = merged.unrecognized.into_inner();
         assert_eq!(unrecognized.len(), 1);
         assert_eq!(unrecognized["no_such_entry"], 114514);
+
+        let dev_unrecognized = merged.developer.unrecognized.into_inner();
+        assert_eq!(dev_unrecognized.len(), 1);
+        assert_eq!(dev_unrecognized["no_such_dev_entry"], 1919810);
     }
 
     #[test]
