@@ -32,6 +32,11 @@ fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
 
     for SqlOption { name, value } in entries {
         let name = name.real_value();
+        if !name.starts_with("streaming.") {
+            bail_invalid_input_syntax!(
+                "ALTER CONFIG only accepts options starting with `streaming.`"
+            );
+        }
         let SqlOptionValue::Value(value) = value else {
             bail_invalid_input_syntax!("ALTER CONFIG only accepts value options");
         };
