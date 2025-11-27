@@ -205,7 +205,7 @@ impl MergeExecutor {
         metrics: &StreamingMetrics,
         actor_context: &ActorContext,
     ) -> SelectReceivers {
-        let merge_barrier_align_duration = if metrics.level >= MetricLevel::Debug {
+        let merge_barrier_align_duration = if true {
             Some(
                 metrics
                     .merge_barrier_align_duration
