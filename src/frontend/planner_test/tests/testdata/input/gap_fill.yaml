@@ -185,4 +185,11 @@
     SELECT * FROM GAP_FILL(t, ts, INTERVAL '0' SECOND, LOCF(val));
   expected_outputs:
     - binder_error
-
+- name: test gap fill with project
+  sql: |
+    CREATE TABLE t (id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(ts));
+    SELECT val FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val));
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - eowc_stream_error
