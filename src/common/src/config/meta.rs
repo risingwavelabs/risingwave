@@ -160,6 +160,12 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether meta should request pausing all data sources on the next bootstrap.
+    /// This is a convenience switch that sets the `pause_on_next_bootstrap` system parameter when
+    /// the meta service starts.
+    #[serde(default = "default::meta::pause_on_next_bootstrap_offline")]
+    pub pause_on_next_bootstrap_offline: bool,
+
     /// Whether to disable adaptive-scaling feature.
     #[serde(default)]
     pub disable_automatic_parallelism_control: bool,
@@ -593,6 +599,10 @@ pub mod default {
 
         pub fn default_parallelism() -> DefaultParallelism {
             DefaultParallelism::Full
+        }
+
+        pub fn pause_on_next_bootstrap_offline() -> bool {
+            false
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
