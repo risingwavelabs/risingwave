@@ -16,9 +16,7 @@ use risingwave_common::catalog::{
     ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::iceberg::{
-    IcebergDeleteParameters, IcebergSplitEnumerator,
-};
+use risingwave_connector::source::iceberg::{IcebergDeleteParameters, IcebergSplitEnumerator};
 use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
@@ -70,13 +68,12 @@ impl FallibleRule<Logical> for SourceToIcebergScanRule {
                         FRONTEND_RUNTIME.block_on(s.get_delete_parameters(time_travel_info))
                     })?;
                 // data file scan
-                let mut data_iceberg_scan: PlanRef =
-                    LogicalIcebergScan::new(
-                        source,
-                        IcebergScanType::DataScan,
-                        delete_parameters.snapshot_id,
-                    )
-                    .into();
+                let mut data_iceberg_scan: PlanRef = LogicalIcebergScan::new(
+                    source,
+                    IcebergScanType::DataScan,
+                    delete_parameters.snapshot_id,
+                )
+                .into();
                 if !delete_parameters.equality_delete_columns.is_empty() {
                     data_iceberg_scan = build_equality_delete_hashjoin_scan(
                         source,
