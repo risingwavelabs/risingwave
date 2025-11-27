@@ -1104,6 +1104,14 @@ impl StreamFragmentGraph {
                 .extend(downstream_fragments);
         }
 
+        // Deduplicate downstream entries per fragment; overlaps are common when the same fragment
+        // is reached via multiple paths (e.g., with StreamShare) and would otherwise appear
+        // multiple times.
+        for downstream in fragment_ordering.values_mut() {
+            let mut seen = HashSet::new();
+            downstream.retain(|id| seen.insert(*id));
+        }
+
         fragment_ordering
     }
 
