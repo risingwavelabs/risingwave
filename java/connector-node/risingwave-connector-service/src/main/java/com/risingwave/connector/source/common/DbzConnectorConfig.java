@@ -333,6 +333,7 @@ public class DbzConnectorConfig {
         }
 
         LOG.info("Final Debezium properties: {}", dbzProps);
+        LOG.info("Debezium max.queue.size: {}", dbzProps.getProperty("max.queue.size", "not set"));
 
         this.sourceId = sourceId;
         this.sourceType = source;
