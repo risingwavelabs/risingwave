@@ -29,7 +29,6 @@ use risingwave_connector::source::iceberg::IcebergProperties;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::IcebergScan;
-use crate::datafusion::to_datafusion_error;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::optimizer::plan_node::LogicalIcebergScan;
 
@@ -65,11 +64,7 @@ impl TableProvider for IcebergTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(
-            IcebergScan::new(self, projection, filters, limit)
-                .await
-                .map_err(to_datafusion_error)?,
-        ))
+        Ok(Arc::new(IcebergScan::new(self, projection, filters, limit)))
     }
 
     fn supports_filters_pushdown(

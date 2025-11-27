@@ -30,7 +30,6 @@ use risingwave_connector::source::iceberg::IcebergProperties;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::{IcebergTableProvider, to_datafusion_error};
-use crate::error::RwError;
 
 /// An execution plan for scanning Iceberg tables.
 ///
@@ -106,13 +105,13 @@ impl ExecutionPlan for IcebergScan {
 }
 
 impl IcebergScan {
-    pub async fn new(
+    pub fn new(
         provider: &IcebergTableProvider,
         // TODO: handle these params
         _projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
-    ) -> Result<Self, RwError> {
+    ) -> Self {
         assert!(
             provider.iceberg_scan_type == IcebergScanType::DataScan,
             "Only DataScan is supported currently"
@@ -135,9 +134,9 @@ impl IcebergScan {
             need_file_path_and_pos: false,
             plan_properties,
         };
-        Ok(Self {
+        Self {
             inner: Arc::new(inner),
-        })
+        }
     }
 }
 
