@@ -90,7 +90,9 @@ pub async fn handle_alter_streaming_set_config(
         .alter_config(job_id, entries_to_add, keys_to_remove)
         .await?;
 
-    Ok(RwPgResponse::empty_result(stmt_type))
+    Ok(RwPgResponse::builder(stmt_type)
+        .notice("ALTER CONFIG requires a RECOVER on the specified streaming job to take effect.")
+        .into())
 }
 
 pub async fn handle_alter_streaming_reset_config(
