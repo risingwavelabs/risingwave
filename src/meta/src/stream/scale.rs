@@ -1905,7 +1905,9 @@ impl ScaleController {
             },
         ) in job_parallelism_updates
         {
-            let assigner = AssignerBuilder::new(table_id).build();
+            let assigner = AssignerBuilder::new(table_id)
+                .with_actor_oriented_balancing()
+                .build();
 
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
 
