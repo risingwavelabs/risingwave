@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package test;
+
+import "google/protobuf/source_context.proto";
+
+// Extended from user_with_nested_struct.proto
+
+message User {
+  int32 id = 1;
+  string name = 2;
+  string address = 3;
+  string city = 4;
+  Gender gender = 5;
+  google.protobuf.SourceContext sc = 6;
+  int32 age = 7;
+  optional AddressDetail address_detail = 8; // Added for nested struct testing
+}
+
+message AddressDetail {
+  string street = 1;
+  string city = 2;
+  LocationDetail location_detail = 3;
+  optional string country = 4; // Added for nested struct testing
+}
+
+message LocationDetail {
+  double latitude = 1;
+  double longitude = 2;
+  optional double altitude = 3; // Added for nested struct testing
+}
+
+enum Gender {
+  MALE = 0;
+  FEMALE = 1;
+}
