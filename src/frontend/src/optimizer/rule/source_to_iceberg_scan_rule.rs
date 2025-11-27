@@ -63,23 +63,27 @@ impl FallibleRule<Logical> for SourceToIcebergScanRule {
             {
                 let timezone = plan.ctx().get_session_timezone();
                 let time_travel_info = to_iceberg_time_travel_as_of(&source.core.as_of, &timezone)?;
-                let (delete_column_names, have_position_delete) =
+                let (delete_column_names, have_position_delete, snapshot_id) =
                     tokio::task::block_in_place(|| {
                         FRONTEND_RUNTIME.block_on(s.get_delete_parameters(time_travel_info))
                     })?;
                 // data file scan
                 let mut data_iceberg_scan: PlanRef =
-                    LogicalIcebergScan::new(source, IcebergScanType::DataScan).into();
+                    LogicalIcebergScan::new(source, IcebergScanType::DataScan, snapshot_id).into();
                 if !delete_column_names.is_empty() {
                     data_iceberg_scan = build_equality_delete_hashjoin_scan(
                         source,
                         delete_column_names,
                         data_iceberg_scan,
+                        snapshot_id,
                     )?;
                 }
                 if have_position_delete {
-                    data_iceberg_scan =
-                        build_position_delete_hashjoin_scan(source, data_iceberg_scan)?;
+                    data_iceberg_scan = build_position_delete_hashjoin_scan(
+                        source,
+                        data_iceberg_scan,
+                        snapshot_id,
+                    )?;
                 }
                 ApplyResult::Ok(data_iceberg_scan)
             }
@@ -93,6 +97,7 @@ fn build_equality_delete_hashjoin_scan(
     source: &LogicalSource,
     delete_column_names: Vec<String>,
     data_iceberg_scan: PlanRef,
+    snapshot_id: Option<i64>,
 ) -> Result<PlanRef> {
     // equality delete scan
     let column_catalog_map = source
@@ -110,8 +115,11 @@ fn build_equality_delete_hashjoin_scan(
         .cloned()
         .collect();
     let equality_delete_source = source.clone_with_column_catalog(column_catalog)?;
-    let equality_delete_iceberg_scan =
-        LogicalIcebergScan::new(&equality_delete_source, IcebergScanType::EqualityDeleteScan);
+    let equality_delete_iceberg_scan = LogicalIcebergScan::new(
+        &equality_delete_source,
+        IcebergScanType::EqualityDeleteScan,
+        snapshot_id,
+    );
 
     let data_columns_len = data_iceberg_scan.schema().len();
     // The join condition is delete_column_names is equal and sequence number is less than, join type is left anti
@@ -187,6 +195,7 @@ fn build_equality_delete_hashjoin_scan(
 fn build_position_delete_hashjoin_scan(
     source: &LogicalSource,
     data_iceberg_scan: PlanRef,
+    snapshot_id: Option<i64>,
 ) -> Result<PlanRef> {
     // FILE_PATH, FILE_POS
     let column_catalog = source
@@ -200,8 +209,11 @@ fn build_position_delete_hashjoin_scan(
         .cloned()
         .collect();
     let position_delete_source = source.clone_with_column_catalog(column_catalog)?;
-    let position_delete_iceberg_scan =
-        LogicalIcebergScan::new(&position_delete_source, IcebergScanType::PositionDeleteScan);
+    let position_delete_iceberg_scan = LogicalIcebergScan::new(
+        &position_delete_source,
+        IcebergScanType::PositionDeleteScan,
+        snapshot_id,
+    );
     let data_columns_len = data_iceberg_scan.schema().len();
 
     let build_inputs = |scan: &PlanRef, offset: usize| {

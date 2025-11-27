@@ -41,6 +41,7 @@ pub struct BatchIcebergScan {
     pub core: generic::Source,
     iceberg_scan_type: IcebergScanType,
     pub predicate: IcebergPredicate,
+    pub snapshot_id: Option<i64>,
 }
 
 impl PartialEq for BatchIcebergScan {
@@ -48,7 +49,9 @@ impl PartialEq for BatchIcebergScan {
         if self.predicate == IcebergPredicate::AlwaysTrue
             && other.predicate == IcebergPredicate::AlwaysTrue
         {
-            self.base == other.base && self.core == other.core
+            self.base == other.base
+                && self.core == other.core
+                && self.snapshot_id == other.snapshot_id
         } else {
             panic!("BatchIcebergScan::eq: comparing non-AlwaysTrue predicates is not supported")
         }
@@ -64,12 +67,17 @@ impl Hash for BatchIcebergScan {
         } else {
             self.base.hash(state);
             self.core.hash(state);
+            self.snapshot_id.hash(state);
         }
     }
 }
 
 impl BatchIcebergScan {
-    pub fn new(core: generic::Source, iceberg_scan_type: IcebergScanType) -> Self {
+    pub fn new(
+        core: generic::Source,
+        iceberg_scan_type: IcebergScanType,
+        snapshot_id: Option<i64>,
+    ) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
@@ -82,6 +90,7 @@ impl BatchIcebergScan {
             core,
             iceberg_scan_type,
             predicate: IcebergPredicate::AlwaysTrue,
+            snapshot_id,
         }
     }
 
@@ -102,6 +111,7 @@ impl BatchIcebergScan {
             core,
             iceberg_scan_type: IcebergScanType::CountStar,
             predicate: IcebergPredicate::AlwaysTrue,
+            snapshot_id: batch_iceberg_scan.snapshot_id,
         }
     }
 
@@ -126,6 +136,7 @@ impl BatchIcebergScan {
             core: self.core.clone(),
             iceberg_scan_type: self.iceberg_scan_type,
             predicate: self.predicate.clone(),
+            snapshot_id: self.snapshot_id,
         }
     }
 
@@ -135,11 +146,16 @@ impl BatchIcebergScan {
             core: self.core.clone(),
             iceberg_scan_type: self.iceberg_scan_type,
             predicate,
+            snapshot_id: self.snapshot_id,
         }
     }
 
     pub fn as_of(&self) -> Option<AsOf> {
         self.core.as_of.clone()
+    }
+
+    pub fn snapshot_id(&self) -> Option<i64> {
+        self.snapshot_id
     }
 }
 
@@ -153,6 +169,7 @@ impl Distill for BatchIcebergScan {
             ("columns", column_names_pretty(self.schema())),
             ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
             ("predicate", Pretty::from(self.predicate.to_string())),
+            ("snapshot_id", Pretty::debug(&self.snapshot_id)),
         ];
         childless_record("BatchIcebergScan", fields)
     }

@@ -210,7 +210,6 @@ impl IcebergFileScanTask {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IcebergSplit {
     pub split_id: i64,
-    // TODO: remove this field. It seems not used.
     pub snapshot_id: i64,
     pub task: IcebergFileScanTask,
 }
@@ -338,7 +337,7 @@ impl IcebergSplitEnumerator {
     pub async fn list_splits_batch(
         &self,
         schema: Schema,
-        time_traval_info: Option<IcebergTimeTravelInfo>,
+        snapshot_id: Option<i64>,
         batch_parallelism: usize,
         iceberg_scan_type: IcebergScanType,
         predicate: IcebergPredicate,
@@ -347,7 +346,6 @@ impl IcebergSplitEnumerator {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
         }
         let table = self.config.load_table().await?;
-        let snapshot_id = Self::get_snapshot_id(&table, time_traval_info)?;
         if snapshot_id.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
             return Ok(vec![IcebergSplit::empty(iceberg_scan_type)]);
@@ -554,14 +552,17 @@ impl IcebergSplitEnumerator {
     pub async fn get_delete_parameters(
         &self,
         time_travel_info: Option<IcebergTimeTravelInfo>,
-    ) -> ConnectorResult<(Vec<String>, bool)> {
+    ) -> ConnectorResult<(Vec<String>, bool, Option<i64>)> {
         let table = self.config.load_table().await?;
         let snapshot_id = Self::get_snapshot_id(&table, time_travel_info)?;
-        if snapshot_id.is_none() {
-            return Ok((vec![], false));
+        match snapshot_id {
+            Some(snapshot_id) => {
+                let (delete_columns, have_position_delete) =
+                    Self::all_delete_parameters(&table, snapshot_id).await?;
+                Ok((delete_columns, have_position_delete, Some(snapshot_id)))
+            }
+            None => Ok((vec![], false, None)),
         }
-        let snapshot_id = snapshot_id.unwrap();
-        Self::all_delete_parameters(&table, snapshot_id).await
     }
 
     /// Uniformly distribute scan tasks to compute nodes.
