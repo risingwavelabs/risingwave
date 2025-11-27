@@ -427,7 +427,7 @@ test_locality_backfill() {
 
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
 
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/locality_backfill/basic.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/locality_backfill/*.slt'
 
   kill_cluster
 }
