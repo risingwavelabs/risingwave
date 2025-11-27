@@ -12522,6 +12522,7 @@ version = "2.7.0-alpha"
 dependencies = [
  "easy-ext",
  "madsim-tokio",
+ "regex",
  "sea-orm",
  "sea-orm-migration",
  "serde",
