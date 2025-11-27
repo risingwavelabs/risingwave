@@ -131,7 +131,7 @@ mod tests {
             stream_chunk_size = 114514
             stream_compute_client_config = { connect_timeout_secs = 114514 }
         "#;
-        let merged = merge_config(&base, partial, ["streaming"])
+        let merged = merge_streaming_config_section(&base, partial)
             .unwrap()
             .unwrap();
 
@@ -162,7 +162,7 @@ mod tests {
             [batch.developer]
             batch_chunk_size = 114514
         "#;
-        let merged = merge_config(&base, partial, ["streaming"]).unwrap();
+        let merged = merge_streaming_config_section(&base, partial).unwrap();
         assert!(
             merged.is_none(),
             "nothing to override, but got: {merged:#?}"
@@ -175,7 +175,7 @@ mod tests {
         let partial = r#"
             [streaming]
         "#;
-        let merged = merge_config(&base, partial, ["streaming"]).unwrap();
+        let merged = merge_streaming_config_section(&base, partial).unwrap();
         assert!(
             merged.is_none(),
             "nothing to override, but got: {merged:#?}"
@@ -192,7 +192,7 @@ mod tests {
             [streaming.developer]
             no_such_dev_entry = 1919810
         "#;
-        let merged = merge_config(&base, partial, ["streaming"])
+        let merged = merge_streaming_config_section(&base, partial)
             .unwrap()
             .unwrap();
 
@@ -212,10 +212,29 @@ mod tests {
             [streaming.developer]
             stream_chunk_size = "omakase"
         "#;
-        let error = merge_config(&base, partial, ["streaming"]).unwrap_err();
+        let error = merge_streaming_config_section(&base, partial).unwrap_err();
         expect_test::expect![[r#"
             failed to deserialize merged config: invalid type: string "omakase", expected usize
             in `developer.stream_chunk_size`
+        "#]]
+        .assert_eq(&error.to_report_string());
+    }
+
+    // Even though we accept `stream_` prefixed config key when deserializing the config, since
+    // we perform merging atop of the raw `toml::Value`, we don't have the information about
+    // the aliasing. Therefore, using a prefixed config key in config override will result in
+    // a duplicate field error.
+    #[test]
+    fn tets_override_with_legacy_prefixed_config() {
+        let base = StreamingConfig::default();
+        let partial = r#"
+            [streaming.developer]
+            stream_chunk_size = 114514
+        "#;
+        let error = merge_streaming_config_section(&base, partial).unwrap_err();
+        expect_test::expect![[r#"
+            failed to deserialize merged config: duplicate field `chunk_size`
+            in `developer`
         "#]]
         .assert_eq(&error.to_report_string());
     }
