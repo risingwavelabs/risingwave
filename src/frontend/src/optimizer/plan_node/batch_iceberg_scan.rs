@@ -169,7 +169,6 @@ impl Distill for BatchIcebergScan {
             ("columns", column_names_pretty(self.schema())),
             ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
             ("predicate", Pretty::from(self.predicate.to_string())),
-            ("snapshot_id", Pretty::debug(&self.snapshot_id)),
         ];
         childless_record("BatchIcebergScan", fields)
     }

@@ -103,7 +103,6 @@ impl Distill for LogicalIcebergScan {
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
                 ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
-                ("snapshot_id", Pretty::debug(&self.snapshot_id)),
             ]
         } else {
             vec![]
