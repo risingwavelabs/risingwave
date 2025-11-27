@@ -18,6 +18,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
+use super::util::execute_with_long_running_notification;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
@@ -95,13 +96,18 @@ pub async fn handle_drop_index(
             .env()
             .meta_client()
             .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
-                job_ids: vec![index_id.index_id],
+                job_ids: vec![index_id.as_job_id()],
             }))
             .await?;
         tracing::info!(?canceled_jobs, "cancelled creating index job");
     } else {
         let catalog_writer = session.catalog_writer()?;
-        catalog_writer.drop_index(index_id, cascade).await?;
+        execute_with_long_running_notification(
+            catalog_writer.drop_index(index_id, cascade),
+            &session,
+            "DROP INDEX",
+        )
+        .await?;
     }
 
     Ok(PgResponse::empty_result(StatementType::DROP_INDEX))

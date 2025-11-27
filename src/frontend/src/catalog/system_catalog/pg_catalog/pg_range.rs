@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_range` stores information about range types. This is in addition to the types' entries in `pg_type`.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-range.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-range.html`
 #[system_catalog(view, "pg_catalog.pg_range")]
 #[derive(Fields)]
 struct PgRange {

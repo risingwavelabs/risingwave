@@ -22,7 +22,7 @@ use clippy_utils::source::snippet_opt;
 use itertools::Itertools;
 use rustc_ast::{Crate, Expr, ExprKind, FormatArgs};
 use rustc_data_structures::fx::FxHashMap;
-use rustc_lexer::{TokenKind, tokenize};
+use rustc_lexer::{FrontmatterAllowed, TokenKind, tokenize};
 use rustc_lint::{EarlyContext, EarlyLintPass};
 use rustc_session::impl_lint_pass;
 use rustc_span::{Span, hygiene};
@@ -104,7 +104,7 @@ fn has_span_from_proc_macro(cx: &EarlyContext<'_>, args: &FormatArgs) -> bool {
         let Some(snippet) = snippet_opt(cx, between_span) else {
             return true;
         };
-        for token in tokenize(&snippet) {
+        for token in tokenize(&snippet, FrontmatterAllowed::No) {
             match token.kind {
                 TokenKind::LineComment { .. }
                 | TokenKind::BlockComment { .. }

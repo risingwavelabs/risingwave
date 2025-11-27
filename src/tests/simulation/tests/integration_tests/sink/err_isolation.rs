@@ -19,28 +19,35 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio::time::sleep;
 
-use crate::sink::utils::{
-    CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSink, SimulationTestSource,
-    start_sink_test_cluster,
-};
+use crate::sink::utils::*;
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
-#[tokio::test]
-async fn test_sink_decouple_err_isolation() -> Result<()> {
-    test_sink_decouple_err_isolation_inner(false).await
+macro_rules! define_tests {
+    ($($test_type:ident,)+) => {
+        $(
+            paste::paste! {
+                #[tokio::test]
+                async fn [<test_ $test_type:snake _decouple_err_isolation>]() -> Result<()> {
+                    test_sink_decouple_err_isolation_inner(TestSinkType::$test_type).await
+                }
+            }
+        )+
+    };
+    () => {
+        $crate::for_all_sink_types! {
+            define_tests
+        }
+    }
 }
 
-#[tokio::test]
-async fn test_coordinated_sink_decouple_err_isolation() -> Result<()> {
-    test_sink_decouple_err_isolation_inner(true).await
-}
+define_tests!();
 
-async fn test_sink_decouple_err_isolation_inner(is_coordinated_sink: bool) -> Result<()> {
+async fn test_sink_decouple_err_isolation_inner(test_type: TestSinkType) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new(is_coordinated_sink);
+    let test_sink = SimulationTestSink::register_new(test_type);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
@@ -80,7 +87,7 @@ async fn test_sink_error_event_logs() -> Result<()> {
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new(false);
+    let test_sink = SimulationTestSink::register_new(TestSinkType::SinkWriter);
     test_sink.set_err_rate(1.0);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 

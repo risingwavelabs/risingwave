@@ -2572,8 +2572,8 @@ mod tests {
 
     /// Sort each row in the data chunk and compare with the rows in the data chunk.
     fn compare_data_chunk_with_rowsort(left: &DataChunk, right: &DataChunk) -> bool {
-        assert!(left.is_compacted());
-        assert!(right.is_compacted());
+        assert!(left.is_vis_compacted());
+        assert!(right.is_vis_compacted());
 
         if left.cardinality() != right.cardinality() {
             return false;
@@ -2857,7 +2857,7 @@ mod tests {
 
                 while let Some(data_chunk) = stream.next().await {
                     let data_chunk = data_chunk.unwrap();
-                    let data_chunk = data_chunk.compact();
+                    let data_chunk = data_chunk.compact_vis();
                     data_chunk_merger.append(&data_chunk).unwrap();
                 }
 
@@ -3446,7 +3446,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3476,7 +3476,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3506,7 +3506,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3546,7 +3546,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3573,7 +3573,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3600,7 +3600,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3641,7 +3641,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3670,7 +3670,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3699,7 +3699,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.first_output_row_id, Vec::<usize>::new());
@@ -3762,7 +3762,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -3803,7 +3803,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(state.build_row_ids, Vec::new());
@@ -3953,7 +3953,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());
@@ -4001,7 +4001,7 @@ mod tests {
             )
             .await
             .unwrap()
-            .compact(),
+            .compact_vis(),
             &expect
         ));
         assert_eq!(left_state.first_output_row_id, Vec::<usize>::new());

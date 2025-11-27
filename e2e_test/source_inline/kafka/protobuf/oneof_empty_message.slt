@@ -1,0 +1,119 @@
+control substitution on
+
+system ok
+rpk topic create 'test-pb-oneof-empty'
+
+
+system ok
+sr_register test-pb-oneof-empty-value PROTOBUF << EOF
+syntax = "proto3";
+package test;
+message EmptyMessage {
+}
+message TextMessage {
+  string content = 1;
+  int32 priority = 2;
+}
+message Event {
+  int32 event_id = 1;
+  oneof payload {
+    EmptyMessage empty = 2;
+    TextMessage text = 3;
+  }
+}
+EOF
+
+
+# create a source with oneof schema
+statement ok
+create source s with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-oneof-empty')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.Event');
+
+
+# create sink to produce messages with empty payload (empty arm is non-null, text arm is null)
+statement ok
+create sink sk_empty as select
+  1 as event_id,
+  row()::struct< > as empty,
+  null::struct<content varchar, priority integer> as text
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-oneof-empty')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.Event');
+
+
+sleep 1s
+
+
+# create sink to produce messages with text payload (text arm is non-null, empty arm is null)
+statement ok
+create sink sk_text as select
+  2 as event_id,
+  null::struct< > as empty,
+  row('Hello World', 1)::struct<content varchar, priority integer> as text
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-oneof-empty')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.Event');
+
+
+sleep 2s
+
+
+# reading messages with oneof containing empty message should work
+query III
+select event_id, empty, text from s order by event_id;
+----
+1	()	NULL
+2	NULL	("Hello World",1)
+
+
+# test that empty struct is properly handled
+query I
+select event_id from s where empty is not null order by event_id;
+----
+1
+
+query I
+select event_id from s where text is not null order by event_id;
+----
+2
+
+
+# test accessing fields from the text message
+query ITI
+select event_id, (text).content, (text).priority from s where text is not null order by event_id;
+----
+2 Hello World 1
+
+
+statement ok
+drop sink sk_empty;
+
+
+statement ok
+drop sink sk_text;
+
+
+statement ok
+drop source s;
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-oneof-empty-value"
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-oneof-empty-value?permanent=true"
+
+
+system ok
+rpk topic delete 'test-pb-oneof-empty'

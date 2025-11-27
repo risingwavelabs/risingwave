@@ -21,7 +21,6 @@
 #![feature(coroutines)]
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
-#![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
 #![feature(panic_update_hook)]

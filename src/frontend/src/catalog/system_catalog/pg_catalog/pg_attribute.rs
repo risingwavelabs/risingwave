@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 /// The catalog `pg_attribute` stores information about table columns. There will be exactly one
 /// `pg_attribute` row for every column in every table in the database. (There will also be
 /// attribute entries for indexes, and indeed all objects that have `pg_class` entries.)
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-attribute.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-attribute.html`
 ///
 /// In RisingWave, we simply make it contain the columns of the view and all the columns of the
 /// tables that are not internal tables.

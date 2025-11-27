@@ -149,7 +149,7 @@ impl EventLogManger {
         self.event_logs
             .read()
             .values()
-            .flat_map(|v| v.iter().map(|e| e.payload.to_owned()))
+            .flat_map(|v| v.iter().map(|e| e.payload.clone()))
             .collect()
     }
 }

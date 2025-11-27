@@ -32,12 +32,12 @@ pub struct ObjectCheckItem {
 }
 
 impl ObjectCheckItem {
-    pub fn new(owner: UserId, mode: AclMode, name: String, object: PbObject) -> Self {
+    pub fn new(owner: UserId, mode: AclMode, name: String, object: impl Into<PbObject>) -> Self {
         Self {
             owner,
             mode,
             name,
-            object,
+            object: object.into(),
         }
     }
 
@@ -77,7 +77,7 @@ impl SessionImpl {
                 if item.owner == user.id {
                     continue;
                 }
-                let has_privilege = user.has_privilege(&item.object, item.mode);
+                let has_privilege = user.has_privilege(item.object, item.mode);
                 if !has_privilege {
                     return Err(PermissionDenied(item.error_message()).into());
                 }
@@ -184,7 +184,7 @@ mod tests {
             DEFAULT_SUPER_USER_ID,
             AclMode::Create,
             "schema".to_owned(),
-            PbObject::SchemaId(schema.id()),
+            schema.id(),
         )];
         assert!(&session.check_privileges(&check_items).is_ok());
 

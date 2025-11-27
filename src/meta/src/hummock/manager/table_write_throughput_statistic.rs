@@ -14,6 +14,8 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use risingwave_common::catalog::TableId;
+
 #[derive(Debug, Clone)]
 pub struct TableWriteThroughputStatistic {
     pub throughput: u64,
@@ -35,7 +37,7 @@ impl TableWriteThroughputStatistic {
 
 #[derive(Debug, Clone)]
 pub struct TableWriteThroughputStatisticManager {
-    table_throughput: HashMap<u32, VecDeque<TableWriteThroughputStatistic>>,
+    table_throughput: HashMap<TableId, VecDeque<TableWriteThroughputStatistic>>,
     max_statistic_expired_secs: i64,
 }
 
@@ -49,7 +51,7 @@ impl TableWriteThroughputStatisticManager {
 
     pub fn add_table_throughput_with_ts(
         &mut self,
-        table_id: u32,
+        table_id: TableId,
         throughput: u64,
         timestamp_secs: i64,
     ) {
@@ -77,7 +79,7 @@ impl TableWriteThroughputStatisticManager {
     // The statistics are sorted by timestamp in descending order.
     pub fn get_table_throughput_descending(
         &self,
-        table_id: u32,
+        table_id: TableId,
         window_secs: i64,
     ) -> impl Iterator<Item = &TableWriteThroughputStatistic> {
         let timestamp_secs = chrono::Utc::now().timestamp();
@@ -89,12 +91,12 @@ impl TableWriteThroughputStatisticManager {
             .take_while(move |statistic| !statistic.is_expired(window_secs, timestamp_secs))
     }
 
-    pub fn remove_table(&mut self, table_id: u32) {
+    pub fn remove_table(&mut self, table_id: TableId) {
         self.table_throughput.remove(&table_id);
     }
 
     // `avg_write_throughput` returns the average write throughput of the table with the given `table_id` within the given `window_secs`.
-    pub fn avg_write_throughput(&self, table_id: u32, window_secs: i64) -> f64 {
+    pub fn avg_write_throughput(&self, table_id: TableId, window_secs: i64) -> f64 {
         let mut total_throughput = 0;
         let mut total_count = 0;
         let mut statistic_iter = self

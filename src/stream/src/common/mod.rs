@@ -14,6 +14,7 @@
 
 pub use column_mapping::*;
 
+pub mod change_buffer;
 mod column_mapping;
 pub mod compact_chunk;
 pub mod log_store_impl;

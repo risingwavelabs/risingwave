@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 ///     sub: "rw-test-all",
 ///     iss: Test,
 ///     tier: All,
-///     cpu_core_limit: None,
+///     rwu_limit: None,
 ///     exp: 10000627200,
 /// }
 /// ```
@@ -33,10 +33,10 @@ pub(crate) const TEST_ALL_LICENSE_KEY_CONTENT: &str = "eyJhbGciOiJSUzUxMiIsInR5c
   eyJzdWIiOiJydy10ZXN0LWFsbCIsImlzcyI6InRlc3QucmlzaW5nd2F2ZS5jb20iLCJleHAiOjEwMDAwNjI3MjAwLCJpYXQiOjE3NTE4Njg5ODEsInRpZXIiOiJhbGwifQ.\
   la3qLwax0MtUZ_sYNPd0tCmWsfJUfUU_GUbt1RBFltAioPgF9fVWblknbrqw6TRS4KJuBY5GJc0K26ghCfwcSooduhrTy9rRmRMkQ7R9fSokQJ3nxU0DiaxK-1Ts2s5NTI7ZX_yEE4DlgUwVV1eKbJ8ihkcaNCExeZ9-BtNuJvJ7-IXm56L-TXTJR4TVsGirS3qHBoK7Nw8OKK8O8OyRAC9ul2SdWz905Ap-5f4hAiWW8fMOkxXpG1f8-UTU5AZo3Lt3YmxLvO1WXtnPro0EJnlI2ylJjgOg37SNbThCG7EQHlrBwP2vHbayH3LNpPWoSFLG2o0e5OQUmgZm8iMkXw";
 
-/// A license key with the `All` tier and 4 core CPU limit that works in production.
+/// A license key with the `All` tier and 4 RWU limit that works in production.
 ///
 /// This allows users to evaluate all features on a small scale. When the total CPU core in
-/// the cluster exceeds the limit (4), features won't be available.
+/// the cluster exceeds 4 or the total memory exceeds 16 GiB, features won't be available.
 ///
 /// The content is a JWT token with the following payload:
 /// ```text
@@ -44,7 +44,7 @@ pub(crate) const TEST_ALL_LICENSE_KEY_CONTENT: &str = "eyJhbGciOiJSUzUxMiIsInR5c
 ///     sub: "rw-default-all-4-core",
 ///     iss: Prod,
 ///     tier: All,
-///     cpu_core_limit: 4,
+///     rwu_limit: 4,
 ///     exp: 10000627200,
 /// }
 /// ```

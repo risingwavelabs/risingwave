@@ -19,6 +19,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::WorkerId;
 use risingwave_common_service::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
@@ -57,7 +58,7 @@ pub async fn prepare_first_valid_version(
     env: MetaSrvEnv,
     hummock_manager_ref: HummockManagerRef,
     cluster_controller_ref: ClusterControllerRef,
-    worker_id: i32,
+    worker_id: WorkerId,
 ) -> (
     PinnedVersion,
     UnboundedSender<HummockVersionUpdate>,
@@ -139,7 +140,7 @@ pub async fn with_hummock_storage(
             env,
             hummock_manager_ref.clone(),
             cluster_ctl_ref,
-            worker_id as _,
+            worker_id,
         )
         .await,
     )
@@ -149,7 +150,7 @@ pub async fn with_hummock_storage(
     register_tables_with_id_for_test(
         hummock_storage.compaction_catalog_manager_ref(),
         &hummock_manager_ref,
-        &[table_id.table_id()],
+        &[table_id],
     )
     .await;
 
@@ -158,7 +159,7 @@ pub async fn with_hummock_storage(
 
 pub fn update_filter_key_extractor_for_table_ids(
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
-    table_ids: &[u32],
+    table_ids: &[TableId],
 ) {
     for table_id in table_ids {
         let mock_table = PbTable {
@@ -174,7 +175,7 @@ pub fn update_filter_key_extractor_for_table_ids(
 pub async fn register_tables_with_id_for_test(
     compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     hummock_manager_ref: &HummockManagerRef,
-    table_ids: &[u32],
+    table_ids: &[TableId],
 ) {
     update_filter_key_extractor_for_table_ids(compaction_catalog_manager_ref, table_ids);
     register_table_ids_to_compaction_group(
@@ -225,7 +226,7 @@ impl HummockTestEnv {
         register_tables_with_id_for_test(
             self.storage.compaction_catalog_manager_ref(),
             &self.manager,
-            &[table_id.table_id()],
+            &[table_id],
         )
         .await;
         self.wait_version_sync().await;
@@ -309,7 +310,7 @@ pub async fn prepare_hummock_test_env() -> HummockTestEnv {
         env,
         hummock_manager_ref.clone(),
         cluster_ctl_ref,
-        worker_id as _,
+        worker_id,
     )
     .await;
 

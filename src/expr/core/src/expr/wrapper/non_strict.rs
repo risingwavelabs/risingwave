@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 use async_trait::async_trait;
 use auto_impl::auto_impl;
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use thiserror_ext::AsReport;
@@ -52,8 +52,8 @@ pub struct LogReport;
 
 impl EvalErrorReport for LogReport {
     fn report(&self, error: ExprError) {
-        static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
-        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
+        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
             tracing::error!(error=%error.as_report(), suppressed_count, "failed to evaluate expression");
         }
     }

@@ -1,0 +1,247 @@
+control substitution on
+
+system ok
+rpk topic create 'test-pb-presence'
+
+
+system ok
+sr_register test-pb-presence-value PROTOBUF << EOF
+syntax = "proto3";
+package test;
+message InnerMessage {
+  string content = 1;
+  int32 value = 2;
+}
+message TestMessage {
+  // Regular primitive fields - should get default values when missing
+  int32 regular_int = 1;
+  string regular_string = 2;
+  bool regular_bool = 3;
+  // Optional primitive fields - should get NULL when missing
+  optional int32 optional_int = 4;
+  optional string optional_string = 5;
+  optional bool optional_bool = 6;
+  // Message field - should get NULL when missing
+  InnerMessage inner_message = 7;
+  // oneof field - should get NULL when missing
+  oneof test_oneof {
+    string oneof_string = 8;
+    int32 oneof_int = 9;
+    InnerMessage oneof_message = 10;
+  }
+}
+EOF
+
+
+# create a source with the presence test schema
+statement ok
+create source s with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-presence')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.TestMessage');
+
+
+# create sink to produce messages with all fields present
+statement ok
+create sink sk_all_fields as select
+  42 as regular_int,
+  'hello' as regular_string,
+  true as regular_bool,
+  100 as optional_int,
+  'optional' as optional_string,
+  false as optional_bool,
+  row('inner content', 200)::struct<content varchar, value integer> as inner_message,
+  'oneof string value' as oneof_string,
+  null::integer as oneof_int,
+  null::struct<content varchar, value integer> as oneof_message
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-presence')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.TestMessage');
+
+
+sleep 1s
+
+
+# create sink to produce messages with only regular fields (others should be missing)
+statement ok
+create sink sk_minimal as select
+  99 as regular_int,
+  'world' as regular_string,
+  false as regular_bool,
+  null::integer as optional_int,
+  null::varchar as optional_string,
+  null::boolean as optional_bool,
+  null::struct<content varchar, value integer> as inner_message,
+  null::varchar as oneof_string,
+  null::integer as oneof_int,
+  null::struct<content varchar, value integer> as oneof_message
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-presence')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.TestMessage');
+
+
+sleep 1s
+
+
+# create sink to produce messages with oneof_int field set
+statement ok
+create sink sk_oneof_int as select
+  77 as regular_int,
+  'oneof test' as regular_string,
+  true as regular_bool,
+  null::integer as optional_int,
+  null::varchar as optional_string,
+  null::boolean as optional_bool,
+  null::struct<content varchar, value integer> as inner_message,
+  null::varchar as oneof_string,
+  333 as oneof_int,
+  null::struct<content varchar, value integer> as oneof_message
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-presence')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.TestMessage');
+
+
+sleep 1s
+
+
+# create sink to produce messages with NO regular primitive fields set
+# This tests that missing regular primitive fields get default values
+statement ok
+create sink sk_empty_regulars as select
+  null::integer as regular_int,
+  null::varchar as regular_string,
+  null::boolean as regular_bool,
+  555 as optional_int,
+  'has optional' as optional_string,
+  true as optional_bool,
+  null::struct<content varchar, value integer> as inner_message,
+  null::varchar as oneof_string,
+  null::integer as oneof_int,
+  null::struct<content varchar, value integer> as oneof_message
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-presence')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.TestMessage');
+
+
+sleep 2s
+
+
+# Test 1: Verify all messages are received correctly
+query ITTITTTIII rowsort
+select
+  regular_int,
+  regular_string,
+  regular_bool,
+  optional_int,
+  optional_string,
+  optional_bool,
+  inner_message,
+  oneof_string,
+  oneof_int,
+  oneof_message
+from s;
+----
+0	(empty)	f	555	has optional	t	NULL	NULL	NULL	NULL
+42	hello	t	100	optional	f	("inner content",200)	oneof string value	NULL	NULL
+77	oneof test	t	NULL	NULL	NULL	NULL	NULL	333	NULL
+99	world	f	NULL	NULL	NULL	NULL	NULL	NULL	NULL
+
+
+# Test 2: Verify that regular primitive fields get DEFAULT VALUES when missing from protobuf bytes
+# This is the key test - when regular primitive fields are not present in protobuf,
+# they should get their default values: int32=0, string="", bool=false
+query ITT
+select regular_int, regular_string, regular_bool from s where optional_int = 555;
+----
+0	(empty)	f
+
+
+# Test 3: Verify that regular primitive fields work normally when explicitly set
+query ITT
+select regular_int, regular_string, regular_bool from s where regular_int = 99;
+----
+99	world	f
+
+
+# Test 4: Verify that optional primitive fields are NULL when missing
+query ITT
+select optional_int, optional_string, optional_bool from s where regular_int = 99;
+----
+NULL	NULL	NULL
+
+
+# Test 5: Verify that optional primitive fields work normally when explicitly set
+query ITT
+select optional_int, optional_string, optional_bool from s where optional_int = 555;
+----
+555	has optional	t
+
+
+# Test 6: Verify that message fields are NULL when missing
+query T
+select inner_message from s where regular_int = 99;
+----
+NULL
+
+
+# Test 7: Verify oneof field handling - only one field should be non-NULL at a time
+query TIT
+select oneof_string, oneof_int, oneof_message from s where regular_int = 42;
+----
+oneof string value	NULL	NULL
+
+query TIT
+select oneof_string, oneof_int, oneof_message from s where regular_int = 77;
+----
+NULL	333	NULL
+
+query TIT
+select oneof_string, oneof_int, oneof_message from s where regular_int = 99;
+----
+NULL	NULL	NULL
+
+
+# Test 8: Verify that we can access fields from inner message when present
+query TI
+select (inner_message).content, (inner_message).value from s where inner_message is not null;
+----
+inner content	200
+
+
+statement ok
+drop sink sk_all_fields;
+
+statement ok
+drop sink sk_minimal;
+
+statement ok
+drop sink sk_oneof_int;
+
+statement ok
+drop sink sk_empty_regulars;
+
+statement ok
+drop source s;
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-presence-value"
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-presence-value?permanent=true"
+
+system ok
+rpk topic delete 'test-pb-presence'

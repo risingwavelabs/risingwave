@@ -187,7 +187,7 @@ mod tests {
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node {
-            let data2 = Datum::from_protobuf(&prost, &DataType::List(Box::new(DataType::Varchar)))
+            let data2 = Datum::from_protobuf(&prost, &DataType::Varchar.list())
                 .unwrap()
                 .unwrap();
             assert_eq!(ScalarImpl::List(value), data2);

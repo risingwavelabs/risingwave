@@ -20,16 +20,12 @@ create table t_many_data_type_rw (
 
 statement ok
 create sink s_many_data_type from t_many_data_type_rw with (
-  connector = 'sqlserver',
+  connector = 'jdbc',
   type = 'upsert',
-  sqlserver.host = 'sqlserver-server',
-  sqlserver.port = 1433,
-  sqlserver.user = 'SA',
-  sqlserver.password = 'SomeTestOnly@SA',
-  sqlserver.database = 'SinkTest',
-  sqlserver.schema = 'test_schema',
-  sqlserver.table = 't_many_data_type',
+  jdbc.url='jdbc:sqlserver://sqlserver-server:1433;databaseName=SinkTest;user=SA;password=SomeTestOnly@SA;trustServerCertificate=true',
   primary_key = 'k1,k2',
+  schema.name='test_schema',
+  table.name = 't_many_data_type',
 );
 
 statement ok

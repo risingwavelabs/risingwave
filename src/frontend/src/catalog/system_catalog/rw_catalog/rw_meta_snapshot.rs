@@ -41,7 +41,7 @@ async fn read_meta_snapshot(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMetaS
             hummock_version_id: s.hummock_version_id as _,
             remarks: s.remarks,
             state_table_info: Some(json!(s.state_table_info).into()),
-            rw_version: s.rw_version.clone(),
+            rw_version: s.rw_version,
         })
         .collect();
     Ok(meta_snapshots)

@@ -17,10 +17,10 @@ use std::sync::Arc;
 
 use apache_avro::schema::{Name, RecordSchema, Schema as AvroSchema};
 use apache_avro::types::{Record, Value};
-use risingwave_common::array::VECTOR_ITEM_TYPE;
+use risingwave_common::array::VECTOR_AS_LIST_TYPE;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
+use risingwave_common::types::{DataType, DatumRef, ListType, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_connector_codec::decoder::utils::rust_decimal_to_scaled_bigint;
 use thiserror_ext::AsReport;
@@ -210,7 +210,7 @@ enum OptIdx {
 /// * For `validate`, the inputs are (RisingWave type, ProtoBuf type).
 /// * For `encode`, the inputs are (RisingWave type, RisingWave data, ProtoBuf type).
 ///
-/// Thus we impl [`MaybeData`] for both [`()`] and [`DatumRef`].
+/// Thus we impl [`MaybeData`] for both `()` and [`DatumRef`].
 trait MaybeData: std::fmt::Debug {
     type Out;
 
@@ -219,7 +219,7 @@ trait MaybeData: std::fmt::Debug {
     /// Switch to `RecordSchema` after #12562
     fn on_struct(self, st: &StructType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
-    fn on_list(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
     fn on_map(
         self,
@@ -242,8 +242,8 @@ impl MaybeData for () {
         validate_fields(st.iter(), avro, refs)
     }
 
-    fn on_list(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
-        on_field(elem, (), avro, refs)
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
+        on_field(lt.elem(), (), avro, refs)
     }
 
     fn on_map(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
@@ -274,14 +274,14 @@ impl MaybeData for DatumRef<'_> {
         Ok(record.into())
     }
 
-    fn on_list(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
         let d = match self {
             Some(s) => s.into_list(),
             None => return Ok(Value::Null),
         };
         let vs = d
             .iter()
-            .map(|d| on_field(elem, d, avro, refs))
+            .map(|d| on_field(lt.elem(), d, avro, refs))
             .try_collect()?;
         Ok(Value::Array(vs))
     }
@@ -447,6 +447,25 @@ fn on_field<D: MaybeData>(
         },
         DataType::Varchar => match inner {
             AvroSchema::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+
+            // Add enum support
+            AvroSchema::Enum(enum_schema) => maybe.on_base(|s| {
+                let str_value = s.into_utf8();
+
+                if let Some(position) = enum_schema
+                    .symbols
+                    .iter()
+                    .position(|symbol| symbol == str_value)
+                {
+                    Ok(Value::Enum(position as u32, str_value.to_owned()))
+                } else {
+                    Err(FieldEncodeError::new(format!(
+                        "Value '{}' is not a valid enum symbol. Valid symbols are: {:?}",
+                        str_value, enum_schema.symbols
+                    )))
+                }
+            })?,
+
             _ => return no_match_err(),
         },
         DataType::Bytea => match inner {
@@ -477,8 +496,8 @@ fn on_field<D: MaybeData>(
             AvroSchema::Record { .. } => maybe.on_struct(st, inner, refs)?,
             _ => return no_match_err(),
         },
-        DataType::List(elem) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(elem, avro_elem, refs)?,
+        DataType::List(lt) => match inner {
+            AvroSchema::Array(avro_elem) => maybe.on_list(lt, avro_elem, refs)?,
             _ => return no_match_err(),
         },
         DataType::Map(m) => {
@@ -585,7 +604,7 @@ fn on_field<D: MaybeData>(
             _ => return no_match_err(),
         },
         DataType::Vector(_) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(&VECTOR_ITEM_TYPE, avro_elem, refs)?,
+            AvroSchema::Array(avro_elem) => maybe.on_list(&VECTOR_AS_LIST_TYPE, avro_elem, refs)?,
             _ => return no_match_err(),
         },
         // Group D: unsupported
@@ -974,6 +993,28 @@ mod tests {
             ]),
         );
 
+        // NEW: Varchar to Enum tests
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("RED".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(0, "RED".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("BLUE".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(2, "BLUE".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("ACTIVE".into())),
+            r#"{"type": "enum", "name": "Status", "symbols": ["ACTIVE", "INACTIVE"]}"#,
+            Value::Enum(0, "ACTIVE".to_owned()),
+        );
+
         // Test complex JSON with nested structures - using serde_json::Value comparison
         let complex_json = r#"{
             "person": {
@@ -1003,7 +1044,7 @@ mod tests {
         let input_json = JsonbVal::from_str(complex_json).unwrap();
         let result = on_field(
             &DataType::Jsonb,
-            Some(ScalarImpl::Jsonb(input_json.clone())).to_datum_ref(),
+            Some(ScalarImpl::Jsonb(input_json)).to_datum_ref(),
             &AvroSchema::parse_str(r#""string""#).unwrap(),
             &NamesRef::new(&AvroSchema::parse_str(r#""string""#).unwrap()).unwrap(),
         )
@@ -1115,7 +1156,7 @@ mod tests {
             Field::with_name(DataType::Int32, "req"),
             Field::with_name(DataType::Varchar, "extra"),
         ]);
-        let Err(err) = AvroEncoder::new(schema, None, avro_schema.clone(), header) else {
+        let Err(err) = AvroEncoder::new(schema, None, avro_schema, header) else {
             panic!()
         };
         assert_eq!(
@@ -1149,21 +1190,21 @@ mod tests {
         }"#;
 
         test_ok(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([4, 5]))),
             avro_schema,
             Value::Array(vec![Value::Int(4), Value::Int(5)]),
         );
 
         test_err(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))).to_datum_ref(),
             avro_schema,
             "encode '' error: found null but required",
         );
 
         test_ok(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))),
             r#"{
                 "type": "array",
@@ -1176,7 +1217,7 @@ mod tests {
         );
 
         test_ok(
-            &DataType::List(DataType::List(DataType::Int32.into()).into()),
+            &DataType::Int32.list().list(),
             Some(ScalarImpl::List(ListValue::from_iter([
                 ListValue::from_iter([26, 29]),
                 ListValue::from_iter([46, 49]),
@@ -1195,7 +1236,7 @@ mod tests {
         );
 
         test_err(
-            &DataType::List(DataType::Boolean.into()),
+            &DataType::Boolean.list(),
             (),
             r#"{"type": "array", "items": "int"}"#,
             "encode '' error: cannot encode boolean column as \"int\" field",
@@ -1252,7 +1293,7 @@ mod tests {
 
         test_ok(
             t,
-            datum.clone(),
+            datum,
             right,
             Value::Union(0, Value::TimestampMillis(1).into()),
         );

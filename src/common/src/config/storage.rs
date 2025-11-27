@@ -196,8 +196,6 @@ pub struct StorageConfig {
     pub time_travel_version_cache_capacity: u64,
 
     // iceberg compaction
-    #[serde(default = "default::storage::iceberg_compaction_target_file_size_mb")]
-    pub iceberg_compaction_target_file_size_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
     #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
@@ -224,13 +222,20 @@ pub struct StorageConfig {
     /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
     #[serde(default = "default::storage::iceberg_compaction_size_estimation_smoothing_factor")]
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
-    // For Small File Compaction
-    /// The threshold for small file compaction in MB.
-    #[serde(default = "default::storage::iceberg_compaction_small_file_threshold_mb")]
-    pub iceberg_compaction_small_file_threshold_mb: u32,
-    /// The maximum total size of tasks in small file compaction in MB.
-    #[serde(default = "default::storage::iceberg_compaction_max_task_total_size_mb")]
-    pub iceberg_compaction_max_task_total_size_mb: u32,
+    /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
+    /// Effective pending budget = `ceil(max_task_parallelism * multiplier)`. Default 4.0.
+    /// Set < 1.0 to reduce buffering (may increase `PullTask` RPC frequency); set higher to batch more tasks.
+    #[serde(
+        default = "default::storage::iceberg_compaction_pending_parallelism_budget_multiplier"
+    )]
+    pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
+
+    #[serde(default = "default::storage::iceberg_compaction_target_binpack_group_size_mb")]
+    pub iceberg_compaction_target_binpack_group_size_mb: Option<u64>,
+    #[serde(default = "default::storage::iceberg_compaction_min_group_size_mb")]
+    pub iceberg_compaction_min_group_size_mb: Option<u64>,
+    #[serde(default = "default::storage::iceberg_compaction_min_group_file_count")]
+    pub iceberg_compaction_min_group_file_count: Option<usize>,
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
@@ -400,6 +405,20 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::fifo_probation_ratio")]
     pub fifo_probation_ratio: f64,
+
+    /// Set the blob index size for each blob.
+    ///
+    /// A larger blob index size can hold more blob entries, but it will also increase the io size of each blob part
+    /// write.
+    ///
+    /// NOTE:
+    ///
+    /// - The size will be aligned up to a multiplier of 4K.
+    /// - Modifying this configuration will invalidate all existing file cache data.
+    ///
+    /// Default: 16 `KiB`
+    #[serde(default = "default::file_cache::blob_index_size_kb")]
+    pub blob_index_size_kb: usize,
 
     /// Recover mode.
     ///
@@ -1008,10 +1027,6 @@ pub mod default {
             10
         }
 
-        pub fn iceberg_compaction_target_file_size_mb() -> u32 {
-            1024
-        }
-
         pub fn iceberg_compaction_enable_validate() -> bool {
             false
         }
@@ -1052,12 +1067,20 @@ pub mod default {
             0.3
         }
 
-        pub fn iceberg_compaction_small_file_threshold_mb() -> u32 {
-            32
+        pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {
+            4.0
         }
 
-        pub fn iceberg_compaction_max_task_total_size_mb() -> u32 {
-            50 * 1024 // 50GB
+        pub fn iceberg_compaction_target_binpack_group_size_mb() -> Option<u64> {
+            Some(100 * 1024) // 100GB
+        }
+
+        pub fn iceberg_compaction_min_group_size_mb() -> Option<u64> {
+            None
+        }
+
+        pub fn iceberg_compaction_min_group_file_count() -> Option<usize> {
+            None
         }
     }
 
@@ -1108,6 +1131,10 @@ pub mod default {
 
         pub fn fifo_probation_ratio() -> f64 {
             0.1
+        }
+
+        pub fn blob_index_size_kb() -> usize {
+            16
         }
 
         pub fn recover_mode() -> RecoverMode {

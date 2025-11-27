@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod checker;
-mod passes;
+pub mod path;
 pub mod reducer;
-
-pub use passes::Strategy;
+pub mod rules;

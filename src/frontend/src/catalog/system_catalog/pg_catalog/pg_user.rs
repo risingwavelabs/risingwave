@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_user` provides access to information about database users.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
+/// Ref: `https://www.postgresql.org/docs/current/view-pg-user.html`
 #[system_catalog(
     view,
     "pg_catalog.pg_user",

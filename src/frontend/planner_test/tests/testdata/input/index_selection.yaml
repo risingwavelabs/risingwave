@@ -17,6 +17,42 @@
     select * from t1 where a = 1 or a = 2
   expected_outputs:
   - batch_plan
+- name: query with 4 exprs against an index with 4 columns
+  sql: |
+    create table t (a int, b numeric, c bigint, d int, e timestamp);
+    create index idx1 on t(a, b, c, d);
+    create index idx2 on t(e);
+    select * from t where
+    ((a = 1 and b = 2 and c = 3 and d = 4) or
+    (a = 11 and b = 22 and c = 33 and d = 44) or
+    (a = 111 and b = 222 and c = 333 and d = 444)) and
+    e between '2025-01-01 00:00:00' and '2025-01-01 23:59:59'
+  expected_outputs:
+    - batch_plan
+- name: query with 5 exprs against an index with 4 columns
+  sql: |
+    create table t (a int, b numeric, c bigint, d int, e timestamp, f int);
+    create index idx1 on t(a, b, c, d);
+    create index idx2 on t(e);
+    select * from t where
+    ((a = 1 and b = 2 and c = 3 and d = 4 and f > 1) or
+    (a = 11 and b = 22 and c = 33 and d = 44 and f > 1) or
+    (a = 111 and b = 222 and c = 333 and d = 444 and f > 1)) and
+    e between '2025-01-01 00:00:00' and '2025-01-01 23:59:59'
+  expected_outputs:
+    - batch_plan
+- name: query with 5 exprs against an index with 4 columns
+  sql: |
+    create table t (a int, b numeric, c bigint, d int, e timestamp, f int);
+    create index idx1 on t(a, b, c);
+    create index idx2 on t(e);
+    select * from t where
+    ((a = 1 and b = 2 and c = 3 and d = 4 and f > 1) or
+    (a = 11 and b = 22 and c = 33 and d = 44 and f > 1) or
+    (a = 111 and b = 222 and c = 333 and d = 444 and f > 1)) and
+    e between '2025-01-01 00:00:00' and '2025-01-01 23:59:59'
+  expected_outputs:
+    - batch_plan
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);

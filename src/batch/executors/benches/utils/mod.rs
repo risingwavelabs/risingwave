@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{BatchSize, BenchmarkId, Criterion, black_box};
+use std::hint::black_box;
+
+use criterion::{BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
 use risingwave_batch_executors::test_utils::{MockExecutor, gen_data};
 use risingwave_batch_executors::{BoxedExecutor, JoinType};

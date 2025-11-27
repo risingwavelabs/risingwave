@@ -79,5 +79,5 @@
     └─LogicalNow { output: [ts] }
   stream_plan: |-
     StreamMaterialize { columns: [year, month, constant, ts(hidden)], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck, watermark_columns: [ts(hidden)] }
-    └─StreamProject { exprs: [Extract('YEAR':Varchar, ts, 'UTC':Varchar) as $expr1, Extract('MONTH':Varchar, ts, 'UTC':Varchar) as $expr2, 1:Int32, ts], output_watermarks: [[ts]] }
+    └─StreamProject { exprs: [Extract('YEAR':Varchar, ts, 'UTC':Varchar) as $expr1, Extract('MONTH':Varchar, ts, 'UTC':Varchar) as $expr2, 1:Int32, ts], output_watermarks: [[ts]], noop_update_hint: true }
       └─StreamNow { output: [ts] }

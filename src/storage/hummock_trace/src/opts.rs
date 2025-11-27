@@ -86,16 +86,14 @@ pub struct TracedTableId {
 impl From<TableId> for TracedTableId {
     fn from(value: TableId) -> Self {
         Self {
-            table_id: value.table_id,
+            table_id: value.as_raw_id(),
         }
     }
 }
 
 impl From<TracedTableId> for TableId {
     fn from(value: TracedTableId) -> Self {
-        Self {
-            table_id: value.table_id,
-        }
+        Self::new(value.table_id)
     }
 }
 

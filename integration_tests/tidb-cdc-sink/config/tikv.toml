@@ -483,7 +483,7 @@ max-open-files = 1024
 # dynamic-level-bytes = true
 
 [security]
-# set the path for certificates. Empty string means disabling secure connectoins.
+# set the path for certificates. Empty string means disabling secure connections.
 # ca-path = ""
 # cert-path = ""
 # key-path = ""

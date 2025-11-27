@@ -17,11 +17,13 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::SecretId;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "secret")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub secret_id: i32,
+    pub secret_id: SecretId,
     pub name: String,
     pub value: Vec<u8>,
 }
@@ -49,7 +51,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSecret> for ActiveModel {
     fn from(secret: PbSecret) -> Self {
         Self {
-            secret_id: Set(secret.id as _),
+            secret_id: Set(secret.id),
             name: Set(secret.name),
             value: Set(secret.value),
         }

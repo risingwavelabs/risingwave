@@ -15,7 +15,7 @@
 use std::fmt::Display;
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::{fmt, mem};
 
 use either::Either;
@@ -38,9 +38,9 @@ use crate::types::{DataType, DefaultOrdered, ToText};
 /// `Op` represents three operations in `StreamChunk`.
 ///
 /// `UpdateDelete` and `UpdateInsert` are semantically equivalent to `Delete` and `Insert`
-/// but always appear in pairs to represent an update operation.
-/// For example, table source, aggregation and outer join can generate updates by themselves,
-/// while most of the other operators only pass through updates with best effort.
+/// but always appear in pairs to represent an update operation. It's guaranteed that
+/// they are adjacent to each other in the same `StreamChunk`, and the stream key of the two
+/// rows are the same.
 #[derive(Clone, Copy, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Op {
     Insert,
@@ -169,9 +169,15 @@ impl StreamChunk {
         &self.data
     }
 
-    /// compact the `StreamChunk` with its visibility map
-    pub fn compact(self) -> Self {
-        if self.is_compacted() {
+    /// Removes the invisible rows based on `visibility`. Returns a new compacted chunk
+    /// with all rows visible.
+    ///
+    /// This does not change the visible content of the chunk. Not to be confused with
+    /// `StreamChunkCompactor`, which removes unnecessary changes based on the key.
+    ///
+    /// See [`DataChunk::compact_vis`] for more details.
+    pub fn compact_vis(self) -> Self {
+        if self.is_vis_compacted() {
             return self;
         }
 
@@ -182,7 +188,7 @@ impl StreamChunk {
             .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
         let columns: Vec<_> = columns
             .into_iter()
-            .map(|col| col.compact(&visibility, cardinality).into())
+            .map(|col| col.compact_vis(&visibility, cardinality).into())
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
         for idx in visibility.iter_ones() {
@@ -230,8 +236,8 @@ impl StreamChunk {
     }
 
     pub fn to_protobuf(&self) -> PbStreamChunk {
-        if !self.is_compacted() {
-            return self.clone().compact().to_protobuf();
+        if !self.is_vis_compacted() {
+            return self.clone().compact_vis().to_protobuf();
         }
         PbStreamChunk {
             cardinality: self.cardinality() as u32,
@@ -321,7 +327,7 @@ impl StreamChunk {
         }
     }
 
-    /// Remove the adjacent delete-insert if their row value are the same.
+    /// Remove the adjacent delete-insert and insert-deletes if their row value are the same.
     pub fn eliminate_adjacent_noop_update(self) -> Self {
         let len = self.data_chunk().capacity();
         let mut c: StreamChunkMut = self.into();
@@ -330,17 +336,32 @@ impl StreamChunk {
             if !c.vis(curr) {
                 continue;
             }
-            if let Some(prev) = prev_r {
-                if matches!(c.op(prev), Op::UpdateDelete | Op::Delete)
-                    && matches!(c.op(curr), Op::UpdateInsert | Op::Insert)
-                    && c.row_ref(prev) == c.row_ref(curr)
-                {
-                    c.set_vis(prev, false);
-                    c.set_vis(curr, false);
-                    prev_r = None;
-                } else {
-                    prev_r = Some(curr)
-                }
+            if let Some(prev) = prev_r
+                && (
+                    // 1. Delete then Insert
+                    (matches!(c.op(prev), Op::UpdateDelete | Op::Delete)
+                    && matches!(c.op(curr), Op::UpdateInsert | Op::Insert))
+                    ||
+                    // 2. Insert then Delete
+                    //
+                    // Note that after eliminating `U+` and `U-` here, we will get a new
+                    // pair of `U-` and `U+` consisting of `prev.prev` and the `next` row.
+                    // `prev.prev` and `prev`, `curr` and `next` share the same stream key
+                    // because they are `U-` and `U+` pairs, while `prev` and `curr` share
+                    // the same stream key because they are equal, so `prev-prev` and `next`
+                    // must also share the same stream key. Therefore, it's okay to leave
+                    // their `Update` ops unchanged.
+                    //
+                    // Also, they can't be the same, otherwise these 4 rows are the same,
+                    // which should already be eliminated by the first branch.
+                    (matches!(c.op(prev), Op::UpdateInsert | Op::Insert)
+                    && matches!(c.op(curr), Op::UpdateDelete | Op::Delete))
+                )
+                && c.row_ref(prev) == c.row_ref(curr)
+            {
+                c.set_vis(prev, false);
+                c.set_vis(curr, false);
+                prev_r = None;
             } else {
                 prev_r = Some(curr);
             }
@@ -362,11 +383,6 @@ impl StreamChunk {
             ops: self.ops.clone(),
             data: self.data.with_visibility(vis),
         }
-    }
-
-    // Compute the required permits of this chunk for rate limiting.
-    pub fn compute_rate_limit_chunk_permits(&self) -> u64 {
-        self.capacity() as _
     }
 }
 
@@ -510,7 +526,28 @@ pub struct OpRowMutRef<'a> {
     i: usize,
 }
 
-impl OpRowMutRef<'_> {
+// Act as a placeholder value when using in `ChangeBuffer`.
+impl Default for OpRowMutRef<'_> {
+    fn default() -> Self {
+        static mut DUMMY_CHUNK_MUT: LazyLock<StreamChunkMut> =
+            LazyLock::new(|| StreamChunk::default().into());
+
+        #[allow(clippy::deref_addrof)] // false positive
+        OpRowMutRef {
+            c: unsafe { &mut *(&raw mut DUMMY_CHUNK_MUT) },
+            i: 0,
+        }
+    }
+}
+
+impl PartialEq for OpRowMutRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.row_ref() == other.row_ref()
+    }
+}
+impl Eq for OpRowMutRef<'_> {}
+
+impl<'a> OpRowMutRef<'a> {
     pub fn index(&self) -> usize {
         self.i
     }
@@ -572,6 +609,8 @@ impl StreamChunkMut {
 
     /// get the mut reference of the stream chunk.
     pub fn to_rows_mut(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
+        // SAFETY: `OpRowMutRef` can only mutate the visibility and ops, which is safe even
+        // when the columns are borrowed by `RowRef` at the same time.
         unsafe {
             (0..self.vis.len())
                 .filter(|i| self.vis.is_set(*i))
@@ -876,8 +915,6 @@ mod tests {
             "\
 +---+---+---+
 | - | 2 | 2 |
-| + | 2 | 3 |
-| - | 2 | 3 |
 | + | 1 | 6 |
 | + | 2 | 3 |
 +---+---+---+"

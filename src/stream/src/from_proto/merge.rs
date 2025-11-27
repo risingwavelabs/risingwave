@@ -105,7 +105,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             params.actor_context,
             params.info,
             node,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
         )
         .await?
         .into_executor(barrier_rx))

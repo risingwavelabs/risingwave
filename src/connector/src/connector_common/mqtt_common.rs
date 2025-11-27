@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use phf::{Set, phf_set};
+use risingwave_common::id::ActorId;
 use rumqttc::tokio_rustls::rustls;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::ConnectProperties;
 use rumqttc::v5::{AsyncClient, EventLoop, MqttOptions};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use strum_macros::{Display, EnumString};
 use with_options::WithOptions;
@@ -103,8 +104,8 @@ impl EnforceSecret for MqttCommon {
 impl MqttCommon {
     pub(crate) fn build_client(
         &self,
-        actor_id: u32,
-        id: u64,
+        actor_id: ActorId,
+        id: u32,
     ) -> ConnectorResult<(AsyncClient, EventLoop)> {
         let client_id = format!(
             "{}_{}_{}",

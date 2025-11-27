@@ -57,7 +57,7 @@ impl<R: TraceReader, G: GlobalReplay + 'static> HummockReplay<R, G> {
                 _ => {
                     worker_scheduler.schedule(r);
                     total_ops += 1;
-                    if total_ops % 10000 == 0 {
+                    if total_ops.is_multiple_of(10000) {
                         println!("replayed {} ops", total_ops);
                     }
                 }

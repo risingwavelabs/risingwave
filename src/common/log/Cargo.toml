@@ -1,0 +1,23 @@
+[package]
+name = "risingwave_common_log"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+governor = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
+tracing = "0.1"
+tracing-subscriber = "0.3.20"

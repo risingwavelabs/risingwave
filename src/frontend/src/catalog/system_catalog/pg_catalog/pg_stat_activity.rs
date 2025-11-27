@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The `pg_stat_activity` view will have one row per server process, showing information related to
 /// the current activity of that process.
-/// Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`]
+/// Ref: `https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`
 #[system_catalog(view, "pg_catalog.pg_stat_activity")]
 #[derive(Fields)]
 struct PgStatActivity {

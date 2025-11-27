@@ -39,9 +39,10 @@ pub async fn handle_refresh_schema(
     table_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let original_table = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
+    let (original_table, has_incoming_sinks) =
+        fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
-    if !original_table.incoming_sinks.is_empty() {
+    if has_incoming_sinks {
         bail_not_implemented!("alter table with incoming sinks");
     }
 

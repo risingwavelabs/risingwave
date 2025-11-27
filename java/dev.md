@@ -40,6 +40,19 @@ Import checkstyle configuration to java code formatter
 2. Click the gear icon next to “Scheme” and select “Import Scheme” → “Checkstyle Configuration”.
 3. Navigate to and select tools/maven/checkstyle.xml located within your cloned repository.
 
+
+## macOS Setup
+
+If you are using macOS and encounter the following error:
+
+```
+[ERROR] /.../risingwave/java/proto/../../proto/ddl_service.proto [0:0]: /.../risingwave/java/proto/target/protoc-plugins/protoc-gen-grpc-java-1.74.0-osx-aarch_64.exe: program not found or is not executable
+Please specify a program using absolute path or make sure the program is available in your PATH system variable
+--grpc-java_out: protoc-gen-grpc-java: Plugin failed with status code 1.
+```
+
+You need to install **Apple Rosetta** to run x86_64 binaries on Apple Silicon Macs.
+
 ### VS Code (WIP)
 
 Install extension [Checkstyle for Java](https://marketplace.visualstudio.com/items?itemName=shengchen.vscode-checkstyle)

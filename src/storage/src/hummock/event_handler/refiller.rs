@@ -742,6 +742,11 @@ impl<'a> Unit<'a> {
     }
 
     fn units(sst: &Sstable, unit: usize) -> usize {
-        sst.block_count() / unit + if sst.block_count() % unit == 0 { 0 } else { 1 }
+        sst.block_count() / unit
+            + if sst.block_count().is_multiple_of(unit) {
+                0
+            } else {
+                1
+            }
     }
 }

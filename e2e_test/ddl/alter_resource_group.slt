@@ -18,6 +18,10 @@ statement ok
 alter system set license_key to '';
 
 
+statement ok
+recover;
+
+
 statement error
 create materialized view m3 with ( resource_group = 'default' ) as select * from t;
 ----

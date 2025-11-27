@@ -17,6 +17,7 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -48,6 +49,7 @@ pub enum LocalNotification {
     BatchParallelismChange,
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
+    SourceDropped(ObjectId),
 }
 
 #[derive(Debug)]
@@ -209,47 +211,8 @@ impl NotificationManager {
             .await
     }
 
-    pub async fn notify_hummock_object_info(
-        &self,
-        operation: Operation,
-        object_info: PbObjectInfo,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            SubscribeType::Hummock.into(),
-            operation,
-            Info::ObjectGroup(PbObjectGroup {
-                objects: vec![PbObject {
-                    object_info: object_info.into(),
-                }],
-            }),
-        )
-        .await
-    }
-
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Compactor.into(), operation, info)
-            .await
-    }
-
-    pub async fn notify_compactor_object_info(
-        &self,
-        operation: Operation,
-        object_info: PbObjectInfo,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            SubscribeType::Compactor.into(),
-            operation,
-            Info::ObjectGroup(PbObjectGroup {
-                objects: vec![PbObject {
-                    object_info: object_info.into(),
-                }],
-            }),
-        )
-        .await
-    }
-
-    pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Compute.into(), operation, info)
             .await
     }
 

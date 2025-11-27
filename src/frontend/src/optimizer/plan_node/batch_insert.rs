@@ -107,7 +107,7 @@ impl ToBatchPb for BatchInsert {
                 .collect(),
         };
         NodeBody::Insert(InsertNode {
-            table_id: self.core.table_id.table_id(),
+            table_id: self.core.table_id,
             table_version_id: self.core.table_version_id,
             column_indices,
             default_columns: if has_default_columns {

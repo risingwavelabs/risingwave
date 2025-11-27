@@ -83,11 +83,12 @@
       └─StreamHashJoin { type: Inner, predicate: salesperson.id IS NOT DISTINCT FROM all_sales.salesperson_id, output: [salesperson.name, all_sales.amount, all_sales.customer_name, salesperson._row_id, salesperson.id, all_sales.salesperson_id] }
         ├─StreamExchange { dist: HashShard(salesperson.id) }
         │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: ArrangementBackfill, stream_key: [salesperson._row_id], pk: [_row_id], dist: UpstreamHashShard(salesperson._row_id) }
-        └─StreamGroupTopN { order: [all_sales.amount DESC], limit: 1, offset: 0, group_key: [all_sales.salesperson_id] }
-          └─StreamExchange { dist: HashShard(all_sales.salesperson_id) }
-            └─StreamProject { exprs: [all_sales.salesperson_id, all_sales.amount, all_sales.customer_name, all_sales._row_id] }
-              └─StreamFilter { predicate: IsNotNull(all_sales.salesperson_id) }
-                └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: ArrangementBackfill, stream_key: [all_sales._row_id], pk: [_row_id], dist: UpstreamHashShard(all_sales._row_id) }
+        └─StreamProject { exprs: [all_sales.salesperson_id, all_sales.amount, all_sales.customer_name] }
+          └─StreamGroupTopN { order: [all_sales.amount DESC], limit: 1, offset: 0, group_key: [all_sales.salesperson_id] }
+            └─StreamExchange { dist: HashShard(all_sales.salesperson_id) }
+              └─StreamProject { exprs: [all_sales.salesperson_id, all_sales.amount, all_sales.customer_name, all_sales._row_id] }
+                └─StreamFilter { predicate: IsNotNull(all_sales.salesperson_id) }
+                  └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: ArrangementBackfill, stream_key: [all_sales._row_id], pk: [_row_id], dist: UpstreamHashShard(all_sales._row_id) }
 - name: lateral join 2 (left join)
   sql: |
     create table all_sales (salesperson_id int, customer_name varchar, amount int );
@@ -121,11 +122,12 @@
       └─StreamHashJoin { type: LeftOuter, predicate: salesperson.id IS NOT DISTINCT FROM all_sales.salesperson_id, output: [salesperson.name, all_sales.amount, all_sales.customer_name, salesperson._row_id, salesperson.id, all_sales.salesperson_id] }
         ├─StreamExchange { dist: HashShard(salesperson.id) }
         │ └─StreamTableScan { table: salesperson, columns: [salesperson.id, salesperson.name, salesperson._row_id], stream_scan_type: ArrangementBackfill, stream_key: [salesperson._row_id], pk: [_row_id], dist: UpstreamHashShard(salesperson._row_id) }
-        └─StreamGroupTopN { order: [all_sales.amount DESC], limit: 1, offset: 0, group_key: [all_sales.salesperson_id] }
-          └─StreamExchange { dist: HashShard(all_sales.salesperson_id) }
-            └─StreamProject { exprs: [all_sales.salesperson_id, all_sales.amount, all_sales.customer_name, all_sales._row_id] }
-              └─StreamFilter { predicate: IsNotNull(all_sales.salesperson_id) }
-                └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: ArrangementBackfill, stream_key: [all_sales._row_id], pk: [_row_id], dist: UpstreamHashShard(all_sales._row_id) }
+        └─StreamProject { exprs: [all_sales.salesperson_id, all_sales.amount, all_sales.customer_name] }
+          └─StreamGroupTopN { order: [all_sales.amount DESC], limit: 1, offset: 0, group_key: [all_sales.salesperson_id] }
+            └─StreamExchange { dist: HashShard(all_sales.salesperson_id) }
+              └─StreamProject { exprs: [all_sales.salesperson_id, all_sales.amount, all_sales.customer_name, all_sales._row_id] }
+                └─StreamFilter { predicate: IsNotNull(all_sales.salesperson_id) }
+                  └─StreamTableScan { table: all_sales, columns: [all_sales.salesperson_id, all_sales.customer_name, all_sales.amount, all_sales._row_id], stream_scan_type: ArrangementBackfill, stream_key: [all_sales._row_id], pk: [_row_id], dist: UpstreamHashShard(all_sales._row_id) }
 - name: lateral join 2 (right join) should throw an error
   sql: |
     create table all_sales (salesperson_id int, customer_name varchar, amount int );

@@ -24,7 +24,7 @@ const KEY_100: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwYWlkLXRl
 
 #[tokio::test]
 async fn test_license_cpu_limit() -> Result<()> {
-    // Now 8 * 3 = 24 cores in total.
+    // Now 8 * 3 + 3 = 27 cores in total.
     let mut cluster = Cluster::start(Configuration {
         compute_nodes: 3,
         compute_node_cores: 8,
@@ -66,7 +66,7 @@ async fn test_license_cpu_limit() -> Result<()> {
     let error = test_feature!().unwrap_err().to_report_string();
     assert!(error.contains("currently not effective"), "{error}");
 
-    // Kill a compute node, the total cores will be reduced to 16, which is under the limit.
+    // Kill a compute node, the total cores will be reduced to 19, which is under the limit.
     // The paid-tier features should be available again.
     cluster.simple_kill_nodes(["compute-2"]).await;
     tokio::time::sleep(std::time::Duration::from_secs(100)).await;

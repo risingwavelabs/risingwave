@@ -98,7 +98,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                 warn!(
                     initial_epoch,
                     aligned_initial_epoch,
-                    sink_id = self.param.sink_id.sink_id,
+                    sink_id = %self.param.sink_id,
                     "initial epoch not matched aligned initial epoch"
                 );
                 let mut peeked_first = Some(first_item);
@@ -243,7 +243,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                             if is_stop {
                                 coordinator_stream_handle.stop().await?;
                                 info!(
-                                    sink_id = self.param.sink_id.sink_id,
+                                    sink_id = %self.param.sink_id,
                                     "coordinated log sinker stops"
                                 );
                                 log_reader.truncate(TruncateOffset::Barrier { epoch })?;

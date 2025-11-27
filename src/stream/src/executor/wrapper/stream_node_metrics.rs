@@ -21,10 +21,10 @@ use crate::executor::prelude::*;
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn stream_node_metrics(
     info: Arc<ExecutorInfo>,
-    enable_explain_analyze_stats: bool,
     input: impl MessageStream,
     actor_ctx: ActorContextRef,
 ) {
+    let enable_explain_analyze_stats = (actor_ctx.config.developer).enable_explain_analyze_stats;
     let stats = ProfileMetricsImpl::new(
         info.id,
         &actor_ctx.streaming_metrics,

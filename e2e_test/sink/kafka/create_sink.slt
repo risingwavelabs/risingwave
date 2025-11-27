@@ -33,7 +33,7 @@ create sink sink_non_exist_broker from t_kafka with (
 
 # Connection test clean-up finished
 
-statement error sink cannot be append-only
+statement error cannot be append-only
 create sink si_kafka_append_only from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',

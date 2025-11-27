@@ -21,7 +21,7 @@ select count(*) from t;
 statement ok
 alter table t set dml_rate_limit to 1;
 
-sleep 3s
+sleep 5s
 
 query II
 select case when count(*) between 1 and 5 then 3 else 0 end from t;

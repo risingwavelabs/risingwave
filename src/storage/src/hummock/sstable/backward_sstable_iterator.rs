@@ -67,7 +67,7 @@ impl BackwardSstableIterator {
         let block_meta_count = sstable.meta.block_metas.len();
         assert!(block_meta_count > 0);
         assert!(
-            sstable.meta.block_metas[0].table_id().table_id() <= read_table_id_range.0,
+            sstable.meta.block_metas[0].table_id() <= read_table_id_range.0,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.0,
             sstable
@@ -78,10 +78,7 @@ impl BackwardSstableIterator {
                 .collect::<Vec<_>>()
         );
         assert!(
-            sstable.meta.block_metas[block_meta_count - 1]
-                .table_id()
-                .table_id()
-                >= read_table_id_range.1,
+            sstable.meta.block_metas[block_meta_count - 1].table_id() >= read_table_id_range.1,
             "table id {} not found table_ids in block_meta {:?}",
             read_table_id_range.1,
             sstable
@@ -93,7 +90,7 @@ impl BackwardSstableIterator {
         );
 
         while start_idx < block_meta_count
-            && sstable.meta.block_metas[start_idx].table_id().table_id() < read_table_id_range.0
+            && sstable.meta.block_metas[start_idx].table_id() < read_table_id_range.0
         {
             start_idx += 1;
         }
@@ -111,7 +108,7 @@ impl BackwardSstableIterator {
         );
 
         while end_idx > start_idx
-            && sstable.meta.block_metas[end_idx].table_id().table_id() > read_table_id_range.1
+            && sstable.meta.block_metas[end_idx].table_id() > read_table_id_range.1
         {
             end_idx -= 1;
         }
@@ -439,7 +436,7 @@ mod tests {
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
                     &SstableInfo::from(SstableInfoInner {
-                        table_ids: vec![1, 2, 3],
+                        table_ids: vec![1.into(), 2.into(), 3.into()],
                         ..Default::default()
                     }),
                 );
@@ -480,7 +477,7 @@ mod tests {
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
                     &SstableInfo::from(SstableInfoInner {
-                        table_ids: vec![1, 2],
+                        table_ids: vec![1.into(), 2.into()],
                         ..Default::default()
                     }),
                 );
@@ -521,7 +518,7 @@ mod tests {
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
                     &SstableInfo::from(SstableInfoInner {
-                        table_ids: vec![2, 3],
+                        table_ids: vec![2.into(), 3.into()],
                         ..Default::default()
                     }),
                 );
@@ -562,7 +559,7 @@ mod tests {
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
                     &SstableInfo::from(SstableInfoInner {
-                        table_ids: vec![2],
+                        table_ids: vec![2.into()],
                         ..Default::default()
                     }),
                 );

@@ -56,7 +56,10 @@ use tracing::info;
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
-use crate::{CompactorMode, CompactorOpts};
+use crate::{
+    CompactorMode, CompactorOpts, default_rpc_max_decoding_message_size_bytes,
+    default_rpc_max_encoding_message_size_bytes,
+};
 
 pub async fn prepare_start_parameters(
     compactor_opts: &CompactorOpts,
@@ -201,7 +204,7 @@ pub async fn compactor_serve(
         WorkerType::Compactor,
         &advertise_addr,
         Default::default(),
-        &config.meta,
+        Arc::new(config.meta.clone()),
     )
     .await;
 
@@ -390,8 +393,20 @@ pub async fn shared_compactor_serve(
         compactor_context,
     );
 
+    let rpc_max_encoding_message_size_bytes = opts
+        .rpc_max_encoding_message_size_bytes
+        .unwrap_or(default_rpc_max_encoding_message_size_bytes());
+
+    let rpc_max_decoding_message_size_bytes = opts
+        .rpc_max_decoding_message_size_bytes
+        .unwrap_or(default_rpc_max_decoding_message_size_bytes());
+
     let server = tonic::transport::Server::builder()
-        .add_service(CompactorServiceServer::new(compactor_srv))
+        .add_service(
+            CompactorServiceServer::new(compactor_srv)
+                .max_decoding_message_size(rpc_max_decoding_message_size_bytes)
+                .max_encoding_message_size(rpc_max_encoding_message_size_bytes),
+        )
         .add_service(MonitorServiceServer::new(monitor_srv))
         .monitored_serve_with_shutdown(
             listen_addr,

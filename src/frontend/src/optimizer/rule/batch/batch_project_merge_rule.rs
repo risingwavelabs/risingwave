@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::prelude::*;
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::expr::{ExprImpl, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
-use crate::optimizer::plan_node::{BatchProject, PlanTreeNodeUnary, generic};
+use crate::optimizer::plan_node::{BatchProject, PlanTreeNodeUnary};
 use crate::utils::Substitute;
 
 /// Merge contiguous [`BatchProject`] nodes.
@@ -37,17 +37,13 @@ impl Rule<Batch> for BatchProjectMergeRule {
             }
         }
 
-        let mut subst = Substitute {
+        let mut core = outer_project.core().clone();
+        core.rewrite_exprs(&mut Substitute {
             mapping: inner_project.exprs().clone(),
-        };
-        let exprs = outer_project
-            .exprs()
-            .iter()
-            .cloned()
-            .map(|expr| subst.rewrite_expr(expr))
-            .collect();
-        let logical_project = generic::Project::new(exprs, inner_project.input());
-        Some(BatchProject::new(logical_project).into())
+        });
+        core.input = inner_project.input();
+
+        Some(BatchProject::new(core).into())
     }
 }
 

@@ -88,7 +88,7 @@ impl TableDesc {
             Vec::new()
         };
         Ok(StorageTableDesc {
-            table_id: self.table_id.into(),
+            table_id: self.table_id,
             columns: self.columns.iter().map(Into::into).collect(),
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
             dist_key_in_pk_indices,
@@ -106,7 +106,7 @@ impl TableDesc {
         let vnode_count = table.vnode_count();
 
         Self {
-            table_id: TableId::new(table.id),
+            table_id: table.id,
             pk: table.pk.iter().map(ColumnOrder::from_protobuf).collect(),
             columns: table
                 .columns

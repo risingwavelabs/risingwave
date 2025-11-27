@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 
 use self::row::JoinRow;
@@ -42,6 +41,11 @@ impl JoinStreamChunkBuilder {
         update_to_output: IndexMappings,
         matched_to_output: IndexMappings,
     ) -> Self {
+        // Enforce that the chunk size is at least 2, so that appending two rows to the chunk
+        // builder will at most yield one chunk. `with_match` depends on and gets simplified
+        // by such property.
+        let chunk_size = chunk_size.max(2);
+
         Self {
             builder: StreamChunkBuilder::new(chunk_size, data_types),
             update_to_output,
@@ -157,46 +161,10 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
         }
     }
 
+    /// Remove unnecessary updates in the pattern `-(k, old), +(k, NULL), -(k, NULL), +(k, new)`
+    /// to avoid this issue: <https://github.com/risingwavelabs/risingwave/issues/17450>
     pub fn post_process(c: StreamChunk) -> StreamChunk {
-        let mut c = StreamChunkMut::from(c);
-
-        // NOTE(st1page): remove the pattern `UpdateDel(k, old), UpdateIns(k, NULL), UpdateDel(k, NULL),  UpdateIns(k, new)`
-        // to avoid this issue <https://github.com/risingwavelabs/risingwave/issues/17450>
-        let mut i = 2;
-        while i < c.capacity() {
-            if c.op(i - 1) == Op::UpdateInsert
-                && c.op(i) == Op::UpdateDelete
-                && c.row_ref(i) == c.row_ref(i - 1)
-            {
-                if c.op(i - 2) == Op::UpdateDelete && c.op(i + 1) == Op::UpdateInsert {
-                    c.set_op(i - 2, Op::Delete);
-                    c.set_vis(i - 1, false);
-                    c.set_vis(i, false);
-                    c.set_op(i + 1, Op::Insert);
-                    i += 3;
-                } else {
-                    debug_assert!(
-                        false,
-                        "unexpected Op sequences {:?}, {:?}, {:?}, {:?}",
-                        c.op(i - 2),
-                        c.op(i - 1),
-                        c.op(i),
-                        c.op(i + 1)
-                    );
-                    warn!(
-                        "unexpected Op sequences {:?}, {:?}, {:?}, {:?}",
-                        c.op(i - 2),
-                        c.op(i - 1),
-                        c.op(i),
-                        c.op(i + 1)
-                    );
-                    i += 1;
-                }
-            } else {
-                i += 1;
-            }
-        }
-        c.into()
+        c.eliminate_adjacent_noop_update()
     }
 
     /// TODO(kwannoel): We can actually reuse a lot of the logic between `with_match_on_insert`
@@ -205,7 +173,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn with_match<const OP: JoinOpPrimitive>(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: &JoinRow<impl Row>,
     ) -> Option<StreamChunk> {
         match OP {
             JoinOp::Insert => self.with_match_on_insert(row, matched_row),
@@ -216,7 +184,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn with_match_on_insert(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: &JoinRow<impl Row>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -239,18 +207,21 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
         // Outer sides
         } else if matched_row.is_zero_degree() && outer_side_null(T, SIDE) {
             // if the matched_row does not have any current matches
-            // `StreamChunkBuilder` guarantees that `UpdateDelete` will never
-            // issue an output chunk.
-            if self
+
+            // The current side part of the stream key changes from NULL to non-NULL.
+            // Thus we cannot use `UpdateDelete` and `UpdateInsert`, as it requires the
+            // stream key to remain the same.
+            let chunk1 = self
                 .stream_chunk_builder
-                .append_row_matched(Op::UpdateDelete, &matched_row.row)
-                .is_some()
-            {
-                unreachable!("`Op::UpdateDelete` should not yield chunk");
-            }
-            self.stream_chunk_builder
-                .append_row(Op::UpdateInsert, row, &matched_row.row)
-                .map(Self::post_process)
+                .append_row_matched(Op::Delete, &matched_row.row);
+            let chunk2 = self
+                .stream_chunk_builder
+                .append_row(Op::Insert, row, &matched_row.row);
+
+            // We've enforced chunk size to be at least 2, so it's impossible to have 2 chunks yield.
+            // TODO: better to ensure they are in the same chunk to make `post_process` more effective.
+            assert!(chunk1.is_none() || chunk2.is_none());
+            chunk1.or(chunk2).map(Self::post_process)
         // Inner sides
         } else {
             self.stream_chunk_builder
@@ -262,7 +233,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
     pub fn with_match_on_delete(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<OwnedRow>,
+        matched_row: &JoinRow<impl Row>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -284,26 +255,28 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
             }
         // Outer sides
         } else if matched_row.is_zero_degree() && outer_side_null(T, SIDE) {
-            // if the matched_row does not have any current
-            // matches
-            if self
+            // if the matched_row does not have any current matches
+
+            // The current side part of the stream key changes from non-NULL to NULL.
+            // Thus we cannot use `UpdateDelete` and `UpdateInsert`, as it requires the
+            // stream key to remain the same.
+            let chunk1 = self
                 .stream_chunk_builder
-                .append_row(Op::UpdateDelete, row, &matched_row.row)
-                .is_some()
-            {
-                unreachable!("`Op::UpdateDelete` should not yield chunk");
-            }
-            self.stream_chunk_builder
-                .append_row_matched(Op::UpdateInsert, &matched_row.row)
-                .map(|c: StreamChunk| Self::post_process(c))
+                .append_row(Op::Delete, row, &matched_row.row);
+            let chunk2 = self
+                .stream_chunk_builder
+                .append_row_matched(Op::Insert, &matched_row.row);
+
+            // We've enforced chunk size to be at least 2, so it's impossible to have 2 chunks yield.
+            // TODO: better to ensure they are in the same chunk to make `post_process` more effective.
+            assert!(chunk1.is_none() || chunk2.is_none());
+            chunk1.or(chunk2).map(Self::post_process)
 
         // Inner sides
         } else {
-            // concat with the matched_row and append the new
-            // row
+            // concat with the matched_row and append the new row
             // FIXME: we always use `Op::Delete` here to avoid
-            // violating
-            // the assumption for U+ after U-.
+            // violating the assumption for U+ after U-, we can actually do better.
             self.stream_chunk_builder
                 .append_row(Op::Delete, row, &matched_row.row)
                 .map(Self::post_process)

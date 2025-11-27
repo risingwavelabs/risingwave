@@ -22,13 +22,24 @@ use risingwave_common::system_param::ParamValue;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(PartialEq, Copy, Clone, Debug, Serialize, Deserialize, Default)]
+/// Use `#[serde(try_from, into)]` to serialize/deserialize as string format (e.g., "Bounded(64)"),
+/// which is consistent with `ALTER SYSTEM SET` command.
+#[derive(PartialEq, Copy, Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub enum AdaptiveParallelismStrategy {
     #[default]
     Auto,
     Full,
     Bounded(NonZeroUsize),
     Ratio(f32),
+}
+
+impl TryFrom<String> for AdaptiveParallelismStrategy {
+    type Error = ParallelismStrategyParseError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
 }
 
 impl Display for AdaptiveParallelismStrategy {
@@ -168,19 +179,36 @@ mod tests {
 
     #[test]
     fn test_invalid_values() {
+        // Bounded(0) is invalid - must be positive
         assert!(matches!(
             parse_strategy("Bounded(0)"),
             Err(ParallelismStrategyParseError::InvalidBoundedValue)
         ));
 
+        // Ratio out of range [0.0, 1.0]
         assert!(matches!(
             parse_strategy("Ratio(1.1)"),
             Err(ParallelismStrategyParseError::InvalidRatioValue)
         ));
-
         assert!(matches!(
             parse_strategy("Ratio(-0.5)"),
             Err(ParallelismStrategyParseError::InvalidRatioValue)
+        ));
+        assert!(matches!(
+            parse_strategy("Ratio(-1)"),
+            Err(ParallelismStrategyParseError::InvalidRatioValue)
+        ));
+
+        // Invalid number format - regex won't match
+        assert!(matches!(
+            parse_strategy("Ratio(-0.a)"),
+            Err(ParallelismStrategyParseError::UnsupportedStrategy(_))
+        ));
+
+        // Negative bounded - regex won't match (only \d+ allowed)
+        assert!(matches!(
+            parse_strategy("Bounded(-5)"),
+            Err(ParallelismStrategyParseError::UnsupportedStrategy(_))
         ));
     }
 
@@ -259,5 +287,45 @@ mod tests {
             max_parallelism.compute_target_parallelism(usize::MAX),
             usize::MAX
         );
+    }
+
+    /// Test serde serialization/deserialization uses string format,
+    /// which is consistent with `ALTER SYSTEM SET` command.
+    #[test]
+    fn test_serde_string_format() {
+        // Test deserialization from string (as used in config files)
+        let auto: AdaptiveParallelismStrategy = serde_json::from_str(r#""Auto""#).unwrap();
+        assert_eq!(auto, AdaptiveParallelismStrategy::Auto);
+
+        let full: AdaptiveParallelismStrategy = serde_json::from_str(r#""Full""#).unwrap();
+        assert_eq!(full, AdaptiveParallelismStrategy::Full);
+
+        let bounded: AdaptiveParallelismStrategy =
+            serde_json::from_str(r#""Bounded(64)""#).unwrap();
+        assert!(matches!(bounded, AdaptiveParallelismStrategy::Bounded(n) if n.get() == 64));
+
+        let ratio: AdaptiveParallelismStrategy = serde_json::from_str(r#""Ratio(0.5)""#).unwrap();
+        assert!(
+            matches!(ratio, AdaptiveParallelismStrategy::Ratio(r) if (r - 0.5).abs() < f32::EPSILON)
+        );
+
+        // Test serialization to string
+        let auto = AdaptiveParallelismStrategy::Auto;
+        assert_eq!(serde_json::to_string(&auto).unwrap(), r#""AUTO""#);
+
+        let bounded = AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(64).unwrap());
+        assert_eq!(serde_json::to_string(&bounded).unwrap(), r#""BOUNDED(64)""#);
+
+        // Test roundtrip
+        let original = AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(128).unwrap());
+        let serialized = serde_json::to_string(&original).unwrap();
+        let deserialized: AdaptiveParallelismStrategy = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(original, deserialized);
+
+        // Test deserialization errors (same validation as ALTER SYSTEM SET)
+        assert!(serde_json::from_str::<AdaptiveParallelismStrategy>(r#""Ratio(-1)""#).is_err());
+        assert!(serde_json::from_str::<AdaptiveParallelismStrategy>(r#""Ratio(-0.a)""#).is_err());
+        assert!(serde_json::from_str::<AdaptiveParallelismStrategy>(r#""Bounded(0)""#).is_err());
+        assert!(serde_json::from_str::<AdaptiveParallelismStrategy>(r#""Invalid""#).is_err());
     }
 }

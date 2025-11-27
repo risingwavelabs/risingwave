@@ -21,6 +21,8 @@ pub mod batch;
 pub use batch::BatchConfig;
 pub mod frontend;
 pub use frontend::FrontendConfig;
+pub mod hba;
+pub use hba::{AddressPattern, AuthMethod, ConnectionType, HbaConfig, HbaEntry};
 pub mod meta;
 pub use meta::{CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig, MetaStoreConfig};
 pub mod streaming;
@@ -34,8 +36,10 @@ pub use storage::{
     CacheEvictionConfig, EvictionConfig, ObjectStoreConfig, StorageConfig, StorageMemoryConfig,
     extract_storage_memory_config,
 };
+pub mod merge;
 pub mod system;
 pub mod utils;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -43,6 +47,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
+pub use merge::*;
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -188,6 +193,10 @@ pub mod default {
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
+            10
+        }
+
+        pub fn stream_topn_cache_min_capacity() -> usize {
             10
         }
 
@@ -365,7 +374,7 @@ pub mod default {
         }
 
         pub fn iceberg_list_interval_sec() -> u64 {
-            1
+            10
         }
 
         pub fn iceberg_fetch_batch_size() -> u64 {
@@ -378,6 +387,10 @@ pub mod default {
 
         pub fn iceberg_sink_write_parquet_max_row_group_rows() -> usize {
             100_000
+        }
+
+        pub fn refresh_scheduler_interval_sec() -> u64 {
+            60
         }
     }
 }
@@ -481,8 +494,7 @@ pub mod tests {
     ) {
         // Set the default value if it's a config name-value pair, otherwise it's a sub-section (Table) that should be recursively processed.
         if let toml::Value::Table(table) = value {
-            let section_configs: BTreeMap<String, toml::Value> =
-                table.clone().into_iter().collect();
+            let section_configs: BTreeMap<String, toml::Value> = table.into_iter().collect();
             let sub_section = if section.is_empty() {
                 name
             } else {

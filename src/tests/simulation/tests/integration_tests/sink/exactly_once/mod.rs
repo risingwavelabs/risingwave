@@ -64,7 +64,7 @@ async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>) -> Result<()> {
 
     let internal_tables = session.run("show internal tables").await?;
 
-    let table_name_prefix = "__internal_test_sink_";
+    let table_name_prefix = "public.__internal_test_sink_";
 
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables

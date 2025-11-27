@@ -13,4 +13,4 @@ edit-url-template = "https://github.com/risingwavelabs/risingwave/edit/main/docs
 search.use-boolean-and = true
 mathjax-support = true
 
-[output.linkcheck]
+[output.linkcheck2]

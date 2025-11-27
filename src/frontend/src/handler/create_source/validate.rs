@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::source::BATCH_POSIX_FS_CONNECTOR;
+
 use super::*;
 
 pub static SOURCE_ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> =
@@ -82,6 +84,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 POSIX_FS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json, Encode::Parquet],
+                ),
+                BATCH_POSIX_FS_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv],
                 ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
                     Format::Debezium => vec![Encode::Json],
@@ -235,6 +240,22 @@ pub fn validate_compatibility(
     if connector == SQL_SERVER_CDC_CONNECTOR && !props.contains_key("schema.name") {
         // Default schema name is "dbo"
         props.insert("schema.name".into(), "dbo".into());
+    }
+
+    // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
+    if (connector == MYSQL_CDC_CONNECTOR
+        || connector == POSTGRES_CDC_CONNECTOR
+        || connector == CITUS_CDC_CONNECTOR
+        || connector == MONGODB_CDC_CONNECTOR
+        || connector == SQL_SERVER_CDC_CONNECTOR)
+        && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
+        && timeout_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "cdc.source.wait.streaming.start.timeout".to_owned(),
+            config_value: timeout_value.to_owned(),
+        }
+        .into());
     }
 
     Ok(())

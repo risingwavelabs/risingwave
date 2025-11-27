@@ -51,14 +51,14 @@ pub async fn handle_alter_streaming_rate_limit(
                 .into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_MATERIALIZED_VIEW, table.id.table_id)
+            (StatementType::ALTER_MATERIALIZED_VIEW, table.id.as_raw_id())
         }
         PbThrottleTarget::Source => {
             let reader = session.env().catalog_reader().read_guard();
             let (source, schema_name) =
                 reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
-            (StatementType::ALTER_SOURCE, source.id)
+            (StatementType::ALTER_SOURCE, source.id.as_raw_id())
         }
         PbThrottleTarget::TableWithSource => {
             let reader = session.env().catalog_reader().read_guard();
@@ -67,7 +67,7 @@ pub async fn handle_alter_streaming_rate_limit(
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             // Get the corresponding source catalog.
             let source_id = if let Some(id) = table.associated_source_id {
-                id.table_id()
+                id.as_raw_id()
             } else {
                 bail!("ALTER SOURCE_RATE_LIMIT is not for table without source")
             };
@@ -81,7 +81,7 @@ pub async fn handle_alter_streaming_rate_limit(
                 return Err(ErrorCode::InvalidInputSyntax(format!("\"{table_name}\" ",)).into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_TABLE, table.id.table_id)
+            (StatementType::ALTER_TABLE, table.id.as_raw_id())
         }
         PbThrottleTarget::TableDml => {
             let reader = session.env().catalog_reader().read_guard();
@@ -94,17 +94,17 @@ pub async fn handle_alter_streaming_rate_limit(
                 .into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_TABLE, table.id.table_id)
+            (StatementType::ALTER_TABLE, table.id.as_raw_id())
         }
         PbThrottleTarget::Sink => {
             let reader = session.env().catalog_reader().read_guard();
-            let (table, schema_name) =
+            let (sink, schema_name) =
                 reader.get_any_sink_by_name(db_name, schema_path, &real_table_name)?;
-            if table.target_table.is_some() {
+            if sink.target_table.is_some() {
                 bail!("ALTER SINK_RATE_LIMIT is not for sink into table")
             }
-            session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_SINK, table.id.sink_id)
+            session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+            (StatementType::ALTER_SINK, sink.id.as_raw_id())
         }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };

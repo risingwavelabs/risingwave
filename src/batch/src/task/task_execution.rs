@@ -26,7 +26,6 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_expr::expr_context::expr_context_scope;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
-use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
@@ -318,8 +317,6 @@ pub struct BatchTaskExecution {
     /// The execution failure.
     failure: Arc<Mutex<Option<Arc<BatchError>>>>,
 
-    epoch: BatchQueryEpoch,
-
     /// Runtime for the batch tasks.
     runtime: Arc<BackgroundShutdownRuntime>,
 
@@ -333,7 +330,6 @@ impl BatchTaskExecution {
         prost_tid: &PbTaskId,
         plan: PlanFragment,
         context: Arc<dyn BatchTaskContext>,
-        epoch: BatchQueryEpoch,
         runtime: Arc<BackgroundShutdownRuntime>,
     ) -> Result<Self> {
         let task_id = TaskId::from(prost_tid);
@@ -353,7 +349,6 @@ impl BatchTaskExecution {
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(rts),
             failure: Arc::new(Mutex::new(None)),
-            epoch,
             context,
             runtime,
             sender,
@@ -392,7 +387,6 @@ impl BatchTaskExecution {
                 self.plan.root.as_ref().unwrap(),
                 &self.task_id,
                 self.context.clone(),
-                self.epoch,
                 self.shutdown_rx.clone(),
             )
             .build(),

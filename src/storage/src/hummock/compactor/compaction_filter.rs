@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dyn_clone::DynClone;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 
 pub trait CompactionFilter: Send + Sync + DynClone {
@@ -32,12 +33,12 @@ impl CompactionFilter for DummyCompactionFilter {}
 
 #[derive(Clone)]
 pub struct StateCleanUpCompactionFilter {
-    existing_table_ids: HashSet<u32>,
-    last_table: Option<(u32, bool)>,
+    existing_table_ids: HashSet<TableId>,
+    last_table: Option<(TableId, bool)>,
 }
 
 impl StateCleanUpCompactionFilter {
-    pub fn new(table_id_set: HashSet<u32>) -> Self {
+    pub fn new(table_id_set: HashSet<TableId>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,
             last_table: None,
@@ -47,7 +48,7 @@ impl StateCleanUpCompactionFilter {
 
 impl CompactionFilter for StateCleanUpCompactionFilter {
     fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
-        let table_id = key.user_key.table_id.table_id();
+        let table_id = key.user_key.table_id;
         if let Some((last_table_id, removed)) = self.last_table.as_ref()
             && *last_table_id == table_id
         {
@@ -61,15 +62,15 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
 
 #[derive(Clone)]
 pub struct TtlCompactionFilter {
-    table_id_to_ttl: HashMap<u32, u32>,
+    table_id_to_ttl: HashMap<TableId, u32>,
     expire_epoch: u64,
-    last_table_and_ttl: Option<(u32, u64)>,
+    last_table_and_ttl: Option<(TableId, u64)>,
 }
 
 impl CompactionFilter for TtlCompactionFilter {
     fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
-        let table_id = key.user_key.table_id.table_id();
+        let table_id = key.user_key.table_id;
         let epoch = key.epoch_with_gap.pure_epoch();
         if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref()
             && *last_table_id == table_id
@@ -92,7 +93,7 @@ impl CompactionFilter for TtlCompactionFilter {
 }
 
 impl TtlCompactionFilter {
-    pub fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
+    pub fn new(table_id_to_ttl: HashMap<TableId, u32>, expire: u64) -> Self {
         Self {
             table_id_to_ttl,
             expire_epoch: expire,
@@ -132,7 +133,8 @@ mod tests {
 
     #[test]
     fn test_ttl_u32() {
-        let mut ttl_filter = TtlCompactionFilter::new(HashMap::from_iter([(1, 4000000000)]), 1);
+        let mut ttl_filter =
+            TtlCompactionFilter::new(HashMap::from_iter([(1.into(), 4000000000)]), 1);
         ttl_filter
             .should_delete(FullKey::new(TableId::new(1), TableKey(vec![]), test_epoch(1)).to_ref());
     }

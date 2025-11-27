@@ -79,7 +79,21 @@ impl GenericPlanNode for Source {
     fn stream_key(&self) -> Option<Vec<usize>> {
         // FIXME: output col idx is not set. But iceberg source can prune cols.
         // XXX: there's a RISINGWAVE_ICEBERG_ROW_ID. Should we use it?
-        self.row_id_index.map(|idx| vec![idx])
+        if let Some(idx) = self.row_id_index {
+            Some(vec![idx])
+        } else if let Some(catalog) = &self.catalog {
+            catalog
+                .pk_col_ids
+                .iter()
+                .map(|id| {
+                    self.column_catalog
+                        .iter()
+                        .position(|c| c.column_id() == *id)
+                })
+                .collect::<Option<Vec<_>>>()
+        } else {
+            None
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -136,6 +150,29 @@ impl Source {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
                             name: "file_scan_task".to_owned(),
+                            data_type: DataType::Jsonb,
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+            ]
+        } else if core.is_batch_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_id".to_owned(),
+                            data_type: DataType::Varchar,
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_info".to_owned(),
                             data_type: DataType::Jsonb,
                         },
                         1,

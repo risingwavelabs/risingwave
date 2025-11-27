@@ -71,10 +71,10 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbIndex> for ActiveModel {
     fn from(pb_index: PbIndex) -> Self {
         Self {
-            index_id: Set(pb_index.id as _),
+            index_id: Set(pb_index.id),
             name: Set(pb_index.name),
-            index_table_id: Set(pb_index.index_table_id as _),
-            primary_table_id: Set(pb_index.primary_table_id as _),
+            index_table_id: Set(pb_index.index_table_id),
+            primary_table_id: Set(pb_index.primary_table_id),
             index_items: Set(pb_index.index_item.into()),
             index_columns_len: Set(pb_index.index_columns_len as _),
             index_column_properties: Set(Some(pb_index.index_column_properties.into())),

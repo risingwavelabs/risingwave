@@ -54,7 +54,7 @@ impl ExchangeSource for LocalExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         let ret = self.task_output.direct_take_data().await?;
         if let Some(data) = ret {
-            let data = data.compact();
+            let data = data.compact_vis();
             trace!(
                 "Receiver task: {:?}, source task output: {:?}, data: {:?}",
                 self.task_id,

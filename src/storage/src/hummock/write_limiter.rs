@@ -39,8 +39,8 @@ impl WriteLimiter {
     pub fn update_write_limits(&self, limits: HashMap<CompactionGroupId, WriteLimit>) {
         let mut index: HashMap<TableId, CompactionGroupId> = HashMap::new();
         for (group_id, limit) in &limits {
-            for table_id in &limit.table_ids {
-                index.insert(table_id.into(), *group_id);
+            for &table_id in &limit.table_ids {
+                index.insert(table_id, *group_id);
             }
         }
         self.limits.store(Arc::new((limits, index)));
@@ -80,15 +80,11 @@ impl WriteLimiter {
                 Some(reason) => {
                     if first_block_msg {
                         first_block_msg = false;
-                        tracing::debug!(
-                            "write to table {} is blocked: {}",
-                            table_id.table_id,
-                            reason,
-                        );
+                        tracing::debug!("write to table {} is blocked: {}", table_id, reason,);
                     } else {
                         tracing::debug!(
                             "write limiter is updated, but write to table {} is still blocked: {}",
-                            table_id.table_id,
+                            table_id,
                             reason,
                         );
                     }
@@ -99,6 +95,6 @@ impl WriteLimiter {
             }
             notified.await;
         }
-        tracing::debug!("write to table {} is unblocked", table_id.table_id,);
+        tracing::debug!("write to table {} is unblocked", table_id);
     }
 }

@@ -32,7 +32,7 @@ use super::explain::ExplainRow;
 use super::show::ShowColumnRow;
 use super::{RwPgResponse, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
-use crate::catalog::CatalogError;
+use crate::catalog::{CatalogError, FragmentId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::show::ShowColumnName;
 use crate::handler::{HandlerArgs, RwPgResponseBuilderExt};
@@ -141,9 +141,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
             let columns = sink.sink_catalog.full_columns().to_vec();
-            let pk_columns = sink
-                .sink_catalog
-                .downstream_pk_indices()
+            let pk_columns = (sink.sink_catalog.downstream_pk.clone().unwrap_or_default())
                 .into_iter()
                 .map(|idx| columns[idx].column_desc.clone())
                 .collect_vec();
@@ -267,7 +265,7 @@ pub async fn handle_describe_fragments(
             match relation {
                 Relation::Source(s) => {
                     if s.is_shared() {
-                        s.catalog.id
+                        s.catalog.id.as_share_source_job_id()
                     } else {
                         bail!(ErrorCode::NotSupported(
                             "non shared source has no fragments to describe".to_owned(),
@@ -275,7 +273,7 @@ pub async fn handle_describe_fragments(
                         ));
                     }
                 }
-                Relation::BaseTable(t) => t.table_catalog.id.table_id,
+                Relation::BaseTable(t) => t.table_catalog.id.as_job_id(),
                 Relation::SystemTable(_t) => {
                     bail!(ErrorCode::NotSupported(
                         "system table has no fragments to describe".to_owned(),
@@ -294,7 +292,7 @@ pub async fn handle_describe_fragments(
                 }
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
-            sink.sink_catalog.id.sink_id
+            sink.sink_catalog.id.as_job_id()
         } else {
             return Err(not_found_err.into());
         }
@@ -374,7 +372,7 @@ fn explain_node<'a>(node: &StreamNode, verbose: bool) -> Pretty<'a> {
 
 pub async fn handle_describe_fragment(
     handler_args: HandlerArgs,
-    fragment_id: u32,
+    fragment_id: FragmentId,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let meta_client = session.env().meta_client();

@@ -16,7 +16,6 @@ use anyhow::anyhow;
 use risingwave_common::acl::AclMode;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object as GrantObject;
 
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -68,10 +67,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
 
         if user.is_super
             || table.owner == user.id
-            || user.has_privilege(
-                &GrantObject::TableId(table.id().table_id()),
-                AclMode::Select,
-            )
+            || user.has_privilege(table.id(), AclMode::Select)
         {
             res.push(record);
         }

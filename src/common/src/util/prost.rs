@@ -110,7 +110,7 @@ impl StackTraceResponse {
             match self.barrier_worker_state.entry(worker_id) {
                 Entry::Occupied(_entry) => {
                     warn!(
-                        worker_id,
+                        %worker_id,
                         worker_state, "duplicate barrier worker state. skipped"
                     );
                 }
@@ -123,7 +123,7 @@ impl StackTraceResponse {
             match self.jvm_stack_traces.entry(worker_id) {
                 Entry::Occupied(_entry) => {
                     warn!(
-                        worker_id,
+                        %worker_id,
                         worker_state, "duplicate jvm stack trace. skipped"
                     );
                 }

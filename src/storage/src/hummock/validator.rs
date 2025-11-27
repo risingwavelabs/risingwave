@@ -97,7 +97,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
                     duplicate_worker_id
                 )
             }
-            visited_keys.insert(current_key.to_owned(), (sstable_info.object_id, worker_id));
+            visited_keys.insert(current_key.clone(), (sstable_info.object_id, worker_id));
             // Ordered and Locally unique
             if let Some(previous_key) = previous_key.take() {
                 let cmp = previous_key.cmp(&current_key);

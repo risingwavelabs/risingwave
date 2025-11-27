@@ -40,16 +40,10 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
         let metrics = {
             let streaming_metrics = actor_context.streaming_metrics.as_ref();
             let actor_id = actor_context.id;
-            let join_fragment_id = 0;
+            let fragment_id = params.fragment_id;
             let name = "sync_log_store";
             let target = "unaligned_hash_join";
-            SyncedKvLogStoreMetrics::new(
-                streaming_metrics,
-                actor_id,
-                join_fragment_id,
-                name,
-                target,
-            )
+            SyncedKvLogStoreMetrics::new(streaming_metrics, actor_id, fragment_id, name, target)
         };
 
         let serde = LogStoreRowSerde::new(
@@ -61,7 +55,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
 
         let pause_duration_ms = node.pause_duration_ms as _;
         let buffer_max_size = node.buffer_size as usize;
-        let chunk_size = actor_context.streaming_config.developer.chunk_size;
+        let chunk_size = actor_context.config.developer.chunk_size;
 
         let executor = SyncedKvLogStoreExecutor::new(
             actor_context,

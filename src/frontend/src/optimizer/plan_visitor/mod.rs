@@ -40,11 +40,13 @@ pub use cardinality_visitor::*;
 mod jsonb_stream_key_checker;
 pub use jsonb_stream_key_checker::*;
 mod distributed_dml_visitor;
-mod read_storage_table_visitor;
+mod locality_provider_counter;
 mod rw_timestamp_validator;
+mod sole_sys_table_visitor;
 pub use distributed_dml_visitor::*;
-pub use read_storage_table_visitor::*;
+pub use locality_provider_counter::*;
 pub use rw_timestamp_validator::*;
+pub use sole_sys_table_visitor::*;
 
 use crate::for_each_convention_all_plan_nodes;
 use crate::optimizer::plan_node::*;

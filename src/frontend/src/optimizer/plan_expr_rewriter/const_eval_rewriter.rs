@@ -31,10 +31,6 @@ impl ExprRewriter for ConstEvalRewriter {
                     expr
                 }
             }
-        } else if let ExprImpl::Parameter(_) = expr {
-            unreachable!(
-                "Parameter should not appear here. It will be replaced by a literal before this step."
-            )
         } else {
             default_rewrite_expr(self, expr)
         }

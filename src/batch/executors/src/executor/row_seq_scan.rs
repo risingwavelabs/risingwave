@@ -14,6 +14,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use prometheus::Histogram;
@@ -25,8 +26,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{PbAsOf, StorageTableDesc, as_of};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::{StateStore, dispatch_state_store};
@@ -51,38 +51,8 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     table: BatchTable<S>,
     scan_ranges: Vec<ScanRange>,
     ordered: bool,
-    epoch: BatchQueryEpoch,
+    query_epoch: BatchQueryEpoch,
     limit: Option<u64>,
-    as_of: Option<AsOf>,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AsOf {
-    pub timestamp: i64,
-}
-
-impl TryFrom<&PbAsOf> for AsOf {
-    type Error = BatchError;
-
-    fn try_from(pb: &PbAsOf) -> std::result::Result<Self, Self::Error> {
-        match pb.as_of_type.as_ref().unwrap() {
-            AsOfType::Timestamp(ts) => Ok(Self {
-                timestamp: ts.timestamp,
-            }),
-            AsOfType::ProcessTime(_) | AsOfType::Version(_) => Err(BatchError::TimeTravel(
-                anyhow::anyhow!("batch query does not support as of process time or version"),
-            )),
-        }
-    }
-}
-
-impl From<&AsOf> for PbAsOf {
-    fn from(v: &AsOf) -> Self {
-        PbAsOf {
-            as_of_type: Some(AsOfType::Timestamp(as_of::Timestamp {
-                timestamp: v.timestamp,
-            })),
-        }
-    }
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
@@ -90,12 +60,11 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: BatchTable<S>,
         scan_ranges: Vec<ScanRange>,
         ordered: bool,
-        epoch: BatchQueryEpoch,
+        query_epoch: BatchQueryEpoch,
         chunk_size: usize,
         identity: String,
         limit: Option<u64>,
         metrics: Option<BatchMetrics>,
-        as_of: Option<AsOf>,
     ) -> Self {
         Self {
             chunk_size,
@@ -104,9 +73,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             table,
             scan_ranges,
             ordered,
-            epoch,
+            query_epoch,
             limit,
-            as_of,
         }
     }
 }
@@ -144,14 +112,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let scan_ranges = build_scan_ranges_from_pb(&seq_scan_node.scan_ranges, table_desc)?;
 
         let ordered = seq_scan_node.ordered;
-
-        let epoch = source.epoch();
         let limit = seq_scan_node.limit;
-        let as_of = seq_scan_node
-            .as_of
-            .as_ref()
-            .map(AsOf::try_from)
-            .transpose()?;
+        let query_epoch = seq_scan_node
+            .query_epoch
+            .ok_or_else(|| anyhow!("query_epoch not set in distributed lookup join"))?;
+
         let chunk_size = if let Some(limit) = seq_scan_node.limit {
             (limit as u32).min(source.context().get_config().developer.chunk_size as u32)
         } else {
@@ -165,12 +130,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 table,
                 scan_ranges,
                 ordered,
-                epoch,
+                query_epoch,
                 chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 limit,
                 metrics,
-                as_of,
             )))
         })
     }
@@ -195,28 +159,15 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     async fn do_execute(self: Box<Self>) {
         let Self {
             chunk_size,
-            identity,
             metrics,
             table,
             scan_ranges,
             ordered,
-            epoch,
+            query_epoch,
             limit,
-            as_of,
+            ..
         } = *self;
         let table = Arc::new(table);
-        // as_of takes precedence
-        let query_epoch = as_of
-            .map(|a| {
-                let epoch = unix_timestamp_sec_to_epoch(a.timestamp).0;
-                tracing::debug!(epoch, identity, "time travel");
-                risingwave_pb::common::BatchQueryEpoch {
-                    epoch: Some(risingwave_pb::common::batch_query_epoch::Epoch::TimeTravel(
-                        epoch,
-                    )),
-                }
-            })
-            .unwrap_or_else(|| epoch);
 
         // Create collector.
         let histogram = metrics
@@ -298,7 +249,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     async fn execute_point_get(
         table: Arc<BatchTable<S>>,
         scan_range: ScanRange,
-        epoch: BatchQueryEpoch,
+        query_epoch: BatchQueryEpoch,
         histogram: Option<impl Deref<Target = Histogram>>,
     ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
@@ -307,7 +258,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
         // Point Get.
-        let row = table.get_row(&pk_prefix, epoch.into()).await?;
+        let row = table.get_row(&pk_prefix, query_epoch.into()).await?;
 
         if let Some(timer) = timer {
             timer.observe_duration()
@@ -321,7 +272,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: Arc<BatchTable<S>>,
         scan_range: ScanRange,
         ordered: bool,
-        epoch: BatchQueryEpoch,
+        query_epoch: BatchQueryEpoch,
         chunk_size: usize,
         limit: Option<u64>,
         histogram: Option<impl Deref<Target = Histogram>>,
@@ -332,7 +283,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
             .batch_chunk_iter_with_pk_bounds(
-                epoch.into(),
+                query_epoch.into(),
                 &pk_prefix,
                 range_bounds,
                 ordered,
@@ -358,11 +309,4 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             }
         }
     }
-}
-
-pub fn unix_timestamp_sec_to_epoch(ts: i64) -> risingwave_common::util::epoch::Epoch {
-    let ts = ts.checked_add(1).unwrap();
-    risingwave_common::util::epoch::Epoch::from_unix_millis_or_earliest(
-        u64::try_from(ts).unwrap_or(0).checked_mul(1000).unwrap(),
-    )
 }

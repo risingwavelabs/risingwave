@@ -150,7 +150,7 @@ impl Distribution {
                     );
 
                     let vnode_mapping = worker_node_manager
-                        .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
+                        .fragment_mapping(Self::get_fragment_id(catalog_reader, *table_id)?)?;
 
                     let worker_slot_to_id_map: HashMap<WorkerSlotId, u32> = vnode_mapping
                         .iter_unique()
@@ -195,21 +195,25 @@ impl Distribution {
         }
     }
 
-    /// Get distribution column indices.
-    ///
-    /// Panics if the distribution is not `HashShard`, `UpstreamHashShard` or `Single`.
+    /// Get distribution column indices. Panics if the distribution is `SomeShard` or `Broadcast`.
     pub fn dist_column_indices(&self) -> &[usize] {
+        self.dist_column_indices_opt()
+            .unwrap_or_else(|| panic!("cannot obtain distribution columns for {self:?}"))
+    }
+
+    /// Get distribution column indices. Returns `None` if the distribution is `SomeShard` or `Broadcast`.
+    pub fn dist_column_indices_opt(&self) -> Option<&[usize]> {
         match self {
-            Distribution::Single => &[],
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => dists,
-            Distribution::SomeShard | Distribution::Broadcast => {
-                panic!("cannot obtain distribution columns for {self:?}")
+            Distribution::Single => Some(&[]),
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
+                Some(dists)
             }
+            Distribution::SomeShard | Distribution::Broadcast => None,
         }
     }
 
     #[inline(always)]
-    fn get_fragment_id(catalog_reader: &CatalogReader, table_id: &TableId) -> Result<FragmentId> {
+    fn get_fragment_id(catalog_reader: &CatalogReader, table_id: TableId) -> Result<FragmentId> {
         catalog_reader
             .read_guard()
             .get_any_table_by_id(table_id)

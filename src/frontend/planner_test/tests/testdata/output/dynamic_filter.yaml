@@ -26,21 +26,48 @@
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: |
     With Top-1 on inner side
-    TODO: currently not possible due to https://github.com/risingwavelabs/risingwave/issues/5764
   before:
   - create_tables
   sql: |
-    with max_v2 as (select v2 max from t2 order by v2 desc limit 1) select v1 from t1, max_v2 where v1 > max;
+    with max_v2 as (select v2 max from t2 order by max desc limit 1) select v1 from t1, max_v2 where v1 > max;
   optimized_logical_plan_for_stream: |-
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalTopN { order: [t2.v2 DESC], limit: 1, offset: 0 }
-      └─LogicalProject { exprs: [t2.v2, t2.v2] }
-        └─LogicalScan { table: t2, columns: [t2.v2] }
-  stream_error: |-
-    Not supported: streaming nested-loop join
-    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/
+      └─LogicalScan { table: t2, columns: [t2.v2] }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
+    └─StreamDynamicFilter { predicate: (t1.v1 > t2.v2), output: [t1.v1, t1._row_id] }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [t2.v2] }
+          └─StreamTopN { order: [t2.v2 DESC], limit: 1, offset: 0 }
+            └─StreamExchange { dist: Single }
+              └─StreamGroupTopN { order: [t2.v2 DESC], limit: 1, offset: 0, group_key: [_vnode] }
+                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: |
+    With Limit-1 on inner side
+  before:
+  - create_tables
+  sql: |
+    with limit_v2 as (select v2 from t2 limit 1) select v1 from t1, limit_v2 where v1 > v2;
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: Inner, on: (t1.v1 > t2.v2), output: [t1.v1] }
+    ├─LogicalScan { table: t1, columns: [t1.v1] }
+    └─LogicalLimit { limit: 1, offset: 0 }
+      └─LogicalScan { table: t2, columns: [t2.v2] }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
+    └─StreamDynamicFilter { predicate: (t1.v1 > t2.v2), output: [t1.v1, t1._row_id] }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [t2.v2] }
+          └─StreamTopN { order: [t2.v2 ASC], limit: 1, offset: 0 }
+            └─StreamExchange { dist: Single }
+              └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [_vnode] }
+                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: With Simple Agg upstream materialized view on inner side
   before:
   - create_tables

@@ -314,7 +314,7 @@ fn configure(chosen: &[Components]) -> Result<Option<Vec<Components>>> {
                 style("Space").reverse(),
             )
         )
-        .items_checked(&items)
+        .items_checked(items)
         .max_length(ITEMS_PER_PAGE)
         .interact_opt()? else {
         return Ok(None);

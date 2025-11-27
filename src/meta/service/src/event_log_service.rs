@@ -53,6 +53,9 @@ impl EventLogService for EventLogServiceImpl {
             risingwave_pb::meta::add_event_log_request::Event::SinkFail(e) => {
                 risingwave_pb::meta::event_log::Event::SinkFail(e)
             }
+            risingwave_pb::meta::add_event_log_request::Event::AutoSchemaChangeFail(e) => {
+                risingwave_pb::meta::event_log::Event::AutoSchemaChangeFail(e)
+            }
         };
         self.event_log_manager.add_event_logs(vec![e]);
         Ok(Response::new(AddEventLogResponse {}))

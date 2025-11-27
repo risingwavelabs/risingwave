@@ -5,7 +5,11 @@ statement ok
 ALTER SYSTEM SET license_key TO '';
 
 statement ok
+flush;
+
+statement ok
 CREATE TABLE t (k INT);
+
 
 statement error
 CREATE SINK dynamodb_sink
@@ -27,6 +31,25 @@ Caused by these errors (recent errors listed first):
   1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: feature DynamoDbSink is not available based on your license
+
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+
+
+statement error
+CREATE SINK redis_sink
+FROM
+    t WITH (
+    primary_key = 'k',
+    connector = 'redis',
+    redis.url= 'redis://127.0.0.1:6379/',
+)FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true',stream='aaa', key_format = 'key_is:{k}', redis_value_type ='stream', value_format = 'jafk:{k}_');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
+  2: failed to validate sink
+  3: feature RedisSinkStream is not available based on your license
 
 Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
 
@@ -189,6 +212,23 @@ Caused by these errors (recent errors listed first):
   2: failed to validate sink
   3: BigQuery error
   4: No such file or directory (os error 2)
+
+
+statement error
+CREATE SINK redis_sink
+FROM
+    t WITH (
+    primary_key = 'k',
+    connector = 'redis',
+    redis.url= 'redis://127.0.0.1:6379/',
+)FORMAT PLAIN ENCODE TEMPLATE(force_append_only='true',stream='aaa', key_format = 'key_is:{k}', redis_value_type ='stream', value_format = 'jafk:{v1}_');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
+  2: failed to validate sink
+  3: Redis error: Can't find field("v1") in key_format or value_format
 
 
 statement ok

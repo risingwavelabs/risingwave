@@ -122,7 +122,7 @@ impl Rule<Logical> for OverWindowToTopNRule {
             offset,
             with_ties,
             Order {
-                column_orders: window_func.order_by.to_vec(),
+                column_orders: window_func.order_by.clone(),
             },
             window_func.partition_by.iter().map(|i| i.index).collect(),
         )

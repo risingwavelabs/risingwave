@@ -1,0 +1,147 @@
+query T
+SELECT get_bit('\x1234567890'::bytea, 30);
+----
+1
+
+query T
+SELECT get_bit('\x1234567890'::bytea, 11);
+----
+0
+
+query T
+SELECT get_bit('\x1234567890'::bytea, 4);
+----
+1
+
+query T
+SELECT get_bit('\x1234567890'::bytea, 23);
+----
+0
+
+statement error index 45 out of valid range, 0..39
+SELECT get_bit('\x1234567890'::bytea, 45);
+
+query T
+SELECT set_bit('\x1234567890'::bytea, 30, 0);
+----
+\x1234563890
+
+query T
+SELECT set_bit('\x1234567890'::bytea, 4, 1);
+----
+\x1234567890
+
+query T
+SELECT set_bit('\x1234567890'::bytea, 4, 0);
+----
+\x0234567890
+
+query T
+SELECT set_bit('\x1234567890'::bytea, 11, 1);
+----
+\x123c567890
+
+query T
+SELECT set_bit('\x1234567890'::bytea, 19, 1);
+----
+\x12345e7890
+
+query T
+SELECT set_bit('\x1234567890'::bytea, 28, 0);
+----
+\x1234566890
+
+query T
+SELECT set_bit('\x1234567890'::bytea, 34, 1);
+----
+\x1234567894
+
+statement error value 10 is invalid, new bit must be 0 or 1
+SELECT set_bit('\x1234567890'::bytea, 34, 10);
+
+
+statement error index 50 out of valid range, 0..39
+SELECT set_bit('\x1234567890'::bytea, 50, 1);
+
+
+query T
+SELECT get_byte('\x1234567890'::bytea, 0);
+----
+18
+
+query T
+SELECT get_byte('\x1234567890'::bytea, 4);
+----
+144
+
+
+statement error index 7 out of valid range, 0..4
+SELECT get_byte('\x1234567890'::bytea, 7);
+
+
+query T
+SELECT set_byte('\x1234567890'::bytea, 2, 37);
+----
+\x1234257890
+
+query T
+SELECT set_byte('\x1234567890'::bytea, 4, 45);
+----
+\x123456782d
+
+
+statement error index 7 out of valid range, 0..4
+SELECT set_byte('\x1234567890'::bytea, 7, 23);
+
+
+query T
+SELECT set_byte('\x1234567890'::bytea, 4, 300);
+----
+\x123456782c
+
+
+query T
+SELECT set_byte('\x1234567890'::bytea, 4, -300);
+----
+\x12345678d4
+
+
+query T
+select bit_count('\x00'::bytea);
+----
+0
+
+query T
+select bit_count('\x4294967295'::bytea);
+----
+17
+
+query T
+select bit_count('0x12345678'::bytea);
+----
+35
+
+query T
+select bit_count('0x80000000'::bytea);
+----
+23
+
+query T
+SELECT reverse(''::bytea);
+----
+\x
+
+query T
+SELECT reverse('\xaa'::bytea);
+----
+\xaa
+
+query T
+SELECT reverse('\xabcd'::bytea);
+----
+\xcdab
+
+query T
+SELECT reverse('\x1234567890'::bytea);
+----
+\x9078563412

@@ -278,19 +278,20 @@ impl UdfImpl for WasmTableFunction {
 /// Later calls with the same binary will simply clone the runtime so that inner immutable
 /// fields are shared.
 fn create_wasm_runtime(binary: &[u8]) -> Result<Runtime> {
-    static RUNTIMES: LazyLock<moka::sync::Cache<md5::Digest, Runtime>> = LazyLock::new(|| {
+    static RUNTIMES: LazyLock<moka::sync::Cache<[u8; 16], Runtime>> = LazyLock::new(|| {
         moka::sync::Cache::builder()
             .time_to_idle(Duration::from_secs(60))
             .build()
     });
 
-    let md5 = md5::compute(binary);
-    if let Some(runtime) = RUNTIMES.get(&md5) {
-        return Ok(runtime.clone());
+    use md5::Digest as _;
+    let md5 = md5::Md5::digest(binary);
+    if let Some(runtime) = RUNTIMES.get(md5.as_slice()) {
+        return Ok(runtime);
     }
 
     let runtime = Runtime::new(binary)?;
-    RUNTIMES.insert(md5, runtime.clone());
+    RUNTIMES.insert(md5.into(), runtime.clone());
     Ok(runtime)
 }
 
@@ -328,7 +329,7 @@ fn wasm_identifier_v1(
             DataType::Int256 => "int256".to_owned(),
             DataType::Bytea => "binary".to_owned(),
             DataType::Varchar => "string".to_owned(),
-            DataType::List(inner) => format!("{}[]", datatype_name(inner)?),
+            DataType::List(l) => format!("{}[]", datatype_name(l.elem())?),
             DataType::Struct(s) => format!(
                 "struct<{}>",
                 s.iter()

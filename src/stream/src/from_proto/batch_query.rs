@@ -56,7 +56,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
 
         let exec = BatchQueryExecutor::new(
             table,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             params.info.schema.clone(),
         );
         Ok((params.info, exec).into())

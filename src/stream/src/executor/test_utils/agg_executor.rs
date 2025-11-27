@@ -31,7 +31,7 @@ use crate::executor::aggregate::{
     AggExecutorArgs, AggStateStorage, HashAggExecutor, HashAggExecutorExtraArgs, SimpleAggExecutor,
     SimpleAggExecutorExtraArgs,
 };
-use crate::executor::{ActorContext, ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::executor::{ActorContext, ActorContextRef, Executor, ExecutorInfo, StreamKey};
 
 /// Generate aggExecuter's schema from `input`, `agg_calls` and `group_key_indices`.
 /// For [`crate::executor::aggregate::HashAggExecutor`], the group key indices should be provided.
@@ -64,7 +64,7 @@ pub async fn create_agg_state_storage<S: StateStore>(
     table_id: TableId,
     agg_call: &AggCall,
     group_key_indices: &[usize],
-    pk_indices: &[usize],
+    stream_key: &[usize],
     input_fields: Vec<Field>,
     is_append_only: bool,
 ) -> AggStateStorage<S> {
@@ -99,7 +99,7 @@ pub async fn create_agg_state_storage<S: StateStore>(
                     Some(OrderType::ascending())
                 });
 
-                for idx in pk_indices {
+                for idx in stream_key {
                     add_column(*idx, input_fields[*idx].data_type(), Some(OrderType::ascending()));
                 }
 
@@ -186,7 +186,7 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     agg_calls: Vec<AggCall>,
     row_count_index: usize,
     group_key_indices: Vec<usize>,
-    pk_indices: PkIndices,
+    stream_key: StreamKey,
     extreme_cache_size: usize,
     emit_on_window_close: bool,
     executor_id: u64,
@@ -199,7 +199,7 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
                 TableId::new(idx as u32),
                 agg_call,
                 &group_key_indices,
-                &pk_indices,
+                &stream_key,
                 input.info.schema.fields.clone(),
                 is_append_only,
             )
@@ -219,7 +219,7 @@ pub async fn new_boxed_hash_agg_executor<S: StateStore>(
     let schema = generate_agg_schema(&input, &agg_calls, Some(&group_key_indices));
     let info = ExecutorInfo::for_test(
         schema,
-        pk_indices,
+        stream_key,
         "HashAggExecutor".to_owned(),
         executor_id,
     );
@@ -259,7 +259,7 @@ pub async fn new_boxed_simple_agg_executor<S: StateStore>(
     is_append_only: bool,
     agg_calls: Vec<AggCall>,
     row_count_index: usize,
-    pk_indices: PkIndices,
+    stream_key: StreamKey,
     executor_id: u64,
     must_output_per_barrier: bool,
 ) -> Executor {
@@ -269,7 +269,7 @@ pub async fn new_boxed_simple_agg_executor<S: StateStore>(
             TableId::new(idx as u32),
             agg_call,
             &[],
-            &pk_indices,
+            &stream_key,
             input.info.schema.fields.clone(),
             is_append_only,
         )
@@ -288,7 +288,7 @@ pub async fn new_boxed_simple_agg_executor<S: StateStore>(
     let schema = generate_agg_schema(&input, &agg_calls, None);
     let info = ExecutorInfo::for_test(
         schema,
-        pk_indices,
+        stream_key,
         "SimpleAggExecutor".to_owned(),
         executor_id,
     );

@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::TableId;
 use risingwave_pb::catalog::PbSubscription;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{ObjectId, SubscriptionId};
+use crate::SubscriptionId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "subscription")]
@@ -28,7 +29,7 @@ pub struct Model {
     pub retention_seconds: i64,
     pub definition: String,
     pub subscription_state: i32,
-    pub dependent_table_id: ObjectId,
+    pub dependent_table_id: TableId,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -54,12 +55,12 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSubscription> for ActiveModel {
     fn from(pb_subscription: PbSubscription) -> Self {
         Self {
-            subscription_id: Set(pb_subscription.id as _),
+            subscription_id: Set(pb_subscription.id),
             name: Set(pb_subscription.name),
             retention_seconds: Set(pb_subscription.retention_seconds as _),
             definition: Set(pb_subscription.definition),
             subscription_state: Set(pb_subscription.subscription_state),
-            dependent_table_id: Set(pb_subscription.dependent_table_id as _),
+            dependent_table_id: Set(pb_subscription.dependent_table_id),
         }
     }
 }

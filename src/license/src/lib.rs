@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
+#![allow(clippy::doc_markdown)]
 
-mod cpu;
 mod feature;
 mod key;
 mod manager;
+mod rwu;
 
 pub use feature::*;
 pub use key::*;

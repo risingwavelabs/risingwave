@@ -274,13 +274,13 @@ pub fn build_table_change_log_delta<'a>(
     old_value_ssts: impl Iterator<Item = SstableInfo>,
     new_value_ssts: impl Iterator<Item = &'a SstableInfo>,
     epochs: &Vec<u64>,
-    log_store_table_ids: impl Iterator<Item = (u32, u64)>,
+    log_store_table_ids: impl Iterator<Item = (TableId, u64)>,
 ) -> HashMap<TableId, ChangeLogDelta> {
     let mut table_change_log: HashMap<_, _> = log_store_table_ids
         .map(|(table_id, truncate_epoch)| {
             let (non_checkpoint_epochs, checkpoint_epoch) = resolve_pb_log_epochs(epochs);
             (
-                TableId::new(table_id),
+                table_id,
                 ChangeLogDelta {
                     truncate_epoch,
                     new_log: EpochNewChangeLog {
@@ -295,19 +295,19 @@ pub fn build_table_change_log_delta<'a>(
         .collect();
     for sst in old_value_ssts {
         for table_id in &sst.table_ids {
-            match table_change_log.get_mut(&TableId::new(*table_id)) {
+            match table_change_log.get_mut(table_id) {
                 Some(log) => {
                     log.new_log.old_value.push(sst.clone());
                 }
                 None => {
-                    warn!(table_id, ?sst, "old value sst contains non-log-store table");
+                    warn!(%table_id, ?sst, "old value sst contains non-log-store table");
                 }
             }
         }
     }
     for sst in new_value_ssts {
         for table_id in &sst.table_ids {
-            if let Some(log) = table_change_log.get_mut(&TableId::new(*table_id)) {
+            if let Some(log) = table_change_log.get_mut(table_id) {
                 log.new_log.new_value.push(sst.clone());
             }
         }

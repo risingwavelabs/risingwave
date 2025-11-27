@@ -13,6 +13,7 @@ stream_enable_arrangement_backfill = false
 enable_barrier_read = true
 
 [storage]
+share_buffers_sync_parallelism = 4
 imm_merge_threshold = 2
 
 [system]

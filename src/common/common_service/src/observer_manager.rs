@@ -122,7 +122,7 @@ where
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
-            Info::ComputeNodeTotalCpuCount(_) => true,
+            Info::ClusterResource(_) => true,
             Info::StreamingWorkerSlotMapping(_) => {
                 notification.version
                     > info

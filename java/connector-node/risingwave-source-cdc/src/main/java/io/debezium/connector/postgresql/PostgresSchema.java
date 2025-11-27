@@ -21,17 +21,34 @@
 package io.debezium.connector.postgresql;
 
 import io.debezium.annotation.NotThreadSafe;
+import io.debezium.config.Configuration;
+import io.debezium.connector.postgresql.PostgresConnectorConfig.LogicalDecoder;
 import io.debezium.connector.postgresql.connection.PostgresConnection;
 import io.debezium.connector.postgresql.connection.PostgresDefaultValueConverter;
 import io.debezium.connector.postgresql.connection.ReplicaIdentityInfo;
 import io.debezium.jdbc.JdbcConnection;
 import io.debezium.pipeline.spi.Offsets;
-import io.debezium.relational.*;
+import io.debezium.relational.RelationalDatabaseSchema;
+import io.debezium.relational.Table;
+import io.debezium.relational.TableId;
+import io.debezium.relational.TableSchemaBuilder;
+import io.debezium.relational.Tables;
+import io.debezium.relational.ddl.DdlParser;
+import io.debezium.relational.history.HistoryRecordComparator;
+import io.debezium.relational.history.SchemaHistory;
+import io.debezium.relational.history.SchemaHistoryException;
+import io.debezium.relational.history.SchemaHistoryListener;
+import io.debezium.relational.history.TableChanges;
 import io.debezium.schema.HistorizedDatabaseSchema;
 import io.debezium.schema.SchemaChangeEvent;
 import io.debezium.spi.topic.TopicNamingStrategy;
 import java.sql.SQLException;
-import java.util.*;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -56,6 +73,8 @@ public class PostgresSchema extends RelationalDatabaseSchema
     private final Map<TableId, List<String>> tableIdToToastableColumns;
     private final Map<Integer, TableId> relationIdToTableId;
     private final boolean readToastableColumns;
+    private final PostgresConnectorConfig connectorConfig;
+    private final PostgresSchemaHistory schemaHistory;
 
     /**
      * Create a schema component given the supplied {@link PostgresConnectorConfig Postgres
@@ -77,9 +96,11 @@ public class PostgresSchema extends RelationalDatabaseSchema
                 false,
                 config.getKeyMapper());
 
+        this.connectorConfig = config;
         this.tableIdToToastableColumns = new HashMap<>();
         this.relationIdToTableId = new HashMap<>();
         this.readToastableColumns = config.skipRefreshSchemaOnMissingToastableData();
+        this.schemaHistory = new PostgresSchemaHistory();
     }
 
     private static TableSchemaBuilder getTableSchemaBuilder(
@@ -142,10 +163,14 @@ public class PostgresSchema extends RelationalDatabaseSchema
      * @param tableId the table identifier; may not be null
      * @param refreshToastableColumns refreshes the cache of toastable columns for `tableId`, if
      *     {@code true}
+     * @param removeGeneratedColumns removes the GENERATED columns from `tableId`, if {@code true}
      * @throws SQLException if there is a problem refreshing the schema from the database server
      */
-    protected void refresh(
-            PostgresConnection connection, TableId tableId, boolean refreshToastableColumns)
+    private void refresh(
+            PostgresConnection connection,
+            TableId tableId,
+            boolean refreshToastableColumns,
+            boolean removeGeneratedColumns)
             throws SQLException {
         Tables temp = new Tables();
         connection.readSchema(temp, null, null, tableId::equals, null, true);
@@ -155,8 +180,19 @@ public class PostgresSchema extends RelationalDatabaseSchema
             LOGGER.warn("Refresh of {} was requested but the table no longer exists", tableId);
             return;
         }
+
+        var updatedTable = temp.forTable(tableId);
+        if (removeGeneratedColumns) {
+            var editor = updatedTable.edit();
+            final var notGeneratedColumns = updatedTable.filterColumns(x -> !x.isGenerated());
+            LOGGER.debug(
+                    "Removing generated columns, the new column list is '{}'", notGeneratedColumns);
+            editor.setColumns(notGeneratedColumns);
+            updatedTable = editor.create();
+        }
+
         // overwrite (add or update) or views of the tables
-        tables().overwriteTable(temp.forTable(tableId));
+        tables().overwriteTable(updatedTable);
         // refresh the schema
         refreshSchema(tableId);
 
@@ -164,6 +200,33 @@ public class PostgresSchema extends RelationalDatabaseSchema
             // and refresh toastable columns info
             refreshToastableColumnsMap(connection, tableId);
         }
+    }
+
+    /**
+     * Refreshes this schema's content for a particular table
+     *
+     * @param connection a {@link JdbcConnection} instance, never {@code null}
+     * @param tableId the table identifier; may not be null
+     * @param refreshToastableColumns refreshes the cache of toastable columns for `tableId`, if
+     *     {@code true}
+     * @throws SQLException if there is a problem refreshing the schema from the database server
+     */
+    protected void refresh(
+            PostgresConnection connection, TableId tableId, boolean refreshToastableColumns)
+            throws SQLException {
+        refresh(connection, tableId, refreshToastableColumns, false);
+    }
+
+    /**
+     * Refreshes this schema's content for a particular table in incremental snapshot
+     *
+     * @param connection a {@link JdbcConnection} instance, never {@code null}
+     * @param tableId the table identifier; may not be null
+     * @throws SQLException if there is a problem refreshing the schema from the database server
+     */
+    protected void refreshFromIncrementalSnapshot(PostgresConnection connection, TableId tableId)
+            throws SQLException {
+        refresh(connection, tableId, true, connectorConfig.plugin() == LogicalDecoder.PGOUTPUT);
     }
 
     protected boolean isFilteredOut(TableId id) {
@@ -303,7 +366,6 @@ public class PostgresSchema extends RelationalDatabaseSchema
         return false;
     }
 
-    // patched: true is a prerequisite to emit schema change events
     @Override
     public boolean isHistorized() {
         return true;
@@ -344,9 +406,72 @@ public class PostgresSchema extends RelationalDatabaseSchema
         return false;
     }
 
-    // patched: PostgreSQL don't need to store history, so we always return true
     @Override
-    public boolean historyExists() {
+    public SchemaHistory getSchemaHistory() {
+        return schemaHistory;
+    }
+}
+
+class PostgresSchemaHistory implements SchemaHistory {
+
+    @Override
+    public void configure(
+            Configuration config,
+            HistoryRecordComparator comparator,
+            SchemaHistoryListener listener,
+            boolean useCatalogBeforeSchema) {
+        // no-op
+    }
+
+    @Override
+    public void start() {
+        // no-op
+    }
+
+    @Override
+    public void record(
+            Map<String, ?> source, Map<String, ?> position, String databaseName, String ddl)
+            throws SchemaHistoryException {
+        // no-op
+    }
+
+    @Override
+    public void record(
+            Map<String, ?> source,
+            Map<String, ?> position,
+            String databaseName,
+            String schemaName,
+            String ddl,
+            TableChanges changes,
+            Instant timestamp)
+            throws SchemaHistoryException {
+        // no-op
+    }
+
+    @Override
+    public void recover(
+            Map<Map<String, ?>, Map<String, ?>> offsets, Tables schema, DdlParser ddlParser)
+            throws InterruptedException {
+        // no-op
+    }
+
+    @Override
+    public void stop() {
+        // no-op
+    }
+
+    @Override
+    public boolean exists() {
         return true;
+    }
+
+    @Override
+    public boolean storageExists() {
+        return true;
+    }
+
+    @Override
+    public void initializeStorage() {
+        // no-op
     }
 }

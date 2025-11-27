@@ -69,6 +69,9 @@ message WorkerNode {
     string rw_version = 1;
     uint64 total_memory_bytes = 2;
     uint64 total_cpu_cores = 3;
+    // The host name reported by `gethostname()`.
+    // Not to be confused with `host` field in `WorkerNode`.
+    string hostname = 4;
   }
   uint32 id = 1;
   WorkerType type = 2;
@@ -94,6 +97,11 @@ message WorkerNode {
   // Moved to `Property` message.
   reserved 10;
   reserved "parallelism";
+}
+
+message ClusterResource {
+  uint64 total_memory_bytes = 1;
+  uint64 total_cpu_cores = 2;
 }
 
 message Buffer {

@@ -20,7 +20,9 @@ use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
-use crate::parser::unified::json::{TimeHandling, TimestampHandling, TimestamptzHandling};
+use crate::parser::unified::json::{
+    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
@@ -77,6 +79,9 @@ async fn build_accessor_builder(
                     .timestamp_handling
                     .unwrap_or(TimestampHandling::GuessNumberUnit),
                 json_config.time_handling.unwrap_or(TimeHandling::Micro),
+                json_config
+                    .bigint_unsigned_handling
+                    .unwrap_or(BigintUnsignedHandlingMode::Long),
                 json_config.handle_toast_columns,
             )?,
         )),
@@ -120,6 +125,7 @@ impl DebeziumParser {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                bigint_unsigned_handling: None,
                 handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
@@ -227,6 +233,7 @@ mod tests {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                bigint_unsigned_handling: None,
                 handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
@@ -273,7 +280,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_additional_columns() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
             ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
             ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
@@ -302,6 +309,7 @@ mod tests {
                 timestamptz_handling: None,
                 timestamp_handling: None,
                 time_handling: None,
+                bigint_unsigned_handling: None,
                 handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),

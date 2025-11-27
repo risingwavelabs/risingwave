@@ -138,7 +138,8 @@ impl UpdateExecutor {
 
         // Transform the data chunk to a stream chunk, then write to the source.
         let write_txn_data = |chunk: DataChunk| async {
-            // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
+            // Note: we've banned updating the primary key when binding `UPDATE` statement.
+            // So we can safely use `Update` op.
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
                 .cycle()
@@ -230,7 +231,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             NodeBody::Update
         )?;
 
-        let table_id = TableId::new(update_node.table_id);
+        let table_id = update_node.table_id;
 
         let old_exprs: Vec<_> = update_node
             .get_old_exprs()

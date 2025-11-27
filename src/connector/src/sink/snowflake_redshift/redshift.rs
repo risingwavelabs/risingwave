@@ -37,6 +37,7 @@ use with_options::WithOptions;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
+use crate::sink::catalog::SinkId;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Common, S3Sink};
@@ -173,8 +174,8 @@ impl TryFrom<SinkParam> for RedshiftSink {
         )
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
         let is_append_only = param.sink_type.is_append_only();
-        let schema = param.schema().clone();
-        let pk_indices = param.downstream_pk.clone();
+        let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         Ok(Self {
             config,
             param,
@@ -278,7 +279,7 @@ impl Sink for RedshiftSink {
             self.is_append_only,
             &pk_column_names,
             &all_column_names,
-            self.param.sink_id.sink_id(),
+            self.param.sink_id,
         )?;
         Ok(coordinator)
     }
@@ -378,7 +379,7 @@ pub struct RedshiftSinkCommitter {
     config: RedShiftConfig,
     client: JdbcJniClient,
     db: DatabaseConnection,
-    sink_id: u32,
+    sink_id: SinkId,
     pk_column_names: Vec<String>,
     all_column_names: Vec<String>,
     writer_target_interval_seconds: u64,
@@ -395,7 +396,7 @@ impl RedshiftSinkCommitter {
         is_append_only: bool,
         pk_column_names: &Vec<String>,
         all_column_names: &Vec<String>,
-        sink_id: u32,
+        sink_id: SinkId,
     ) -> Result<Self> {
         let client = config.build_client()?;
         let writer_target_interval_seconds = config.writer_target_interval_seconds;
@@ -460,7 +461,7 @@ impl RedshiftSinkCommitter {
         client: &JdbcJniClient,
         config: &RedShiftConfig,
         is_append_only: bool,
-        sink_id: u32,
+        sink_id: SinkId,
         paths: Vec<String>,
     ) -> Result<()> {
         if paths.is_empty() {
@@ -512,7 +513,7 @@ impl RedshiftSinkCommitter {
         need_copy_into: bool,
         writer_target_interval_seconds: u64,
         write_intermediate_interval_seconds: u64,
-        sink_id: u32,
+        sink_id: SinkId,
         config: RedShiftConfig,
         db: DatabaseConnection,
         mut shutdown_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,

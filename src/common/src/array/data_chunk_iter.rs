@@ -125,7 +125,7 @@ unsafe impl TrustedLen for DataChunkRefIterWithHoles<'_> {}
 mod row_ref {
     use super::*;
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Default)]
     pub struct RowRef<'a> {
         columns: &'a [ArrayRef],
 

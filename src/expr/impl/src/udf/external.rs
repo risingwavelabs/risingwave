@@ -258,8 +258,8 @@ impl ExternalFunction {
                     tracing::error!(?backoff, error = %err.as_report(), "UDF tonic error. retry...");
                 }
                 ret => {
-                    if ret.is_err() {
-                        tracing::error!(error = %ret.as_ref().unwrap_err().as_report(), "UDF error. exiting...");
+                    if let Err(e) = &ret {
+                        tracing::error!(error = %e.as_report(), "UDF error. exiting...");
                     }
                     return ret;
                 }

@@ -130,7 +130,13 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     uncompressed_file_size: sst.uncompressed_file_size as _,
                     range_tombstone_count: sst.range_tombstone_count as _,
                     bloom_filter_kind: sst.bloom_filter_kind as _,
-                    table_ids: json!(sst.table_ids).into(),
+                    table_ids: json!(
+                        sst.table_ids
+                            .iter()
+                            .map(|table_id| table_id.as_raw_id())
+                            .collect_vec()
+                    )
+                    .into(),
                     sst_size: sst.sst_size as _,
                 });
             }
@@ -189,7 +195,7 @@ async fn read_hummock_table_watermarks(
             vnode_watermark_map
                 .into_iter()
                 .map(move |(vnode, (epoch, watermark))| RwHummockTableWatermark {
-                    table_id: table_id.table_id as _,
+                    table_id: table_id.as_i32_id(),
                     vnode_id: vnode as _,
                     epoch: epoch as _,
                     watermark,
@@ -216,7 +222,7 @@ async fn read_hummock_snapshot_groups(
         .info()
         .iter()
         .map(|(table_id, info)| RwHummockSnapshot {
-            table_id: table_id.table_id as _,
+            table_id: table_id.as_i32_id(),
             committed_epoch: info.committed_epoch as _,
         })
         .collect())
@@ -240,7 +246,7 @@ async fn read_hummock_table_change_log(
         .table_change_log
         .iter()
         .map(|(table_id, change_log)| RwHummockTableChangeLog {
-            table_id: table_id.table_id as i32,
+            table_id: table_id.as_i32_id(),
             change_log: json!(change_log.to_protobuf()).into(),
         })
         .collect())

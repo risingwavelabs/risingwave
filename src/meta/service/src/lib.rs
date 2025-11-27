@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(coverage_attribute)]
 

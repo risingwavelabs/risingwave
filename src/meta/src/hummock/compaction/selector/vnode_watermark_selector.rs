@@ -80,10 +80,7 @@ fn safe_epoch_read_table_watermarks(
     safe_epoch_read_table_watermarks_impl(
         safe_epoch_table_watermarks_impl(
             table_watermarks,
-            &member_table_ids
-                .iter()
-                .map(TableId::table_id)
-                .collect::<Vec<_>>(),
+            &member_table_ids.iter().copied().collect::<Vec<_>>(),
         )
         .into_iter()
         .filter(|(_table_id, table_watermarks)| {

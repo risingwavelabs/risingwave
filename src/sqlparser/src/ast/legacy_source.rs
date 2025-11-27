@@ -18,8 +18,6 @@
 use std::fmt;
 
 use itertools::Itertools as _;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use winnow::ModalResult;
 
 use crate::ast::{
@@ -31,7 +29,6 @@ use crate::parser::{Parser, StrError};
 use crate::{impl_fmt_display, impl_parse_to, parser_err};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CompatibleFormatEncode {
     RowFormat(LegacyRowFormat),
     V2(FormatEncodeOptions),
@@ -121,7 +118,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LegacyRowFormat {
     Protobuf(ProtobufSchema), // Keyword::PROTOBUF ProtobufSchema
     Json,                     // Keyword::JSON
@@ -282,7 +278,6 @@ impl fmt::Display for LegacyRowFormat {
 //     row_schema_location: AstString,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ProtobufSchema {
     pub message_name: AstString,
     pub row_schema_location: AstString,
@@ -321,7 +316,6 @@ impl fmt::Display for ProtobufSchema {
 // Keyword::REGISTRY]],     row_schema_location: AstString,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AvroSchema {
     pub row_schema_location: AstString,
     pub use_schema_registry: bool,
@@ -350,7 +344,6 @@ impl fmt::Display for AvroSchema {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebeziumAvroSchema {
     pub row_schema_location: AstString,
 }
@@ -395,7 +388,6 @@ impl ParseTo for DebeziumAvroSchema {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CsvInfo {
     pub delimiter: u8,
     pub has_header: bool,

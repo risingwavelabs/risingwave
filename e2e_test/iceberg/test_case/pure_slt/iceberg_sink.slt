@@ -45,6 +45,24 @@ CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
     table.name='e2e_demo_table',
 );
 
+# test is_exactly_once is true with sink_decouple = false
+statement error
+CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'v1',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = secret iceberg_s3_access_key,
+    s3.secret.key = secret iceberg_s3_secret_key,
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='e2e_demo_table',
+    is_exactly_once = true
+);
+
 statement ok
 CREATE SOURCE iceberg_demo_source WITH (
     connector = 'iceberg',

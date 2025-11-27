@@ -143,11 +143,11 @@ impl MessageIndexes {
         const TAG_MESSAGE_NESTED: i32 = 3;
 
         let mut indexes = vec![];
-        let mut path = desc.path().array_chunks();
-        let &[tag, idx] = path.next().unwrap();
+        let mut path = desc.path().iter().copied().array_chunks();
+        let [tag, idx] = path.next().unwrap();
         assert_eq!(tag, TAG_FILE_MESSAGE);
         indexes.push(idx);
-        for &[tag, idx] in path {
+        for [tag, idx] in path {
             assert_eq!(tag, TAG_MESSAGE_NESTED);
             indexes.push(idx);
         }
@@ -175,7 +175,7 @@ impl MessageIndexes {
 /// * For `validate`, the inputs are (RisingWave type, ProtoBuf type).
 /// * For `encode`, the inputs are (RisingWave type, RisingWave data, ProtoBuf type).
 ///
-/// Thus we impl [`MaybeData`] for both [`()`] and [`ScalarRefImpl`].
+/// Thus we impl [`MaybeData`] for both `()` and [`ScalarRefImpl`].
 trait MaybeData: std::fmt::Debug {
     type Out;
 
@@ -389,8 +389,8 @@ fn on_field<D: MaybeData>(
             Kind::Message(pb) => maybe.on_struct(st, &pb)?,
             _ => return no_match_err(),
         },
-        DataType::List(elem) => match expect_list {
-            true => maybe.on_list(elem, proto_field)?,
+        DataType::List(lt) => match expect_list {
+            true => maybe.on_list(lt.elem(), proto_field)?,
             false => return no_match_err(),
         },
         // Group B: match between RisingWave types and ProtoBuf Well-Known types
@@ -506,7 +506,7 @@ mod tests {
                 ])),
                 "nested_message_field",
             ),
-            Field::with_name(DataType::List(DataType::Int32.into()), "repeated_int_field"),
+            Field::with_name(DataType::Int32.list(), "repeated_int_field"),
             Field::with_name(DataType::Timestamptz, "timestamp_field"),
             Field::with_name(
                 DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Int32)),
@@ -580,8 +580,7 @@ mod tests {
             },
         ]);
 
-        let encoder =
-            ProtoEncoder::new(schema, None, descriptor.clone(), ProtoHeader::None).unwrap();
+        let encoder = ProtoEncoder::new(schema, None, descriptor, ProtoHeader::None).unwrap();
         let m = encoder.encode(row).unwrap();
         expect_test::expect![[r#"
             field: FieldDescriptor {
@@ -906,7 +905,7 @@ mod tests {
         let message_descriptor = pool.get_message_by_name("all_types.AllTypes").unwrap();
 
         let schema = Schema::new(vec![Field::with_name(
-            DataType::List(DataType::List(DataType::Int32.into()).into()),
+            DataType::Int32.list().list(),
             "repeated_int_field",
         )]);
 
@@ -924,7 +923,7 @@ mod tests {
         );
 
         let schema = Schema::new(vec![Field::with_name(
-            DataType::List(DataType::Int32.into()),
+            DataType::Int32.list(),
             "repeated_int_field",
         )]);
         let row = OwnedRow::new(vec![Some(ScalarImpl::List(ListValue::from_iter([

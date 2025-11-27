@@ -386,7 +386,7 @@ mod tests {
             StructType::new([("f2", DataType::Int32), ("f3", DataType::Boolean)])
                 .with_ids([ColumnId::new(11), ColumnId::new(12)])
                 .into();
-        let list = DataType::List(Box::new(inner_struct.clone()));
+        let list = DataType::list(inner_struct.clone());
         let map = MapType::from_kv(DataType::Varchar, list.clone()).into();
         let outer_struct = StructType::new([("f1", DataType::Int32), ("map", map)])
             .with_ids([ColumnId::new(1), ColumnId::new(2)])

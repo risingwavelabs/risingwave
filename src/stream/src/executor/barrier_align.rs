@@ -174,8 +174,8 @@ mod tests {
         barrier_align(
             left,
             right,
-            0,
-            0,
+            0.into(),
+            0.into(),
             Arc::new(StreamingMetrics::unused()),
             "dummy_executor",
         )

@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::HummockVectorFileId;
 use risingwave_hummock_sdk::vector_index::{HnswFlatIndex, VectorFileInfo};
 use risingwave_object_store::object::ObjectStreamingUploader;
 
+use crate::hummock::vector::monitor::VectorStoreCacheStats;
 use crate::hummock::vector::writer::{VectorObjectIdManagerRef, new_vector_file_builder};
 use crate::hummock::vector::{EnumVectorAccessor, get_vector_block, search_vector};
 use crate::hummock::{
@@ -497,6 +498,11 @@ pub(super) struct BuildingVectors {
     pub(super) file_builder: VectorFileBuilder,
 }
 
+#[derive(Default)]
+pub(crate) struct FileVectorStoreCtx {
+    pub stats: VectorStoreCacheStats,
+}
+
 pub(crate) struct FileVectorStore {
     sstable_store: SstableStoreRef,
 
@@ -550,6 +556,10 @@ impl FileVectorStore {
             Ok(None)
         }
     }
+
+    pub fn flushed_vector_files(&self) -> &[VectorFileInfo] {
+        &self.flushed_vector_files
+    }
 }
 
 impl VectorStore for FileVectorStore {
@@ -557,15 +567,27 @@ impl VectorStore for FileVectorStore {
         = EnumVectorAccessor<'a>
     where
         Self: 'a;
+    type Ctx = FileVectorStoreCtx;
+    type Err = HummockError;
 
-    async fn get_vector(&self, idx: usize) -> HummockResult<Self::Accessor<'_>> {
+    async fn get_vector(
+        &self,
+        idx: usize,
+        ctx: &mut Self::Ctx,
+    ) -> HummockResult<Self::Accessor<'_>> {
         if let Some(building_vectors) = self.building_vectors.as_ref()
             && idx >= building_vectors.flushed_next_vector_id
         {
             Ok(building_vectors.file_builder.get_vector(idx))
         } else {
             Ok(EnumVectorAccessor::BlockHolder(
-                get_vector_block(&self.sstable_store, &self.flushed_vector_files, idx).await?,
+                get_vector_block(
+                    &self.sstable_store,
+                    &self.flushed_vector_files,
+                    idx,
+                    &mut ctx.stats,
+                )
+                .await?,
             ))
         }
     }

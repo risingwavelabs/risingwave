@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use with_options::WithOptions;
 
 use crate::enforce_secret::EnforceSecret;

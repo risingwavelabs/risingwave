@@ -25,7 +25,7 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::TableId;
+use risingwave_common::id::{ActorId, FragmentId, SourceId};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
@@ -65,6 +65,38 @@ pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
+/// Callback wrapper for reporting CDC auto schema change fail events
+/// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+#[derive(Clone)]
+pub struct CdcAutoSchemaChangeFailCallback(
+    Arc<dyn Fn(SourceId, String, String, String, String) + Send + Sync>,
+);
+
+impl CdcAutoSchemaChangeFailCallback {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(SourceId, String, String, String, String) + Send + Sync + 'static,
+    {
+        Self(Arc::new(f))
+    }
+
+    pub fn call(
+        &self,
+        source_id: SourceId,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        self.0(source_id, table_name, cdc_table_id, upstream_ddl, fail_info);
+    }
+}
+
+impl std::fmt::Debug for CdcAutoSchemaChangeFailCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CdcAutoSchemaChangeFailCallback")
+    }
+}
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
     fn try_from_btreemap(
@@ -195,11 +227,17 @@ pub trait SplitEnumerator: Sized + Send {
     -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
     /// Do some cleanup work when a fragment is dropped, e.g., drop Kafka consumer group.
-    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<FragmentId>) -> Result<()> {
         Ok(())
     }
     /// Do some cleanup work when a backfill fragment is finished, e.g., drop Kafka consumer group.
-    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<FragmentId>) -> Result<()> {
+        Ok(())
+    }
+    /// Called after `worker.tick()` execution to perform periodic operations,
+    /// such as monitoring upstream PostgreSQL `confirmed_flush_lsn`, etc.
+    /// This can be extended to support more periodic operations in the future.
+    async fn on_tick(&mut self) -> Result<()> {
         Ok(())
     }
 }
@@ -211,24 +249,29 @@ pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 #[async_trait]
 pub trait AnySplitEnumerator: Send {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
-    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
-    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()>;
+    async fn on_drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> Result<()>;
+    async fn on_finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> Result<()>;
+    async fn on_tick(&mut self) -> Result<()>;
 }
 
 #[async_trait]
-impl<T: SplitEnumerator<Split: Into<SplitImpl>>> AnySplitEnumerator for T {
+impl<T: SplitEnumerator<Split: Into<SplitImpl>> + 'static> AnySplitEnumerator for T {
     async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
         SplitEnumerator::list_splits(self)
             .await
             .map(|s| s.into_iter().map(|s| s.into()).collect())
     }
 
-    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
-        SplitEnumerator::on_drop_fragments(self, _fragment_ids).await
+    async fn on_drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> Result<()> {
+        SplitEnumerator::on_drop_fragments(self, fragment_ids).await
     }
 
-    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<u32>) -> Result<()> {
-        SplitEnumerator::on_finish_backfill(self, _fragment_ids).await
+    async fn on_finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> Result<()> {
+        SplitEnumerator::on_finish_backfill(self, fragment_ids).await
+    }
+
+    async fn on_tick(&mut self) -> Result<()> {
+        SplitEnumerator::on_tick(self).await
     }
 }
 
@@ -268,7 +311,9 @@ impl SourceEnumeratorContext {
     /// where the real context doesn't matter.
     pub fn dummy() -> SourceEnumeratorContext {
         SourceEnumeratorContext {
-            info: SourceEnumeratorInfo { source_id: 0 },
+            info: SourceEnumeratorInfo {
+                source_id: 0.into(),
+            },
             metrics: Arc::new(EnumeratorMetrics::default()),
         }
     }
@@ -276,14 +321,14 @@ impl SourceEnumeratorContext {
 
 #[derive(Clone, Debug)]
 pub struct SourceEnumeratorInfo {
-    pub source_id: u32,
+    pub source_id: SourceId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct SourceContext {
-    pub actor_id: u32,
-    pub source_id: TableId,
-    pub fragment_id: u32,
+    pub actor_id: ActorId,
+    pub source_id: SourceId,
+    pub fragment_id: FragmentId,
     pub source_name: String,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
@@ -291,13 +336,15 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    // callback function to report CDC auto schema change fail events
+    pub on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
 }
 
 impl SourceContext {
     pub fn new(
-        actor_id: u32,
-        source_id: TableId,
-        fragment_id: u32,
+        actor_id: ActorId,
+        source_id: SourceId,
+        fragment_id: FragmentId,
         source_name: String,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
@@ -305,6 +352,32 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+    ) -> Self {
+        Self::new_with_auto_schema_change_callback(
+            actor_id,
+            source_id,
+            fragment_id,
+            source_name,
+            metrics,
+            source_ctrl_opts,
+            connector_props,
+            schema_change_channel,
+            None,
+        )
+    }
+
+    pub fn new_with_auto_schema_change_callback(
+        actor_id: ActorId,
+        source_id: SourceId,
+        fragment_id: FragmentId,
+        source_name: String,
+        metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+        connector_props: ConnectorProperties,
+        schema_change_channel: Option<
+            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
+        >,
+        on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
     ) -> Self {
         Self {
             actor_id,
@@ -315,6 +388,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            on_cdc_auto_schema_change_failure,
         }
     }
 
@@ -322,9 +396,9 @@ impl SourceContext {
     /// where the real context doesn't matter.
     pub fn dummy() -> Self {
         Self::new(
-            0,
-            TableId::new(0),
-            0,
+            0.into(),
+            SourceId::new(0),
+            0.into(),
             "dummy".to_owned(),
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
@@ -334,6 +408,29 @@ impl SourceContext {
             ConnectorProperties::default(),
             None,
         )
+    }
+
+    /// Report CDC auto schema change fail event
+    /// Parameters: (`source_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+    pub fn on_cdc_auto_schema_change_failure(
+        &self,
+        source_id: SourceId,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        if let Some(ref cdc_auto_schema_change_fail_callback) =
+            self.on_cdc_auto_schema_change_failure
+        {
+            cdc_auto_schema_change_fail_callback.call(
+                source_id,
+                table_name,
+                cdc_table_id,
+                upstream_ddl,
+                fail_info,
+            );
+        }
     }
 }
 
@@ -707,11 +804,10 @@ impl SplitImpl {
     }
 
     pub fn into_batch_split(self) -> Option<BatchSourceSplitImpl> {
-        #[expect(clippy::match_single_binding)]
         match self {
-            // SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
-            //     Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
-            // }
+            SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
+                Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
+            }
             _ => None,
         }
     }

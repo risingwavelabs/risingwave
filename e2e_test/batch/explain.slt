@@ -43,3 +43,34 @@ explain (distsql, format json) select 1;
 Caused by:
   Not supported: EXPLAIN (TRACE, JSON FORMAT)
 HINT: Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.
+
+
+query ok
+explain (verbose) select 1;
+----
+BatchValues { rows: [[1:Int32]] }
+
+query ok
+explain (verBOSE) select 1;
+----
+BatchValues { rows: [[1:Int32]] }
+
+query ok
+explain (VERBOSE) select 1;
+----
+BatchValues { rows: [[1:Int32]] }
+
+query ok
+explain ("verbose") select 1;
+----
+BatchValues { rows: [[1:Int32]] }
+
+query error
+explain ("VERBOSE") select 1;
+----
+    db error: ERROR: Failed to run the query
+
+Caused by:
+  sql parser error: expected SELECT, VALUES, or a subquery in the query body, found: "VERBOSE"
+LINE 1: explain ("VERBOSE") select 1;
+                 ^

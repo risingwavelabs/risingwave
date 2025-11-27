@@ -52,6 +52,13 @@ mod m20250819_014448_add_version_column_indices_to_table;
 mod m20250820_080903_snowflake_redshift_sink_file_path;
 mod m20250820_120000_add_cdc_table_type;
 mod m20250821_081110_cdc_table_snapshot_splits_add_column;
+mod m20250905_144810_deprecate_table_incoming_sinks;
+mod m20250916_120000_add_refresh_fields;
+mod m20251005_000000_fragment_splits;
+mod m20251016_220528_fragment_parallelism;
+mod m20251022_294610_source_refresh_mode;
+mod m20251030_120000_refresh_jobs;
+mod m20251112_114514_streaming_job_config_override;
 mod utils;
 
 pub struct Migrator;
@@ -142,6 +149,13 @@ impl MigratorTrait for Migrator {
             Box::new(m20250820_120000_add_cdc_table_type::Migration),
             Box::new(m20250821_081110_cdc_table_snapshot_splits_add_column::Migration),
             Box::new(m20250820_080903_snowflake_redshift_sink_file_path::Migration),
+            Box::new(m20250905_144810_deprecate_table_incoming_sinks::Migration),
+            Box::new(m20250916_120000_add_refresh_fields::Migration),
+            Box::new(m20251005_000000_fragment_splits::Migration),
+            Box::new(m20251016_220528_fragment_parallelism::Migration),
+            Box::new(m20251022_294610_source_refresh_mode::Migration),
+            Box::new(m20251030_120000_refresh_jobs::Migration),
+            Box::new(m20251112_114514_streaming_job_config_override::Migration),
         ]
     }
 }

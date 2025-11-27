@@ -15,7 +15,7 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-/// The catalog `pg_partitioned_table` stores information about how tables are partitioned. Reference: [`https://www.postgresql.org/docs/current/catalog-pg-partitioned-table.html`]
+/// The catalog `pg_partitioned_table` stores information about how tables are partitioned. Reference: `https://www.postgresql.org/docs/current/catalog-pg-partitioned-table.html`
 #[system_catalog(view, "pg_catalog.pg_partitioned_table")]
 #[derive(Fields)]
 struct PgPartitionedTable {

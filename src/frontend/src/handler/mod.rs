@@ -60,6 +60,7 @@ mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_table_drop_connector;
+pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 pub mod cancel_job;
@@ -117,7 +118,9 @@ pub mod vacuum;
 pub mod variable;
 mod wait;
 
-pub use alter_table_column::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
+pub use alter_table_column::{
+    fetch_table_catalog_for_alter, get_new_table_definition_for_cdc_table, get_replace_table_plan,
+};
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
@@ -485,7 +488,7 @@ pub async fn handle(
             DescribeKind::Plain => describe::handle_describe(handler_args, name),
         },
         Statement::DescribeFragment { fragment_id } => {
-            describe::handle_describe_fragment(handler_args, fragment_id).await
+            describe::handle_describe_fragment(handler_args, fragment_id.into()).await
         }
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
@@ -598,6 +601,15 @@ pub async fn handle(
         | Statement::Insert { .. }
         | Statement::Delete { .. }
         | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
+        Statement::Copy {
+            entity: CopyEntity::Query(query),
+            target: CopyTarget::Stdout,
+        } => {
+            let response =
+                query::handle_query(handler_args, Statement::Query(query), vec![Format::Text])
+                    .await?;
+            Ok(response.into_copy_query_to_stdout())
+        }
         Statement::CreateView {
             materialized,
             if_not_exists,
@@ -676,7 +688,7 @@ pub async fn handle(
                 name,
                 table_name,
                 method,
-                columns.to_vec(),
+                columns.clone(),
                 include,
                 distributed_by,
             )
@@ -854,6 +866,12 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER TABLE SET CONFIG")
+            }
+            AlterTableOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER TABLE RESET CONFIG")
+            }
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
@@ -873,13 +891,7 @@ pub async fn handle(
                 .await
             }
             AlterTableOperation::AlterConnectorProps { alter_props } => {
-                // If exists a associated source, it should be of the same name.
-                crate::handler::alter_source_props::handle_alter_table_connector_props(
-                    handler_args,
-                    name,
-                    alter_props,
-                )
-                .await
+                alter_table_props::handle_alter_table_props(handler_args, name, alter_props).await
             }
             AlterTableOperation::AddConstraint { .. }
             | AlterTableOperation::DropConstraint { .. }
@@ -908,6 +920,12 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterIndexOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER INDEX SET CONFIG")
+            }
+            AlterIndexOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER INDEX RESET CONFIG")
             }
         },
         Statement::AlterView {
@@ -1024,6 +1042,18 @@ pub async fn handle(
                     }
                     alter_mv::handle_alter_mv(handler_args, name, query).await
                 }
+                AlterViewOperation::SetConfig { .. } => {
+                    if !materialized {
+                        bail!("SET CONFIG is only supported for materialized views");
+                    }
+                    bail_not_implemented!("ALTER MATERIALIZED VIEW SET CONFIG")
+                }
+                AlterViewOperation::ResetConfig { .. } => {
+                    if !materialized {
+                        bail!("RESET CONFIG is only supported for materialized views");
+                    }
+                    bail_not_implemented!("ALTER MATERIALIZED VIEW RESET CONFIG")
+                }
             }
         }
 
@@ -1065,6 +1095,12 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterSinkOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER SINK SET CONFIG")
+            }
+            AlterSinkOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER SINK RESET CONFIG")
             }
             AlterSinkOperation::SwapRenameSink { target_sink } => {
                 alter_swap_rename::handle_swap_rename(
@@ -1201,6 +1237,12 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSourceOperation::SetConfig { .. } => {
+                bail_not_implemented!("ALTER SOURCE SET CONFIG")
+            }
+            AlterSourceOperation::ResetConfig { .. } => {
+                bail_not_implemented!("ALTER SOURCE RESET CONFIG")
+            }
         },
         Statement::AlterFunction {
             name,
@@ -1248,18 +1290,35 @@ pub async fn handle(
             operation,
         } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
         Statement::AlterFragment {
-            fragment_id,
-            operation: AlterFragmentOperation::AlterBackfillRateLimit { rate_limit },
-        } => {
-            alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
-                &handler_args.session,
-                PbThrottleTarget::Fragment,
-                fragment_id,
-                rate_limit,
-                StatementType::SET_VARIABLE,
-            )
-            .await
-        }
+            fragment_ids,
+            operation,
+        } => match operation {
+            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
+                let [fragment_id] = fragment_ids.as_slice() else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "ALTER FRAGMENT ... SET RATE_LIMIT supports exactly one fragment id"
+                            .to_owned(),
+                    )
+                    .into());
+                };
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                    &handler_args.session,
+                    PbThrottleTarget::Fragment,
+                    *fragment_id,
+                    rate_limit,
+                    StatementType::SET_VARIABLE,
+                )
+                .await
+            }
+            AlterFragmentOperation::SetParallelism { parallelism } => {
+                alter_parallelism::handle_alter_fragment_parallelism(
+                    handler_args,
+                    fragment_ids.into_iter().map_into().collect(),
+                    parallelism,
+                )
+                .await
+            }
+        },
         Statement::AlterDefaultPrivileges { .. } => {
             handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
         }

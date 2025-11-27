@@ -213,76 +213,68 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         let full_out_col_num = self.internal_column_num();
         let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
-        let mut pk_indices = left_pk
+        // Collect PKs in internal column space (without applying i2o mapping yet)
+        let mut pk_indices_internal = left_pk
             .iter()
             .map(|index| l2i.try_map(*index))
             .chain(right_pk.iter().map(|index| r2i.try_map(*index)))
             .flatten()
-            .map(|index| i2o.try_map(index))
-            .collect::<Option<Vec<_>>>()?;
-
-        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
-        // key.
-        let l2i = self.l2i_col_mapping();
-        let r2i = self.r2i_col_mapping();
-        let full_out_col_num = self.internal_column_num();
-        let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
+            .collect::<Vec<_>>();
 
         let either_or_both = self.add_which_join_key_to_pk();
 
         for (lk, rk) in eq_indexes {
             match either_or_both {
                 EitherOrBoth::Left(_) => {
-                    // Remove right-side join-key column it from pk_indices.
+                    // Remove right-side join-key column from pk_indices_internal.
                     // This may happen when right-side join-key is included in right-side PK.
                     // e.g. select a, b where a.bid = b.id
                     // Here the pk_indices should be [a.id, a.bid] instead of [a.id, b.id, a.bid],
                     // because b.id = a.bid, so either of them would be enough.
-                    if let Some(rk) = r2i.try_map(rk)
-                        && let Some(out_k) = i2o.try_map(rk)
-                    {
-                        pk_indices.retain(|&x| x != out_k);
+                    if let Some(rk_internal) = r2i.try_map(rk) {
+                        pk_indices_internal.retain(|&x| x != rk_internal);
                     }
-                    // Add left-side join-key column in pk_indices
-                    if let Some(lk) = l2i.try_map(lk) {
-                        let out_k = i2o.try_map(lk)?;
-                        if !pk_indices.contains(&out_k) {
-                            pk_indices.push(out_k);
-                        }
+                    // Add left-side join-key column in pk_indices_internal
+                    if let Some(lk_internal) = l2i.try_map(lk)
+                        && !pk_indices_internal.contains(&lk_internal)
+                    {
+                        pk_indices_internal.push(lk_internal);
                     }
                 }
                 EitherOrBoth::Right(_) => {
-                    // Remove left-side join-key column it from pk_indices
+                    // Remove left-side join-key column from pk_indices_internal
                     // See the example above
-                    if let Some(lk) = l2i.try_map(lk)
-                        && let Some(out_k) = i2o.try_map(lk)
-                    {
-                        pk_indices.retain(|&x| x != out_k);
+                    if let Some(lk_internal) = l2i.try_map(lk) {
+                        pk_indices_internal.retain(|&x| x != lk_internal);
                     }
-                    // Add right-side join-key column in pk_indices
-                    if let Some(rk) = r2i.try_map(rk) {
-                        let out_k = i2o.try_map(rk)?;
-                        if !pk_indices.contains(&out_k) {
-                            pk_indices.push(out_k);
-                        }
+                    // Add right-side join-key column in pk_indices_internal
+                    if let Some(rk_internal) = r2i.try_map(rk)
+                        && !pk_indices_internal.contains(&rk_internal)
+                    {
+                        pk_indices_internal.push(rk_internal);
                     }
                 }
                 EitherOrBoth::Both(_, _) => {
-                    if let Some(lk) = l2i.try_map(lk) {
-                        let out_k = i2o.try_map(lk)?;
-                        if !pk_indices.contains(&out_k) {
-                            pk_indices.push(out_k);
-                        }
+                    if let Some(lk_internal) = l2i.try_map(lk)
+                        && !pk_indices_internal.contains(&lk_internal)
+                    {
+                        pk_indices_internal.push(lk_internal);
                     }
-                    if let Some(rk) = r2i.try_map(rk) {
-                        let out_k = i2o.try_map(rk)?;
-                        if !pk_indices.contains(&out_k) {
-                            pk_indices.push(out_k);
-                        }
+                    if let Some(rk_internal) = r2i.try_map(rk)
+                        && !pk_indices_internal.contains(&rk_internal)
+                    {
+                        pk_indices_internal.push(rk_internal);
                     }
                 }
             };
         }
+
+        // Now apply i2o mapping to get output indices
+        let pk_indices = pk_indices_internal
+            .iter()
+            .map(|&index| i2o.try_map(index))
+            .collect::<Option<Vec<_>>>()?;
+
         Some(pk_indices)
     }
 

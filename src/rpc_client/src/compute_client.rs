@@ -19,11 +19,11 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, RpcClientConfig, STREAM_WINDOW_SIZE};
+use risingwave_common::id::{ActorId, FragmentId};
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
-use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{
     ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
@@ -103,7 +103,7 @@ impl ComputeClient {
     pub async fn get_data(&self, output_id: TaskOutputId) -> Result<Streaming<GetDataResponse>> {
         Ok(self
             .exchange_client
-            .to_owned()
+            .clone()
             .get_data(GetDataRequest {
                 task_output_id: Some(output_id),
             })
@@ -114,10 +114,10 @@ impl ComputeClient {
 
     pub async fn get_stream(
         &self,
-        up_actor_id: u32,
-        down_actor_id: u32,
-        up_fragment_id: u32,
-        down_fragment_id: u32,
+        up_actor_id: ActorId,
+        down_actor_id: ActorId,
+        up_fragment_id: FragmentId,
+        down_fragment_id: FragmentId,
         database_id: DatabaseId,
         term_id: String,
     ) -> Result<(
@@ -137,7 +137,7 @@ impl ComputeClient {
                     down_actor_id,
                     up_fragment_id,
                     down_fragment_id,
-                    database_id: database_id.database_id,
+                    database_id,
                     term_id,
                 })),
             },
@@ -153,7 +153,7 @@ impl ComputeClient {
 
         let response_stream = self
             .exchange_client
-            .to_owned()
+            .clone()
             .get_stream(request_stream)
             .await
             .inspect_err(|_| {
@@ -174,16 +174,14 @@ impl ComputeClient {
         &self,
         task_id: TaskId,
         plan: PlanFragment,
-        epoch: BatchQueryEpoch,
         expr_context: ExprContext,
     ) -> Result<Streaming<TaskInfoResponse>> {
         Ok(self
             .task_client
-            .to_owned()
+            .clone()
             .create_task(CreateTaskRequest {
                 task_id: Some(task_id),
                 plan: Some(plan),
-                epoch: Some(epoch),
                 tracing_context: TracingContext::from_current_span().to_protobuf(),
                 expr_context: Some(expr_context),
             })
@@ -195,7 +193,7 @@ impl ComputeClient {
     pub async fn execute(&self, req: ExecuteRequest) -> Result<Streaming<GetDataResponse>> {
         Ok(self
             .task_client
-            .to_owned()
+            .clone()
             .execute(req)
             .await
             .map_err(RpcError::from_compute_status)?
@@ -205,7 +203,7 @@ impl ComputeClient {
     pub async fn cancel(&self, req: CancelTaskRequest) -> Result<CancelTaskResponse> {
         Ok(self
             .task_client
-            .to_owned()
+            .clone()
             .cancel_task(req)
             .await
             .map_err(RpcError::from_compute_status)?
@@ -215,7 +213,7 @@ impl ComputeClient {
     pub async fn fast_insert(&self, req: FastInsertRequest) -> Result<FastInsertResponse> {
         Ok(self
             .task_client
-            .to_owned()
+            .clone()
             .fast_insert(req)
             .await
             .map_err(RpcError::from_compute_status)?
@@ -225,7 +223,7 @@ impl ComputeClient {
     pub async fn stack_trace(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
         Ok(self
             .monitor_client
-            .to_owned()
+            .clone()
             .stack_trace(req)
             .await
             .map_err(RpcError::from_compute_status)?
@@ -235,7 +233,7 @@ impl ComputeClient {
     pub async fn get_streaming_stats(&self) -> Result<GetStreamingStatsResponse> {
         Ok(self
             .monitor_client
-            .to_owned()
+            .clone()
             .get_streaming_stats(GetStreamingStatsRequest::default())
             .await
             .map_err(RpcError::from_compute_status)?
@@ -245,7 +243,7 @@ impl ComputeClient {
     pub async fn profile(&self, sleep_s: u64) -> Result<ProfilingResponse> {
         Ok(self
             .monitor_client
-            .to_owned()
+            .clone()
             .profiling(ProfilingRequest { sleep_s })
             .await
             .map_err(RpcError::from_compute_status)?
@@ -255,7 +253,7 @@ impl ComputeClient {
     pub async fn heap_profile(&self, dir: String) -> Result<HeapProfilingResponse> {
         Ok(self
             .monitor_client
-            .to_owned()
+            .clone()
             .heap_profiling(HeapProfilingRequest { dir })
             .await
             .map_err(RpcError::from_compute_status)?
@@ -265,7 +263,7 @@ impl ComputeClient {
     pub async fn list_heap_profile(&self) -> Result<ListHeapProfilingResponse> {
         Ok(self
             .monitor_client
-            .to_owned()
+            .clone()
             .list_heap_profiling(ListHeapProfilingRequest {})
             .await
             .map_err(RpcError::from_compute_status)?
@@ -275,7 +273,7 @@ impl ComputeClient {
     pub async fn analyze_heap(&self, path: String) -> Result<AnalyzeHeapResponse> {
         Ok(self
             .monitor_client
-            .to_owned()
+            .clone()
             .analyze_heap(AnalyzeHeapRequest { path })
             .await
             .map_err(RpcError::from_compute_status)?
@@ -285,7 +283,7 @@ impl ComputeClient {
     pub async fn show_config(&self) -> Result<ShowConfigResponse> {
         Ok(self
             .config_client
-            .to_owned()
+            .clone()
             .show_config(ShowConfigRequest {})
             .await
             .map_err(RpcError::from_compute_status)?
@@ -295,7 +293,7 @@ impl ComputeClient {
     pub async fn resize_cache(&self, request: ResizeCacheRequest) -> Result<ResizeCacheResponse> {
         Ok(self
             .config_client
-            .to_owned()
+            .clone()
             .resize_cache(request)
             .await
             .map_err(RpcError::from_compute_status)?

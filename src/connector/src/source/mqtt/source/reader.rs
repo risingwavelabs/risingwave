@@ -55,7 +55,7 @@ impl SplitReader for MqttSplitReader {
     ) -> Result<Self> {
         let (client, eventloop) = properties
             .common
-            .build_client(source_ctx.actor_id, source_ctx.fragment_id as u64)
+            .build_client(source_ctx.actor_id, source_ctx.source_id.as_raw_id())
             .inspect_err(|e| tracing::error!("Failed to build mqtt client: {}", e.as_report()))?;
 
         let qos = properties.common.qos();

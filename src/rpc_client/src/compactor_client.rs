@@ -57,7 +57,7 @@ impl CompactorClient {
     pub async fn stack_trace(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
         Ok(self
             .monitor_client
-            .to_owned()
+            .clone()
             .stack_trace(req)
             .await
             .map_err(RpcError::from_compactor_status)?

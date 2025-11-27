@@ -26,8 +26,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::error_or_notice::ErrorOrNoticeMessage;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
-use crate::pg_server::BoxedError;
-use crate::types::Row;
+use crate::types::{Format, Row};
 
 /// Messages that can be sent from pg client to server. Implement `read`.
 #[derive(Debug)]
@@ -412,7 +411,7 @@ fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
 /// Message sent from server to psql client. Implement `write` (how to serialize it into psql
 /// buffer).
 /// Ref: <https://www.postgresql.org/docs/current/protocol-message-formats.html>
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum BeMessage<'a> {
     AuthenticationOk,
     AuthenticationCleartextPassword,
@@ -434,14 +433,19 @@ pub enum BeMessage<'a> {
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery(TransactionStatus),
     RowDescription(&'a [PgFieldDescriptor]),
-    ErrorResponse(BoxedError),
+    ErrorResponse(&'a (dyn std::error::Error + Send + Sync + 'static)),
     CloseComplete,
+
+    // Copy
+    CopyOutResponse(usize),
+    CopyData(&'a Row),
+    CopyDone,
 
     // 0: process ID, 1: secret key
     BackendKeyData((i32, i32)),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum BeParameterStatusMessage<'a> {
     ClientEncoding(&'a str),
     StandardConformingString(&'a str),
@@ -450,7 +454,7 @@ pub enum BeParameterStatusMessage<'a> {
     TimeZone(&'a str),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
     pub rows_cnt: i32,
@@ -465,7 +469,7 @@ pub enum TransactionStatus {
 
 impl BeMessage<'_> {
     /// Write message to the given buf.
-    pub fn write(buf: &mut BytesMut, message: &BeMessage<'_>) -> Result<()> {
+    pub fn write(buf: &mut BytesMut, message: BeMessage<'_>) -> Result<()> {
         match message {
             // AuthenticationOk
             // +-----+----------+-----------+
@@ -613,7 +617,7 @@ impl BeMessage<'_> {
                 buf.put_u8(b'T');
                 write_body(buf, |buf| {
                     buf.put_i16(row_descs.len() as i16); // # of fields
-                    for pg_field in *row_descs {
+                    for pg_field in row_descs {
                         write_cstr(buf, pg_field.get_name().as_bytes())?;
                         buf.put_i32(pg_field.get_table_oid()); // table oid
                         buf.put_i16(pg_field.get_col_attr_num()); // attnum
@@ -667,7 +671,7 @@ impl BeMessage<'_> {
                 buf.put_u8(b't');
                 write_body(buf, |buf| {
                     buf.put_i16(para_descs.len() as i16);
-                    for oid in *para_descs {
+                    for oid in para_descs {
                         buf.put_i32(*oid);
                     }
                     Ok(())
@@ -710,10 +714,77 @@ impl BeMessage<'_> {
             BeMessage::BackendKeyData((process_id, secret_key)) => {
                 buf.put_u8(b'K');
                 write_body(buf, |buf| {
-                    buf.put_i32(*process_id);
-                    buf.put_i32(*secret_key);
+                    buf.put_i32(process_id);
+                    buf.put_i32(secret_key);
                     Ok(())
                 })?;
+            }
+            BeMessage::CopyOutResponse(col_num) => {
+                buf.put_u8(b'H');
+                write_body(buf, |buf| {
+                    buf.put_i8(Format::Text.to_i8());
+                    buf.put_i16(col_num as _);
+                    for _ in 0..col_num {
+                        buf.put_i16(Format::Text.to_i8() as _);
+                    }
+                    Ok(())
+                })?;
+            }
+            BeMessage::CopyData(row) => {
+                buf.put_u8(b'd');
+                // As in https://www.postgresql.org/docs/current/sql-copy.html, the default format is TSV format
+                write_body(buf, |buf| {
+                    fn write_str_bytes(
+                        buf: &mut BytesMut,
+                        str_bytes: &Option<Bytes>,
+                    ) -> Result<()> {
+                        let Some(str_bytes) = str_bytes else {
+                            return Ok(());
+                        };
+                        let s = String::from_utf8_lossy(str_bytes);
+                        for c in s.as_str().chars() {
+                            // As suggested in https://en.wikipedia.org/wiki/Tab-separated_values
+                            // we only escape "\t\b\r\\"
+                            match c {
+                                '\t' => {
+                                    buf.put_slice(b"\\t");
+                                }
+                                '\n' => {
+                                    buf.put_slice(b"\\n");
+                                }
+                                '\r' => {
+                                    buf.put_slice(b"\\r");
+                                }
+                                '\\' => {
+                                    buf.put_slice(b"\\\\");
+                                }
+                                _ => {
+                                    std::fmt::Write::write_char(buf, c).map_err(|_| {
+                                        Error::other(anyhow!("failed to write_char [{c}]"))
+                                    })?;
+                                }
+                            }
+                        }
+                        Ok(())
+                    }
+                    match row.values() {
+                        [] => {}
+                        [first, rest @ ..] => {
+                            write_str_bytes(buf, first)?;
+
+                            for rest in rest {
+                                buf.put_u8(b'\t');
+                                write_str_bytes(buf, rest)?;
+                            }
+                        }
+                    }
+                    buf.put_u8(b'\n');
+                    Ok(())
+                })?;
+            }
+            BeMessage::CopyDone => {
+                buf.put_u8(b'c');
+                write_body(buf, |_| Ok(()))?;
             }
         }
 

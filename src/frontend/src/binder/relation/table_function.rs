@@ -66,6 +66,18 @@ impl Binder {
                 self.bind_window_table_function(alias, kind, args)?,
             )));
         }
+        // gap_fill
+        if func_name.eq_ignore_ascii_case("gap_fill") {
+            if with_ordinality {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "WITH ORDINALITY for gap_fill".to_owned(),
+                )
+                .into());
+            }
+            return Ok(Relation::GapFill(Box::new(
+                self.bind_gap_fill(alias, args)?,
+            )));
+        }
         // watermark
         if is_watermark_func(func_name) {
             if with_ordinality {

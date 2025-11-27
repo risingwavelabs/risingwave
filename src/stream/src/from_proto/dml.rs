@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_pb::stream_plan::DmlNode;
 use risingwave_storage::StateStore;
 
@@ -34,7 +33,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
-        let table_id = TableId::new(node.table_id);
+        let table_id = node.table_id;
         let column_descs = node.column_descs.iter().map(Into::into).collect_vec();
 
         let exec = DmlExecutor::new(
@@ -44,7 +43,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             table_id,
             node.table_version_id,
             column_descs,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             node.rate_limit.into(),
         );
         Ok((params.info, exec).into())

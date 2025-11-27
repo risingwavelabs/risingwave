@@ -23,6 +23,7 @@ use std::sync::atomic::Ordering;
 pub use ahash::RandomState;
 use hashbrown::HashTable;
 use hashbrown::hash_table::Entry;
+use hashbrown0_14 as _;
 
 use crate::sequence::{AtomicSequence, Sequence, Sequencer};
 
@@ -167,7 +168,7 @@ where
                         },
                         self.alloc.clone(),
                     );
-                    let ptr = NonNull::new_unchecked(Box::into_raw(entry));
+                    let ptr = NonNull::new_unchecked(Box::into_raw_with_allocator(entry).0);
                     v.insert(ptr);
                     self.attach(ptr);
                     None

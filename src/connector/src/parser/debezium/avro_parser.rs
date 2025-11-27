@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_extract_inner_schema() {
-        let inner_shema_str = r#"{
+        let inner_schema_str = r#"{
     "type": "record",
     "name": "Value",
     "namespace": "dbserver1.inventory.customers",
@@ -272,7 +272,7 @@ mod tests {
 }"#;
 
         let outer_schema = get_outer_schema();
-        let expected_inner_schema = Schema::parse_str(inner_shema_str).unwrap();
+        let expected_inner_schema = Schema::parse_str(inner_schema_str).unwrap();
         let extracted_inner_schema = extract_debezium_table_schema(&outer_schema).unwrap();
         assert_eq!(&expected_inner_schema, extracted_inner_schema);
     }

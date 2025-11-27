@@ -21,17 +21,19 @@ use lru::LruCache;
 use risingwave_common::lru::LruCache as RwLruCache;
 use risingwave_common::sequence::SEQUENCE_GLOBAL;
 
-fn lru(loops: usize, evict_ratio: u64) -> (usize, Duration) {
+fn lru(loops: usize, _evict_ratio: u64) -> (usize, Duration) {
     let mut lru = LruCache::unbounded();
-    let mut evicted = 0;
+    let evicted = 0;
     let now = Instant::now();
     for i in 0..loops as u64 {
-        if i % evict_ratio == 0 && i != 0 {
-            lru.update_epoch(i);
-            while lru.pop_lru_by_epoch(i).is_some() {
-                evicted += 1;
-            }
-        }
+        // Changed back to use the official lru-rs crate, so there is no update_epoch anymore.
+        // Keep the code for reference.
+        // if i % evict_ratio == 0 && i != 0 {
+        //     lru.update_epoch(i);
+        //     while lru.pop_lru_by_epoch(i).is_some() {
+        //         evicted += 1;
+        //     }
+        // }
         lru.put(i, i);
     }
 

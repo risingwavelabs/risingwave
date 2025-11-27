@@ -50,7 +50,7 @@ impl From<NatsMessage> for SourceMessage {
             offset: message.reply_subject.unwrap_or_default(),
             split_id: message.split_id,
             meta: SourceMeta::Nats(NatsMeta {
-                subject: message.subject.clone(),
+                subject: message.subject,
             }),
         }
     }

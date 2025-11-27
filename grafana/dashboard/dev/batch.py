@@ -152,15 +152,15 @@ def _(outer_panels: Panels):
                     ["last"],
                 ),
                 panels.timeseries_count(
-                    "Subsription Cursor Nums",
+                    "Subscription Cursor Nums",
                     "The number of valid and invalid subscription cursor",
                     [
                         panels.target(
-                            f"{metric('subsription_cursor_nums')}",
+                            f"{metric('subscription_cursor_nums')}",
                             "",
                         ),
                         panels.target(
-                            f"{metric('invalid_subsription_cursor_nums')}",
+                            f"{metric('invalid_subscription_cursor_nums')}",
                             "",
                         ),
                     ],

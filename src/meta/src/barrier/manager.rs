@@ -33,7 +33,7 @@ use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
-use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub struct GlobalBarrierManager {
     status: Arc<ArcSwap<BarrierManagerStatus>>,
@@ -59,13 +59,13 @@ impl GlobalBarrierManager {
         let job_info = self
             .metadata_manager
             .catalog_controller
-            .list_background_creating_jobs(true)
+            .list_background_creating_jobs(true, None)
             .await?;
         for (job_id, definition, _init_at) in job_info {
-            if let Entry::Vacant(e) = ddl_progress.entry(job_id as _) {
-                warn!(job_id, "background job has no ddl progress");
+            if let Entry::Vacant(e) = ddl_progress.entry(job_id) {
+                warn!(%job_id, "background job has no ddl progress");
                 e.insert(DdlProgress {
-                    id: job_id as u64,
+                    id: job_id.as_raw_id() as u64,
                     statement: definition,
                     create_type: CreateType::Background.as_str().into(),
                     progress: "0.0%".into(),
@@ -94,7 +94,7 @@ impl GlobalBarrierManager {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(BarrierManagerRequest::UpdateDatabaseBarrier {
-                database_id: (database_id as u32).into(),
+                database_id,
                 barrier_interval_ms,
                 checkpoint_frequency,
                 sender: tx,
@@ -143,6 +143,7 @@ impl GlobalBarrierManager {
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
         barrier_scheduler: schedule::BarrierScheduler,
+        refresh_manager: GlobalRefreshManagerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
         let hummock_manager_clone = hummock_manager.clone();
@@ -157,6 +158,7 @@ impl GlobalBarrierManager {
             scale_controller,
             request_rx,
             barrier_scheduler,
+            refresh_manager,
         )
         .await;
         let manager = Self {

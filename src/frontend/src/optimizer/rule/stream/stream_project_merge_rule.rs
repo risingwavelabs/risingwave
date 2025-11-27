@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::prelude::*;
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::expr::{ExprImpl, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
-use crate::optimizer::plan_node::{PlanTreeNodeUnary, StreamProject, generic};
+use crate::optimizer::plan_node::{PlanTreeNodeUnary, StreamProject};
 use crate::utils::Substitute;
 
 /// Merge contiguous [`StreamProject`] nodes.
@@ -37,22 +37,17 @@ impl Rule<Stream> for StreamProjectMergeRule {
             }
         }
 
-        let mut subst = Substitute {
+        let mut core = outer_project.core().clone();
+        core.rewrite_exprs(&mut Substitute {
             mapping: inner_project.exprs().clone(),
-        };
-        let exprs = outer_project
-            .exprs()
-            .iter()
-            .cloned()
-            .map(|expr| subst.rewrite_expr(expr))
-            .collect();
-        let logical_project = generic::Project::new(exprs, inner_project.input());
+        });
+        core.input = inner_project.input();
 
         // If either of the projects has the hint, we should keep it.
         let noop_update_hint = outer_project.noop_update_hint() || inner_project.noop_update_hint();
 
         Some(
-            StreamProject::new(logical_project)
+            StreamProject::new(core)
                 .with_noop_update_hint(noop_update_hint)
                 .into(),
         )

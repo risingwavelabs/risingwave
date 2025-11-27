@@ -312,3 +312,38 @@
     SELECT anon_1.f1 AS "IntegerRange(0, -2, 1)" FROM unnest(CASE WHEN (nullif(1, 0) IS NOT NULL AND sign(1) = sign( -2 - 0)) THEN array_remove(array((SELECT generate_series(0,  -2, 1) AS generate_series_1)),  -2) ELSE CAST(ARRAY[] AS SMALLINT[]) END) AS anon_1(f1);
   expected_outputs:
     - binder_error
+- name: sys subquery
+  sql: |
+    SELECT
+    ARRAY (
+    SELECT
+    (SELECT CAST(attname AS TEXT)
+    FROM pg_attribute
+    WHERE attrelid = con1.conrelid
+    AND attnum = con1.conkey[i])
+    FROM generate_series(array_lower(con1.conkey, 1), array_upper(con1.conkey, 1)) AS i
+    ) AS "source_keys",
+    (SELECT nspname
+    FROM pg_namespace AS ns2
+    JOIN pg_class AS cl2 ON ns2.oid = cl2.relnamespace
+    WHERE cl2.oid = con1.confrelid) AS "target_schema",
+    (SELECT relname
+    FROM pg_class
+    WHERE oid = con1.confrelid) AS "target_table",
+    ARRAY (
+    SELECT
+    (SELECT CAST(attname AS TEXT)
+    FROM pg_attribute
+    WHERE attrelid = con1.confrelid
+    AND attnum = con1.confkey[i])
+    FROM generate_series(array_lower(con1.confkey, 1), array_upper(con1.confkey, 1)) AS i
+    ) AS "target_keys"
+    FROM pg_class AS cl
+    JOIN pg_namespace AS ns ON cl.relnamespace = ns.oid
+    JOIN pg_constraint AS con1 ON con1.conrelid = cl.oid
+    WHERE ns.nspname = 'public'
+    AND cl.relname = 'carriers'
+    AND con1.contype = 'f'
+    ORDER BY con1.conname;
+  expected_outputs:
+    - batch_plan

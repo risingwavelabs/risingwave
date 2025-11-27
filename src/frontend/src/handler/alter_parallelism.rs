@@ -24,9 +24,9 @@ use thiserror_ext::AsReport;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
-use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::{CatalogError, FragmentId};
 use crate::error::{ErrorCode, Result};
 
 pub async fn handle_alter_parallelism(
@@ -73,7 +73,7 @@ pub async fn handle_alter_parallelism(
                 }
 
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
-                table.id.table_id()
+                table.id.as_job_id()
             }
             StatementType::ALTER_SOURCE => {
                 let (source, schema_name) =
@@ -88,14 +88,14 @@ pub async fn handle_alter_parallelism(
                 }
 
                 session.check_privilege_for_drop_alter(schema_name, &**source)?;
-                source.id
+                source.id.as_share_source_job_id()
             }
             StatementType::ALTER_SINK => {
                 let (sink, schema_name) =
                     reader.get_created_sink_by_name(db_name, schema_path, &real_table_name)?;
 
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-                sink.id.sink_id()
+                sink.id.as_job_id()
             }
             // TODO: support alter parallelism for shared source
             _ => bail!(
@@ -119,6 +119,23 @@ pub async fn handle_alter_parallelism(
     }
 
     Ok(builder.into())
+}
+
+pub async fn handle_alter_fragment_parallelism(
+    handler_args: HandlerArgs,
+    fragment_ids: Vec<FragmentId>,
+    parallelism: SetVariableValue,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let target_parallelism = extract_fragment_parallelism(parallelism)?;
+
+    session
+        .env()
+        .meta_client()
+        .alter_fragment_parallelism(fragment_ids, target_parallelism)
+        .await?;
+
+    Ok(RwPgResponse::builder(StatementType::ALTER_FRAGMENT).into())
 }
 
 fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParallelism> {
@@ -165,4 +182,11 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
     };
 
     Ok(target_parallelism)
+}
+
+fn extract_fragment_parallelism(parallelism: SetVariableValue) -> Result<Option<TableParallelism>> {
+    match parallelism {
+        SetVariableValue::Default => Ok(None),
+        other => extract_table_parallelism(other).map(Some),
+    }
 }

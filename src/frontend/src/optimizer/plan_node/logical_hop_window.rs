@@ -39,7 +39,7 @@ pub struct LogicalHopWindow {
 }
 
 impl LogicalHopWindow {
-    /// Hop windows will add `windows_start` and `windows_end` columns at the end.
+    /// Hop windows will add `window_start` and `window_end` columns at the end.
     /// Take care to modify the code referring it if above rule changes.
     pub const ADDITION_COLUMN_LEN: usize = 2;
 
@@ -316,6 +316,21 @@ impl ToStream for LogicalHopWindow {
         let window = self.core.clone_with_input(new_input);
         let (window_start_exprs, window_end_exprs) = window.derive_window_start_and_end_exprs()?;
         Ok(StreamHopWindow::new(window, window_start_exprs, window_end_exprs).into())
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        // Map output columns to input columns using the o2i mapping
+        let input_columns = columns
+            .iter()
+            .map(|&col| self.o2i_col_mapping().try_map(col))
+            .collect::<Option<Vec<usize>>>()?;
+
+        let new_input = self.input().try_better_locality(&input_columns)?;
+        Some(self.clone_with_input(new_input).into())
     }
 
     fn logical_rewrite_for_stream(

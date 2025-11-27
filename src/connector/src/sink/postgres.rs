@@ -24,7 +24,7 @@ use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
@@ -134,13 +134,9 @@ impl TryFrom<SinkParam> for PostgresSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = PostgresConfig::from_btreemap(param.properties)?;
-        PostgresSink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        PostgresSink::new(config, schema, pk_indices, param.sink_type.is_append_only())
     }
 }
 

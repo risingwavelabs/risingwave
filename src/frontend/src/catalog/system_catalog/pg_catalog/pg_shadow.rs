@@ -16,7 +16,7 @@ use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 /// The view `pg_shadow` exists for backwards compatibility: it emulates a catalog that existed in
 /// PostgreSQL before version 8.1. It shows properties of all roles that are marked as rolcanlogin
-/// in `pg_authid`. Ref: [`https://www.postgresql.org/docs/current/view-pg-shadow.html`]
+/// in `pg_authid`. Ref: `https://www.postgresql.org/docs/current/view-pg-shadow.html`
 #[system_catalog(
     view,
     "pg_catalog.pg_shadow",

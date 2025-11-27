@@ -186,7 +186,7 @@ impl<W: WindowImpl> WindowBuffer<W> {
     fn maintain_delta(&mut self, old_outer: Range<usize>, new_outer: Range<usize>) {
         debug_assert!(self.frame_exclusion.is_no_others());
 
-        let (outer_removed, outer_added) = range_diff(old_outer.clone(), new_outer.clone());
+        let (outer_removed, outer_added) = range_diff(old_outer, new_outer);
         let delta = self.curr_delta.as_mut().unwrap();
         for idx in outer_removed.iter().cloned().flatten() {
             delta.push((Op::Delete, self.buffer[idx].value.clone()));

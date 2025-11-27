@@ -27,7 +27,9 @@ use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, WatermarkColumns};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, StreamKind, WatermarkColumns,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -42,22 +44,25 @@ pub struct StreamGlobalApproxPercentile {
 
 impl StreamGlobalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
+        assert!(
+            input.stream_kind().is_append_only(),
+            "the input of GlobalApproxPercentile must be the local phase, which is append-only"
+        );
         let schema = Schema::new(vec![Field::with_name(
             DataType::Float64,
             "approx_percentile",
         )]);
-        let functional_dependency = FunctionalDependencySet::with_key(1, &[]);
-        let watermark_columns = WatermarkColumns::new();
+
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
             Some(vec![]),
-            functional_dependency,
+            FunctionalDependencySet::new(1),
             Distribution::Single,
-            input.stream_kind(),
+            StreamKind::Retract,
             input.emit_on_window_close(),
-            watermark_columns,
-            input.columns_monotonicity().clone(),
+            WatermarkColumns::new(),
+            MonotonicityMap::new(),
         );
         Self {
             base,

@@ -15,9 +15,9 @@
 #![feature(trait_alias)]
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
-#![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(coverage_attribute)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 #[macro_use]
 extern crate tracing;
@@ -30,6 +30,7 @@ pub mod telemetry;
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
@@ -253,7 +254,7 @@ pub fn start(
             .unwrap();
         tracing::info!("advertise addr is {}", advertise_addr);
 
-        compute_node_serve(listen_addr, advertise_addr, opts, shutdown).await;
+        compute_node_serve(listen_addr, advertise_addr, Arc::new(opts), shutdown).await;
     })
 }
 

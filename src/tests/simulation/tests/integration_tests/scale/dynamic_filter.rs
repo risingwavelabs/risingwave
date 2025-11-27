@@ -12,15 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Result;
-use itertools::Itertools;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
@@ -28,7 +23,9 @@ const SELECT: &str = "select * from mv1 order by v1;";
 
 #[tokio::test]
 async fn test_dynamic_filter() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let configuration = Configuration::for_scale_no_shuffle();
+    let total_cores = configuration.total_streaming_cores();
+    let mut cluster = Cluster::start(configuration).await?;
     let mut session = cluster.start_session();
 
     session.run("create table t1 (v1 int);").await?;
@@ -38,41 +35,14 @@ async fn test_dynamic_filter() -> Result<()> {
     session.run("flush").await?;
     sleep(Duration::from_secs(5)).await;
 
-    let dynamic_filter_fragment = cluster
-        .locate_one_fragment([identity_contains("dynamicFilter")])
-        .await?;
-
-    let materialize_fragments = cluster
-        .locate_fragments([identity_contains("materialize")])
-        .await?;
-
-    let mut upstream_fragment_ids = HashSet::new();
-    visit_stream_node_body(
-        dynamic_filter_fragment.inner.nodes.as_ref().unwrap(),
-        |node| {
-            if let NodeBody::Merge(merge) = node {
-                upstream_fragment_ids.insert(merge.upstream_fragment_id);
-            }
-        },
-    );
-
-    let fragment = materialize_fragments
-        .iter()
-        .find(|fragment| upstream_fragment_ids.contains(&fragment.id()))
-        .unwrap();
-
-    let id = fragment.id();
-
-    let (worker_1, worker_2, worker_3) = fragment
-        .all_worker_count()
-        .into_keys()
-        .collect_tuple::<(_, _, _)>()
-        .unwrap();
-
     // prev -[1,2,3]
     cluster
-        .reschedule(format!("{id}:[{worker_1}:-2, {worker_2}:-1]"))
+        .run(format!(
+            "alter table t1 set parallelism = {}",
+            total_cores - 3
+        ))
         .await?;
+
     sleep(Duration::from_secs(3)).await;
 
     session.run(SELECT).await?.assert_result_eq("");
@@ -86,7 +56,10 @@ async fn test_dynamic_filter() -> Result<()> {
 
     // prev -[4,5]+[1,2,3]
     cluster
-        .reschedule(format!("{id}:[{worker_3}:-1, {worker_1}:2]"))
+        .run(format!(
+            "alter table t1 set parallelism = {}",
+            total_cores - 2
+        ))
         .await?;
     sleep(Duration::from_secs(3)).await;
     session.run(SELECT).await?.assert_result_eq("1\n2\n3");
@@ -99,8 +72,12 @@ async fn test_dynamic_filter() -> Result<()> {
 
     // prev -[1,2,3]+[4,5]
     cluster
-        .reschedule(format!("{id}:[{worker_1}:-2, {worker_3}:1]"))
+        .run(format!(
+            "alter table t1 set parallelism = {}",
+            total_cores - 3
+        ))
         .await?;
+
     sleep(Duration::from_secs(3)).await;
     session.run(SELECT).await?.assert_result_eq("3");
 
@@ -113,7 +90,7 @@ async fn test_dynamic_filter() -> Result<()> {
     //
     // prev +[1,2,3]
     cluster
-        .reschedule(format!("{id}:[{worker_1}:2, {worker_2}:1]"))
+        .run(format!("alter table t1 set parallelism = {}", total_cores))
         .await?;
     sleep(Duration::from_secs(3)).await;
     session.run(SELECT).await?.assert_result_eq("2\n3");
@@ -124,7 +101,12 @@ async fn test_dynamic_filter() -> Result<()> {
     session.run(SELECT).await?.assert_result_eq("");
 
     // prev -[1]
-    cluster.reschedule(format!("{id}:[{worker_1}:1]")).await?;
+    cluster
+        .run(format!(
+            "alter table t1 set parallelism = {}",
+            total_cores - 1
+        ))
+        .await?;
     sleep(Duration::from_secs(3)).await;
     session.run(SELECT).await?.assert_result_eq("");
 

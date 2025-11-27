@@ -10,7 +10,7 @@ def _(outer_panels: Panels):
             "Network",
             [
                 panels.timeseries_bytes_per_sec(
-                    "Streming Remote Exchange (Bytes/s)",
+                    "Streaming Remote Exchange (Bytes/s)",
                     "Send/Recv throughput per node for streaming exchange",
                     [
                         panels.target(

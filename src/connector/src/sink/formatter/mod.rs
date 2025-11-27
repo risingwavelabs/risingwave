@@ -16,6 +16,7 @@ use anyhow::{Context, anyhow};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 
+use crate::sink::redis::REDIS_VALUE_TYPE_STREAM;
 use crate::sink::{Result, SinkError};
 
 mod append_only;
@@ -38,7 +39,8 @@ use super::encoder::{
 };
 use super::redis::{
     CHANNEL, CHANNEL_COLUMN, KEY_FORMAT, LAT_NAME, LON_NAME, MEMBER_NAME, REDIS_VALUE_TYPE,
-    REDIS_VALUE_TYPE_GEO, REDIS_VALUE_TYPE_PUBSUB, REDIS_VALUE_TYPE_STRING, VALUE_FORMAT,
+    REDIS_VALUE_TYPE_GEO, REDIS_VALUE_TYPE_PUBSUB, REDIS_VALUE_TYPE_STRING, STREAM, STREAM_COLUMN,
+    VALUE_FORMAT,
 };
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, ProtoHeader, TimestampHandlingMode,
@@ -339,7 +341,12 @@ impl EncoderBuild for TemplateEncoder {
                             "`{CHANNEL}` and `{CHANNEL_COLUMN}` only one can be set"
                         )));
                     }
-                    TemplateEncoder::new_pubsub_key(b.schema, pk_indices, channel, channel_column)
+                    TemplateEncoder::new_pubsub_stream_key(
+                        b.schema,
+                        pk_indices,
+                        channel,
+                        channel_column,
+                    )
                 }
                 None => {
                     let template = b.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
@@ -349,6 +356,43 @@ impl EncoderBuild for TemplateEncoder {
                         b.schema,
                         pk_indices,
                         template.clone(),
+                    ))
+                }
+            },
+            REDIS_VALUE_TYPE_STREAM => match pk_indices {
+                Some(_) => {
+                    let stream = b.format_desc.options.get(STREAM).cloned();
+                    let stream_column = b.format_desc.options.get(STREAM_COLUMN).cloned();
+                    if (stream.is_none() && stream_column.is_none())
+                        || (stream.is_some() && stream_column.is_some())
+                    {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{STREAM}` and `{STREAM_COLUMN}` only one can be set"
+                        )));
+                    }
+                    TemplateEncoder::new_pubsub_stream_key(
+                        b.schema,
+                        pk_indices,
+                        stream,
+                        stream_column,
+                    )
+                }
+                None => {
+                    let value_template =
+                        b.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "Cannot find '{VALUE_FORMAT}',please set it."
+                            ))
+                        })?;
+                    let key_template = b.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find '{KEY_FORMAT}',please set it."))
+                    })?;
+
+                    Ok(TemplateEncoder::new_stream_value(
+                        b.schema,
+                        pk_indices,
+                        key_template.clone(),
+                        value_template.clone(),
                     ))
                 }
             },

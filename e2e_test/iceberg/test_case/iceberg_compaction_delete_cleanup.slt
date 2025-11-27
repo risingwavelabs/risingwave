@@ -1,0 +1,248 @@
+control substitution on
+
+# Cleanup any previous test data
+statement ok
+DROP TABLE IF EXISTS t_compaction_delete;
+
+statement ok
+DROP CONNECTION IF EXISTS lakekeeper_catalog_conn;
+
+statement ok
+DROP SECRET IF EXISTS lakekeeper_secret;
+
+statement ok
+create secret lakekeeper_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection lakekeeper_catalog_conn
+with (
+    type = 'iceberg',
+    catalog.type = 'rest',
+    catalog.uri = 'http://127.0.0.1:8181/catalog/',
+    warehouse.path = 'risingwave-warehouse',
+    s3.access.key = secret lakekeeper_secret,
+    s3.secret.key = secret lakekeeper_secret,
+    s3.path.style.access = 'true',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1'
+);
+
+statement ok
+set iceberg_engine_connection = 'public.lakekeeper_catalog_conn';
+
+statement ok
+create table t_compaction_delete(
+    id int primary key,
+    name varchar,
+    v int
+)
+with(
+    commit_checkpoint_interval = 1
+) engine = iceberg;
+
+# Step 1: Insert 3 batches to create multiple data files
+# Use same v=999 for records that will be deleted later
+statement ok
+insert into t_compaction_delete values (1, 'alice', 100), (2, 'bob', 999);
+
+statement ok
+FLUSH;
+
+sleep 1s
+
+statement ok
+insert into t_compaction_delete values (3, 'charlie', 300), (4, 'david', 999);
+
+statement ok
+FLUSH;
+
+sleep 1s
+
+statement ok
+insert into t_compaction_delete values (5, 'eve', 500), (6, 'frank', 999);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query III rowsort
+select * from t_compaction_delete;
+----
+1 alice 100
+2 bob 999
+3 charlie 300
+4 david 999
+5 eve 500
+6 frank 999
+
+# Step 2: DELETE spanning multiple data files using v=999 filter
+# This deletes records (2, 4, 6) from all 3 data files
+statement ok
+delete from t_compaction_delete where v = 999;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query III rowsort
+select * from t_compaction_delete;
+----
+1 alice 100
+3 charlie 300
+5 eve 500
+
+# Step 3: UPDATE operation
+statement ok
+update t_compaction_delete set v = 111 where id = 1;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query III rowsort
+select * from t_compaction_delete;
+----
+1 alice 111
+3 charlie 300
+5 eve 500
+
+# Before first VACUUM FULL: check file counts
+# Should have multiple data files from inserts
+query ?
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_compaction_delete'
+and content = 'Data';
+----
+7
+
+# Should have delete files from DELETE and UPDATE operations
+query ?
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_compaction_delete'
+and content in ('PositionDeletes', 'EqualityDeletes');
+----
+3
+
+# Total files (data + delete)
+query ?
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_compaction_delete';
+----
+10
+
+# Step 4: First VACUUM FULL
+statement ok
+VACUUM FULL t_compaction_delete;
+
+sleep 5s
+
+query III rowsort
+select * from t_compaction_delete;
+----
+1 alice 111
+3 charlie 300
+5 eve 500
+
+# After first compaction: data files should be compacted, some delete files may remain
+query ?
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_compaction_delete'
+and content = 'Data';
+----
+1
+
+query ?
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_compaction_delete'
+and content in ('PositionDeletes', 'EqualityDeletes');
+----
+1
+
+# Step 5: Insert more data before second compaction (creates new data files)
+statement ok
+insert into t_compaction_delete values (7, 'grace', 700), (8, 'henry', 800);
+
+statement ok
+FLUSH;
+
+sleep 1s
+
+statement ok
+insert into t_compaction_delete values (9, 'iris', 900), (10, 'jack', 1000);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query III rowsort
+select * from t_compaction_delete;
+----
+1 alice 111
+10 jack 1000
+3 charlie 300
+5 eve 500
+7 grace 700
+8 henry 800
+9 iris 900
+
+# Step 6: Second VACUUM FULL - should clean all delete files
+statement ok
+VACUUM FULL t_compaction_delete;
+
+sleep 5s
+
+query III rowsort
+select * from t_compaction_delete;
+----
+1 alice 111
+10 jack 1000
+3 charlie 300
+5 eve 500
+7 grace 700
+8 henry 800
+9 iris 900
+
+# After second compaction: all files compacted to 1, all delete files cleaned
+query ?
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_compaction_delete';
+----
+1
+
+query ?
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_compaction_delete'
+and content in ('PositionDeletes', 'EqualityDeletes');
+----
+0
+
+query ?
+select sum(record_count) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_compaction_delete'
+and content = 'Data';
+----
+7
+
+# Cleanup
+statement ok
+DROP TABLE t_compaction_delete;
+
+statement ok
+DROP CONNECTION lakekeeper_catalog_conn;
+
+statement ok
+DROP SECRET lakekeeper_secret;

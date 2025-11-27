@@ -109,7 +109,7 @@ impl FrontendRetryClient {
             Self::get_retry_strategy(),
             || async {
                 self.client
-                    .to_owned()
+                    .clone()
                     .0
                     .get_table_replace_plan(request.clone())
                     .await
@@ -123,13 +123,13 @@ impl FrontendRetryClient {
         &self,
         request: GetRunningSqlsRequest,
     ) -> std::result::Result<Response<GetRunningSqlsResponse>, tonic::Status> {
-        self.client.0.to_owned().get_running_sqls(request).await
+        self.client.0.clone().get_running_sqls(request).await
     }
 
     pub async fn cancel_running_sql(
         &self,
         request: CancelRunningSqlRequest,
     ) -> std::result::Result<Response<CancelRunningSqlResponse>, tonic::Status> {
-        self.client.0.to_owned().cancel_running_sql(request).await
+        self.client.0.clone().cancel_running_sql(request).await
     }
 }

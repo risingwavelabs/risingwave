@@ -1,0 +1,145 @@
+# Test MySQL CDC with TIMESTAMPTZ as primary key
+# This test verifies that TIMESTAMPTZ primary key works correctly in CDC backfill
+
+control substitution on
+
+statement ok
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 1;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS ts_pk_test;
+    CREATE TABLE ts_pk_test (
+        t TIMESTAMP NOT NULL PRIMARY KEY,
+        id BIGINT NOT NULL,
+        info VARCHAR(50) NOT NULL DEFAULT ''
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+"
+
+# Insert 50 backfill rows into MySQL
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO ts_pk_test (t, id, info) VALUES
+        (FROM_UNIXTIME(1700000001), 1, 'backfill'),
+        (FROM_UNIXTIME(1700000002), 2, 'backfill'),
+        (FROM_UNIXTIME(1700000003), 3, 'backfill'),
+        (FROM_UNIXTIME(1700000004), 4, 'backfill'),
+        (FROM_UNIXTIME(1700000005), 5, 'backfill'),
+        (FROM_UNIXTIME(1700000006), 6, 'backfill'),
+        (FROM_UNIXTIME(1700000007), 7, 'backfill'),
+        (FROM_UNIXTIME(1700000008), 8, 'backfill'),
+        (FROM_UNIXTIME(1700000009), 9, 'backfill'),
+        (FROM_UNIXTIME(1700000010), 10, 'backfill'),
+        (FROM_UNIXTIME(1700000011), 11, 'backfill'),
+        (FROM_UNIXTIME(1700000012), 12, 'backfill'),
+        (FROM_UNIXTIME(1700000013), 13, 'backfill'),
+        (FROM_UNIXTIME(1700000014), 14, 'backfill'),
+        (FROM_UNIXTIME(1700000015), 15, 'backfill'),
+        (FROM_UNIXTIME(1700000016), 16, 'backfill'),
+        (FROM_UNIXTIME(1700000017), 17, 'backfill'),
+        (FROM_UNIXTIME(1700000018), 18, 'backfill'),
+        (FROM_UNIXTIME(1700000019), 19, 'backfill'),
+        (FROM_UNIXTIME(1700000020), 20, 'backfill'),
+        (FROM_UNIXTIME(1700000021), 21, 'backfill'),
+        (FROM_UNIXTIME(1700000022), 22, 'backfill'),
+        (FROM_UNIXTIME(1700000023), 23, 'backfill'),
+        (FROM_UNIXTIME(1700000024), 24, 'backfill'),
+        (FROM_UNIXTIME(1700000025), 25, 'backfill'),
+        (FROM_UNIXTIME(1700000026), 26, 'backfill'),
+        (FROM_UNIXTIME(1700000027), 27, 'backfill'),
+        (FROM_UNIXTIME(1700000028), 28, 'backfill'),
+        (FROM_UNIXTIME(1700000029), 29, 'backfill'),
+        (FROM_UNIXTIME(1700000030), 30, 'backfill'),
+        (FROM_UNIXTIME(1700000031), 31, 'backfill'),
+        (FROM_UNIXTIME(1700000032), 32, 'backfill'),
+        (FROM_UNIXTIME(1700000033), 33, 'backfill'),
+        (FROM_UNIXTIME(1700000034), 34, 'backfill'),
+        (FROM_UNIXTIME(1700000035), 35, 'backfill'),
+        (FROM_UNIXTIME(1700000036), 36, 'backfill'),
+        (FROM_UNIXTIME(1700000037), 37, 'backfill'),
+        (FROM_UNIXTIME(1700000038), 38, 'backfill'),
+        (FROM_UNIXTIME(1700000039), 39, 'backfill'),
+        (FROM_UNIXTIME(1700000040), 40, 'backfill'),
+        (FROM_UNIXTIME(1700000041), 41, 'backfill'),
+        (FROM_UNIXTIME(1700000042), 42, 'backfill'),
+        (FROM_UNIXTIME(1700000043), 43, 'backfill'),
+        (FROM_UNIXTIME(1700000044), 44, 'backfill'),
+        (FROM_UNIXTIME(1700000045), 45, 'backfill'),
+        (FROM_UNIXTIME(1700000046), 46, 'backfill'),
+        (FROM_UNIXTIME(1700000047), 47, 'backfill'),
+        (FROM_UNIXTIME(1700000048), 48, 'backfill'),
+        (FROM_UNIXTIME(1700000049), 49, 'backfill'),
+        (FROM_UNIXTIME(1700000050), 50, 'backfill');
+"
+
+sleep 2s
+
+statement ok
+create source s_ts_pk with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev'
+);
+
+sleep 2s
+
+statement ok
+create table rw_ts_pk (
+  t TIMESTAMPTZ,
+  id BIGINT,
+  info VARCHAR,
+  primary key (t)
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 10,
+) from s_ts_pk table 'risedev.ts_pk_test';
+
+sleep 5s
+
+# Insert incremental data (debezium)
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO ts_pk_test (t, id, info) VALUES
+        (FROM_UNIXTIME(1700001001), 1001, 'debezium'),
+        (FROM_UNIXTIME(1700001002), 1002, 'debezium'),
+        (FROM_UNIXTIME(1700001003), 1003, 'debezium'),
+        (FROM_UNIXTIME(1700001004), 1004, 'debezium'),
+        (FROM_UNIXTIME(1700001005), 1005, 'debezium');
+"
+
+sleep 3s
+
+# Verify total count in RisingWave
+query I
+select count(*) as row_cnt from rw_ts_pk;
+----
+55
+
+# Verify we have both backfill and debezium data
+query T
+select count(*) as backfill_count from rw_ts_pk where info = 'backfill';
+----
+50
+
+query T
+select count(*) as debezium_count from rw_ts_pk where info = 'debezium';
+----
+5
+
+# Clean up
+statement ok
+drop table rw_ts_pk;
+
+statement ok
+drop source s_ts_pk cascade;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE IF EXISTS ts_pk_test;
+"

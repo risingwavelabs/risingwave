@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::id::JobId;
 
 use super::*;
 use crate::controller::utils::{
-    get_database_resource_group, get_existing_job_resource_group, get_table_columns,
+    StreamingJobExtraInfo, get_database_resource_group, get_existing_job_resource_group,
+    get_streaming_job_extra_info as fetch_streaming_job_extra_info, get_table_columns,
 };
 
 impl CatalogController {
@@ -30,7 +32,11 @@ impl CatalogController {
         Ok(ObjectModel(secret, obj.unwrap()).into())
     }
 
-    pub async fn get_object_database_id(&self, object_id: ObjectId) -> MetaResult<DatabaseId> {
+    pub async fn get_object_database_id(
+        &self,
+        object_id: impl Into<ObjectId>,
+    ) -> MetaResult<DatabaseId> {
+        let object_id = object_id.into();
         let inner = self.inner.read().await;
         let (database_id,): (Option<DatabaseId>,) = Object::find_by_id(object_id)
             .select_only()
@@ -54,6 +60,26 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("connection", connection_id))?;
 
         Ok(ObjectModel(conn, obj.unwrap()).into())
+    }
+
+    pub async fn get_table_catalog_by_name(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        name: &str,
+    ) -> MetaResult<Option<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_obj = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::Name
+                    .eq(name)
+                    .and(object::Column::DatabaseId.eq(database_id))
+                    .and(object::Column::SchemaId.eq(schema_id)),
+            )
+            .one(&inner.db)
+            .await?;
+        Ok(table_obj.map(|(table, obj)| ObjectModel(table, obj.unwrap()).into()))
     }
 
     pub async fn get_table_by_name(
@@ -89,6 +115,22 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))
     }
 
+    pub async fn get_table_by_associate_source_id(
+        &self,
+        associated_source_id: SourceId,
+    ) -> MetaResult<PbTable> {
+        let inner = self.inner.read().await;
+        Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::OptionalAssociatedSourceId.eq(associated_source_id))
+            .one(&inner.db)
+            .await?
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found("table associated source", associated_source_id)
+            })
+    }
+
     pub async fn get_table_by_id(&self, table_id: TableId) -> MetaResult<PbTable> {
         let inner = self.inner.read().await;
         let table_obj = Table::find_by_id(table_id)
@@ -100,6 +142,27 @@ impl CatalogController {
         } else {
             Err(MetaError::catalog_id_not_found("table", table_id))
         }
+    }
+
+    pub async fn get_user_created_table_by_ids(
+        &self,
+        job_ids: impl Iterator<Item = JobId>,
+    ) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::TableId
+                    .is_in(job_ids.map(|job_id| job_id.as_mv_table_id()).collect_vec())
+                    .and(table::Column::TableType.eq(TableType::Table)),
+            )
+            .all(&inner.db)
+            .await?;
+        let tables = table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect();
+        Ok(tables)
     }
 
     pub async fn get_table_by_ids(
@@ -142,17 +205,26 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn get_sink_by_ids(&self, sink_ids: Vec<SinkId>) -> MetaResult<Vec<PbSink>> {
+    pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
         let inner = self.inner.read().await;
         let sink_objs = Sink::find()
             .find_also_related(Object)
-            .filter(sink::Column::SinkId.is_in(sink_ids))
+            .filter(sink::Column::TargetTable.eq(table_id))
             .all(&inner.db)
             .await?;
         Ok(sink_objs
             .into_iter()
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
             .collect())
+    }
+
+    pub async fn get_sink_by_id(&self, sink_id: SinkId) -> MetaResult<Option<PbSink>> {
+        let inner = self.inner.read().await;
+        let sink_objs = Sink::find_by_id(sink_id)
+            .find_also_related(Object)
+            .one(&inner.db)
+            .await?;
+        Ok(sink_objs.map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into()))
     }
 
     pub async fn get_sink_auto_refresh_schema_from(
@@ -182,7 +254,11 @@ impl CatalogController {
             .await?;
         Ok(tables
             .into_iter()
-            .flat_map(|ids| ids.into_inner().into_iter())
+            .flat_map(|ids| {
+                ids.into_inner()
+                    .into_iter()
+                    .map(|table_id| TableId::new(table_id as _))
+            })
             .collect())
     }
 
@@ -208,30 +284,26 @@ impl CatalogController {
     pub async fn get_mv_depended_subscriptions(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+    ) -> MetaResult<HashMap<TableId, HashMap<SubscriptionId, u64>>> {
         let inner = self.inner.read().await;
         let select = Subscription::find()
             .select_only()
             .select_column(subscription::Column::SubscriptionId)
             .select_column(subscription::Column::DependentTableId)
-            .select_column(subscription::Column::RetentionSeconds)
-            .select_column(object::Column::DatabaseId)
-            .join(JoinType::InnerJoin, subscription::Relation::Object.def());
+            .select_column(subscription::Column::RetentionSeconds);
         let select = if let Some(database_id) = database_id {
-            select.filter(object::Column::DatabaseId.eq(database_id))
+            select
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .filter(object::Column::DatabaseId.eq(database_id))
         } else {
             select
         };
-        let subscription_objs: Vec<(SubscriptionId, ObjectId, i64, DatabaseId)> =
+        let subscription_objs: Vec<(SubscriptionId, TableId, i64)> =
             select.into_tuple().all(&inner.db).await?;
-        let mut map: HashMap<_, HashMap<_, HashMap<_, _>>> = HashMap::new();
+        let mut map: HashMap<_, HashMap<_, _>> = HashMap::new();
         // Write object at the same time we write subscription, so we must be able to get obj
-        for (subscription_id, dependent_table_id, retention_seconds, database_id) in
-            subscription_objs
-        {
-            map.entry(database_id)
-                .or_default()
-                .entry(dependent_table_id)
+        for (subscription_id, dependent_table_id, retention_seconds) in subscription_objs {
+            map.entry(dependent_table_id)
                 .or_default()
                 .insert(subscription_id, retention_seconds as _);
         }
@@ -348,7 +420,9 @@ impl CatalogController {
 
     /// Returns column ids of versioned tables.
     /// Being versioned implies using `ColumnAwareSerde`.
-    pub async fn get_versioned_table_schemas(&self) -> MetaResult<HashMap<TableId, Vec<i32>>> {
+    pub async fn get_versioned_table_schemas(
+        &self,
+    ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, Vec<i32>>> {
         let res = self
             .list_all_state_tables()
             .await?
@@ -356,7 +430,7 @@ impl CatalogController {
             .filter_map(|t| {
                 if t.version.is_some() {
                     let ret = (
-                        t.id.try_into().unwrap(),
+                        t.id,
                         t.columns
                             .iter()
                             .map(|c| c.column_desc.as_ref().unwrap().column_id)
@@ -372,21 +446,21 @@ impl CatalogController {
 
     pub async fn get_existing_job_resource_group(
         &self,
-        streaming_job_id: ObjectId,
+        streaming_job_id: JobId,
     ) -> MetaResult<String> {
         let inner = self.inner.read().await;
         get_existing_job_resource_group(&inner.db, streaming_job_id).await
     }
 
-    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+    pub async fn get_database_resource_group(&self, database_id: DatabaseId) -> MetaResult<String> {
         let inner = self.inner.read().await;
         get_database_resource_group(&inner.db, database_id).await
     }
 
     pub async fn get_existing_job_resource_groups(
         &self,
-        streaming_job_ids: Vec<ObjectId>,
-    ) -> MetaResult<HashMap<ObjectId, String>> {
+        streaming_job_ids: Vec<JobId>,
+    ) -> MetaResult<HashMap<JobId, String>> {
         let inner = self.inner.read().await;
         let mut resource_groups = HashMap::new();
         for job_id in streaming_job_ids {
@@ -399,10 +473,10 @@ impl CatalogController {
 
     pub async fn get_existing_job_database_resource_group(
         &self,
-        streaming_job_id: ObjectId,
+        streaming_job_id: JobId,
     ) -> MetaResult<String> {
         let inner = self.inner.read().await;
-        let database_id: ObjectId = StreamingJob::find_by_id(streaming_job_id)
+        let database_id: DatabaseId = StreamingJob::find_by_id(streaming_job_id)
             .select_only()
             .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
             .column(object::Column::DatabaseId)
@@ -416,7 +490,7 @@ impl CatalogController {
 
     pub async fn get_job_streaming_parallelisms(
         &self,
-        streaming_job_id: ObjectId,
+        streaming_job_id: JobId,
     ) -> MetaResult<StreamingParallelism> {
         let inner = self.inner.read().await;
 
@@ -434,9 +508,9 @@ impl CatalogController {
     pub async fn get_fragment_streaming_job_id(
         &self,
         fragment_id: FragmentId,
-    ) -> MetaResult<ObjectId> {
+    ) -> MetaResult<JobId> {
         let inner = self.inner.read().await;
-        let job_id: ObjectId = Fragment::find_by_id(fragment_id)
+        let job_id: JobId = Fragment::find_by_id(fragment_id)
             .select_only()
             .column(fragment::Column::JobId)
             .into_tuple()
@@ -444,6 +518,22 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("fragment", fragment_id))?;
         Ok(job_id)
+    }
+
+    pub async fn list_streaming_job_with_database(
+        &self,
+    ) -> MetaResult<HashMap<DatabaseId, Vec<JobId>>> {
+        let inner = self.inner.read().await;
+        let database_objects: Vec<(DatabaseId, JobId)> = StreamingJob::find()
+            .select_only()
+            .column(object::Column::DatabaseId)
+            .column(streaming_job::Column::JobId)
+            .join(JoinType::LeftJoin, streaming_job::Relation::Object.def())
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(database_objects.into_iter().into_group_map())
     }
 
     // Output: Vec<(table id, db name, schema name, table name, resource group)>
@@ -504,5 +594,28 @@ impl CatalogController {
             .into_tuple()
             .all(&inner.db)
             .await?)
+    }
+
+    pub async fn get_streaming_job_status(&self, streaming_job_id: JobId) -> MetaResult<JobStatus> {
+        let inner = self.inner.read().await;
+        let status = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::JobStatus)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+        Ok(status)
+    }
+
+    pub async fn get_streaming_job_extra_info(
+        &self,
+        job_ids: Vec<JobId>,
+    ) -> MetaResult<HashMap<JobId, StreamingJobExtraInfo>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let result = fetch_streaming_job_extra_info(&txn, job_ids).await?;
+        Ok(result)
     }
 }

@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
-use risingwave_common::catalog::TableOption;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
@@ -61,12 +61,12 @@ impl TtlPickerState {
 }
 
 pub struct TtlReclaimCompactionPicker {
-    table_id_to_ttl: HashMap<u32, u32>,
+    table_id_to_ttl: HashMap<TableId, u32>,
 }
 
 impl TtlReclaimCompactionPicker {
     pub fn new(table_id_to_options: &HashMap<StateTableId, TableOption>) -> Self {
-        let table_id_to_ttl: HashMap<u32, u32> = table_id_to_options
+        let table_id_to_ttl: HashMap<TableId, u32> = table_id_to_options
             .iter()
             .filter(|id_to_option| {
                 let table_option = id_to_option.1;
@@ -79,7 +79,7 @@ impl TtlReclaimCompactionPicker {
     }
 
     fn filter(&self, sst: &SstableInfo, current_epoch_physical_time: u64) -> bool {
-        let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<u32>>();
+        let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<_>>();
         let expire_epoch =
             Epoch::from_physical_time(current_epoch_physical_time - MIN_TTL_EXPIRE_INTERVAL_MS);
 
@@ -202,6 +202,7 @@ mod test {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::level::Level;
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
@@ -370,10 +371,10 @@ mod test {
         let mut local_stats = LocalSelectorStatistic::default();
         let mut selector = TtlCompactionSelector::default();
         {
-            let table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+            let table_id_to_options: HashMap<TableId, TableOption> = (2..=10)
                 .map(|table_id| {
                     (
-                        table_id as u32,
+                        table_id.into(),
                         TableOption {
                             retention_seconds: Some(5_u32),
                         },
@@ -424,10 +425,10 @@ mod test {
                 }
             }
 
-            let table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+            let table_id_to_options: HashMap<TableId, TableOption> = (2..=10)
                 .map(|table_id| {
                     (
-                        table_id as u32,
+                        table_id.into(),
                         TableOption {
                             retention_seconds: Some(5_u32),
                         },
@@ -516,10 +517,10 @@ mod test {
 
             // rebuild selector
             selector = TtlCompactionSelector::default();
-            let mut table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+            let mut table_id_to_options: HashMap<TableId, TableOption> = (2..=10)
                 .map(|table_id| {
                     (
-                        table_id as u32,
+                        table_id.into(),
                         TableOption {
                             retention_seconds: Some(7200),
                         },
@@ -528,7 +529,7 @@ mod test {
                 .collect();
 
             table_id_to_options.insert(
-                5,
+                5.into(),
                 TableOption {
                     retention_seconds: Some(5),
                 },
@@ -611,10 +612,10 @@ mod test {
 
             // rebuild selector
             selector = TtlCompactionSelector::default();
-            let mut table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+            let mut table_id_to_options: HashMap<TableId, TableOption> = (2..=10)
                 .map(|table_id| {
                     (
-                        table_id as u32,
+                        table_id.into(),
                         TableOption {
                             retention_seconds: Some(5_u32),
                         },
@@ -624,21 +625,21 @@ mod test {
 
             // cut range [2,3,4] [6,7] [10]
             table_id_to_options.insert(
-                5,
+                5.into(),
                 TableOption {
                     retention_seconds: Some(7200_u32),
                 },
             );
 
             table_id_to_options.insert(
-                8,
+                8.into(),
                 TableOption {
                     retention_seconds: Some(7200_u32),
                 },
             );
 
             table_id_to_options.insert(
-                9,
+                9.into(),
                 TableOption {
                     retention_seconds: Some(7200_u32),
                 },
@@ -699,10 +700,10 @@ mod test {
 
             // rebuild selector
             selector = TtlCompactionSelector::default();
-            let mut table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+            let mut table_id_to_options: HashMap<TableId, TableOption> = (2..=10)
                 .map(|table_id| {
                     (
-                        table_id as u32,
+                        table_id.into(),
                         TableOption {
                             retention_seconds: Some(5_u32),
                         },
@@ -712,21 +713,21 @@ mod test {
 
             // cut range [2,3,4] [6,7] [10]
             table_id_to_options.insert(
-                5,
+                5.into(),
                 TableOption {
                     retention_seconds: Some(7200_u32),
                 },
             );
 
             table_id_to_options.insert(
-                8,
+                8.into(),
                 TableOption {
                     retention_seconds: Some(7200_u32),
                 },
             );
 
             table_id_to_options.insert(
-                9,
+                9.into(),
                 TableOption {
                     retention_seconds: Some(7200_u32),
                 },
@@ -737,7 +738,7 @@ mod test {
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 if index == expect_task_file_count.len() - 1 {
                     table_id_to_options.insert(
-                        5,
+                        5.into(),
                         TableOption {
                             retention_seconds: Some(5_u32),
                         },

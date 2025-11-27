@@ -1,0 +1,162 @@
+# Test for GAP FILL with EOWC (Event-time Oriented Window Computing) syntax.
+# This requires watermark definition and EMIT ON WINDOW CLOSE.
+
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE gap_table (
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (ts),
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+set streaming_parallelism = 0;
+
+statement ok
+INSERT INTO gap_table VALUES
+    ('2024-05-21 10:00:00', 10.0),
+    ('2024-05-21 10:02:00', 12.0),
+    ('2024-05-21 10:05:00', 15.0);
+
+# Use EOWC syntax with EMIT ON WINDOW CLOSE
+statement ok
+CREATE MATERIALIZED VIEW gap_filled AS
+SELECT ts, value
+FROM GAP_FILL(gap_table, ts, INTERVAL '1' MINUTE)
+EMIT ON WINDOW CLOSE;
+
+# Insert some more data with later timestamps to trigger watermark advancement
+statement ok
+INSERT INTO gap_table VALUES
+    ('2024-05-21 10:08:00', 21.0);
+
+# Check the result - GAP_FILL uses NULL by default for unspecified columns
+query TR
+SELECT ts, value FROM gap_filled ORDER BY ts;
+----
+2024-05-21 10:00:00 10
+2024-05-21 10:01:00 NULL
+2024-05-21 10:02:00 12
+2024-05-21 10:03:00 NULL
+2024-05-21 10:04:00 NULL
+2024-05-21 10:05:00 15
+
+statement ok
+DROP MATERIALIZED VIEW gap_filled;
+
+# Test with custom fill strategies - LOCF
+statement ok
+CREATE MATERIALIZED VIEW gap_filled_locf AS
+SELECT ts, value
+FROM GAP_FILL(gap_table, ts, INTERVAL '1' MINUTE, LOCF(value))
+EMIT ON WINDOW CLOSE;
+
+# Test with INTERPOLATE strategy
+statement ok
+CREATE MATERIALIZED VIEW gap_filled_interpolate AS
+SELECT ts, value
+FROM GAP_FILL(gap_table, ts, INTERVAL '1' MINUTE, INTERPOLATE(value))
+EMIT ON WINDOW CLOSE;
+
+# Insert more data to trigger watermark
+statement ok
+INSERT INTO gap_table VALUES
+    ('2024-05-21 10:10:00', 25.0);
+
+# Check result with explicit LOCF strategy
+query TR
+SELECT ts, value FROM gap_filled_locf ORDER BY ts;
+----
+2024-05-21 10:00:00 10
+2024-05-21 10:01:00 10
+2024-05-21 10:02:00 12
+2024-05-21 10:03:00 12
+2024-05-21 10:04:00 12
+2024-05-21 10:05:00 15
+2024-05-21 10:06:00 15
+2024-05-21 10:07:00 15
+2024-05-21 10:08:00 21
+
+statement ok
+DROP MATERIALIZED VIEW gap_filled_locf;
+
+# Check interpolated values
+query TR
+SELECT ts, value FROM gap_filled_interpolate ORDER BY ts;
+----
+2024-05-21 10:00:00 10
+2024-05-21 10:01:00 11
+2024-05-21 10:02:00 12
+2024-05-21 10:03:00 13
+2024-05-21 10:04:00 14
+2024-05-21 10:05:00 15
+2024-05-21 10:06:00 17
+2024-05-21 10:07:00 19
+2024-05-21 10:08:00 21
+
+statement ok
+DROP MATERIALIZED VIEW gap_filled_interpolate;
+
+statement ok
+DROP TABLE gap_table;
+
+# Test mixed multi-column fill strategies with EOWC
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE gap_multi_column_table (
+    ts TIMESTAMP,
+    temperature DOUBLE,
+    pressure DOUBLE,
+    status VARCHAR,
+    PRIMARY KEY (ts),
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+set streaming_parallelism = 0;
+
+statement ok
+INSERT INTO gap_multi_column_table VALUES
+    ('2024-05-21 10:00:00', 20.0, 100.0, 'active'),
+    ('2024-05-21 10:04:00', 24.0, 120.0, 'inactive');
+
+# Create MV with mixed strategies:
+# - temperature: INTERPOLATE (linear interpolation)
+# - pressure: LOCF (last observation carried forward)
+# - status: KEEPNULL (keep as NULL for filled rows)
+statement ok
+CREATE MATERIALIZED VIEW gap_filled_mixed AS
+SELECT ts, temperature, pressure, status
+FROM GAP_FILL(gap_multi_column_table, ts, INTERVAL '1' MINUTE,
+              INTERPOLATE(temperature), LOCF(pressure), KEEPNULL(status))
+EMIT ON WINDOW CLOSE;
+
+# Insert data with later timestamp to trigger watermark advancement
+statement ok
+INSERT INTO gap_multi_column_table VALUES
+    ('2024-05-21 10:10:00', 30.0, 150.0, 'active');
+
+# Check result - temperature interpolated, pressure LOCF, status NULL
+query TRRT
+SELECT ts, temperature, pressure, status FROM gap_filled_mixed ORDER BY ts;
+----
+2024-05-21 10:00:00 20 100 active
+2024-05-21 10:01:00 21 100 NULL
+2024-05-21 10:02:00 22 100 NULL
+2024-05-21 10:03:00 23 100 NULL
+2024-05-21 10:04:00 24 120 inactive
+
+# Cleanup
+statement ok
+DROP MATERIALIZED VIEW gap_filled_mixed;
+
+statement ok
+DROP TABLE gap_multi_column_table;

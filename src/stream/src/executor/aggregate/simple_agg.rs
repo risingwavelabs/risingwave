@@ -51,8 +51,8 @@ struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
-    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
-    input_pk_indices: Vec<usize>,
+    /// Stream key indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
+    input_stream_key: Vec<usize>,
 
     /// Schema from input.
     input_schema: Schema,
@@ -123,7 +123,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: args.info,
-                input_pk_indices: input_info.pk_indices,
+                input_stream_key: input_info.stream_key,
                 input_schema: input_info.schema,
                 agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
                 agg_calls: args.agg_calls,
@@ -270,7 +270,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             &this.agg_funcs,
             &this.storages,
             &this.intermediate_state_table,
-            &this.input_pk_indices,
+            &this.input_stream_key,
             this.row_count_index,
             false, // emit on window close
             this.extreme_cache_size,

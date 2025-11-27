@@ -637,9 +637,9 @@ fn test_all_types() -> anyhow::Result<()> {
                 Int32(4),
                 Int32(5),
             ])
-            Owned(Utf8(""))
+            Owned(null)
             Owned(Int32(123))
-            Owned(Utf8("DEFAULT"))
+            Owned(null)
             Owned([
                 StructValue(
                     Utf8("key1"),

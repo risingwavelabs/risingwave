@@ -86,8 +86,8 @@ The final written key (aka. full key) is encoded by appending the 8-byte epoch a
 ### Write Path
 
 The Hummock client will batch writes and generate SSTs to sync to the underlying S3-compatible service. An SST consists of two files:
-- <id>`.data`: Data file composed of ~64KB blocks, each of which contains the actual key-value pairs.
-- <id>`.meta`: Meta file containing large metadata including min-max index, Bloom filter as well as data block metadata.
+- `<id>.data`: Data file composed of ~64KB blocks, each of which contains the actual key-value pairs.
+- `<id>.meta`: Meta file containing large metadata including min-max index, Bloom filter as well as data block metadata.
 
 After the SST is uploaded to an S3-compatible service, the Hummock client will let the Hummock manager know there's a new table.
 The list of all SSTs along with some metadata forms a ***version***. When the Hummock client adds new SSTs to the Hummock manager, a new version will be generated with the new set of SST files.

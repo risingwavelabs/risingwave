@@ -18,7 +18,6 @@
 //! environment variables.
 
 #![feature(panic_update_hook)]
-#![feature(let_chains)]
 #![feature(exitcode_exit_method)]
 
 use std::pin::pin;

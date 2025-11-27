@@ -14,7 +14,6 @@
 
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
@@ -83,7 +82,7 @@ impl Binder {
                 table_catalog.owner,
                 AclMode::Delete,
                 table_name.clone(),
-                PbObject::TableId(table_catalog.id.table_id),
+                table_catalog.id,
             ),
             table_catalog.database_id,
         )?;

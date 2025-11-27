@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use risingwave_common::id::TableId;
+
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
 
@@ -28,7 +30,7 @@ pub struct MetricsInfo {
 impl MetricsInfo {
     pub fn new(
         metrics: Arc<StreamingMetrics>,
-        table_id: u32,
+        table_id: TableId,
         actor_id: ActorId,
         desc: impl Into<String>,
     ) -> Self {

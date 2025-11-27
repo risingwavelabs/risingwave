@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use comfy_table::{Row, Table};
 use itertools::Itertools;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::WorkerId;
 use risingwave_pb::common::WorkerType;
 
 use crate::CtlContext;
@@ -24,7 +25,7 @@ use crate::CtlContext;
 pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let mappings = meta_client.list_serving_vnode_mappings().await?;
-    let workers: HashMap<_, _> = meta_client
+    let workers: HashMap<WorkerId, _> = meta_client
         .list_worker_nodes(Some(WorkerType::ComputeNode))
         .await?
         .into_iter()
@@ -44,7 +45,7 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
     let rows = mappings
         .iter()
         .flat_map(|(fragment_id, (table_id, mapping))| {
-            let mut worker_nodes: HashMap<u32, Vec<VirtualNode>> = HashMap::new();
+            let mut worker_nodes: HashMap<WorkerId, Vec<VirtualNode>> = HashMap::new();
             for (vnode, worker_slot_id) in mapping.iter_with_vnode() {
                 worker_nodes
                     .entry(worker_slot_id.worker_id())

@@ -14,9 +14,8 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_pb::catalog::table::{
-    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
-};
+use risingwave_common::id::JobId;
+use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, PbEngine, PbTableType};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable, PbVectorIndexInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
@@ -24,8 +23,8 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
-    TableId, TableVersion, WebhookSourceInfo,
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, SourceId, TableId,
+    TableVersion, WebhookSourceInfo,
 };
 
 #[derive(
@@ -189,7 +188,7 @@ pub struct Model {
     pub name: String,
     pub optional_associated_source_id: Option<SourceId>,
     pub table_type: TableType,
-    pub belongs_to_job_id: Option<ObjectId>,
+    pub belongs_to_job_id: Option<JobId>,
     pub columns: ColumnCatalogArray,
     pub pk: ColumnOrderArray,
     pub distribution_key: I32Array,
@@ -211,7 +210,6 @@ pub struct Model {
     pub description: Option<String>,
     pub version: Option<TableVersion>,
     pub retention_seconds: Option<i32>,
-    pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
     pub vnode_count: i32,
     pub webhook_info: Option<WebhookSourceInfo>,
@@ -306,27 +304,25 @@ impl From<PbTable> for ActiveModel {
         let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
         } else {
-            Set(Some(pb_table.fragment_id as FragmentId))
+            Set(Some(pb_table.fragment_id))
         };
         let dml_fragment_id = pb_table
             .dml_fragment_id
-            .map(|x| Set(Some(x as FragmentId)))
+            .map(|x| Set(Some(x)))
             .unwrap_or_default();
         let optional_associated_source_id =
-            if let Some(OptionalAssociatedSourceId::AssociatedSourceId(src_id)) =
-                pb_table.optional_associated_source_id
-            {
-                Set(Some(src_id as SourceId))
+            if let Some(src_id) = pb_table.optional_associated_source_id {
+                Set(Some(src_id.into()))
             } else {
                 NotSet
             };
 
         Self {
-            table_id: Set(pb_table.id as _),
+            table_id: Set(pb_table.id),
             name: Set(pb_table.name),
             optional_associated_source_id,
             table_type: Set(table_type.into()),
-            belongs_to_job_id: Set(pb_table.job_id.map(|x| x as _)),
+            belongs_to_job_id: Set(pb_table.job_id),
             columns: Set(pb_table.columns.into()),
             pk: Set(pb_table.pk.into()),
             distribution_key: Set(pb_table.distribution_key.into()),
@@ -355,7 +351,6 @@ impl From<PbTable> for ActiveModel {
             description: Set(pb_table.description),
             version: Set(pb_table.version.as_ref().map(|v| v.into())),
             retention_seconds: Set(pb_table.retention_seconds.map(|i| i as _)),
-            incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
             vnode_count,
             webhook_info: Set(pb_table.webhook_info.as_ref().map(WebhookSourceInfo::from)),

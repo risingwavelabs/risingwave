@@ -1,0 +1,6 @@
+name	1
+	2
+name1\tname	3
+name1\rname	4
+name1\nname	5
+name1\\name	6

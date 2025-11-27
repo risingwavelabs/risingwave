@@ -50,10 +50,7 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let mut picker = SpaceReclaimCompactionPicker::new(
             group.compaction_config.max_space_reclaim_bytes,
-            member_table_ids
-                .iter()
-                .map(|table_id| table_id.table_id)
-                .collect(),
+            member_table_ids.iter().copied().collect(),
         );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let state = self.state.entry(group.group_id).or_default();

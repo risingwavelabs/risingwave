@@ -19,7 +19,9 @@ use risingwave_common_estimate_size::EstimateSize;
 use crate::executor::StreamExecutorResult;
 
 pub trait JoinEncoding: 'static + Send + Sync + Default {
-    type EncodedRow: CachedJoinRow + Default;
+    type EncodedRow: CachedJoinRow<DecodedRow = Self::DecodedRow> + Default;
+    type DecodedRow: Row;
+
     fn encode<R: Row>(row: &JoinRow<R>) -> Self::EncodedRow;
 }
 
@@ -27,6 +29,7 @@ pub trait JoinEncoding: 'static + Send + Sync + Default {
 pub struct CpuEncoding {}
 
 impl JoinEncoding for CpuEncoding {
+    type DecodedRow = OwnedRow;
     type EncodedRow = JoinRow<OwnedRow>;
 
     fn encode<R: Row>(row: &JoinRow<R>) -> JoinRow<OwnedRow> {
@@ -38,6 +41,7 @@ impl JoinEncoding for CpuEncoding {
 pub struct MemoryEncoding {}
 
 impl JoinEncoding for MemoryEncoding {
+    type DecodedRow = OwnedRow;
     type EncodedRow = EncodedJoinRow;
 
     fn encode<R: Row>(row: &JoinRow<R>) -> EncodedJoinRow {
@@ -76,6 +80,11 @@ impl<R: Row> JoinRow<R> {
         let degree = build_degree_row(order_key, self.degree);
         (&self.row, degree)
     }
+
+    /// Map the row to another row.
+    pub fn map<R2: Row>(self, f: impl FnOnce(R) -> R2) -> JoinRow<R2> {
+        JoinRow::new(f(self.row), self.degree)
+    }
 }
 
 pub type DegreeType = u64;
@@ -85,7 +94,9 @@ fn build_degree_row(order_key: impl Row, degree: DegreeType) -> impl Row {
 }
 
 pub trait CachedJoinRow: EstimateSize + Default + Send + Sync {
-    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>>;
+    type DecodedRow: Row;
+
+    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<Self::DecodedRow>>;
 
     fn increase_degree(&mut self);
 
@@ -99,6 +110,8 @@ pub struct EncodedJoinRow {
 }
 
 impl CachedJoinRow for EncodedJoinRow {
+    type DecodedRow = OwnedRow;
+
     fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
         let row = self.compacted_row.deserialize(data_types)?;
         Ok(JoinRow::new(row, self.degree))
@@ -129,6 +142,8 @@ impl EstimateSize for JoinRow<OwnedRow> {
 }
 
 impl CachedJoinRow for JoinRow<OwnedRow> {
+    type DecodedRow = OwnedRow;
+
     fn decode(&self, _data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
         Ok(self.clone())
     }

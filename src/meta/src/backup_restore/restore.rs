@@ -177,7 +177,7 @@ async fn restore_impl(
             target_id,
             &opts,
             LoaderV2::new(backup_store),
-            WriterModelV2ToMetaStoreV2::new(meta_store.to_owned()),
+            WriterModelV2ToMetaStoreV2::new(meta_store),
         )
         .await?;
     }

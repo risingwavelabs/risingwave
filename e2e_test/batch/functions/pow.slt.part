@@ -292,9 +292,13 @@ select
 ----
 numeric 2.718
 
-# rust_decimal overflows very early
+query R
+select round(exp(12::decimal), 7);
+----
+162754.7914190
+
 statement error overflow
-select exp(12::decimal);
+select exp(67::decimal);
 
 query RRTR
 select

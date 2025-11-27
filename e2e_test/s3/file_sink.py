@@ -483,15 +483,15 @@ def test_file_sink_batching():
     # delete objects
 
     client = Minio(
-        "127.0.0.1:9301",
-        "hummockadmin",
-        "hummockadmin",
+        endpoint="127.0.0.1:9301",
+        access_key="hummockadmin",
+        secret_key="hummockadmin",
         secure=False,
     )
-    objects = client.list_objects("hummock001", prefix="test_file_sink_batching/", recursive=True)
+    objects = client.list_objects(bucket_name="hummock001", prefix="test_file_sink_batching/", recursive=True)
 
     for obj in objects:
-        client.remove_object("hummock001", obj.object_name)
+        client.remove_object(bucket_name="hummock001", object_name=obj.object_name)
         print(f"Deleted: {obj.object_name}")
 
 
@@ -503,9 +503,9 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        "127.0.0.1:9301",
-        "hummockadmin",
-        "hummockadmin",
+        endpoint="127.0.0.1:9301",
+        access_key="hummockadmin",
+        secret_key="hummockadmin",
         secure=False,
     )
     run_id = str(random.randint(1000, 9999))
@@ -518,9 +518,9 @@ if __name__ == "__main__":
         pq.write_table(table, _local(idx))
 
         client.fput_object(
-            "hummock001",
-            _s3(idx),
-            _local(idx)
+            bucket_name="hummock001",
+            object_name=_s3(idx),
+            file_path=_local(idx),
         )
     # put parquet file to test table function file scan
     if data:
@@ -533,9 +533,9 @@ if __name__ == "__main__":
         pq.write_table(first_table, "data_0.parquet")
 
         client.fput_object(
-            "hummock001",
-            first_file_path,
-            "data_0.parquet"
+            bucket_name="hummock001",
+            object_name=first_file_path,
+            file_path="data_0.parquet",
         )
 
     # do test
@@ -543,13 +543,13 @@ if __name__ == "__main__":
 
     # clean up s3 files
     for idx, _ in enumerate(data):
-       client.remove_object("hummock001", _s3(idx))
+       client.remove_object(bucket_name="hummock001", object_name=_s3(idx))
 
     do_sink(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
     # clean up s3 files
     for idx, _ in enumerate(data):
-       client.remove_object("hummock001", _s3(idx))
+       client.remove_object(bucket_name="hummock001", object_name=_s3(idx))
 
     # test file sink batching
     test_file_sink_batching()

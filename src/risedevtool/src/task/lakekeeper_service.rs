@@ -108,7 +108,7 @@ impl LakekeeperService {
                     .username(&username)
                     .password(&password)
                     .database("template1")
-                    .ssl_mode(sqlx::postgres::PgSslMode::Disable);
+                    .ssl_mode(sqlx::postgres::PgSslMode::Prefer);
 
                 // Retry connection with exponential backoff
                 let mut attempts = 0;

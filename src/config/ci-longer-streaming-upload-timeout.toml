@@ -14,6 +14,7 @@ in_flight_barrier_nums = 10
 stream_exchange_concurrent_barriers = 10
 
 [storage]
+share_buffers_sync_parallelism = 4
 imm_merge_threshold = 2
 
 [storage.object_store.retry]

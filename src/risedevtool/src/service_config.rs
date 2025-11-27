@@ -107,6 +107,7 @@ pub struct FrontendConfig {
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
+    pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub user_managed: bool,
 }

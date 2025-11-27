@@ -87,10 +87,8 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             .create_sst_writer(id, writer_options)
             .await
             .unwrap();
-        let table_id_to_vnode = HashMap::from_iter(vec![(
-            TableId::default().into(),
-            VirtualNode::COUNT_FOR_TEST,
-        )]);
+        let table_id_to_vnode =
+            HashMap::from_iter(vec![(TableId::default(), VirtualNode::COUNT_FOR_TEST)]);
 
         let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
 

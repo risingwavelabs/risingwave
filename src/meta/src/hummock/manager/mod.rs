@@ -139,7 +139,8 @@ pub struct HummockManager {
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
     // and is maintained in memory. All event_streams are consumed through a separate event loop
-    compactor_streams_change_tx: UnboundedSender<(u32, Streaming<SubscribeCompactionEventRequest>)>,
+    compactor_streams_change_tx:
+        UnboundedSender<(HummockContextId, Streaming<SubscribeCompactionEventRequest>)>,
 
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
@@ -149,7 +150,7 @@ pub struct HummockManager {
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
 
-    table_id_to_table_option: parking_lot::RwLock<HashMap<u32, TableOption>>,
+    table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -180,7 +181,7 @@ impl HummockManager {
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
@@ -205,7 +206,7 @@ impl HummockManager {
         compactor_manager: CompactorManagerRef,
         config: risingwave_pb::hummock::CompactionConfig,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> HummockManagerRef {
@@ -232,12 +233,13 @@ impl HummockManager {
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: CompactionGroupManager,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
         let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
+
         let state_store_dir: &str = sys_params.data_directory();
         let use_new_object_prefix_strategy: bool = sys_params.use_new_object_prefix_strategy();
         let deterministic_mode = env.opts.compaction_deterministic_test;
@@ -537,7 +539,7 @@ impl HummockManager {
 
     pub fn update_table_id_to_table_option(
         &self,
-        new_table_id_to_table_option: HashMap<u32, TableOption>,
+        new_table_id_to_table_option: HashMap<TableId, TableOption>,
     ) {
         *self.table_id_to_table_option.write() = new_table_id_to_table_option;
     }

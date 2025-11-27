@@ -16,18 +16,12 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use anyhow::Context as _;
-use futures::future::try_join_all;
 use risingwave_common::array::StreamChunkBuilder;
 use risingwave_common::config::MetricLevel;
 use tokio::sync::mpsc;
-use tokio::time::Instant;
 
 use super::exchange::input::BoxedActorInput;
 use super::*;
-use crate::executor::exchange::input::{
-    assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
-};
 use crate::executor::prelude::*;
 use crate::task::LocalBarrierManager;
 
@@ -167,13 +161,14 @@ impl MergeExecutor {
 
     #[cfg(test)]
     pub fn for_test(
-        actor_id: ActorId,
+        actor_id: impl Into<ActorId>,
         inputs: Vec<super::exchange::permit::Receiver>,
         local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
         chunk_size: usize,
         barrier_rx: Option<mpsc::UnboundedReceiver<Barrier>>,
     ) -> Self {
+        let actor_id = actor_id.into();
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::ActorInput;
 
@@ -186,7 +181,7 @@ impl MergeExecutor {
             inputs
                 .into_iter()
                 .enumerate()
-                .map(|(idx, input)| LocalInput::new(input, idx as ActorId).boxed_input())
+                .map(|(idx, input)| LocalInput::new(input, ActorId::new(idx as u32)).boxed_input())
                 .collect(),
             &metrics,
             &actor_ctx,
@@ -194,8 +189,8 @@ impl MergeExecutor {
 
         Self::new(
             actor_ctx,
-            514,
-            1919,
+            514.into(),
+            1919.into(),
             upstream,
             local_barrier_manager,
             metrics.into(),
@@ -224,7 +219,7 @@ impl MergeExecutor {
         };
 
         // Futures of all active upstreams.
-        SelectReceivers::new(upstreams, None, merge_barrier_align_duration.clone())
+        SelectReceivers::new(upstreams, None, merge_barrier_align_duration)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -240,29 +235,36 @@ impl MergeExecutor {
         );
 
         // Channels that're blocked by the barrier to align.
-        let mut start_time = Instant::now();
         pin_mut!(select_all);
-        while let Some(msg) = select_all.next().await {
-            metrics
-                .actor_input_buffer_blocking_duration_ns
-                .inc_by(start_time.elapsed().as_nanos() as u64);
-            let msg: DispatcherMessage = msg?;
-            let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
 
-            match &mut msg {
-                Message::Watermark(_) => {
-                    // Do nothing.
-                }
-                Message::Chunk(chunk) => {
+        let mut barrier_buffer = DispatchBarrierBuffer::new(
+            self.barrier_rx,
+            actor_id,
+            self.upstream_fragment_id,
+            self.local_barrier_manager,
+            self.metrics.clone(),
+            self.fragment_id,
+        );
+
+        loop {
+            let msg = barrier_buffer
+                .await_next_message(&mut select_all, &metrics)
+                .await?;
+            let msg = match msg {
+                DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
+                DispatcherMessage::Chunk(chunk) => {
                     metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
+                    Message::Chunk(chunk)
                 }
-                Message::Barrier(barrier) => {
+                DispatcherMessage::Barrier(barrier) => {
                     tracing::debug!(
                         target: "events::stream::barrier::path",
-                        actor_id = actor_id,
+                        actor_id = %actor_id,
                         "receiver receives barrier from path: {:?}",
                         barrier.passed_actors
                     );
+                    let (mut barrier, new_inputs) =
+                        barrier_buffer.pop_barrier_with_inputs(barrier).await?;
                     barrier.passed_actors.push(actor_id);
 
                     if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
@@ -291,30 +293,7 @@ impl MergeExecutor {
                         // `Watermark` of upstream may become stale after upstream scaling.
                         select_all.flush_buffered_watermarks();
 
-                        if !update.added_upstream_actors.is_empty() {
-                            // Create new upstreams receivers.
-                            let mut new_upstreams: Vec<_> = try_join_all(
-                                update.added_upstream_actors.iter().map(|upstream_actor| {
-                                    new_input(
-                                        &self.local_barrier_manager,
-                                        self.metrics.clone(),
-                                        self.actor_context.id,
-                                        self.fragment_id,
-                                        upstream_actor,
-                                        new_upstream_fragment_id,
-                                    )
-                                }),
-                            )
-                            .await
-                            .context("failed to create upstream receivers")?;
-
-                            // Poll the first barrier from the new upstreams. It must be the same as
-                            // the one we polled from original upstreams.
-                            for upstream in &mut new_upstreams {
-                                let new_barrier = expect_first_barrier(upstream).await?;
-                                assert_equal_dispatcher_barrier(barrier, &new_barrier);
-                            }
-
+                        if let Some(new_upstreams) = new_inputs {
                             // Add the new upstreams to select.
                             select_all.add_upstreams_from(new_upstreams);
                         }
@@ -332,15 +311,18 @@ impl MergeExecutor {
                         );
                     }
 
-                    if barrier.is_stop(actor_id) {
+                    let is_stop = barrier.is_stop(actor_id);
+                    let msg = Message::Barrier(barrier);
+                    if is_stop {
                         yield msg;
                         break;
                     }
+
+                    msg
                 }
-            }
+            };
 
             yield msg;
-            start_time = Instant::now();
         }
     }
 }
@@ -474,7 +456,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let (tx, rx) = channel_for_test();
-        let input = LocalInput::new(rx, 1).boxed_input();
+        let input = LocalInput::new(rx, 1.into()).boxed_input();
         let mut buffer = BufferChunks::new(input, 100, Schema::new(vec![]));
 
         // Send a chunk
@@ -537,7 +519,7 @@ mod tests {
 
         // Send a barrier.
         let barrier = Barrier::new_test_barrier(test_epoch(1));
-        test_env.inject_barrier(&barrier, [2]);
+        test_env.inject_barrier(&barrier, [2.into()]);
         tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
@@ -553,7 +535,7 @@ mod tests {
             .await
             .unwrap();
         let barrier = Barrier::new_test_barrier(test_epoch(2));
-        test_env.inject_barrier(&barrier, [2]);
+        test_env.inject_barrier(&barrier, [2.into()]);
         tx.send(Message::Barrier(barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
@@ -576,7 +558,7 @@ mod tests {
             rxs.push(rx);
         }
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let actor_id = 233;
+        let actor_id = 233.into();
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64)
@@ -680,8 +662,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let actor_id = 233;
-        let (untouched, old, new) = (234, 235, 238); // upstream actors
+        let actor_id = 233.into();
+        let (untouched, old, new) = (234.into(), 235.into(), 238.into()); // upstream actors
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
         let metrics = Arc::new(StreamingMetrics::unused());
 
@@ -689,7 +671,7 @@ mod tests {
         // old -> actor_id
         // new -> actor_id
 
-        let (upstream_fragment_id, fragment_id) = (10, 18);
+        let (upstream_fragment_id, fragment_id) = (10.into(), 18.into());
 
         let inputs: Vec<_> =
             try_join_all([untouched, old].into_iter().map(async |upstream_actor_id| {
@@ -781,7 +763,7 @@ mod tests {
                         .await;
                     assert_eq!(output_requests.len(), 1);
                     let (downstream_actor_id, request) = output_requests.pop().unwrap();
-                    assert_eq!(actor_id, downstream_actor_id);
+                    assert_eq!(downstream_actor_id, actor_id);
                     let NewOutputRequest::Local(tx) = request else {
                         unreachable!()
                     };
@@ -910,8 +892,8 @@ mod tests {
             RemoteInput::new(
                 &test_env.local_barrier_manager,
                 addr.into(),
-                (0, 0),
-                (0, 0),
+                (0.into(), 0.into()),
+                (0.into(), 0.into()),
                 Arc::new(StreamingMetrics::unused()),
             )
             .await

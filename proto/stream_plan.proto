@@ -121,10 +121,6 @@ message ThrottleMutation {
   map<uint32, RateLimit> actor_throttle = 1;
 }
 
-message CombinedMutation {
-  repeated BarrierMutation mutations = 1;
-}
-
 message SubscriptionUpstreamInfo {
   // can either be subscription_id or table_id of creating TableFragments
   uint32 subscriber_id = 1;
@@ -151,6 +147,10 @@ message RefreshStartMutation {
   uint32 table_id = 1;
   // Associated source ID for this refresh operation.
   uint32 associated_source_id = 2;
+}
+message ListFinishMutation {
+  // Associated source ID for this list operation.
+  uint32 associated_source_id = 1;
 }
 message LoadFinishMutation {
   // Associated source ID for this load operation.
@@ -188,9 +188,8 @@ message BarrierMutation {
     RefreshStartMutation refresh_start = 15;
     // Load finish signal for refreshing tables
     LoadFinishMutation load_finish = 16;
-    // Combined mutation.
-    // Currently, it can only be Add & Update, which is for sink into table.
-    CombinedMutation combined = 100;
+    // List finish signal for refreshing tables
+    ListFinishMutation list_finish = 17;
   }
 }
 
@@ -251,6 +250,10 @@ message ActorMapping {
   repeated uint32 data = 2;
 }
 
+message Columns {
+  repeated plan_common.ColumnCatalog columns = 1;
+}
+
 message StreamSource {
   uint32 source_id = 1;
   catalog.Table state_table = 2;
@@ -264,6 +267,10 @@ message StreamSource {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  // Downstream columns are used by list node to know which columns are needed.
+  optional Columns downstream_columns = 11;
+  plan_common.SourceRefreshMode refresh_mode = 12;
+  optional uint32 associated_table_id = 13;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -280,6 +287,8 @@ message StreamFsFetch {
   // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  plan_common.SourceRefreshMode refresh_mode = 11;
+  optional uint32 associated_table_id = 12;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -372,6 +381,7 @@ message FilterNode {
 message ChangeLogNode {
   // Whether or not there is an op in the final output.
   bool need_op = 1;
+  repeated uint32 distribution_keys = 2;
 }
 
 message CdcFilterNode {
@@ -393,8 +403,38 @@ message MaterializeNode {
   uint32 table_id = 1;
   // Column indexes and orders of primary key.
   repeated common.ColumnOrder column_orders = 2;
-  // Used for internal table states.
+
+  // Primary materialized table that stores the final result data.
+  // Purpose: This is the main table that users query against. It contains the
+  //          complete materialized view results with all columns from the SELECT clause.
+  // Schema: Matches the output schema of the materialized view query
+  // PK: Determined by the stream key of the materialized view
+  // Distribution: Hash distributed by primary key columns for parallel processing
   catalog.Table table = 3;
+
+  // Staging table for refreshable materialized views during refresh operations.
+  // Purpose: Temporary storage for collecting new/updated data during refresh.
+  //          This allows atomic replacement of old data with refreshed data.
+  // Schema: Contains only the primary key columns from the main table (pk-only table)
+  //         - All PK columns with same data types as main table
+  //         - Same primary key definition as main table
+  // Usage: Active only during refresh operations, empty otherwise
+  // Lifecycle: Created -> populated during refresh -> merged with main table -> cleared
+  optional catalog.Table staging_table = 5;
+
+  // Progress tracking table for refreshable materialized views.
+  // Purpose: Tracks refresh operation progress per VirtualNode to enable fault-tolerant
+  //          resumable refresh operations. Stores checkpoint information for recovery.
+  // Schema: Simplified variable-length schema (following backfill pattern):
+  //         - vnode (i32): VirtualNode identifier (PK)
+  //         - current_pos...: Current processing position (variable PK fields from upstream)
+  //         - is_completed (bool): Whether this vnode has completed processing
+  //         - processed_rows (i64): Number of rows processed so far in this vnode
+  // PK: vnode (allows efficient per-vnode progress lookup and updates)
+  // Distribution: Hash distributed by vnode for parallel progress tracking
+  // Usage: Persists across refresh operations for resumability
+  // Note: Stage info is now tracked in MaterializeExecutor memory for simplicity
+  optional catalog.Table refresh_progress_table = 6;
 }
 
 message AggCallState {
@@ -535,7 +575,8 @@ message HashJoinNode {
   bool is_append_only = 14;
 
   // Which encoding will be used to encode join rows in operator cache.
-  JoinEncodingType join_encoding_type = 15;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  JoinEncodingType join_encoding_type = 15 [deprecated = true];
 }
 
 message AsOfJoinNode {
@@ -559,7 +600,8 @@ message AsOfJoinNode {
   repeated bool null_safe = 9;
   optional plan_common.AsOfJoinDesc asof_desc = 10;
   // Which encoding will be used to encode join rows in operator cache.
-  JoinEncodingType join_encoding_type = 11;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  JoinEncodingType join_encoding_type = 11 [deprecated = true];
 }
 
 message TemporalJoinNode {
@@ -961,10 +1003,41 @@ message VectorIndexWriteNode {
   catalog.Table table = 1;
 }
 
+message VectorIndexLookupJoinNode {
+  plan_common.VectorIndexReaderDesc reader_desc = 1;
+  uint32 vector_column_idx = 2;
+}
+
 message UpstreamSinkUnionNode {
   // It is always empty in the persisted metadata, and get filled before we spawn the actors.
   // The actual upstream info may be added and removed dynamically at runtime.
   repeated UpstreamSinkInfo init_upstreams = 1;
+}
+
+message LocalityProviderNode {
+  // Column indices that define locality
+  repeated uint32 locality_columns = 1;
+  // State table for buffering input data
+  optional catalog.Table state_table = 2;
+  // Progress table for tracking backfill progress
+  optional catalog.Table progress_table = 3;
+}
+
+message EowcGapFillNode {
+  uint32 time_column_index = 1;
+  expr.ExprNode interval = 2;
+  repeated uint32 fill_columns = 3;
+  repeated string fill_strategies = 4;
+  catalog.Table buffer_table = 5;
+  catalog.Table prev_row_table = 6;
+}
+
+message GapFillNode {
+  uint32 time_column_index = 1;
+  expr.ExprNode interval = 2;
+  repeated uint32 fill_columns = 3;
+  repeated string fill_strategies = 4;
+  catalog.Table state_table = 5;
 }
 
 message StreamNode {
@@ -1029,6 +1102,10 @@ message StreamNode {
     MaterializedExprsNode materialized_exprs = 149;
     VectorIndexWriteNode vector_index_write = 150;
     UpstreamSinkUnionNode upstream_sink_union = 151;
+    LocalityProviderNode locality_provider = 152;
+    EowcGapFillNode eowc_gap_fill = 153;
+    GapFillNode gap_fill = 154;
+    VectorIndexLookupJoinNode vector_index_lookup_join = 155;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -1128,12 +1205,16 @@ message StreamActor {
   string mview_definition = 9;
   // Provide the necessary context, e.g. session info like time zone, for the actor.
   plan_common.ExprContext expr_context = 10;
+  // The config override for this actor.
+  string config_override = 11;
 }
 
 // The streaming context associated with a stream plan
 message StreamContext {
   // The timezone associated with the streaming plan. Only applies to MV for now.
   string timezone = 1;
+  // The partial config of this job to override the global config.
+  string config_override = 2;
 }
 
 message BackfillOrder {
@@ -1146,6 +1227,9 @@ message BackfillOrder {
 // For the persisted form, see `TableFragments`.
 message StreamFragmentGraph {
   message StreamFragment {
+    reserved 5, 6;
+    reserved "table_ids_cnt", "upstream_table_ids";
+
     // 0-based on frontend, and will be rewritten to global id on meta.
     uint32 fragment_id = 1;
     // root stream node in this fragment.
@@ -1156,10 +1240,6 @@ message StreamFragmentGraph {
     // Note: if this is `false`, the fragment may still be a singleton according to the scheduler.
     // One should check `meta.Fragment.distribution_type` for the final result.
     bool requires_singleton = 4;
-    // Number of table ids (stateful states) for this fragment.
-    uint32 table_ids_cnt = 5;
-    // Mark the upstream table ids of this fragment, Used for fragments with `StreamScan`s.
-    repeated uint32 upstream_table_ids = 6;
   }
 
   message StreamFragmentEdge {

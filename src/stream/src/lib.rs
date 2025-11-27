@@ -17,7 +17,6 @@
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(more_qualified_paths)]
-#![feature(let_chains)]
 #![feature(coroutines)]
 #![feature(iter_from_coroutine)]
 #![feature(proc_macro_hygiene)]
@@ -27,7 +26,6 @@
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
 #![feature(error_generic_member_access)]
-#![feature(btree_extract_if)]
 #![feature(iter_order_by)]
 #![feature(exact_size_is_empty)]
 #![feature(impl_trait_in_assoc_type)]
@@ -102,10 +100,10 @@ mod consistency {
             debug_assert!(!crate::consistency::enable_strict_consistency());
 
             use std::sync::LazyLock;
-            use risingwave_common::log::LogSuppresser;
+            use risingwave_common::log::LogSuppressor;
 
-            static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
-            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+            static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
+            if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                 tracing::error!(suppressed_count, $($arg)*);
             }
         };

@@ -60,6 +60,13 @@ impl StreamTableScan {
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
 
+        let mut stream_scan_type = stream_scan_type;
+        if core.cross_database() {
+            assert_ne!(stream_scan_type, StreamScanType::UpstreamOnly);
+            // Force rewrite scan type to cross-db scan
+            stream_scan_type = StreamScanType::CrossDbSnapshotBackfill;
+        }
+
         let distribution = {
             match core.distribution_key() {
                 Some(distribution_key) => {
@@ -385,7 +392,7 @@ impl StreamTableScan {
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
-                    fields: upstream_schema.clone(),
+                    fields: upstream_schema,
                     stream_key: vec![], // not used
                     ..Default::default()
                 },
@@ -403,7 +410,7 @@ impl StreamTableScan {
         };
 
         let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
-            table_id: self.core.table_catalog.id.table_id,
+            table_id: self.core.table_catalog.id,
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,

@@ -167,11 +167,12 @@ impl TryFrom<SinkParam> for PulsarSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let downstream_pk = param.downstream_pk_or_empty();
         let config = PulsarConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
-            downstream_pk: param.downstream_pk,
+            downstream_pk,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
@@ -200,7 +201,7 @@ impl Sink for PulsarSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        // For upsert Pulsar sink, the primary key must be defined.
+        // For non-append-only Pulsar sink, the primary key must be defined.
         if self.format_desc.format != SinkFormat::AppendOnly && self.downstream_pk.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "primary key not defined for {:?} pulsar sink (please define in `primary_key` field)",

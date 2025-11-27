@@ -23,7 +23,7 @@ use risingwave_stream::common::table::test_utils::gen_pbtable;
 
 #[tokio::test]
 async fn test_mem_table_spill_in_streaming() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -153,7 +153,7 @@ async fn test_mem_table_spill_in_streaming() {
 
 #[tokio::test]
 async fn test_mem_table_spill_in_streaming_multiple_times() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![

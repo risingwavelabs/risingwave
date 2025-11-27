@@ -1,0 +1,35 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table sink_t1 (v1 int, v2 int);
+
+statement ok
+create table sink_t2 (v1 int, v2 varchar, v3 int);
+
+statement ok
+create table sink_t3 (v1 int primary key, v2 int);
+
+statement ok
+create table sink_t4 (v1 int);
+
+statement ok
+create sink sink_s1 into sink_t3 from sink_t1;
+
+statement ok
+create sink sink_s2 into sink_t3 as select v1, v3 from sink_t2;
+
+statement ok
+create sink sink_s3 into sink_t4 as select v1 from sink_t3 with (type = 'append-only', force_append_only = 'true');
+
+statement ok
+insert into sink_t1 values (1, 11), (2, 12);
+
+statement ok
+insert into sink_t2 values (3, 'a', 13), (4, 'b', 14);
+
+statement ok
+insert into sink_t3 values (5, 15);
+
+statement ok
+delete from sink_t1 where v1 = 2;

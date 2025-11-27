@@ -98,7 +98,7 @@ fn build_fetch_cursor_response(rows: Vec<Row>, pg_descs: Vec<PgFieldDescriptor>)
 pub async fn handle_parse(
     handler_args: HandlerArgs,
     statement: Statement,
-    specific_param_types: Vec<Option<DataType>>,
+    specified_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
     if let Statement::FetchCursor { stmt } = &statement {
         let session = handler_args.session.clone();
@@ -108,7 +108,8 @@ pub async fn handle_parse(
             .get_fields_with_cursor(&cursor_name)
             .await?;
 
-        let mut binder = Binder::new_with_param_types(&session, specific_param_types);
+        let mut binder =
+            Binder::new_for_batch(&session).with_specified_params_types(specified_param_types);
         let schema = Some(Schema::new(fields));
 
         let bound = binder.bind_fetch_cursor(cursor_name, stmt.count, schema)?;

@@ -33,7 +33,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 /// executors will likely shrink and becomes a subset of the previous one (to ensure the best
 /// locality). In this case, this function will return `false` and the cache entries that're not in
 /// the current partition anymore are still kept. This achieves the best performance as we won't
-/// touch and valiate the cache at all when scaling-out, which is the common case and the critical
+/// touch and validate the cache at all when scaling-out, which is the common case and the critical
 /// path.
 ///
 /// This brings a problem when scaling in after a while. Some partitions may be reassigned back to

@@ -19,7 +19,7 @@ use risingwave_frontend_macro::system_catalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 
 /// The catalog `pg_settings` stores settings.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-settings.html`]
+/// Ref: `https://www.postgresql.org/docs/current/view-pg-settings.html`
 #[derive(Fields)]
 #[primary_key(name, context)]
 struct PgSetting {
