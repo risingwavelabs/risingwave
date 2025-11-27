@@ -150,9 +150,10 @@ db.all_types.insertOne({
 });
 EOF
 
+sleep 3s
 
-
-query TTTT retry 8 backoff 1s
+# keep retry does not work here
+query TTTT retry 3 backoff 1s
 select
   _id, database_name, collection_name,
   commit_ts > (select at from phases where name = '03_ingested')
