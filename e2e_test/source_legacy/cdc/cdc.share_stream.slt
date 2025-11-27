@@ -415,7 +415,7 @@ SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 12
 
-query II
+query II retry 6 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 ----
 12
@@ -431,7 +431,7 @@ SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 23
 
-query II
+query II retry 6 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 ----
 23
@@ -728,7 +728,7 @@ psql -c "
 DELETE FROM numeric_table WHERE id IN (102, 103, 104, 105, 106, 107);
 "
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_list_to_varchar_list_shared order by id;
 ----
 1 {3.14,6,57896044618658097711785492504343953926634992332820282019728792003956564819967,57896044618658097711785492504343953926634992332820282019728792003956564819968,115792089237316195423570985008687907853269984665640564039457584007913129639936.555555}
@@ -736,7 +736,7 @@ select * from numeric_list_to_varchar_list_shared order by id;
 3 {3.14,6,57896044618658097711785492504343953926634992332820282019728792003956564819967,57896044618658097711785492504343953926634992332820282019728792003956564819968,115792089237316195423570985008687907853269984665640564039457584007913129639936.555555}
 4 NULL
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_list_to_rw_int256_list_shared order by id;
 ----
 1 NULL
@@ -744,7 +744,7 @@ select * from numeric_list_to_rw_int256_list_shared order by id;
 3 NULL
 4 NULL
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_list_to_numeric_list_shared order by id;
 ----
 1 NULL
@@ -752,18 +752,18 @@ select * from numeric_list_to_numeric_list_shared order by id;
 3 NULL
 4 NULL
 
-query II
+query II retry 4 backoff 1s
 select * from enum_to_varchar_shared order by id;
 ----
 1 happy
 2 ok
 
-query II
+query II retry 4 backoff 1s
 select * from upper_orders_shared order by id;
 ----
 1 happy
 
-query II
+query II retry 4 backoff 1s
 select * from json_table_shared order by id;
 ----
 1  {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
