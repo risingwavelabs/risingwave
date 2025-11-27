@@ -38,8 +38,8 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
-    iceberg_scan_type: IcebergScanType,
-    snapshot_id: Option<i64>,
+    pub iceberg_scan_type: IcebergScanType,
+    pub snapshot_id: Option<i64>,
 }
 
 impl LogicalIcebergScan {

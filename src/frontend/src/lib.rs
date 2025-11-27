@@ -70,6 +70,7 @@ pub(crate) mod error;
 mod meta_client;
 pub mod metrics_reader;
 pub use metrics_reader::MetricsReaderImpl;
+pub mod datafusion;
 pub mod test_utils;
 mod user;
 pub mod webhook;

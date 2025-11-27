@@ -47,6 +47,10 @@ pub use distributed_dml_visitor::*;
 pub use locality_provider_counter::*;
 pub use rw_timestamp_validator::*;
 pub use sole_sys_table_visitor::*;
+mod iceberg_scan_detector;
+pub use iceberg_scan_detector::*;
+mod datafusion_plan_converter;
+pub use datafusion_plan_converter::*;
 
 use crate::for_each_convention_all_plan_nodes;
 use crate::optimizer::plan_node::*;
