@@ -17,6 +17,7 @@
 
     <properties>
         <iceberg.version>1.9.2</iceberg.version>
+        <hive.version>2.3.10</hive.version>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <maven.javadoc.skip>true</maven.javadoc.skip>
@@ -63,12 +64,26 @@
         <dependency>
             <groupId>org.apache.hive</groupId>
             <artifactId>hive-exec</artifactId>
-            <version>4.1.0</version>
+            <version>${hive.version}</version>
             <scope>runtime</scope>
+            <exclusions>
+                <!-- Drop legacy JDK 7 tools.jar dependency not present in modern JDKs -->
+                <exclusion>
+                    <groupId>jdk.tools</groupId>
+                    <artifactId>jdk.tools</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.hive</groupId>
             <artifactId>hive-metastore</artifactId>
+            <version>${hive.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>jdk.tools</groupId>
+                    <artifactId>jdk.tools</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
