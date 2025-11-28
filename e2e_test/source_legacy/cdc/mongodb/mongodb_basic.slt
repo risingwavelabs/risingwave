@@ -1,6 +1,18 @@
 # CDC source basic test
 control substitution on
 
+# Test invalid MongoDB URL - should fail during validation
+statement error Failed to connect to MongoDB
+CREATE TABLE users_invalid (_id JSONB PRIMARY KEY, payload JSONB)
+INCLUDE TIMESTAMP as commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE COLLECTION_NAME as collection_name
+WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://wrong-host:27017/?replicaSet=rs0',
+  collection.name = 'random_data.*'
+);
+
 statement ok
 CREATE TABLE users (_id JSONB PRIMARY KEY, payload JSONB)
 INCLUDE TIMESTAMP as commit_ts
