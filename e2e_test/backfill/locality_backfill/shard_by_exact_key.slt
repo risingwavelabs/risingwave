@@ -1,0 +1,43 @@
+statement ok
+set enable_locality_backfill=true;
+
+statement ok
+create table t (
+      id int
+    , p1 int
+    , p2 int
+    , time int
+    , v1 int
+    , v2 int
+);
+
+
+statement ok
+create materialized view v_c as
+select
+    *
+    , lag(v1, 0) over (partition by p1 order by id) as out5
+    , lag(v1, 1) over (partition by p1, p2 order by id) as out6
+    , lag(v1) over (partition by p1, p2 order by time, id) as out7
+    , lead(v2, 1) over (partition by p1, p2 order by time, id) as out8
+    , lead(v2, 2) over (partition by p1, p2 order by v1, v2) as out9
+from t;
+
+statement ok
+insert into t values
+  (100001, 100, 200, 1, 701, 805)
+, (100002, 100, 200, 2, 700, 806)
+, (100003, 100, 208, 2, 723, 807)
+, (100004, 103, 200, 2, 702, 808);
+
+statement ok
+update t set v1 = 799 where id = 100002;
+
+statement ok
+update t set p2 = 200 where id = 100003;
+
+statement ok
+flush;
+
+statement ok
+drop table t cascade;
