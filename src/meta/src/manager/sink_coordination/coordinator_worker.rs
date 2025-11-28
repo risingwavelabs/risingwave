@@ -179,6 +179,9 @@ impl TwoPhaseCommitHandler {
                     self.curr_hummock_committed_epoch = recv_epoch;
                     while let Some((epoch, _)) = self.pending_epochs.front() && *epoch <= recv_epoch {
                         let (epoch, metadata) = self.pending_epochs.pop_front().expect("should have prepared epoch");
+                        if !self.prepared_epochs.is_empty() {
+                            assert!(epoch > self.prepared_epochs.back().expect("non-empty").0);
+                        }
                         self.prepared_epochs.push_back((epoch, metadata));
                     }
                 }
@@ -188,9 +191,15 @@ impl TwoPhaseCommitHandler {
 
     fn push_new_item(&mut self, epoch: u64, metadata: Vec<u8>) {
         if epoch > self.curr_hummock_committed_epoch {
+            if !self.pending_epochs.is_empty() {
+                assert!(epoch > self.pending_epochs.back().expect("non-empty").0);
+            }
             self.pending_epochs.push_back((epoch, metadata));
         } else {
             assert!(self.pending_epochs.is_empty());
+            if !self.prepared_epochs.is_empty() {
+                assert!(epoch > self.prepared_epochs.back().expect("non-empty").0);
+            }
             self.prepared_epochs.push_back((epoch, metadata));
         }
     }
@@ -206,6 +215,7 @@ impl TwoPhaseCommitHandler {
     }
 
     fn failed_committed(&mut self, epoch: u64, err: SinkError) {
+        assert_eq!(self.prepared_epochs.front().expect("non-empty").0, epoch,);
         if let Some((prev_fut, strategy)) = &mut self.backoff_state {
             let new_fut = strategy.next().expect("infinite");
             *prev_fut = new_fut;
@@ -562,9 +572,12 @@ impl CoordinatorWorker {
         two_phase_handler: Option<&mut TwoPhaseCommitHandler>,
     ) -> anyhow::Result<CoordinatorWorkerEvent> {
         // For single-phase coordinator, there is no need to wait.
-        let two_phase_next_fut = match two_phase_handler {
-            Some(handler) => Either::Left(handler.next_to_commit()),
-            None => Either::Right(pending::<_>()),
+        let two_phase_next_fut = async {
+            if let Some(handler) = two_phase_handler {
+                handler.next_to_commit().await
+            } else {
+                pending().await
+            }
         };
         select! {
             next_handle_event = self.handle_manager.next_event() => {
@@ -770,52 +783,36 @@ impl CoordinatorWorker {
         coordinator: &mut BoxTwoPhaseCoordinator,
     ) -> anyhow::Result<(Option<u64>, TwoPhaseCommitHandler)> {
         let ordered_metadata = list_sink_states_ordered_by_epoch(db, sink_id as _).await?;
-        let mut pending_items = vec![];
 
-        let last_committed_epoch = if ordered_metadata.is_empty() {
-            None
-        } else {
-            let mut metadata_iter = ordered_metadata.into_iter().peekable();
-            let last_committed_epoch = metadata_iter
-                .next_if(|(_, state, _)| matches!(state, SinkState::Committed))
-                .map(|(epoch, _, _)| epoch);
+        let mut metadata_iter = ordered_metadata.into_iter().peekable();
+        let last_committed_epoch = metadata_iter
+            .next_if(|(_, state, _)| matches!(state, SinkState::Committed))
+            .map(|(epoch, _, _)| epoch);
 
-            let mut aborted_epochs = vec![];
-            let mut last_epoch = last_committed_epoch;
-            let mut has_seen_aborted = false;
-            for (epoch, state, metadata) in metadata_iter {
-                if let Some(last_epoch) = last_epoch {
-                    assert!(epoch > last_epoch);
+        let pending_items = metadata_iter
+            .peeking_take_while(|(_, state, _)| matches!(state, SinkState::Pending))
+            .map(|(epoch, _, metadata)| (epoch, metadata))
+            .collect_vec();
+
+        let mut aborted_epochs = vec![];
+
+        for (epoch, state, metadata) in metadata_iter {
+            match state {
+                SinkState::Aborted => {
+                    coordinator.abort(epoch, metadata).await;
+                    aborted_epochs.push(epoch);
                 }
-                last_epoch = Some(epoch);
-                match state {
-                    SinkState::Committed => {
-                        unreachable!(
-                            "found committed state after the first position at epoch {}",
-                            epoch
-                        );
-                    }
-                    SinkState::Pending => {
-                        assert!(
-                            !has_seen_aborted,
-                            "found pending state after aborted state at epoch {}",
-                            epoch
-                        );
-                        pending_items.push((epoch, metadata));
-                    }
-                    SinkState::Aborted => {
-                        has_seen_aborted = true;
-                        coordinator.abort(epoch, metadata).await;
-                        aborted_epochs.push(epoch);
-                    }
+                other => {
+                    unreachable!(
+                        "unexpected state {:?} after pending items at epoch {}",
+                        other, epoch
+                    );
                 }
             }
+        }
 
-            // Records for all aborted epochs and previously committed epochs are no longer needed.
-            clean_aborted_records(db, sink_id, aborted_epochs).await?;
-
-            last_committed_epoch
-        };
+        // Records for all aborted epochs and previously committed epochs are no longer needed.
+        clean_aborted_records(db, sink_id, aborted_epochs).await?;
 
         let (initial_hummock_committed_epoch, job_committed_epoch_rx) = subscriber(sink_id).await?;
         let mut two_phase_handler = TwoPhaseCommitHandler::new(

@@ -152,10 +152,6 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     ) -> MetaResult<()> {
         unimplemented!()
     }
-
-    async fn reset_sink_coordinator(&self, _database_id: Option<DatabaseId>) -> MetaResult<()> {
-        Ok(())
-    }
 }
 
 #[tokio::test]

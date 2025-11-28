@@ -235,20 +235,6 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
         Ok(())
     }
-
-    async fn reset_sink_coordinator(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
-        if let Some(database_id) = database_id {
-            let sink_ids = self
-                .metadata_manager
-                .catalog_controller
-                .list_sink_ids(Some(database_id))
-                .await?;
-            self.sink_manager.stop_sink_coordinator(sink_ids).await;
-        } else {
-            self.sink_manager.reset().await;
-        }
-        Ok(())
-    }
 }
 
 impl GlobalBarrierWorkerContextImpl {

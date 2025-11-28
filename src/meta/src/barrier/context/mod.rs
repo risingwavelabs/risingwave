@@ -100,11 +100,6 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         &self,
         refresh_finished_table_job_ids: Vec<JobId>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
-
-    fn reset_sink_coordinator(
-        &self,
-        database_id: Option<DatabaseId>,
-    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {

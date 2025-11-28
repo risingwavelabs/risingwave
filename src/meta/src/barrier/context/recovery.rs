@@ -57,8 +57,6 @@ impl GlobalBarrierWorkerContextImpl {
             .reset_all_refresh_jobs_to_idle()
             .await?;
 
-        self.abort_dirty_pending_sink_state(database_id).await?;
-
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
@@ -66,6 +64,20 @@ impl GlobalBarrierWorkerContextImpl {
             })
             .await;
 
+        Ok(())
+    }
+
+    async fn reset_sink_coordinator(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
+        if let Some(database_id) = database_id {
+            let sink_ids = self
+                .metadata_manager
+                .catalog_controller
+                .list_sink_ids(Some(database_id))
+                .await?;
+            self.sink_manager.stop_sink_coordinator(sink_ids).await;
+        } else {
+            self.sink_manager.reset().await;
+        }
         Ok(())
     }
 
@@ -412,6 +424,13 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
+                    self.reset_sink_coordinator(None)
+                        .await
+                        .context("reset sink coordinator")?;
+                    self.abort_dirty_pending_sink_state(None)
+                        .await
+                        .context("abort dirty pending sink state")?;
+
                     // Background job progress needs to be recovered.
                     tracing::info!("recovering background job progress");
                     let background_jobs = self
@@ -635,6 +654,13 @@ impl GlobalBarrierWorkerContextImpl {
         self.clean_dirty_streaming_jobs(Some(database_id))
             .await
             .context("clean dirty streaming jobs")?;
+
+        self.reset_sink_coordinator(Some(database_id))
+            .await
+            .context("reset sink coordinator")?;
+        self.abort_dirty_pending_sink_state(Some(database_id))
+            .await
+            .context("abort dirty pending sink state")?;
 
         // Background job progress needs to be recovered.
         tracing::info!(

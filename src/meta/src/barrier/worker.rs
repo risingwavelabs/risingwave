@@ -373,7 +373,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }));
                                 Self::report_collect_failure(&self.env, &error);
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
-                                self.context.reset_sink_coordinator(Some(database_id)).await?;
                                 match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(%database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
@@ -751,8 +750,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             self.context
                 .notify_creating_job_failed(None, recovery_reason.clone())
                 .await;
-
-            self.context.reset_sink_coordinator(None).await?;
 
             let runtime_info_snapshot = self
                 .context

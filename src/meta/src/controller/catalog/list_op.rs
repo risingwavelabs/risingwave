@@ -340,18 +340,15 @@ impl CatalogController {
     pub async fn list_sink_ids(&self, database_id: Option<DatabaseId>) -> MetaResult<Vec<SinkId>> {
         let inner = self.inner.read().await;
 
-        let sink_ids: Vec<SinkId> = Sink::find()
-            .select_only()
-            .column(sink::Column::SinkId)
-            .join(JoinType::InnerJoin, sink::Relation::Object.def())
-            .filter(
-                database_id
-                    .map(|database_id| object::Column::DatabaseId.eq(database_id))
-                    .unwrap_or_else(|| SimpleExpr::from(true)),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
+        let mut query = Sink::find().select_only().column(sink::Column::SinkId);
+
+        if let Some(database_id) = database_id {
+            query = query
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .filter(object::Column::DatabaseId.eq(database_id));
+        }
+
+        let sink_ids: Vec<SinkId> = query.into_tuple().all(&inner.db).await?;
 
         Ok(sink_ids)
     }
