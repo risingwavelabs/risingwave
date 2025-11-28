@@ -127,7 +127,7 @@ impl GlobalRefreshManager {
 
     pub async fn mark_refresh_complete(&self, table_id: TableId) -> MetaResult<()> {
         self.metadata_manager
-            .update_refresh_job_status(table_id, RefreshState::Idle, None)
+            .update_refresh_job_status(table_id, RefreshState::Idle, None, true)
             .await?;
         self.remove_progress_tracker(table_id, "success");
         tracing::info!(%table_id, "Table refresh completed, state updated to Idle");
@@ -327,7 +327,12 @@ impl GlobalRefreshManager {
         self.register_progress_tracker(table_id, database_id, tracker);
 
         self.metadata_manager
-            .update_refresh_job_status(table_id, RefreshState::Refreshing, Some(trigger_time))
+            .update_refresh_job_status(
+                table_id,
+                RefreshState::Refreshing,
+                Some(trigger_time),
+                false,
+            )
             .await?;
 
         let refresh_command = Command::Refresh {
@@ -352,7 +357,7 @@ impl GlobalRefreshManager {
                     "failed to execute refresh command"
                 );
                 self.metadata_manager
-                    .update_refresh_job_status(table_id, RefreshState::Idle, None)
+                    .update_refresh_job_status(table_id, RefreshState::Idle, None, false)
                     .await?;
                 self.remove_progress_tracker(table_id, "failure");
                 Err(anyhow!(err)

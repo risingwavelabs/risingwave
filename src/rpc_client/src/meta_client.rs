@@ -646,6 +646,22 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_streaming_job_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> Result<()> {
+        let request = AlterStreamingJobConfigRequest {
+            job_id,
+            entries_to_add,
+            keys_to_remove,
+        };
+
+        self.inner.alter_streaming_job_config(request).await?;
+        Ok(())
+    }
+
     pub async fn alter_fragment_parallelism(
         &self,
         fragment_ids: Vec<FragmentId>,
@@ -2478,6 +2494,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_streaming_job_config, AlterStreamingJobConfigRequest, AlterStreamingJobConfigResponse }
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }

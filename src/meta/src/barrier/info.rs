@@ -29,6 +29,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
@@ -412,7 +413,7 @@ pub(super) enum CreateStreamingJobStatus {
 pub(super) struct InflightStreamingJobInfo {
     pub job_id: JobId,
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
-    pub subscribers: HashMap<u32, SubscriberType>,
+    pub subscribers: HashMap<SubscriberId, SubscriberType>,
     pub status: CreateStreamingJobStatus,
 }
 
@@ -594,12 +595,15 @@ impl InflightDatabaseInfo {
         }
     }
 
-    pub fn fragment_subscribers(&self, fragment_id: FragmentId) -> impl Iterator<Item = u32> + '_ {
+    pub fn fragment_subscribers(
+        &self,
+        fragment_id: FragmentId,
+    ) -> impl Iterator<Item = SubscriberId> + '_ {
         let job_id = self.fragment_location[&fragment_id];
         self.jobs[&job_id].subscribers.keys().copied()
     }
 
-    pub fn job_subscribers(&self, job_id: JobId) -> impl Iterator<Item = u32> + '_ {
+    pub fn job_subscribers(&self, job_id: JobId) -> impl Iterator<Item = SubscriberId> + '_ {
         self.jobs[&job_id].subscribers.keys().copied()
     }
 
@@ -622,7 +626,7 @@ impl InflightDatabaseInfo {
     pub fn register_subscriber(
         &mut self,
         job_id: JobId,
-        subscriber_id: u32,
+        subscriber_id: SubscriberId,
         subscriber: SubscriberType,
     ) {
         self.jobs
@@ -636,7 +640,7 @@ impl InflightDatabaseInfo {
     pub fn unregister_subscriber(
         &mut self,
         job_id: JobId,
-        subscriber_id: u32,
+        subscriber_id: SubscriberId,
     ) -> Option<SubscriberType> {
         self.jobs
             .get_mut(&job_id)
