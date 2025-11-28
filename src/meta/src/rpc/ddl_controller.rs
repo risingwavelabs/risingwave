@@ -1633,7 +1633,7 @@ impl DdlController {
             return Ok(specified);
         }
 
-        // Use configured parallelism if no default parallelism is specified.
+        // Use default parallelism when no specific parallelism is provided by the user.
         let default_parallelism = match default_parallelism {
             DefaultParallelism::Full => available,
             DefaultParallelism::Default(num) => {
