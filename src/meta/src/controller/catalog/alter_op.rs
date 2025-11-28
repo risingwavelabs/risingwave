@@ -17,7 +17,7 @@ use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
-use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 
 use super::*;
@@ -931,11 +931,7 @@ impl CatalogController {
             last_success_time: Set(None),
         };
         match RefreshJob::insert(active)
-            .on_conflict(
-                OnConflict::column(refresh_job::Column::TableId)
-                    .do_nothing()
-                    .to_owned(),
-            )
+            .on_conflict_do_nothing()
             .exec(&inner.db)
             .await
         {
