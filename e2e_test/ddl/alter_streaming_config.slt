@@ -49,6 +49,7 @@ Caused by:
 
 
 # Error: invalid type
+skipif madsim
 statement error
 alter table t set config (
     streaming.developer.chunk_size = "omakase"
@@ -65,6 +66,7 @@ in `developer.chunk_size`
 
 
 # Error: invalid value
+skipif madsim
 statement error
 alter table t set config (
     streaming.developer.join_encoding_type = "nothing_optimized"
@@ -94,6 +96,7 @@ Caused by:
 
 
 # Error: using deprecated prefixed config key
+skipif madsim
 statement error
 alter table t set config (
     streaming.developer.stream_chunk_size = 512
