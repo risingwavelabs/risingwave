@@ -477,6 +477,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
     timeout_in_minutes: 30
+    parallelism: 2
     retry: *auto-retry
 
   - label: "check"

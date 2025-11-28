@@ -255,6 +255,7 @@ steps:
           environment:
           - CODECOV_TOKEN
     timeout_in_minutes: 25
+    parallelism: 2
     retry: *auto-retry
 
   - label: "unit test (madsim)"
