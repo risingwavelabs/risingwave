@@ -24,6 +24,7 @@ use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_meta_model::SinkId;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
@@ -62,6 +63,71 @@ impl GlobalBarrierWorkerContextImpl {
                 dropped_source_ids: dirty_associated_source_ids,
             })
             .await;
+
+        Ok(())
+    }
+
+    async fn reset_sink_coordinator(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
+        if let Some(database_id) = database_id {
+            let sink_ids = self
+                .metadata_manager
+                .catalog_controller
+                .list_sink_ids(Some(database_id))
+                .await?;
+            self.sink_manager.stop_sink_coordinator(sink_ids).await;
+        } else {
+            self.sink_manager.reset().await;
+        }
+        Ok(())
+    }
+
+    async fn abort_dirty_pending_sink_state(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<()> {
+        let pending_sinks: HashSet<SinkId> = self
+            .metadata_manager
+            .catalog_controller
+            .list_all_pending_sinks(database_id)
+            .await?;
+
+        if pending_sinks.is_empty() {
+            return Ok(());
+        }
+
+        let sink_with_state_tables: HashMap<SinkId, Vec<TableId>> = self
+            .metadata_manager
+            .catalog_controller
+            .fetch_sink_with_state_table_ids(pending_sinks)
+            .await?;
+
+        let mut sink_committed_epoch: HashMap<SinkId, u64> = HashMap::new();
+
+        for (sink_id, table_ids) in sink_with_state_tables {
+            let Some(table_id) = table_ids.first() else {
+                return Err(anyhow!("no state table id in sink: {}", sink_id).into());
+            };
+
+            self.hummock_manager
+                .on_current_version(|version| -> MetaResult<()> {
+                    if let Some(committed_epoch) = version.table_committed_epoch(*table_id) {
+                        assert!(
+                            sink_committed_epoch
+                                .insert(sink_id, committed_epoch)
+                                .is_none()
+                        );
+                        Ok(())
+                    } else {
+                        Err(anyhow!("cannot get committed epoch on table {}.", table_id).into())
+                    }
+                })
+                .await?;
+        }
+
+        self.metadata_manager
+            .catalog_controller
+            .abort_pending_sink_epochs(sink_committed_epoch)
+            .await?;
 
         Ok(())
     }
@@ -358,6 +424,13 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
+                    self.reset_sink_coordinator(None)
+                        .await
+                        .context("reset sink coordinator")?;
+                    self.abort_dirty_pending_sink_state(None)
+                        .await
+                        .context("abort dirty pending sink state")?;
+
                     // Background job progress needs to be recovered.
                     tracing::info!("recovering background job progress");
                     let background_jobs = self
@@ -581,6 +654,13 @@ impl GlobalBarrierWorkerContextImpl {
         self.clean_dirty_streaming_jobs(Some(database_id))
             .await
             .context("clean dirty streaming jobs")?;
+
+        self.reset_sink_coordinator(Some(database_id))
+            .await
+            .context("reset sink coordinator")?;
+        self.abort_dirty_pending_sink_state(Some(database_id))
+            .await
+            .context("abort dirty pending sink state")?;
 
         // Background job progress needs to be recovered.
         tracing::info!(

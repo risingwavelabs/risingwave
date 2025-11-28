@@ -28,6 +28,7 @@
 #![feature(duration_millis_float)]
 #![feature(iterator_try_reduce)]
 #![feature(iterator_try_collect)]
+#![feature(vec_deque_pop_if)]
 
 pub mod backup_restore;
 pub mod barrier;
