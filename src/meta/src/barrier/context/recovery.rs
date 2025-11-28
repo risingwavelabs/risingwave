@@ -419,9 +419,11 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
-                        self.env
-                            .actor_id_generator()
-                            .store(0, AtomicOrdering::Relaxed);
+
+                        // NOTE: uncomment the following line once resuming from scratch is fully supported.
+                        // self.env
+                        //     .actor_id_generator()
+                        //     .store(0, AtomicOrdering::Relaxed);
 
                         self.resolve_database_info(None, &active_streaming_nodes)
                             .await
