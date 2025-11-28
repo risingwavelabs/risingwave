@@ -12,30 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common_proc_macro::serde_prefix_all;
+
 use super::*;
 
-#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
-pub enum AsyncStackTraceOption {
-    /// Disabled.
-    Off,
-    /// Enabled with basic instruments.
-    On,
-    /// Enabled with extra verbose instruments in release build.
-    /// Behaves the same as `on` in debug build due to performance concern.
-    #[default]
-    #[clap(alias = "verbose")]
-    ReleaseVerbose,
-}
+mod async_stack_trace;
+mod join_encoding_type;
 
-impl AsyncStackTraceOption {
-    pub fn is_verbose(self) -> Option<bool> {
-        match self {
-            Self::Off => None,
-            Self::On => Some(false),
-            Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
-        }
-    }
-}
+pub use async_stack_trace::*;
+pub use join_encoding_type::*;
 
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -53,7 +38,7 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
 
-    #[serde(default, with = "streaming_prefix")]
+    #[serde(default)]
     #[config_doc(omitted)]
     pub developer: StreamingDeveloperConfig,
 
@@ -70,11 +55,10 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-serde_with::with_prefix!(streaming_prefix "stream_");
-
 /// The subsections `[streaming.developer]`.
 ///
 /// It is put at [`StreamingConfig::developer`].
+#[serde_prefix_all("stream_", mode = "alias")]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingDeveloperConfig {
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
@@ -252,6 +236,15 @@ pub struct StreamingDeveloperConfig {
     /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
     #[serde(default = "default::developer::refresh_scheduler_interval_sec")]
     pub refresh_scheduler_interval_sec: u64,
+
+    /// Determine which encoding will be used to encode join rows in operator cache.
+    #[serde(default)]
+    pub join_encoding_type: JoinEncodingType,
+
+    #[serde(default, flatten)]
+    #[serde_prefix_all(skip)]
+    #[config_doc(omitted)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 pub mod default {

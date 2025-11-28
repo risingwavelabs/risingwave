@@ -106,6 +106,9 @@ impl StreamManagerService for StreamServiceImpl {
                     .last_trigger_time
                     .map(|time| DateTime::from_timestamp_millis(time).unwrap().to_string()),
                 trigger_interval_secs: job.trigger_interval_secs,
+                last_success_time: job
+                    .last_success_time
+                    .map(|time| DateTime::from_timestamp_millis(time).unwrap().to_string()),
             })
             .collect();
         Ok(Response::new(ListRefreshTableStatesResponse {

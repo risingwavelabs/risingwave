@@ -3285,6 +3285,13 @@ pub enum SqlOptionValue {
     BackfillOrder(BackfillOrderStrategy),
 }
 
+impl SqlOptionValue {
+    /// Returns a `NULL` value.
+    pub const fn null() -> Self {
+        Self::Value(Value::Null)
+    }
+}
+
 impl fmt::Display for SqlOptionValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

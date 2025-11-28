@@ -192,6 +192,9 @@ for_all_wrapped_id_fields! (
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
         }
+        AlterStreamingJobConfigRequest {
+            job_id: JobId,
+        }
         AlterSwapRenameRequest.ObjectNameSwapPair {
             src_object_id: ObjectId,
             dst_object_id: ObjectId,
@@ -657,6 +660,7 @@ for_all_wrapped_id_fields! (
             associated_table_id: TableId,
         }
         SubscriptionUpstreamInfo {
+            subscriber_id: SubscriberId,
             upstream_mv_table_id: TableId,
         }
         ThrottleMutation {
@@ -731,6 +735,7 @@ for_all_wrapped_id_fields! (
         InjectBarrierRequest.BuildActorInfo {
             fragment_upstreams: FragmentId,
             actor_id: ActorId,
+            initial_subscriber_ids: SubscriberId,
         }
         InjectBarrierRequest.FragmentBuildActorInfo {
             fragment_id: FragmentId,

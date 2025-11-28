@@ -253,36 +253,43 @@ pub type ViewId = TypedId<12>;
 pub type FunctionId = TypedId<13>;
 pub type ConnectionId = TypedId<14>;
 pub type SecretId = TypedId<15>;
+pub type SubscriberId = TypedId<16>;
 
 pub type ObjectId = TypedId<256>;
+
+macro_rules! impl_as {
+    (@func $target_id_name:ident, $alias_name:ident) => {
+        paste::paste! {
+            pub fn [< as_ $alias_name >](self) -> $target_id_name {
+                $target_id_name::new(self.0)
+            }
+        }
+    };
+    (@func $target_id_name:ident) => {
+        paste::paste! {
+            impl_as! { @func $target_id_name, [< $target_id_name:snake >] }
+        }
+    };
+    ($src_id_name:ident $(,$target_id_name:ident)* $(,{$orig_target_id_name:ident , $alias_name:ident})*) => {
+        impl $src_id_name {
+            $(
+                impl_as! { @func $target_id_name }
+            )*
+            $(
+                impl_as! { @func $orig_target_id_name, $alias_name }
+            )*
+        }
+    }
+}
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {
         self.0 == table_id.0
     }
-
-    pub fn as_mv_table_id(self) -> TableId {
-        TableId::new(self.0)
-    }
-
-    pub fn as_sink_id(self) -> SinkId {
-        SinkId::new(self.0)
-    }
-
-    pub fn as_shared_source_id(self) -> SourceId {
-        SourceId::new(self.0)
-    }
-
-    pub fn as_index_id(self) -> IndexId {
-        IndexId::new(self.0)
-    }
 }
 
-impl TableId {
-    pub fn as_job_id(self) -> JobId {
-        JobId::new(self.0)
-    }
-}
+impl_as!(JobId, SinkId, IndexId, SubscriberId, {TableId, mv_table_id}, {SourceId, shared_source_id});
+impl_as!(TableId, JobId);
 
 impl From<OptionalAssociatedTableId> for TableId {
     fn from(value: OptionalAssociatedTableId) -> Self {
@@ -297,27 +304,10 @@ impl From<TableId> for OptionalAssociatedTableId {
     }
 }
 
-impl SinkId {
-    pub fn as_job_id(self) -> JobId {
-        JobId::new(self.0)
-    }
-}
-
-impl IndexId {
-    pub fn as_job_id(self) -> JobId {
-        JobId::new(self.0)
-    }
-}
-
-impl SourceId {
-    pub fn as_share_source_job_id(self) -> JobId {
-        JobId::new(self.0)
-    }
-
-    pub fn as_cdc_table_id(self) -> TableId {
-        TableId::new(self.0)
-    }
-}
+impl_as!(SinkId, JobId);
+impl_as!(IndexId, JobId);
+impl_as!(SourceId, {JobId, share_source_job_id}, {TableId, cdc_table_id});
+impl_as!(SubscriptionId, SubscriberId);
 
 impl From<OptionalAssociatedSourceId> for SourceId {
     fn from(value: OptionalAssociatedSourceId) -> Self {

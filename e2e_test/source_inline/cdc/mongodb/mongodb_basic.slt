@@ -87,11 +87,9 @@ SELECT
 FROM
     per_field;
 
-sleep 5s
-
 control substitution off
 
-query TTT
+query TTT retry 5 backoff 1s
 select _id, database_name, collection_name from all_types_extjson;
 ----
 {"$oid": "6911a33502454e0f774f8803"} test all_types
@@ -119,6 +117,9 @@ select * from all_types_access order by _id, field;
 {"$oid": "6911a33502454e0f774f8803"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
 {"$oid": "6911a33502454e0f774f8803"} f18_long       {"$numberLong": "9007199254740993"}
 {"$oid": "6911a33502454e0f774f8803"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
+
+# so that incremental rows are inserted at least 1s later
+sleep 1s
 
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF
@@ -150,17 +151,19 @@ db.all_types.insertOne({
 });
 EOF
 
-
 sleep 3s
 
-query TTTT
+query TTTTTT retry 3 backoff 1s
 select
   _id, database_name, collection_name,
+  commit_ts,
+  (select at from phases where name = '03_ingested'),
   commit_ts > (select at from phases where name = '03_ingested')
 from all_types_extjson order by commit_ts;
 ----
-{"$oid": "6911a33502454e0f774f8803"} test all_types f
-{"$oid": "6911a33502454e0f774f8804"} test all_types t
+{"$oid": "6911a33502454e0f774f8803"} test all_types <slt:ignore> <slt:ignore> f
+{"$oid": "6911a33502454e0f774f8804"} test all_types <slt:ignore> <slt:ignore> t
+
 
 query TTT
 select * from all_types_access order by _id, field;
@@ -199,6 +202,7 @@ select * from all_types_access order by _id, field;
 {"$oid": "6911a33502454e0f774f8804"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
 {"$oid": "6911a33502454e0f774f8804"} f18_long       {"$numberLong": "9007199254740993"}
 {"$oid": "6911a33502454e0f774f8804"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
+
 
 statement ok
 DROP TABLE all_types_extjson cascade;

@@ -202,6 +202,8 @@ fn arg_writer_type(arg: &syn::FnArg) -> Option<WriterTypeKind> {
             note = "`function!` macro can only recognize fully-qualified type.";
             help = "Please use `jsonbb::Builder` instead."
         };
+    } else if elem == &parse_quote!(impl risingwave_common::array::ListWrite) {
+        Some(WriterTypeKind::ListWrite)
     } else {
         None
     }

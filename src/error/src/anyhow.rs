@@ -142,7 +142,7 @@ macro_rules! def_anyhow_newtype {
                         return stringify!($from);
                     }
                 )*
-                return "connector_error";
+                return stringify!($name);
             }
         }
 
