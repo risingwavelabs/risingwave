@@ -266,6 +266,7 @@ message ListStreamingJobStatesResponse {
     uint32 max_parallelism = 4;
     string name = 5;
     string resource_group = 6;
+    string config_override = 9;
     uint32 database_id = 7;
     uint32 schema_id = 8;
   }
