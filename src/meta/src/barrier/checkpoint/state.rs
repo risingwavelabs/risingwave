@@ -283,36 +283,38 @@ impl DatabaseCheckpointControl {
             Some(mutation) => Some(mutation),
             None => {
                 let mut subscription_info_to_drop = vec![];
-                for (&job_id, creating_job) in &mut self.creating_streaming_job_controls {
-                    if let Some(upstream_table_ids) = creating_job.should_merge_to_upstream() {
-                        subscription_info_to_drop.extend(upstream_table_ids.iter().map(
-                            |upstream_table_id| PbSubscriptionUpstreamInfo {
-                                subscriber_id: job_id.as_subscriber_id(),
-                                upstream_mv_table_id: *upstream_table_id,
-                            },
-                        ));
-                        for upstream_mv_table_id in upstream_table_ids {
-                            assert_matches!(
-                                self.database_info.unregister_subscriber(
-                                    upstream_mv_table_id.as_job_id(),
-                                    job_id.as_subscriber_id()
-                                ),
-                                Some(SubscriberType::SnapshotBackfill)
-                            );
+                if barrier_info.kind.is_checkpoint() {
+                    for (&job_id, creating_job) in &mut self.creating_streaming_job_controls {
+                        if let Some(upstream_table_ids) = creating_job.should_merge_to_upstream() {
+                            subscription_info_to_drop.extend(upstream_table_ids.iter().map(
+                                |upstream_table_id| PbSubscriptionUpstreamInfo {
+                                    subscriber_id: job_id.as_subscriber_id(),
+                                    upstream_mv_table_id: *upstream_table_id,
+                                },
+                            ));
+                            for upstream_mv_table_id in upstream_table_ids {
+                                assert_matches!(
+                                    self.database_info.unregister_subscriber(
+                                        upstream_mv_table_id.as_job_id(),
+                                        job_id.as_subscriber_id()
+                                    ),
+                                    Some(SubscriberType::SnapshotBackfill)
+                                );
+                            }
+                            let job_fragments = creating_job
+                                .start_consume_upstream(control_stream_manager, barrier_info)?;
+                            finished_snapshot_backfill_jobs.insert(job_id);
+                            table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
+                                job_fragments.values(),
+                            ));
+                            self.database_info.add_existing(InflightStreamingJobInfo {
+                                job_id,
+                                fragment_infos: job_fragments,
+                                subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
+                                status: CreateStreamingJobStatus::Created,
+                                cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
+                            });
                         }
-                        let job_fragments = creating_job
-                            .start_consume_upstream(control_stream_manager, barrier_info)?;
-                        finished_snapshot_backfill_jobs.insert(job_id);
-                        table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
-                            job_fragments.values(),
-                        ));
-                        self.database_info.add_existing(InflightStreamingJobInfo {
-                            job_id,
-                            fragment_infos: job_fragments,
-                            subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
-                            status: CreateStreamingJobStatus::Created,
-                            cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
-                        });
                     }
                 }
                 if !finished_snapshot_backfill_jobs.is_empty() {
