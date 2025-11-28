@@ -36,9 +36,8 @@ public class DbzConnectorConfig {
             "cdc.source.wait.streaming.start.timeout";
 
     private static final String QUEUE_MAX_MEMORY_RATIO = "queue.memory.ratio";
-    private static final double DEFAULT_QUEUE_MAX_MEMORY_RATIO = 0.15;
     private static final double MIN_QUEUE_MAX_MEMORY_RATIO = 0.01;
-    private static final double MAX_QUEUE_MAX_MEMORY_RATIO = 0.5;
+    private static final double MAX_QUEUE_MAX_MEMORY_RATIO = 0.8;
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -372,8 +371,13 @@ public class DbzConnectorConfig {
     }
 
     /**
-     * Calculate and set max.queue.size.in.bytes based on JVM heap size and memory ratio. This
-     * ensures the queue size is always a portion of available JVM memory and never 0.
+     * Calculate and set max.queue.size.in.bytes based on JVM heap size and memory ratio.
+     *
+     * <p>If user does not specify queue.memory.ratio, this method does nothing. Debezium will use
+     * whatever is configured in debezium.properties (max.queue.size = 8192 by default).
+     *
+     * <p>If user specifies a valid ratio (0.01-0.8), calculate and set max.queue.size.in.bytes
+     * accordingly.
      *
      * <p>JVM heap size is obtained from Runtime.getRuntime().maxMemory(), which reflects the -Xmx
      * value set by Rust code during JVM initialization. See: src/jni_core/src/jvm_runtime.rs:85-103
@@ -384,34 +388,34 @@ public class DbzConnectorConfig {
      * @param dbzProps The Debezium properties to update
      */
     private void calculateAndSetMaxQueueSizeInBytes(Properties dbzProps) {
-        // Default queue memory ratio is 15% of JVM heap
-        double queueMemoryRatio = DEFAULT_QUEUE_MAX_MEMORY_RATIO;
-
         // Check if user specified a custom ratio
         String ratioStr = dbzProps.getProperty(QUEUE_MAX_MEMORY_RATIO);
-        if (ratioStr != null) {
-            try {
-                queueMemoryRatio = Double.parseDouble(ratioStr);
-                // Validate ratio is in reasonable range (1% - 50%)
-                if (queueMemoryRatio < MIN_QUEUE_MAX_MEMORY_RATIO
-                        || queueMemoryRatio > MAX_QUEUE_MAX_MEMORY_RATIO) {
-                    LOG.warn(
-                            "Invalid {}: {}, must be between {} and {}, using default {}",
-                            QUEUE_MAX_MEMORY_RATIO,
-                            queueMemoryRatio,
-                            MIN_QUEUE_MAX_MEMORY_RATIO,
-                            MAX_QUEUE_MAX_MEMORY_RATIO,
-                            DEFAULT_QUEUE_MAX_MEMORY_RATIO);
-                    queueMemoryRatio = DEFAULT_QUEUE_MAX_MEMORY_RATIO;
-                }
-            } catch (NumberFormatException e) {
+        if (ratioStr == null) {
+            // User did not specify ratio, do nothing
+            // Debezium will use its default max.queue.size from debezium.properties
+            LOG.info(
+                    "Debezium {} not specified, skipping calculating and setting max.queue.size.in.bytes calculation",
+                    QUEUE_MAX_MEMORY_RATIO);
+            return;
+        }
+
+        double queueMemoryRatio;
+        try {
+            queueMemoryRatio = Double.parseDouble(ratioStr);
+            // Validate ratio is in reasonable range (1% - 80%)
+            if (queueMemoryRatio < MIN_QUEUE_MAX_MEMORY_RATIO
+                    || queueMemoryRatio > MAX_QUEUE_MAX_MEMORY_RATIO) {
                 LOG.warn(
-                        "Invalid {} format: {}, using default {}",
+                        "Invalid {}: {}, must be between {} and {}, ignoring",
                         QUEUE_MAX_MEMORY_RATIO,
-                        ratioStr,
-                        DEFAULT_QUEUE_MAX_MEMORY_RATIO);
-                queueMemoryRatio = DEFAULT_QUEUE_MAX_MEMORY_RATIO;
+                        queueMemoryRatio,
+                        MIN_QUEUE_MAX_MEMORY_RATIO,
+                        MAX_QUEUE_MAX_MEMORY_RATIO);
+                return;
             }
+        } catch (NumberFormatException e) {
+            LOG.warn("Invalid {} format: {}, ignoring", QUEUE_MAX_MEMORY_RATIO, ratioStr);
+            return;
         }
 
         // Get JVM max heap size from Runtime
