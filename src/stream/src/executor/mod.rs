@@ -197,6 +197,7 @@ use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
 };
+use risingwave_pb::id::SubscriberId;
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
@@ -339,7 +340,7 @@ pub struct AddMutation {
     pub splits: SplitAssignments,
     pub pause: bool,
     /// (`upstream_mv_table_id`,  `subscriber_id`)
-    pub subscriptions_to_add: Vec<(TableId, u32)>,
+    pub subscriptions_to_add: Vec<(TableId, SubscriberId)>,
     /// nodes which should start backfill
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
@@ -366,7 +367,7 @@ pub enum Mutation {
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
-        subscriptions_to_drop: Vec<(u32, TableId)>,
+        subscriptions_to_drop: Vec<(SubscriberId, TableId)>,
     },
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
@@ -681,7 +682,7 @@ impl Barrier {
     pub fn added_subscriber_on_mv_table(
         &self,
         mv_table_id: TableId,
-    ) -> impl Iterator<Item = u32> + '_ {
+    ) -> impl Iterator<Item = SubscriberId> + '_ {
         if let Some(Mutation::Add(add)) = self.mutation.as_deref() {
             Some(add)
         } else {

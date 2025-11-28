@@ -50,8 +50,8 @@ use risingwave_expr::function;
 /// ```
 
 #[function("array_distinct(anyarray) -> anyarray")]
-pub fn array_distinct(list: ListRef<'_>) -> ListValue {
-    ListValue::from_datum_iter(&list.elem_type(), list.iter().unique())
+pub fn array_distinct(list: ListRef<'_>, writer: &mut impl risingwave_common::array::ListWrite) {
+    writer.write_iter(list.iter().unique());
 }
 
 #[cfg(test)]
@@ -64,7 +64,9 @@ mod tests {
     fn test_array_distinct_array_of_primitives() {
         let array = ListValue::from_iter([42, 43, 42]);
         let expected = ListValue::from_iter([42, 43]);
-        let actual = array_distinct(array.as_scalar_ref());
+        let mut builder = array.elem_type().create_array_builder(3);
+        array_distinct(array.as_scalar_ref(), &mut builder);
+        let actual = ListValue::new(builder.finish());
         assert_eq!(actual, expected);
     }
 
