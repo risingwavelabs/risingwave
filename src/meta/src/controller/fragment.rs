@@ -153,6 +153,7 @@ pub struct StreamingJobInfo {
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub resource_group: String,
+    pub config_override: String,
     pub database_id: DatabaseId,
     pub schema_id: SchemaId,
 }
@@ -791,6 +792,13 @@ impl CatalogController {
                     Expr::col((database::Entity, database::Column::ResourceGroup)),
                 ),
                 "resource_group",
+            )
+            .column_as(
+                Expr::if_null(
+                    Expr::col((streaming_job::Entity, streaming_job::Column::ConfigOverride)),
+                    Expr::val(""),
+                ),
+                "config_override",
             )
             .column(object::Column::DatabaseId)
             .column(object::Column::SchemaId)
