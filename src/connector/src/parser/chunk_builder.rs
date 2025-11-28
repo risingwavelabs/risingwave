@@ -343,7 +343,7 @@ impl SourceStreamChunkRowWriter<'_> {
                                 })
                             }
                         }
-                        None => parse_field(desc), // parse from payload
+                        None => parse_field(desc), // parse from payload你
                     }
                 }
                 (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {

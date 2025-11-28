@@ -59,7 +59,7 @@ impl DebeziumCdcMeta {
 
     pub fn extract_database_name(&self) -> DatumRef<'_> {
         Some(ScalarRefImpl::Utf8(
-            &self.full_table_name.as_str()[0..self.db_name_prefix_len],
+            &self.full_table_name.as_str()[0..self.db_name_prefix_len.saturating_sub(1)],
         ))
     }
 
@@ -69,13 +69,59 @@ impl DebeziumCdcMeta {
         ))
     }
 
+    /// Calculate the prefix length to skip when extracting table name from `full_table_name`.
+    ///
+    /// # Background
+    ///
+    /// Debezium sends `full_table_name` in different formats depending on the CDC source type:
+    ///
+    /// - **MySQL**: `"database.table"` (1 dot, 2 parts)
+    ///   - Example: `"risedev.orders"`
+    ///   - User provides: `"risedev.orders"` (same format)
+    ///   - Result: `database_name` = "risedev", `table_name` = "orders"
+    ///   - Note: MySQL CDC typically doesn't use the `database_name` column separately
+    ///
+    /// - **`MongoDB`**: `"database.collection"` (1 dot, 2 parts)
+    ///   - Example: `"random_data.users"`
+    ///   - User can include: `DATABASE_NAME` and `COLLECTION_NAME`
+    ///   - Result: `database_name` = `"random_data"`, collection parsed from payload
+    ///
+    /// - **Postgres**: `"database.schema.table"` (2 dots, 3 parts)
+    ///   - Example: `"mydb.public.users"`
+    ///   - User provides: `"public.users"` (database already in source config)
+    ///   - Result: `database_name` = "mydb", `table_name` = "public.users"
+    ///
+    /// - **SQL Server**: `"database.schema.table"` (2 dots, 3 parts)
+    ///   - Example: `"mydb.dbo.orders"`
+    ///   - User provides: `"dbo.orders"` (database already in source config)
+    ///   - Result: `database_name` = "mydb", `table_name` = "dbo.orders"
+    ///
+    /// # Returns
+    ///
+    /// The number of characters to skip from the start of `full_table_name` when calling
+    /// `extract_table_name()`. This is always the position after the first dot to extract
+    /// the database portion for `extract_database_name()`.
+    fn extract_db_name_prefix_len_from_full_table_name(full_table_name: &str) -> usize {
+        if let Some(first_dot) = full_table_name.find('.') {
+            // Return position after first dot to extract database prefix
+            // This works for all formats:
+            // - MySQL: "database.table" → database_name = "database", table_name = "table"
+            // - MongoDB: "database.collection" → database_name = "database"
+            // - Postgres/SQL Server: "database.schema.table" → database_name = "database", table_name = "schema.table"
+            first_dot + 1
+        } else {
+            // No dot found (should not happen in practice for valid CDC messages)
+            0
+        }
+    }
+
     pub fn new(
         full_table_name: String,
         source_ts_ms: i64,
         msg_type: cdc_message::CdcMessageType,
     ) -> Self {
-        // full_table_name is in the format of `database_name.table_name`
-        let db_name_prefix_len = full_table_name.as_str().find('.').unwrap_or(0);
+        let db_name_prefix_len =
+            Self::extract_db_name_prefix_len_from_full_table_name(&full_table_name);
         Self {
             db_name_prefix_len,
             full_table_name,
