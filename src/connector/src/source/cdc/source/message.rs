@@ -64,13 +64,9 @@ impl DebeziumCdcMeta {
     }
 
     pub fn extract_table_name(&self) -> DatumRef<'_> {
-        Some(ScalarRefImpl::Utf8(if self.db_name_prefix_len == 0 {
-            // No dot found, return the entire string
-            self.full_table_name.as_str()
-        } else {
-            // Skip the database name and the dot
-            &self.full_table_name.as_str()[self.db_name_prefix_len + 1..]
-        }))
+        Some(ScalarRefImpl::Utf8(
+            &self.full_table_name.as_str()[self.db_name_prefix_len..],
+        ))
     }
 
     /// Calculate the prefix length to skip when extracting table name from `full_table_name`.
@@ -102,17 +98,21 @@ impl DebeziumCdcMeta {
     ///
     /// # Returns
     ///
-    /// The position of the first dot in `full_table_name`, which separates the database name
-    /// from the rest. Used by `extract_database_name()` as the end position and by
-    /// `extract_table_name()` to skip the database portion.
+    /// The number of characters to skip from the start of `full_table_name` when calling
+    /// `extract_table_name()`. This is always the position after the first dot to extract
+    /// the database portion for `extract_database_name()`.
     fn extract_db_name_prefix_len_from_full_table_name(full_table_name: &str) -> usize {
-        // Return position of the first dot (not including the dot itself)
-        // This works for all formats:
-        // - MySQL: "database.table" → database_name = "database", table_name = "table"
-        // - MongoDB: "database.collection" → database_name = "database"
-        // - Postgres/SQL Server: "database.schema.table" → database_name = "database", table_name = "schema.table"
-        // If no dot found, return 0 (should not happen in practice for valid CDC messages)
-        full_table_name.find('.').unwrap_or_default()
+        if let Some(first_dot) = full_table_name.find('.') {
+            // Return position after first dot to extract database prefix
+            // This works for all formats:
+            // - MySQL: "database.table" → database_name = "database", table_name = "table"
+            // - MongoDB: "database.collection" → database_name = "database"
+            // - Postgres/SQL Server: "database.schema.table" → database_name = "database", table_name = "schema.table"
+            first_dot + 1
+        } else {
+            // No dot found (should not happen in practice for valid CDC messages)
+            0
+        }
     }
 
     pub fn new(
