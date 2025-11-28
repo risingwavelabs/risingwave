@@ -193,7 +193,7 @@ opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = "0.16"
 opentelemetry_sdk = { version = "0.29", default-features = false }
 otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev = "e6cd165b9bc85783b42c106e99186b86b73e3507" }
-parking_lot = { version = "0.12.5", features = [
+parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
