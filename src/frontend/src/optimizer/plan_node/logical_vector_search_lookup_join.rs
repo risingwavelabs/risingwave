@@ -73,7 +73,7 @@ impl VectorSearchLookupJoinCore {
                     let field = &self.lookup.schema().fields[*i];
                     field.data_type.clone()
                 })
-                .chain(self.include_distance.then(|| VECTOR_DISTANCE_TYPE)),
+                .chain(self.include_distance.then_some(VECTOR_DISTANCE_TYPE)),
         )
     }
 }
