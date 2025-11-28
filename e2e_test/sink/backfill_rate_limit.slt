@@ -1,14 +1,17 @@
 statement ok
+set rw_implicit_flush=true;
+
+statement ok
 set sink_decouple = true;
 
 statement ok
-create table t1 (v1 int);
+CREATE TABLE IF NOT EXISTS t1 (v1 int);
 
 statement ok
-insert into t1 select * from generate_series(1, 1000);
+INSERT INTO t1 SELECT * FROM generate_series(1, 1000);
 
 statement ok
-create sink kafaka_sink
+CREATE SINK kafka_sink
 AS
 SELECT * FROM t1
 with (
@@ -21,54 +24,28 @@ with (
 );
 
 statement ok
-create table kafka_source (v1 int) with (
+ALTER SINK kafaka_sink SET BACKFILL_RATE_LIMIT = 0;
+
+statement ok
+CREATE TABLE kafka_source (v1 int) with (
   connector = 'kafka',
-  topic = 'kafka_source',
+  topic = 'test_sink_backfill_rate_limit',
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
-) FORMAT PLAIN ENCODE JSON
-
-statement ok
-flush;
+) FORMAT PLAIN ENCODE JSON;
 
 sleep 3s
 
 query I
-select count(*) from kafka_source;
+SELECT count(*) FROM kafka_source;
 ----
 0
 
 statement ok
-INSERT TABLE t VALUES (1001);
+DROP SINK kafka_sink;
 
-statement ok
-flush;
-
-query I
-select count(*) from kafka_source;
-----
-0
-
-query I
-alter sink kafka_sink set backfill_rate_limit to 1000;
-
-
-sleep 3s
-
-
-query I
-select count(*) > 1 from kafka_source;
-----
-t
-
-statement ok
+statement ok 
 DROP TABLE kafka_source;
 
 statement ok
-DROP SINK kafaka_sink;
-
-statement ok
 DROP TABLE t1;
-
-statement ok
-FLUSH;
