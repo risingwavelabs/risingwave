@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::external::DebeziumOffset;
-use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait};
+use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait, Mysql, Postgres};
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.
@@ -106,6 +106,37 @@ impl MySqlCdcSplit {
         };
         Self { inner: split }
     }
+
+    /// Extract MySQL CDC binlog offset (file sequence and position) from the offset JSON string.
+    ///
+    /// MySQL binlog offset format:
+    /// ```json
+    /// {
+    ///   "sourcePartition": { "server": "..." },
+    ///   "sourceOffset": {
+    ///     "file": "binlog.000123",
+    ///     "pos": 456789,
+    ///     ...
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// Returns `Some((file_seq, position))` where:
+    /// - `file_seq`: the numeric part of binlog filename (e.g., 123 from "binlog.000123")
+    /// - `position`: the byte offset within the binlog file
+    pub fn mysql_binlog_offset(&self) -> Option<(u64, u64)> {
+        let offset_str = self.inner.start_offset.as_ref()?;
+        let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+        let source_offset = offset.get("sourceOffset")?;
+
+        let file = source_offset.get("file")?.as_str()?;
+        let pos = source_offset.get("pos")?.as_u64()?;
+
+        // Extract numeric sequence from "binlog.NNNNNN"
+        let file_seq = file.strip_prefix("binlog.")?.parse::<u64>().ok()?;
+
+        Some((file_seq, pos))
+    }
 }
 
 impl CdcSplitTrait for MySqlCdcSplit {
@@ -140,6 +171,18 @@ impl PostgresCdcSplit {
             inner: split,
             server_addr,
         }
+    }
+
+    /// Extract PostgreSQL LSN value from the offset JSON string.
+    ///
+    /// This function parses the offset JSON and extracts the LSN value from the sourceOffset.lsn field.
+    /// Returns Some(lsn) if the LSN is found and can be parsed as u64, None otherwise.
+    pub fn pg_lsn(&self) -> Option<u64> {
+        let offset_str = self.inner.start_offset.as_ref()?;
+        let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+        let source_offset = offset.get("sourceOffset")?;
+        let lsn = source_offset.get("lsn")?;
+        lsn.as_u64()
     }
 }
 
@@ -371,4 +414,37 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         dispatch_cdc_split!(self, mut, update_offset(last_seen_offset)?);
         Ok(())
     }
+}
+
+impl DebeziumCdcSplit<Postgres> {
+    /// Extract PostgreSQL LSN value from the current split offset.
+    ///
+    /// Returns Some(lsn) if the LSN is found and can be parsed as u64, None otherwise.
+    pub fn pg_lsn(&self) -> Option<u64> {
+        self.postgres_split.as_ref()?.pg_lsn()
+    }
+}
+
+impl DebeziumCdcSplit<Mysql> {
+    /// Extract MySQL CDC binlog offset (file sequence and position) from the current split offset.
+    ///
+    /// Returns `Some((file_seq, position))` where:
+    /// - `file_seq`: the numeric part of binlog filename (e.g., 123 from "binlog.000123")
+    /// - `position`: the byte offset within the binlog file
+    pub fn mysql_binlog_offset(&self) -> Option<(u64, u64)> {
+        self.mysql_split.as_ref()?.mysql_binlog_offset()
+    }
+}
+
+/// Extract PostgreSQL LSN value from a CDC offset JSON string.
+///
+/// This is a standalone helper function that can be used when you only have the offset string
+/// (e.g., in callbacks) and don't have access to the Split object.
+///
+/// Returns Some(lsn) if the LSN is found and can be parsed as u64, None otherwise.
+pub fn extract_postgres_lsn_from_offset_str(offset_str: &str) -> Option<u64> {
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let lsn = source_offset.get("lsn")?;
+    lsn.as_u64()
 }

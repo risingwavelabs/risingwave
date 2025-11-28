@@ -27,12 +27,13 @@ use prometheus::{
 };
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+    LabelGuardedUintGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
-    register_guarded_int_gauge_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model::WorkerId;
@@ -223,6 +224,12 @@ pub struct MetaMetrics {
     pub compaction_group_size: IntGaugeVec,
     pub compaction_group_file_count: IntGaugeVec,
     pub compaction_group_throughput: IntGaugeVec,
+
+    // ********************************** Refresh Manager ************************************
+    pub refresh_job_duration: LabelGuardedUintGaugeVec,
+    pub refresh_job_finish_cnt: LabelGuardedIntCounterVec,
+    pub refresh_cron_job_trigger_cnt: LabelGuardedIntCounterVec,
+    pub refresh_cron_job_miss_cnt: LabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -843,6 +850,35 @@ impl MetaMetrics {
         let compact_task_trivial_move_sst_count =
             register_histogram_vec_with_registry!(opts, &["group"], registry).unwrap();
 
+        let refresh_job_duration = register_guarded_uint_gauge_vec_with_registry!(
+            "meta_refresh_job_duration",
+            "The duration of refresh job",
+            &["table_id", "status"],
+            registry
+        )
+        .unwrap();
+        let refresh_job_finish_cnt = register_guarded_int_counter_vec_with_registry!(
+            "meta_refresh_job_finish_cnt",
+            "The number of finished refresh jobs",
+            &["table_id", "status"],
+            registry
+        )
+        .unwrap();
+        let refresh_cron_job_trigger_cnt = register_guarded_int_counter_vec_with_registry!(
+            "meta_refresh_cron_job_trigger_cnt",
+            "The number of cron refresh jobs triggered",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+        let refresh_cron_job_miss_cnt = register_guarded_int_counter_vec_with_registry!(
+            "meta_refresh_cron_job_miss_cnt",
+            "The number of cron refresh jobs missed",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -926,6 +962,10 @@ impl MetaMetrics {
             compaction_group_size,
             compaction_group_file_count,
             compaction_group_throughput,
+            refresh_job_duration,
+            refresh_job_finish_cnt,
+            refresh_cron_job_trigger_cnt,
+            refresh_cron_job_miss_cnt,
         }
     }
 

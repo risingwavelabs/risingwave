@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Finite32;
-use risingwave_common::types::{
-    DataType, F32, F64, ListRef, ListValue, ScalarRefImpl, VectorRef, VectorVal,
-};
+use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef, VectorVal};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::vector::MeasureDistanceBuilder;
 use risingwave_common::vector::distance::{L1Distance, L2SqrDistance, inner_product_faiss};
@@ -335,8 +333,12 @@ fn vector_concat(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
 /// {1,2,3}
 /// ```
 #[function("cast(vector) -> float4[]")]
-fn vector_to_float4(v: VectorRef<'_>) -> ListValue {
-    v.as_raw_slice().iter().copied().map(F32::from).collect()
+fn vector_to_float4(v: VectorRef<'_>, writer: &mut impl risingwave_common::array::ListWrite) {
+    writer.write_iter(
+        v.as_raw_slice()
+            .iter()
+            .map(|&f| Some(ScalarRefImpl::Float32(F32::from(f)))),
+    );
 }
 
 /// ```slt

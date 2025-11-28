@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod graph;
+use anyhow::Context;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
@@ -202,9 +203,15 @@ pub fn build_graph_with_strategy(
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
     }
 
-    // Set timezone.
+    // Set context for this streaming job.
+    let config_override = ctx
+        .session_ctx()
+        .config()
+        .to_initial_streaming_config_override()
+        .context("invalid initial streaming config override")?;
     fragment_graph.ctx = Some(StreamContext {
         timezone: ctx.get_session_timezone(),
+        config_override,
     });
 
     fragment_graph.backfill_order = backfill_order;

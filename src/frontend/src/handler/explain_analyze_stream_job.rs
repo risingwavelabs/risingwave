@@ -134,7 +134,7 @@ mod bind {
                     AnalyzeTarget::Index(_) => {
                         let (catalog, _schema_name) =
                             catalog.get_any_index_by_name(&db_name, schema_path, &name)?;
-                        catalog.id.index_id.into()
+                        catalog.id.as_job_id()
                     }
                     AnalyzeTarget::Table(_) => {
                         let (catalog, _schema_name) =

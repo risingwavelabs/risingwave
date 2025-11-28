@@ -61,7 +61,7 @@ impl CatalogController {
 
         let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id, None, None).await?;
         let mut db: database::ActiveModel = db.into();
-        db.database_id = Set(DatabaseId::new(db_obj.oid as _));
+        db.database_id = Set(db_obj.oid.as_database_id());
         let db = db.insert(&txn).await?;
 
         let mut schemas = vec![];
@@ -70,12 +70,12 @@ impl CatalogController {
                 &txn,
                 ObjectType::Schema,
                 owner_id,
-                Some(DatabaseId::new(db_obj.oid as _)),
+                Some(db_obj.oid.as_database_id()),
                 None,
             )
             .await?;
             let schema = schema::ActiveModel {
-                schema_id: Set(SchemaId::new(schema_obj.oid as _)),
+                schema_id: Set(schema_obj.oid.as_schema_id()),
                 name: Set(schema_name.into()),
             };
             let schema = schema.insert(&txn).await?;
@@ -103,12 +103,7 @@ impl CatalogController {
         let owner_id = schema.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            schema.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, schema.database_id, &txn).await?;
         check_schema_name_duplicate(&schema.name, schema.database_id, &txn).await?;
 
         let schema_obj = Self::create_object(
@@ -120,7 +115,7 @@ impl CatalogController {
         )
         .await?;
         let mut schema: schema::ActiveModel = schema.into();
-        schema.schema_id = Set(SchemaId::new(schema_obj.oid as _));
+        schema.schema_id = Set(schema_obj.oid.as_schema_id());
         let schema = schema.insert(&txn).await?;
 
         let updated_user_info =
@@ -151,18 +146,8 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         ensure_user_id(pb_subscription.owner as _, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            pb_subscription.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(
-            ObjectType::Schema,
-            pb_subscription.schema_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, pb_subscription.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_subscription.schema_id, &txn).await?;
         check_subscription_name_duplicate(pb_subscription, &txn).await?;
 
         let obj = Self::create_object(
@@ -173,14 +158,14 @@ impl CatalogController {
             Some(pb_subscription.schema_id),
         )
         .await?;
-        pb_subscription.id = obj.oid as _;
+        pb_subscription.id = obj.oid.as_subscription_id();
         let subscription: subscription::ActiveModel = pb_subscription.clone().into();
         Subscription::insert(subscription).exec(&txn).await?;
 
         // record object dependency.
         ObjectDependency::insert(object_dependency::ActiveModel {
-            oid: Set(pb_subscription.dependent_table_id.as_raw_id() as ObjectId),
-            used_by: Set(pb_subscription.id as _),
+            oid: Set(pb_subscription.dependent_table_id.into()),
+            used_by: Set(pb_subscription.id.into()),
             ..Default::default()
         })
         .exec(&txn)
@@ -197,18 +182,8 @@ impl CatalogController {
         let owner_id = pb_source.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            pb_source.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(
-            ObjectType::Schema,
-            pb_source.schema_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, pb_source.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_source.schema_id, &txn).await?;
         check_relation_name_duplicate(
             &pb_source.name,
             pb_source.database_id,
@@ -273,18 +248,22 @@ impl CatalogController {
             Some(pb_source.schema_id),
         )
         .await?;
-        let source_id = SourceId::new(source_obj.oid as _);
+        let source_id = source_obj.oid.as_source_id();
         pb_source.id = source_id;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
         // add secret and connection dependency
-        let dep_relation_ids = secret_ids.iter().chain(connection_ids.iter());
+        let dep_relation_ids = secret_ids
+            .iter()
+            .copied()
+            .map_into()
+            .chain(connection_ids.iter().copied().map_into());
         if !secret_ids.is_empty() || !connection_ids.is_empty() {
             ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
-                    oid: Set(*id as _),
-                    used_by: Set(source_id.as_raw_id() as _),
+                    oid: Set(id),
+                    used_by: Set(source_id.as_object_id()),
                     ..Default::default()
                 }
             }))
@@ -292,8 +271,7 @@ impl CatalogController {
             .await?;
         }
 
-        let updated_user_info =
-            grant_default_privileges_automatically(&txn, source_id.as_raw_id() as _).await?;
+        let updated_user_info = grant_default_privileges_automatically(&txn, source_id).await?;
 
         txn.commit().await?;
 
@@ -339,18 +317,8 @@ impl CatalogController {
         let owner_id = pb_function.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            pb_function.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(
-            ObjectType::Schema,
-            pb_function.schema_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, pb_function.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_function.schema_id, &txn).await?;
         check_function_signature_duplicate(&pb_function, &txn).await?;
 
         let function_obj = Self::create_object(
@@ -361,7 +329,7 @@ impl CatalogController {
             Some(pb_function.schema_id),
         )
         .await?;
-        pb_function.id = function_obj.oid as _;
+        pb_function.id = function_obj.oid.as_function_id();
         pb_function.created_at_epoch = Some(
             Epoch::from_unix_millis(function_obj.created_at.and_utc().timestamp_millis() as _).0,
         );
@@ -397,21 +365,11 @@ impl CatalogController {
         let owner_id = pb_connection.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            pb_connection.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(
-            ObjectType::Schema,
-            pb_connection.schema_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, pb_connection.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_connection.schema_id, &txn).await?;
         check_connection_name_duplicate(&pb_connection, &txn).await?;
 
-        let mut dep_secrets = HashSet::new();
+        let mut dep_secrets: HashSet<SecretId> = HashSet::new();
         if let Some(ConnectionInfo::ConnectionParams(params)) = &pb_connection.info {
             dep_secrets.extend(
                 params
@@ -429,13 +387,13 @@ impl CatalogController {
             Some(pb_connection.schema_id),
         )
         .await?;
-        pb_connection.id = conn_obj.oid as _;
+        pb_connection.id = conn_obj.oid.as_connection_id();
         let connection: connection::ActiveModel = pb_connection.clone().into();
         Connection::insert(connection).exec(&txn).await?;
 
         for secret_id in dep_secrets {
             ObjectDependency::insert(object_dependency::ActiveModel {
-                oid: Set(secret_id as _),
+                oid: Set(secret_id.as_object_id()),
                 used_by: Set(conn_obj.oid),
                 ..Default::default()
             })
@@ -452,7 +410,7 @@ impl CatalogController {
             report_event(
                 PbTelemetryEventStage::Unspecified,
                 "connection_create",
-                pb_connection.get_id() as _,
+                pb_connection.get_id().as_raw_id() as i64,
                 {
                     pb_connection.info.as_ref().and_then(|info| match info {
                         ConnectionInfo::ConnectionParams(params) => {
@@ -490,18 +448,8 @@ impl CatalogController {
         let owner_id = pb_secret.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            pb_secret.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(
-            ObjectType::Schema,
-            pb_secret.schema_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id, &txn).await?;
         check_secret_name_duplicate(&pb_secret, &txn).await?;
 
         let secret_obj = Self::create_object(
@@ -512,7 +460,7 @@ impl CatalogController {
             Some(pb_secret.schema_id),
         )
         .await?;
-        pb_secret.id = secret_obj.oid as _;
+        pb_secret.id = secret_obj.oid.as_secret_id();
         let secret: secret::ActiveModel = pb_secret.clone().into();
         Secret::insert(secret).exec(&txn).await?;
 
@@ -554,13 +502,11 @@ impl CatalogController {
         let owner_id = pb_view.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(
-            ObjectType::Database,
-            pb_view.database_id.as_raw_id() as _,
-            &txn,
-        )
-        .await?;
-        ensure_object_id(ObjectType::Schema, pb_view.schema_id.as_raw_id() as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_view.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_view.schema_id, &txn).await?;
+        check_relation_name_duplicate(&pb_view.name, pb_view.database_id, pb_view.schema_id, &txn)
+            .await?;
+        ensure_object_id(ObjectType::Schema, pb_view.schema_id, &txn).await?;
         check_relation_name_duplicate(&pb_view.name, pb_view.database_id, pb_view.schema_id, &txn)
             .await?;
 
@@ -572,7 +518,7 @@ impl CatalogController {
             Some(pb_view.schema_id),
         )
         .await?;
-        pb_view.id = view_obj.oid as _;
+        pb_view.id = view_obj.oid.as_view_id();
         let view: view::ActiveModel = pb_view.clone().into();
         View::insert(view).exec(&txn).await?;
 
@@ -616,13 +562,14 @@ impl CatalogController {
         let table_ids = cross_db_snapshot_backfill_info
             .upstream_mv_table_id_to_backfill_epoch
             .keys()
-            .map(|t| t.as_raw_id() as ObjectId)
+            .copied()
+            .map_into()
             .collect_vec();
         let cnt = Subscription::find()
             .select_only()
             .column(subscription::Column::DependentTableId)
             .distinct()
-            .filter(subscription::Column::DependentTableId.is_in(table_ids))
+            .filter(subscription::Column::DependentTableId.is_in::<TableId, _>(table_ids))
             .count(&inner.db)
             .await? as usize;
 

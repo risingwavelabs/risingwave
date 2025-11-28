@@ -34,7 +34,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, MetaConfig};
 use risingwave_common::hash::WorkerSlotMapping;
-use risingwave_common::id::{DatabaseId, JobId, SchemaId, SinkId, WorkerId};
+use risingwave_common::id::{
+    ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, ViewId, WorkerId,
+};
 use risingwave_common::monitor::EndpointExt;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
@@ -64,7 +66,6 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
-use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
@@ -78,7 +79,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::{ActorId, FragmentId};
+use risingwave_pb::id::{ActorId, FragmentId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -92,6 +93,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
@@ -131,8 +133,6 @@ use crate::hummock_meta_client::{
     IcebergCompactionEventItem,
 };
 use crate::meta_rpc_client_method_impl;
-
-type ConnectionId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
@@ -250,9 +250,7 @@ impl MetaClient {
     }
 
     pub async fn drop_secret(&self, secret_id: SecretId) -> Result<WaitVersion> {
-        let request = DropSecretRequest {
-            secret_id: secret_id.into(),
-        };
+        let request = DropSecretRequest { secret_id };
         let resp = self.inner.drop_secret(request).await?;
         Ok(resp
             .version
@@ -648,6 +646,22 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_streaming_job_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> Result<()> {
+        let request = AlterStreamingJobConfigRequest {
+            job_id,
+            entries_to_add,
+            keys_to_remove,
+        };
+
+        self.inner.alter_streaming_job_config(request).await?;
+        Ok(())
+    }
+
     pub async fn alter_fragment_parallelism(
         &self,
         fragment_ids: Vec<FragmentId>,
@@ -708,7 +722,7 @@ impl MetaClient {
 
     pub async fn alter_secret(
         &self,
-        secret_id: u32,
+        secret_id: SecretId,
         secret_name: String,
         database_id: DatabaseId,
         schema_id: SchemaId,
@@ -798,7 +812,7 @@ impl MetaClient {
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropTableRequest {
-            source_id: source_id.map(SourceId::Id),
+            source_id: source_id.map(risingwave_pb::ddl_service::drop_table_request::SourceId::Id),
             table_id,
             cascade,
         };
@@ -821,7 +835,7 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<WaitVersion> {
+    pub async fn drop_view(&self, view_id: ViewId, cascade: bool) -> Result<WaitVersion> {
         let request = DropViewRequest { view_id, cascade };
         let resp = self.inner.drop_view(request).await?;
         Ok(resp
@@ -829,11 +843,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_source(
-        &self,
-        source_id: risingwave_common::id::SourceId,
-        cascade: bool,
-    ) -> Result<WaitVersion> {
+    pub async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<WaitVersion> {
         let request = DropSourceRequest { source_id, cascade };
         let resp = self.inner.drop_source(request).await?;
         Ok(resp
@@ -851,7 +861,7 @@ impl MetaClient {
 
     pub async fn drop_subscription(
         &self,
-        subscription_id: u32,
+        subscription_id: SubscriptionId,
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropSubscriptionRequest {
@@ -865,10 +875,7 @@ impl MetaClient {
     }
 
     pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<WaitVersion> {
-        let request = DropIndexRequest {
-            index_id: index_id.index_id,
-            cascade,
-        };
+        let request = DropIndexRequest { index_id, cascade };
         let resp = self.inner.drop_index(request).await?;
         Ok(resp
             .version
@@ -881,7 +888,7 @@ impl MetaClient {
         cascade: bool,
     ) -> Result<WaitVersion> {
         let request = DropFunctionRequest {
-            function_id: function_id.0,
+            function_id,
             cascade,
         };
         let resp = self.inner.drop_function(request).await?;
@@ -1449,7 +1456,7 @@ impl MetaClient {
         sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: sink_id.as_raw_id(),
@@ -1467,10 +1474,10 @@ impl MetaClient {
         &self,
         table_id: TableId,
         sink_id: SinkId,
-        source_id: risingwave_common::id::SourceId,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: table_id.as_raw_id(),
@@ -1489,10 +1496,10 @@ impl MetaClient {
 
     pub async fn alter_source_connector_props(
         &self,
-        source_id: risingwave_common::id::SourceId,
+        source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         let req = AlterConnectorPropsRequest {
             object_id: source_id.as_raw_id(),
@@ -1744,7 +1751,7 @@ impl MetaClient {
 
     pub async fn add_cdc_auto_schema_change_fail_event(
         &self,
-        source_id: risingwave_common::id::SourceId,
+        source_id: SourceId,
         table_name: String,
         cdc_table_id: String,
         upstream_ddl: String,
@@ -1815,6 +1822,12 @@ impl MetaClient {
         let request = ListCdcProgressRequest {};
         let resp = self.inner.list_cdc_progress(request).await?;
         Ok(resp.cdc_progress)
+    }
+
+    pub async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
+        let request = ListRefreshTableStatesRequest {};
+        let resp = self.inner.list_refresh_table_states(request).await?;
+        Ok(resp.states)
     }
 
     pub async fn create_iceberg_table(
@@ -2468,6 +2481,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
+            ,{ stream_client, list_refresh_table_states, ListRefreshTableStatesRequest, ListRefreshTableStatesResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, get_fragment_vnodes, GetFragmentVnodesRequest, GetFragmentVnodesResponse }
@@ -2480,6 +2494,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_streaming_job_config, AlterStreamingJobConfigRequest, AlterStreamingJobConfigResponse }
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }

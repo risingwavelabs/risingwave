@@ -127,7 +127,7 @@ pub async fn handle_create_aggregate(
     })?;
 
     let function = Function {
-        id: FunctionId::placeholder().0,
+        id: FunctionId::placeholder(),
         schema_id,
         database_id,
         name: function_name,

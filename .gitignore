@@ -91,3 +91,6 @@ e2e_test/iceberg/metastore_db
 # Development Tools
 .direnv/
 book/
+
+# Build caches
+.m2/

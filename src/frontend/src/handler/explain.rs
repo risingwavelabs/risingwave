@@ -232,7 +232,6 @@ pub async fn do_handle_explain(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
                                 session.config().batch_parallelism().0,
-                                session.config().timezone(),
                                 plan.clone(),
                             )?);
                             batch_plan_fragmenter_fmt = if explain_format == ExplainFormat::Dot {

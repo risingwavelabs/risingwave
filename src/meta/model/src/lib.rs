@@ -53,6 +53,7 @@ pub mod iceberg_tables;
 pub mod index;
 pub mod object;
 pub mod object_dependency;
+pub mod refresh_job;
 pub mod schema;
 pub mod secret;
 pub mod serde_seaql_migration;
@@ -72,14 +73,6 @@ pub mod worker_property;
 
 pub type TransactionId = i32;
 
-type RawObjectId = i32;
-pub type ObjectId = RawObjectId;
-pub type SubscriptionId = RawObjectId;
-pub type IndexId = RawObjectId;
-pub type ViewId = RawObjectId;
-pub type FunctionId = RawObjectId;
-pub type ConnectionId = RawObjectId;
-pub type SecretId = RawObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;

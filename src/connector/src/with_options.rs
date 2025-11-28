@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::time::Duration;
 
+use risingwave_pb::id::SecretId;
 use risingwave_pb::secret::PbSecretRef;
 
 use crate::error::ConnectorResult;
@@ -264,12 +265,12 @@ impl WithOptionsSecResolved {
         &mut self,
         update_alter_props: BTreeMap<String, String>,
         update_alter_secret_refs: BTreeMap<String, PbSecretRef>,
-    ) -> ConnectorResult<(Vec<u32>, Vec<u32>)> {
+    ) -> ConnectorResult<(Vec<SecretId>, Vec<SecretId>)> {
         let to_add_secret_dep = update_alter_secret_refs
             .values()
             .map(|new_rely_secret| new_rely_secret.secret_id)
             .collect();
-        let mut to_remove_secret_dep: Vec<u32> = vec![];
+        let mut to_remove_secret_dep: Vec<SecretId> = vec![];
 
         // make sure the key in update_alter_props and update_alter_secret_refs not collide
         for key in update_alter_props.keys() {

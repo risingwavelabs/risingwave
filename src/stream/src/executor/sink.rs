@@ -628,10 +628,24 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     Message::Watermark(w) => yield Message::Watermark(w),
                     Message::Chunk(mut chunk) => {
                         // Compact the chunk to eliminate any unnecessary updates to external systems.
-                        if !skip_compact {
-                            chunk = dispatch_output_kind!(sink_type, KIND, {
-                                compact_chunk_inline::<KIND>(chunk, &stream_key, input_compact_ib)
-                            });
+                        // This should be performed against the downstream pk, not the stream key, to
+                        // ensure correct retract/upsert semantics from the downstream's perspective.
+                        if sink_type != SinkType::AppendOnly
+                            && let Some(downstream_pk) = &downstream_pk
+                        {
+                            if skip_compact {
+                                // We can only skip compaction if the keys are exactly the same, not just
+                                // matching by being a subset.
+                                assert_eq!(&stream_key, downstream_pk);
+                            } else {
+                                chunk = dispatch_output_kind!(sink_type, KIND, {
+                                    compact_chunk_inline::<KIND>(
+                                        chunk,
+                                        downstream_pk,
+                                        input_compact_ib,
+                                    )
+                                });
+                            }
                         }
                         match sink_type {
                             SinkType::AppendOnly => yield Message::Chunk(chunk),

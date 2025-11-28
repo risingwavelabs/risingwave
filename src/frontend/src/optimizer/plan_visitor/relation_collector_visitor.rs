@@ -14,7 +14,7 @@
 
 use std::collections::HashSet;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::id::ObjectId;
 
 use super::{
     BatchPlanVisitor, DefaultBehavior, DefaultValue, LogicalPlanVisitor, StreamPlanVisitor,
@@ -28,11 +28,11 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 /// TODO(rc): maybe we should rename this to `DependencyCollectorVisitor`.
 #[derive(Debug, Clone, Default)]
 pub struct RelationCollectorVisitor {
-    relations: HashSet<TableId>,
+    relations: HashSet<ObjectId>,
 }
 
 impl RelationCollectorVisitor {
-    fn new_with(relations: HashSet<TableId>) -> Self {
+    fn new_with(relations: HashSet<ObjectId>) -> Self {
         Self { relations }
     }
 
@@ -41,9 +41,9 @@ impl RelationCollectorVisitor {
     /// duplicated with the default ones. The collection is necessary, because implicit dependencies
     /// on indices can only be discovered after plan is built.
     pub fn collect_with<C: ConventionMarker>(
-        relations: HashSet<TableId>,
+        relations: HashSet<ObjectId>,
         plan: PlanRef<C>,
-    ) -> HashSet<TableId>
+    ) -> HashSet<ObjectId>
     where
         Self: PlanVisitor<C>,
     {
@@ -63,7 +63,7 @@ impl LogicalPlanVisitor for RelationCollectorVisitor {
     }
 
     fn visit_logical_scan(&mut self, plan: &LogicalScan) {
-        self.relations.insert(plan.table().id);
+        self.relations.insert(plan.table().id.as_object_id());
     }
 }
 
@@ -78,12 +78,13 @@ impl StreamPlanVisitor for RelationCollectorVisitor {
 
     fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) {
         let logical = plan.core();
-        self.relations.insert(logical.table_catalog.id);
+        self.relations
+            .insert(logical.table_catalog.id.as_object_id());
     }
 
     fn visit_stream_source(&mut self, plan: &StreamSource) {
         if let Some(catalog) = plan.source_catalog() {
-            self.relations.insert(catalog.id.as_raw_id().into());
+            self.relations.insert(catalog.id.as_object_id());
         }
     }
 }
@@ -98,12 +99,13 @@ impl BatchPlanVisitor for RelationCollectorVisitor {
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        self.relations.insert(plan.core().table_catalog.id);
+        self.relations
+            .insert(plan.core().table_catalog.id.as_object_id());
     }
 
     fn visit_batch_source(&mut self, plan: &BatchSource) {
         if let Some(catalog) = plan.source_catalog() {
-            self.relations.insert(catalog.id.as_raw_id().into());
+            self.relations.insert(catalog.id.as_object_id());
         }
     }
 }

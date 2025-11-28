@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use chrono::DateTime;
 use itertools::Itertools;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
@@ -24,13 +25,14 @@ use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::ActorId;
-use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
+use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{FragmentId, ObjectId, StreamingParallelism};
+use risingwave_meta_model::{FragmentId, StreamingParallelism};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -54,6 +56,7 @@ pub struct StreamServiceImpl {
     barrier_manager: BarrierManagerRef,
     stream_manager: GlobalStreamManagerRef,
     metadata_manager: MetadataManager,
+    refresh_manager: GlobalRefreshManagerRef,
 }
 
 impl StreamServiceImpl {
@@ -63,6 +66,7 @@ impl StreamServiceImpl {
         barrier_manager: BarrierManagerRef,
         stream_manager: GlobalStreamManagerRef,
         metadata_manager: MetadataManager,
+        refresh_manager: GlobalRefreshManagerRef,
     ) -> Self {
         StreamServiceImpl {
             env,
@@ -70,6 +74,7 @@ impl StreamServiceImpl {
             barrier_manager,
             stream_manager,
             metadata_manager,
+            refresh_manager,
         }
     }
 }
@@ -84,6 +89,30 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(FlushResponse {
             status: None,
             hummock_version_id: version_id.to_u64(),
+        }))
+    }
+
+    async fn list_refresh_table_states(
+        &self,
+        _request: Request<ListRefreshTableStatesRequest>,
+    ) -> TonicResponse<ListRefreshTableStatesResponse> {
+        let refresh_jobs = self.metadata_manager.list_refresh_jobs().await?;
+        let refresh_table_states = refresh_jobs
+            .into_iter()
+            .map(|job| RefreshTableState {
+                table_id: job.table_id,
+                current_status: job.current_status.to_string(),
+                last_trigger_time: job
+                    .last_trigger_time
+                    .map(|time| DateTime::from_timestamp_millis(time).unwrap().to_string()),
+                trigger_interval_secs: job.trigger_interval_secs,
+                last_success_time: job
+                    .last_success_time
+                    .map(|time| DateTime::from_timestamp_millis(time).unwrap().to_string()),
+            })
+            .collect();
+        Ok(Response::new(ListRefreshTableStatesResponse {
+            states: refresh_table_states,
         }))
     }
 
@@ -147,19 +176,19 @@ impl StreamManagerService for StreamServiceImpl {
             }
         };
 
-        let request_id = if request.kind() == ThrottleTarget::Fragment {
+        let job_id = if request.kind() == ThrottleTarget::Fragment {
             self.metadata_manager
                 .catalog_controller
                 .get_fragment_streaming_job_id(request.id.into())
                 .await?
         } else {
-            request.id as _
+            request.id.into()
         };
 
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(request_id as ObjectId)
+            .get_object_database_id(job_id)
             .await?;
         // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
@@ -194,7 +223,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .find_creating_streaming_job_ids(infos.infos)
                 .await?
                 .into_iter()
-                .map(|id| JobId::new(id as _))
+                .map(|id| id.as_job_id())
                 .collect(),
             Jobs::Ids(jobs) => jobs.job_ids,
         };
@@ -485,7 +514,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .chain(source_fragments.values().flatten().copied())
                 .collect();
 
-            let guard = self.env.shared_actor_info.read_guard();
+            let guard = self.env.shared_actor_infos().read_guard();
             guard
                 .iter_over_fragments()
                 .filter(|(frag_id, _)| all_fragment_ids.contains(frag_id))
@@ -587,14 +616,9 @@ impl StreamManagerService for StreamServiceImpl {
 
         tracing::info!("Refreshing table with id: {}", req.table_id);
 
-        // Create refresh manager and execute refresh
-        let refresh_manager = risingwave_meta::stream::RefreshManager::new(
-            self.metadata_manager.clone(),
-            self.barrier_scheduler.clone(),
-        );
-
-        let response = refresh_manager
-            .refresh_table(req, self.env.shared_actor_infos())
+        let response = self
+            .refresh_manager
+            .trigger_manual_refresh(req, self.env.shared_actor_infos())
             .await?;
 
         Ok(Response::new(response))
@@ -615,7 +639,7 @@ impl StreamManagerService for StreamServiceImpl {
                             request.changed_props.clone().into_iter().collect(),
                         )
                         .await?,
-                    request.object_id,
+                    request.object_id.into(),
                 ),
                 Ok(AlterConnectorPropsObject::IcebergTable) => {
                     let (prop, sink_id) = self
@@ -626,7 +650,7 @@ impl StreamManagerService for StreamServiceImpl {
                             request.extra_options,
                         )
                         .await?;
-                    (prop, sink_id.as_raw_id())
+                    (prop, sink_id.as_object_id())
                 }
 
                 Ok(AlterConnectorPropsObject::Source) => {
@@ -658,7 +682,7 @@ impl StreamManagerService for StreamServiceImpl {
                             .map_err(MetaError::from)?
                             .into_iter()
                             .collect(),
-                        request.object_id,
+                        request.object_id.into(),
                     )
                 }
 
@@ -673,7 +697,7 @@ impl StreamManagerService for StreamServiceImpl {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(object_id as ObjectId)
+            .get_object_database_id(object_id)
             .await?;
 
         let mut mutation = HashMap::default();

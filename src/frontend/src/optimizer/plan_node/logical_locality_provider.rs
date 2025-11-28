@@ -127,8 +127,15 @@ impl ToStream for LogicalLocalityProvider {
         use super::StreamLocalityProvider;
 
         let input = self.input().to_stream(ctx)?;
+        // Use `shard_by_exact_key` instead of `shard_by_key`, because locality provider will change the `stream_key` to include locality columns.
+        // If we use `shard_by_key`, it is possible that the locality columns are (`a`, `b`), but input stream key is only (`a`).
+        // In this case, `shard_by_key` will only shuffle by `a`. once `b` is changed, we will meet  U- and U+ should have same stream key error.
+        // Though we can let locality provider stream key to include its distribution columns only to fix the error,
+        // using `shard_by_exact_key` for another reason that it can provide better locality by `shard_by_key`.
+        // For example, if locality columns are (`a`, `b`), and we use `shard_by_key` with key (`b`),
+        // then all data with same `a` but different b will be shuffled to different nodes, which hurts locality.
         let required_dist =
-            RequiredDist::shard_by_key(self.input().schema().len(), self.locality_columns());
+            RequiredDist::shard_by_exact_key(self.input().schema().len(), self.locality_columns());
         let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
         let input = if input.as_stream_exchange().is_none() {
             // Force a no shuffle exchange to ensure locality provider is in its own fragment.

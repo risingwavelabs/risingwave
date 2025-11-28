@@ -14,7 +14,6 @@
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::id::JobId;
-use risingwave_meta_model::table::RefreshState;
 
 use super::*;
 use crate::controller::utils::{
@@ -33,7 +32,11 @@ impl CatalogController {
         Ok(ObjectModel(secret, obj.unwrap()).into())
     }
 
-    pub async fn get_object_database_id(&self, object_id: ObjectId) -> MetaResult<DatabaseId> {
+    pub async fn get_object_database_id(
+        &self,
+        object_id: impl Into<ObjectId>,
+    ) -> MetaResult<DatabaseId> {
+        let object_id = object_id.into();
         let inner = self.inner.read().await;
         let (database_id,): (Option<DatabaseId>,) = Object::find_by_id(object_id)
             .select_only()
@@ -213,24 +216,6 @@ impl CatalogController {
             .into_iter()
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
             .collect())
-    }
-
-    /// Get the refresh state of a table
-    pub async fn get_table_refresh_state(
-        &self,
-        table_id: TableId,
-    ) -> MetaResult<Option<RefreshState>> {
-        let inner = self.inner.read().await;
-        let (refresh_state,): (Option<RefreshState>,) = Table::find_by_id(table_id)
-            .select_only()
-            .select_column(table::Column::RefreshState)
-            .into_tuple()
-            .one(&inner.db)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
-
-        // Default to IDLE if not set (for backward compatibility)
-        Ok(Some(refresh_state.unwrap_or(RefreshState::Idle)))
     }
 
     pub async fn get_sink_by_id(&self, sink_id: SinkId) -> MetaResult<Option<PbSink>> {
@@ -523,9 +508,9 @@ impl CatalogController {
     pub async fn get_fragment_streaming_job_id(
         &self,
         fragment_id: FragmentId,
-    ) -> MetaResult<ObjectId> {
+    ) -> MetaResult<JobId> {
         let inner = self.inner.read().await;
-        let job_id: ObjectId = Fragment::find_by_id(fragment_id)
+        let job_id: JobId = Fragment::find_by_id(fragment_id)
             .select_only()
             .column(fragment::Column::JobId)
             .into_tuple()

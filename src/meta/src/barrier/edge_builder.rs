@@ -18,6 +18,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
+use risingwave_pb::id::SubscriberId;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use tracing::warn;
@@ -51,7 +52,7 @@ impl FragmentEdgeBuildResult {
                 FragmentId,
                 &StreamNode,
                 impl Iterator<Item = (&StreamActor, WorkerId)>,
-                impl IntoIterator<Item = u32>,
+                impl IntoIterator<Item = SubscriberId>,
             ),
         >,
     ) -> StreamJobActorsToCreate {

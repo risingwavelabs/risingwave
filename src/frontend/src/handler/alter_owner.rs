@@ -17,7 +17,6 @@ use std::sync::Arc;
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
 use risingwave_common::id::SchemaId;
-use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -113,7 +112,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&view.owner)?;
-                    Object::ViewId(view.id)
+                    view.id.into()
                 }
                 StatementType::ALTER_SOURCE => {
                     let (source, schema_name) =
@@ -161,7 +160,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&subscription.owner())?;
-                    Object::SubscriptionId(subscription.id.subscription_id)
+                    subscription.id.into()
                 }
                 StatementType::ALTER_DATABASE => {
                     let database = catalog_reader.get_database_by_name(&obj_name.real_value())?;
@@ -193,7 +192,7 @@ pub async fn handle_alter_owner(
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
                     check_owned_by_admin(&connection.owner)?;
-                    Object::ConnectionId(connection.id)
+                    connection.id.into()
                 }
                 _ => unreachable!(),
             },

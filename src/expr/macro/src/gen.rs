@@ -454,12 +454,24 @@ impl FunctionAttr {
         };
         // now the `output` is: Option<impl ScalarRef or Scalar>
         let append_output = match user_fn.writer_type_kind {
-            Some(WriterTypeKind::FmtWrite) | Some(WriterTypeKind::IoWrite) => quote! {{
+            Some(WriterTypeKind::FmtWrite)
+            | Some(WriterTypeKind::IoWrite)
+            | Some(WriterTypeKind::ListWrite) => quote! {{
                 let mut writer = builder.writer();
                 if #output.is_some() {
                     writer.finish();
                 } else {
-                    drop(writer);
+                    writer.rollback();
+                    builder.append_null();
+                }
+            }},
+            Some(WriterTypeKind::JsonbbBuilder) => quote! {{
+                let mut writer_wrapper = builder.writer();
+                let mut writer = writer_wrapper.inner();
+                if #output.is_some() {
+                    writer_wrapper.finish();
+                } else {
+                    writer_wrapper.rollback();
                     builder.append_null();
                 }
             }},
@@ -480,6 +492,19 @@ impl FunctionAttr {
             Some(WriterTypeKind::IoWrite) => quote! {{
                 let mut writer = Vec::new();
                 #output.map(|_| writer.into())
+            }},
+            Some(WriterTypeKind::JsonbbBuilder) => quote! {{
+                let mut writer = jsonbb::Builder::<Vec<u8>>::new();
+                #output.map(|_| JsonbVal::from(writer.finish()).into())
+            }},
+            Some(WriterTypeKind::ListWrite) => quote! {{
+                let mut writer = {
+                    let DataType::List(list_ty) = &self.context.return_type else {
+                        panic!("data type must be DataType::List");
+                    };
+                    list_ty.elem().create_array_builder(1)
+                };
+                #output.map(|_| ListValue::new(writer.finish()).into())
             }},
             None if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 #output.map(|s| s.as_ref().into())

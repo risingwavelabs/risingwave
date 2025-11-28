@@ -34,7 +34,6 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_connector::sink::catalog::SinkType;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
@@ -174,9 +173,7 @@ impl BuildingFragment {
                     && let Some(source) = table_source
                 {
                     node_inner.source_id = source.id;
-                    if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
-                        source.optional_associated_table_id
-                    {
+                    if let Some(id) = source.optional_associated_table_id {
                         node_inner.associated_table_id = Some(id.into());
                     }
                 }
@@ -191,9 +188,7 @@ impl BuildingFragment {
                         {
                             debug_assert_ne!(source.id, job_id.as_raw_id());
                             source_inner.source_id = source.id;
-                            if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
-                                source.optional_associated_table_id
-                            {
+                            if let Some(id) = source.optional_associated_table_id {
                                 source_inner.associated_table_id = Some(id.into());
                             }
                         }
@@ -203,9 +198,7 @@ impl BuildingFragment {
                         if let Some(source_inner) = source_node.source_inner.as_mut() {
                             debug_assert_eq!(source.id, job_id.as_raw_id());
                             source_inner.source_id = source.id;
-                            if let Some(OptionalAssociatedTableId::AssociatedTableId(id)) =
-                                source.optional_associated_table_id
-                            {
+                            if let Some(id) = source.optional_associated_table_id {
                                 source_inner.associated_table_id = Some(id.into());
                             }
                         }
@@ -398,6 +391,7 @@ fn clone_fragment(
                 vnode_bitmap: actor.vnode_bitmap.clone(),
                 mview_definition: actor.mview_definition.clone(),
                 expr_context: actor.expr_context.clone(),
+                config_override: actor.config_override.clone(),
             })
             .collect(),
         state_table_ids: fragment.state_table_ids.clone(),
@@ -780,13 +774,13 @@ impl StreamFragmentGraph {
 
     /// Refill the internal tables' `table_id`s according to the given map, typically obtained from
     /// `create_internal_table_catalog`.
-    pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<TableId, u32>) {
+    pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<TableId, TableId>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
                     let target = table_id_map.get(&table.id).cloned().unwrap();
-                    table.id = target.into();
+                    table.id = target;
                 },
             );
         }
@@ -1108,6 +1102,14 @@ impl StreamFragmentGraph {
                 .entry(fragment_id)
                 .or_default()
                 .extend(downstream_fragments);
+        }
+
+        // Deduplicate downstream entries per fragment; overlaps are common when the same fragment
+        // is reached via multiple paths (e.g., with StreamShare) and would otherwise appear
+        // multiple times.
+        for downstream in fragment_ordering.values_mut() {
+            let mut seen = HashSet::new();
+            downstream.retain(|id| seen.insert(*id));
         }
 
         fragment_ordering

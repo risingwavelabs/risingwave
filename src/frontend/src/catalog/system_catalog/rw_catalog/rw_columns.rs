@@ -62,7 +62,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(|(index, column)| RwColumn {
-                relation_id: view.id as i32,
+                relation_id: view.id.as_i32_id(),
                 name: column.name.clone(),
                 position: index as i32 + 1,
                 is_hidden: false,
@@ -83,7 +83,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(|(index, column)| RwColumn {
-                relation_id: sink.id.as_raw_id() as i32,
+                relation_id: sink.id.as_i32_id(),
                 name: column.name().into(),
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,
@@ -107,7 +107,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(move |(index, column)| RwColumn {
-                relation_id: table.id.as_raw_id() as i32,
+                relation_id: table.id.as_i32_id(),
                 name: column.name().into(),
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,
@@ -132,7 +132,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 .iter()
                 .enumerate()
                 .map(move |(index, column)| RwColumn {
-                    relation_id: table.id.as_raw_id() as i32,
+                    relation_id: table.id.as_i32_id(),
                     name: column.name().into(),
                     position: index as i32 + 1,
                     is_hidden: column.is_hidden,
@@ -164,7 +164,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 .iter()
                 .enumerate()
                 .map(move |(index, column)| RwColumn {
-                    relation_id: source.id.as_raw_id() as i32,
+                    relation_id: source.id.as_i32_id(),
                     name: column.name().into(),
                     position: index as i32 + 1,
                     is_hidden: column.is_hidden,

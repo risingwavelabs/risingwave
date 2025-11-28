@@ -544,7 +544,7 @@
 - id: create_correlated_tables_with_column_value_index
   sql: |
     create table items (id int primary key, name string, unindexed timestamptz, embedding vector(3)) append only;
-    create table events (event_id int primary key, time timestamp, embedding vector(3));
+    create table events (event_id int primary key, time timestamp, embedding vector(3)) append only;
     create index i on items using flat (embedding) include (name) with (distance_type = 'l2');
 - id: correlated_read_without_embedding
   before:
@@ -609,3 +609,66 @@
     └─BatchProject { exprs: [events.event_id, vector_info, events.time] }
       └─BatchVectorSearch { top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding, lookup_output: [("items.id", Int32), ("name", Varchar)], include_distance: true }
         └─BatchScan { table: events, columns: [events.event_id, events.time, events.embedding], distribution: UpstreamHashShard(events.event_id) }
+- id: correlated_read_without_embedding
+  before:
+  - create_correlated_tables_with_column_value_index
+  sql: |
+    select
+      event_id, array(
+        select row(name)
+        from (select name from items FOR SYSTEM_TIME AS OF PROCTIME() order by events.embedding <-> items.embedding limit 3)
+      ) as related_info,
+      time
+    from events;
+  logical_plan: |-
+    LogicalProject { exprs: [events.event_id, $expr3, events.time] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(StructType { fields: [("f1", Varchar)] }))) as $expr3] }
+        └─LogicalAgg { aggs: [array_agg($expr2)] }
+          └─LogicalProject { exprs: [Row(items.name) as $expr2] }
+            └─LogicalProject { exprs: [items.name] }
+              └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
+                └─LogicalProject { exprs: [items.name, L2Distance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
+                  └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [events.event_id, array, events.time] }
+    └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.name:Varchar], include_distance: false }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [event_id, related_info, time], stream_key: [event_id], pk_columns: [event_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [events.event_id, vector_info, events.time] }
+      └─StreamVectorIndexLookupJoin { top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding, lookup_output: [("name", Varchar)], include_distance: false, as_of: ProcessTime }
+        └─StreamTableScan { table: events, columns: [events.event_id, events.time, events.embedding], stream_scan_type: ArrangementBackfill, stream_key: [events.event_id], pk: [event_id], dist: UpstreamHashShard(events.event_id) }
+- id: correlated_read_without_embedding
+  before:
+  - create_correlated_tables_with_column_value_index
+  sql: |
+    select
+      event_id, array(
+        select row(id, name, distance)
+        from (select id, name, events.embedding <-> items.embedding as distance from items FOR SYSTEM_TIME AS OF PROCTIME() order by distance limit 3)
+      ) as related_info,
+      time
+    from events;
+  logical_plan: |-
+    LogicalProject { exprs: [events.event_id, $expr3, events.time] }
+    └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding, events._rw_timestamp] }
+      └─LogicalProject { exprs: [Coalesce(array_agg($expr2), ARRAY[]:List(Struct(StructType { fields: [("f1", Int32), ("f2", Varchar), ("f3", Float64)] }))) as $expr3] }
+        └─LogicalAgg { aggs: [array_agg($expr2)] }
+          └─LogicalProject { exprs: [Row(items.id, items.name, $expr1) as $expr2] }
+            └─LogicalTopN { order: [$expr1 ASC], limit: 3, offset: 0 }
+              └─LogicalProject { exprs: [items.id, items.name, L2Distance(CorrelatedInputRef { index: 2, correlated_id: 1 }, items.embedding) as $expr1] }
+                └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [events.event_id, array, events.time] }
+    └─LogicalVectorSearchLookupJoin { distance_type: L2Sqr, top_n: 3, input_vector: events.embedding:Vector(3), lookup_vector: items.embedding, lookup_output_columns: [items.id:Int32, items.name:Varchar], include_distance: true }
+      ├─LogicalScan { table: events, columns: [events.event_id, events.time, events.embedding] }
+      └─LogicalScan { table: items, columns: [items.id, items.name, items.unindexed, items.embedding, items._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [event_id, related_info, time], stream_key: [event_id], pk_columns: [event_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [events.event_id, vector_info, events.time] }
+      └─StreamVectorIndexLookupJoin { top_n: 3, distance_type: L2Sqr, index_name: "i", vector: events.embedding, lookup_output: [("items.id", Int32), ("name", Varchar)], include_distance: true, as_of: ProcessTime }
+        └─StreamTableScan { table: events, columns: [events.event_id, events.time, events.embedding], stream_scan_type: ArrangementBackfill, stream_key: [events.event_id], pk: [event_id], dist: UpstreamHashShard(events.event_id) }

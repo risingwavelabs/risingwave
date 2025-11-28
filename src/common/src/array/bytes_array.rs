@@ -269,6 +269,13 @@ impl BytesWriter<'_> {
         self.builder.finish_partial();
         let _ = ManuallyDrop::new(self); // Prevent drop
     }
+
+    /// `rollback` will be called while the entire record is abandoned.
+    /// The partial data was cleaned and the `builder` can be safely used.
+    pub fn rollback(self) {
+        self.builder.rollback_partial();
+        let _ = ManuallyDrop::new(self); // Prevent drop
+    }
 }
 
 impl Write for BytesWriter<'_> {
@@ -289,7 +296,8 @@ impl Write for BytesWriter<'_> {
 
 impl Drop for BytesWriter<'_> {
     fn drop(&mut self) {
-        // If `finish` is not called, we should rollback the data.
+        // If the writer is dropped without calling `finish` or `rollback`,
+        // we rollback the partial data by default.
         self.builder.rollback_partial();
     }
 }

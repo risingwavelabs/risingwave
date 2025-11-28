@@ -83,6 +83,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
         }
         Connection {
+            id: ConnectionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
@@ -90,10 +91,12 @@ for_all_wrapped_id_fields! (
             id: DatabaseId,
         }
         Function {
+            id: FunctionId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
         Index {
+            id: IndexId,
             index_table_id: TableId,
             primary_table_id: TableId,
             schema_id: SchemaId,
@@ -104,6 +107,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
         }
         Secret {
+            id: SecretId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
@@ -113,13 +117,22 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             target_table: TableId,
             auto_refresh_schema_from_table: TableId,
+            connection_id: ConnectionId,
+        }
+        SinkFormatDesc {
+            connection_id: ConnectionId,
         }
         Source {
             id: SourceId,
             schema_id: SchemaId,
             database_id: DatabaseId,
+            connection_id: ConnectionId,
+        }
+        StreamSourceInfo {
+            connection_id: ConnectionId,
         }
         Subscription {
+            id: SubscriptionId,
             dependent_table_id: TableId,
             schema_id: SchemaId,
             database_id: DatabaseId,
@@ -134,6 +147,7 @@ for_all_wrapped_id_fields! (
             dml_fragment_id: FragmentId,
         }
         View {
+            id: ViewId,
             schema_id: SchemaId,
             database_id: DatabaseId,
         }
@@ -173,9 +187,17 @@ for_all_wrapped_id_fields! (
         AlterSecretRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
+            secret_id: SecretId,
         }
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
+        }
+        AlterStreamingJobConfigRequest {
+            job_id: JobId,
+        }
+        AlterSwapRenameRequest.ObjectNameSwapPair {
+            src_object_id: ObjectId,
+            dst_object_id: ObjectId,
         }
         CompactIcebergTableRequest {
             sink_id: SinkId,
@@ -184,12 +206,33 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             schema_id: SchemaId,
         }
+        CreateMaterializedViewRequest {
+            dependencies: ObjectId,
+        }
         CreateSecretRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
         }
+        CreateSinkRequest {
+            dependencies: ObjectId,
+        }
+        CreateTableRequest {
+            dependencies: ObjectId,
+        }
+        CreateViewRequest {
+            dependencies: ObjectId,
+        }
+        DropConnectionRequest {
+            connection_id: ConnectionId,
+        }
         DropDatabaseRequest {
             database_id: DatabaseId,
+        }
+        DropFunctionRequest {
+            function_id: FunctionId,
+        }
+        DropIndexRequest {
+            index_id: IndexId,
         }
         DropMaterializedViewRequest {
             table_id: TableId,
@@ -197,14 +240,23 @@ for_all_wrapped_id_fields! (
         DropSchemaRequest {
             schema_id: SchemaId,
         }
+        DropSecretRequest {
+            secret_id: SecretId,
+        }
         DropSinkRequest {
             sink_id: SinkId,
         }
         DropSourceRequest {
             source_id: SourceId,
         }
+        DropSubscriptionRequest {
+            subscription_id: SubscriptionId,
+        }
         DropTableRequest {
             table_id: TableId,
+        }
+        DropViewRequest {
+            view_id: ViewId,
         }
         ExpireIcebergTableSnapshotsRequest {
             sink_id: SinkId,
@@ -319,6 +371,9 @@ for_all_wrapped_id_fields! (
         AddWorkerNodeResponse {
             node_id: WorkerId,
         }
+        AlterConnectorPropsRequest {
+            connector_conn_ref: ConnectionId,
+        }
         AlterConnectorPropsRequest.AlterIcebergTableIds {
             sink_id: SinkId,
             source_id: SourceId,
@@ -414,9 +469,16 @@ for_all_wrapped_id_fields! (
         ListCdcProgressResponse {
             cdc_progress: JobId,
         }
+        ListObjectDependenciesResponse.ObjectDependencies {
+            object_id: ObjectId,
+            referenced_object_id: ObjectId,
+        }
         ListRateLimitsResponse.RateLimitInfo {
             job_id: JobId,
             fragment_id: FragmentId,
+        }
+        ListRefreshTableStatesResponse.RefreshTableState {
+            table_id: TableId,
         }
         ListStreamingJobStatesResponse.StreamingJobState {
             table_id: JobId,
@@ -494,6 +556,11 @@ for_all_wrapped_id_fields! (
     recursive {
         ComplexRecursiveMessage {
             node_id: WorkerId,
+        }
+    }
+    secret {
+        SecretRef {
+            secret_id: SecretId,
         }
     }
     source {
@@ -593,6 +660,7 @@ for_all_wrapped_id_fields! (
             associated_table_id: TableId,
         }
         SubscriptionUpstreamInfo {
+            subscriber_id: SubscriberId,
             upstream_mv_table_id: TableId,
         }
         ThrottleMutation {
@@ -623,6 +691,9 @@ for_all_wrapped_id_fields! (
         UpstreamSinkInfo {
             upstream_fragment_id: FragmentId,
         }
+        VectorIndexLookupJoinNode {
+            table_id: TableId,
+        }
     }
     stream_service {
         BarrierCompleteResponse {
@@ -641,6 +712,7 @@ for_all_wrapped_id_fields! (
         }
         BarrierCompleteResponse.CreateMviewProgress {
             backfill_actor_id: ActorId,
+            fragment_id: FragmentId,
         }
         BarrierCompleteResponse.ListFinishedSource {
             reporter_actor_id: ActorId,
@@ -663,6 +735,7 @@ for_all_wrapped_id_fields! (
         InjectBarrierRequest.BuildActorInfo {
             fragment_upstreams: FragmentId,
             actor_id: ActorId,
+            initial_subscriber_ids: SubscriberId,
         }
         InjectBarrierRequest.FragmentBuildActorInfo {
             fragment_id: FragmentId,
@@ -861,6 +934,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.locality_provider")
         .boxed(".stream_plan.StreamNode.node_body.eowc_gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.gap_fill")
+        .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // Eq + Hash are for plan nodes to do common sub-plan detection.
@@ -919,7 +993,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.SourceRefreshMode", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.SourceRefreshMode.refresh_mode", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeStreaming", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullRecompute", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullReload", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalCollectionName",
             "#[derive(Eq, Hash)]",

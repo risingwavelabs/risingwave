@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::array::StructValue;
 use risingwave_common::row::Row;
 use risingwave_common::types::{
     DataType, ListRef, MapRef, MapType, MapValue, ScalarRef, ScalarRefImpl, ToOwnedDatum,
 };
-use risingwave_expr::expr::Context;
 use risingwave_expr::{ExprError, function};
 
 use super::array_positions::array_position;
 
 #[function("array(...) -> anyarray", type_infer = "unreachable")]
-fn array(row: impl Row, ctx: &Context) -> ListValue {
-    ListValue::from_datum_iter(ctx.return_type.as_list_elem(), row.iter())
+fn array(row: impl Row, writer: &mut impl risingwave_common::array::ListWrite) {
+    writer.write_iter(row.iter());
 }
 
 #[function("row(...) -> struct", type_infer = "unreachable")]
@@ -202,11 +201,11 @@ fn map_length<T: TryFrom<usize>>(map: MapRef<'_>) -> Result<T, ExprError> {
 /// {a:1,b:3.0,c:4.0}
 /// ```
 #[function("map_cat(anymap, anymap) -> anymap")]
-fn map_cat(m1: Option<MapRef<'_>>, m2: Option<MapRef<'_>>) -> Result<Option<MapValue>, ExprError> {
+fn map_cat(m1: Option<MapRef<'_>>, m2: Option<MapRef<'_>>) -> Option<MapValue> {
     match (m1, m2) {
-        (None, None) => Ok(None),
-        (Some(m), None) | (None, Some(m)) => Ok(Some(m.to_owned_scalar())),
-        (Some(m1), Some(m2)) => Ok(Some(MapValue::concat(m1, m2))),
+        (None, None) => None,
+        (Some(m), None) | (None, Some(m)) => Some(m.to_owned_scalar()),
+        (Some(m1), Some(m2)) => Some(MapValue::concat(m1, m2)),
     }
 }
 
@@ -278,8 +277,8 @@ fn map_delete(map: MapRef<'_>, key: Option<ScalarRefImpl<'_>>) -> MapValue {
         Ok(DataType::list(args[0].as_map().key().clone()))
     }"
 )]
-fn map_keys(map: MapRef<'_>) -> ListValue {
-    map.into_kv().0.to_owned_scalar()
+fn map_keys(map: MapRef<'_>, writer: &mut impl risingwave_common::array::ListWrite) {
+    writer.write_iter(map.into_kv().0.iter());
 }
 
 /// # Example
@@ -296,8 +295,8 @@ fn map_keys(map: MapRef<'_>) -> ListValue {
         Ok(DataType::list(args[0].as_map().value().clone()))
     }"
 )]
-fn map_values(map: MapRef<'_>) -> ListValue {
-    map.into_kv().1.to_owned_scalar()
+fn map_values(map: MapRef<'_>, writer: &mut impl risingwave_common::array::ListWrite) {
+    writer.write_iter(map.into_kv().1.iter());
 }
 
 /// # Example
@@ -314,8 +313,8 @@ fn map_values(map: MapRef<'_>) -> ListValue {
         Ok(args[0].as_map().clone().into_list())
     }"
 )]
-fn map_entries(map: MapRef<'_>) -> ListValue {
-    map.into_inner().to_owned_scalar()
+fn map_entries(map: MapRef<'_>, writer: &mut impl risingwave_common::array::ListWrite) {
+    writer.write_iter(map.into_inner().iter());
 }
 
 #[cfg(test)]

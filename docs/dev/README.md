@@ -12,7 +12,7 @@ Edit `SUMMARY.md` to add new chapters.
 
 ```sh
 # install tools
-> cargo install mdbook mdbook-linkcheck mdbook-toc
+> cargo install mdbook mdbook-toc mdbook-linkcheck2
 # start a web server on localhost that you can visit to view the book,
 # and it will automatically reload each time you edit a page.
 > mdbook serve --open

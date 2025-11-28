@@ -252,7 +252,10 @@ impl StreamMaterialize {
             Distribution::Single => RequiredDist::single(),
             _ => match table_type {
                 TableType::Table => {
-                    assert_matches!(user_distributed_by, RequiredDist::ShardByKey(_));
+                    assert_matches!(
+                        user_distributed_by,
+                        RequiredDist::ShardByKey(_) | RequiredDist::ShardByExactKey(_)
+                    );
                     user_distributed_by
                 }
                 TableType::MaterializedView => {

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::{ScalarRef, ScalarRefImpl};
+use risingwave_common::array::ListRef;
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::expr::Context;
 use risingwave_expr::function;
 
@@ -92,41 +92,48 @@ fn array_cat(
     left: Option<ListRef<'_>>,
     right: Option<ListRef<'_>>,
     ctx: &Context,
-) -> Option<ListValue> {
-    Some(if ctx.arg_types[0] == ctx.arg_types[1] {
+    writer: &mut impl risingwave_common::array::ListWrite,
+) -> Option<()> {
+    if ctx.arg_types[0] == ctx.arg_types[1] {
         // array || array
-        let (Some(left), Some(right)) = (left, right) else {
-            return left.or(right).map(|list| list.to_owned_scalar());
-        };
-        ListValue::from_datum_iter(
-            ctx.arg_types[0].as_list_elem(),
-            left.iter().chain(right.iter()),
-        )
+        if left.is_none() && right.is_none() {
+            return None;
+        }
+
+        if let Some(left) = left {
+            writer.write_iter(left.iter());
+        }
+        if let Some(right) = right {
+            writer.write_iter(right.iter());
+        }
     } else if ctx.arg_types[0].as_list_elem() == &ctx.arg_types[1] {
         // array[] || array
-        let Some(right) = right else {
-            return left.map(|left| left.to_owned_scalar());
-        };
-        ListValue::from_datum_iter(
-            &ctx.arg_types[1],
-            left.iter()
-                .flat_map(|list| list.iter())
-                .chain([Some(right.into())]),
-        )
+        if left.is_none() && right.is_none() {
+            return None;
+        }
+
+        if let Some(left) = left {
+            writer.write_iter(left.iter());
+        }
+        if let Some(right) = right {
+            writer.write(Some(ScalarRefImpl::from(right)));
+        }
     } else if &ctx.arg_types[0] == ctx.arg_types[1].as_list_elem() {
         // array || array[]
-        let Some(left) = left else {
-            return right.map(|right| right.to_owned_scalar());
-        };
-        ListValue::from_datum_iter(
-            &ctx.arg_types[0],
-            [Some(left.into())]
-                .into_iter()
-                .chain(right.iter().flat_map(|list| list.iter())),
-        )
+        if left.is_none() && right.is_none() {
+            return None;
+        }
+
+        if let Some(left) = left {
+            writer.write(Some(ScalarRefImpl::from(left)));
+        }
+        if let Some(right) = right {
+            writer.write_iter(right.iter());
+        }
     } else {
         unreachable!()
-    })
+    }
+    Some(())
 }
 
 /// Appends a value as the back element of an array.
@@ -159,14 +166,10 @@ fn array_cat(
 fn array_append(
     left: Option<ListRef<'_>>,
     right: Option<ScalarRefImpl<'_>>,
-    ctx: &Context,
-) -> ListValue {
-    ListValue::from_datum_iter(
-        &ctx.arg_types[1],
-        left.iter()
-            .flat_map(|list| list.iter())
-            .chain(std::iter::once(right)),
-    )
+    writer: &mut impl risingwave_common::array::ListWrite,
+) {
+    writer.write_iter(left.iter().flat_map(|list| list.iter()));
+    writer.write(right);
 }
 
 /// Prepends a value as the front element of an array.
@@ -199,10 +202,8 @@ fn array_append(
 fn array_prepend(
     left: Option<ScalarRefImpl<'_>>,
     right: Option<ListRef<'_>>,
-    ctx: &Context,
-) -> ListValue {
-    ListValue::from_datum_iter(
-        &ctx.arg_types[0],
-        std::iter::once(left).chain(right.iter().flat_map(|list| list.iter())),
-    )
+    writer: &mut impl risingwave_common::array::ListWrite,
+) {
+    writer.write(left);
+    writer.write_iter(right.iter().flat_map(|list| list.iter()));
 }

@@ -54,7 +54,7 @@ pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
-pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
+pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue, ListWrite, ListWriter};
 pub use map_array::{MapArray, MapArrayBuilder, MapRef, MapValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};

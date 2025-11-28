@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::{AddAssign, Deref};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
@@ -26,6 +27,7 @@ use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
+use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -163,6 +165,8 @@ pub struct StreamActor {
     pub vnode_bitmap: Option<Bitmap>,
     pub mview_definition: String,
     pub expr_context: Option<PbExprContext>,
+    // TODO: shall we merge `config_override` with `expr_context` to be a `StreamContext`?
+    pub config_override: Arc<str>,
 }
 
 impl StreamActor {
@@ -177,6 +181,7 @@ impl StreamActor {
                 .map(|bitmap| bitmap.to_protobuf()),
             mview_definition: self.mview_definition.clone(),
             expr_context: self.expr_context.clone(),
+            config_override: self.config_override.to_string(),
         }
     }
 }
@@ -277,12 +282,16 @@ pub struct StreamJobFragments {
 pub struct StreamContext {
     /// The timezone used to interpret timestamps and dates for conversion
     pub timezone: Option<String>,
+
+    /// The partial config of this job to override the global config.
+    pub config_override: Arc<str>,
 }
 
 impl StreamContext {
     pub fn to_protobuf(&self) -> PbStreamContext {
         PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
+            config_override: self.config_override.to_string(),
         }
     }
 
@@ -301,6 +310,17 @@ impl StreamContext {
             } else {
                 Some(prost.get_timezone().clone())
             },
+            config_override: prost.get_config_override().as_str().into(),
+        }
+    }
+}
+
+#[easy_ext::ext(StreamingJobModelContextExt)]
+impl risingwave_meta_model::streaming_job::Model {
+    pub fn stream_context(&self) -> StreamContext {
+        StreamContext {
+            timezone: self.timezone.clone(),
+            config_override: self.config_override.clone().unwrap_or_default().into(),
         }
     }
 }
@@ -343,7 +363,14 @@ impl StreamJobFragments {
 
 pub type StreamJobActorsToCreate = HashMap<
     WorkerId,
-    HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>, HashSet<u32>)>,
+    HashMap<
+        FragmentId,
+        (
+            StreamNode,
+            Vec<StreamActorWithUpDownstreams>,
+            HashSet<SubscriberId>,
+        ),
+    >,
 >;
 
 impl StreamJobFragments {

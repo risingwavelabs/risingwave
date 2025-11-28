@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{ExprError, capture_context, function};
 use risingwave_sqlparser::parser::{Parser, ParserError};
@@ -58,7 +59,7 @@ fn resolve_regclass_impl(
     search_path: &SearchPath,
     db_name: &str,
     class_name: &str,
-) -> Result<u32, ExprError> {
+) -> Result<ObjectId, ExprError> {
     resolve_regclass_inner(catalog, auth_context, search_path, db_name, class_name)
         .map_err(Into::into)
 }
@@ -69,7 +70,7 @@ fn resolve_regclass_inner(
     search_path: &SearchPath,
     db_name: &str,
     class_name: &str,
-) -> Result<u32, ResolveRegclassError> {
+) -> Result<ObjectId, ResolveRegclassError> {
     // We use the full parser here because this function needs to accept every legal way
     // of identifying an object in PG SQL as a valid value for the varchar
     // literal.  For example: 'foo', 'public.foo', '"my table"', and
@@ -86,5 +87,5 @@ fn resolve_regclass_inner(
 #[function("cast_regclass(varchar) -> int4")]
 fn cast_regclass(class_name: &str) -> Result<i32, ExprError> {
     let oid = resolve_regclass_impl_captured(class_name)?;
-    Ok(oid as i32)
+    Ok(oid.as_i32_id())
 }

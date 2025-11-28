@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::ObjectId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
@@ -55,7 +56,7 @@ pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>
 pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
 pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
-pub type ConnectorPropsChange = HashMap<u32, HashMap<String, String>>;
+pub type ConnectorPropsChange = HashMap<ObjectId, HashMap<String, String>>;
 
 const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 

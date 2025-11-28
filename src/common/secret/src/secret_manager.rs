@@ -81,7 +81,7 @@ impl LocalSecretManager {
         let mut secret_guard = self.secrets.write();
         if secret_guard.insert(secret_id, secret).is_some() {
             tracing::error!(
-                secret_id = secret_id,
+                secret_id = %secret_id,
                 "adding a secret but it already exists, overwriting it"
             );
         };
@@ -91,7 +91,7 @@ impl LocalSecretManager {
         let mut secret_guard = self.secrets.write();
         if secret_guard.insert(secret_id, secret).is_none() {
             tracing::error!(
-                secret_id = secret_id,
+                secret_id = %secret_id,
                 "updating a secret but it does not exist, adding it"
             );
         }
@@ -146,7 +146,7 @@ impl LocalSecretManager {
     }
 
     pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
-        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>> =
+        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>> =
             self.secrets.read();
         self.fill_secret_inner(secret_ref, &secret_guard)
     }
@@ -154,7 +154,7 @@ impl LocalSecretManager {
     fn fill_secret_inner(
         &self,
         secret_ref: PbSecretRef,
-        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>>,
+        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>>,
     ) -> SecretResult<String> {
         let secret_id = secret_ref.secret_id;
         let pb_secret_bytes = secret_guard

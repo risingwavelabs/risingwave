@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Minimal imports for prototype
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use risingwave_expr::bail;
 
 use super::stream::StreamPlanNodeMetadata;
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, ExprVisitable, Logical, LogicalFilter,
-    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     PredicatePushdownContext, ToBatch, ToStream, ToStreamContext, generic,
 };
 use crate::binder::BoundFillStrategy;
@@ -84,9 +86,42 @@ impl_distill_by_unit!(LogicalGapFill, core, "LogicalGapFill");
 
 impl ColPrunable for LogicalGapFill {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        // For minimal prototype: simply pass through all columns without optimization
-        let new_input = self.input().prune_col(required_cols, ctx);
-        self.clone_with_input(new_input).into()
+        let input_col_num = self.input().schema().len();
+        let mut input_required = FixedBitSet::from_iter(required_cols.iter().copied());
+        input_required.insert(self.time_col().index());
+        input_required.union_with(&self.interval().collect_input_refs(input_col_num));
+        self.fill_strategies()
+            .iter()
+            .for_each(|s| input_required.insert(s.target_col.index()));
+
+        let input_required_cols: Vec<_> = input_required.ones().collect();
+        let mut col_index_mapping =
+            ColIndexMapping::with_remaining_columns(&input_required_cols, input_col_num);
+
+        let mut new_core = self.core.clone();
+        new_core.input = self.input().prune_col(&input_required_cols, ctx);
+        new_core.rewrite_with_col_index_mapping(&mut col_index_mapping);
+
+        let logical_gap_fill = Self {
+            base: PlanBase::new_logical_with_core(&new_core),
+            core: new_core,
+        }
+        .into();
+
+        if input_required_cols == required_cols {
+            logical_gap_fill
+        } else {
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| col_index_mapping.map(idx))
+                .collect_vec();
+            let src_size = logical_gap_fill.schema().len();
+            LogicalProject::with_mapping(
+                logical_gap_fill,
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
+            )
+            .into()
+        }
     }
 }
 
@@ -124,7 +159,7 @@ impl PredicatePushdown for LogicalGapFill {
 
 impl ToBatch for LogicalGapFill {
     fn to_batch(&self) -> Result<super::BatchPlanRef> {
-        unimplemented!("batch gap fill")
+        bail!("BatchGapFill is not implemented yet")
     }
 }
 
@@ -202,7 +237,7 @@ impl ToStream for LogicalGapFill {
 
         Ok((
             Self {
-                base: self.base.clone_with_new_plan_id(),
+                base: PlanBase::new_logical_with_core(&new_core),
                 core: new_core,
             }
             .into(),

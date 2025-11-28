@@ -19,12 +19,12 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 
 pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
-    object_id: i32,
+    object_id: ObjectId,
     column: object::Column,
     new_value: Value,
     objects_to_notify: &mut Vec<PbObjectInfo>,
 ) -> MetaResult<()> {
-    let internal_tables = get_internal_tables_by_id(JobId::new(object_id as _), txn).await?;
+    let internal_tables = get_internal_tables_by_id(object_id.as_job_id(), txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
@@ -150,8 +150,8 @@ impl CatalogController {
         let mut obj_dependencies = dependencies
             .into_iter()
             .map(|(oid, used_by)| PbObjectDependencies {
-                object_id: used_by as _,
-                referenced_object_id: oid as _,
+                object_id: used_by,
+                referenced_object_id: oid,
             })
             .collect_vec();
 
@@ -172,8 +172,8 @@ impl CatalogController {
 
         obj_dependencies.extend(view_dependencies.into_iter().map(|(view_id, table_id)| {
             PbObjectDependencies {
-                object_id: table_id as _,
-                referenced_object_id: view_id as _,
+                object_id: table_id,
+                referenced_object_id: view_id,
             }
         }));
 
@@ -197,8 +197,8 @@ impl CatalogController {
         };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
-                object_id: table_id.as_raw_id(),
-                referenced_object_id: sink_id.as_raw_id() as _,
+                object_id: table_id.into(),
+                referenced_object_id: sink_id.into(),
             }
         }));
 
@@ -224,8 +224,8 @@ impl CatalogController {
         };
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
             |(subscription_id, table_id)| PbObjectDependencies {
-                object_id: subscription_id as _,
-                referenced_object_id: table_id.as_raw_id(),
+                object_id: subscription_id.into(),
+                referenced_object_id: table_id.into(),
             },
         ));
 

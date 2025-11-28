@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::id::{DatabaseId, JobId, SchemaId};
+use risingwave_common::id::{ConnectionId, DatabaseId, JobId, SchemaId, SecretId};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
 use risingwave_meta_model::{TableVersion, source, table};
@@ -123,7 +123,7 @@ impl StreamingJob {
             Self::MaterializedView(table) => table.id.as_job_id(),
             Self::Sink(sink) => sink.id.as_job_id(),
             Self::Table(_, table, ..) => table.id.as_job_id(),
-            Self::Index(index, _) => index.id.into(),
+            Self::Index(index, _) => index.id.as_job_id(),
             Self::Source(source) => source.id.as_share_source_job_id(),
         }
     }
@@ -240,7 +240,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<u32>> {
+    pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<ConnectionId>> {
         match self {
             StreamingJob::Source(source) => Ok(get_referred_connection_ids_from_source(source)),
             StreamingJob::Table(source, _, _) => {
@@ -256,7 +256,7 @@ impl StreamingJob {
     }
 
     // Get the secret ids that are referenced by this job.
-    pub fn dependent_secret_ids(&self) -> MetaResult<HashSet<u32>> {
+    pub fn dependent_secret_ids(&self) -> MetaResult<HashSet<SecretId>> {
         match self {
             StreamingJob::Sink(sink) => Ok(get_referred_secret_ids_from_sink(sink)),
             StreamingJob::Table(source, _, _) => {

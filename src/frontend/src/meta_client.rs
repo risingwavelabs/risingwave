@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Context;
-use risingwave_common::id::{JobId, SourceId, TableId, WorkerId};
+use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -37,6 +37,7 @@ use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
@@ -148,6 +149,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>>;
 
+    async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>>;
+
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
     async fn alter_sink_props(
@@ -155,7 +158,7 @@ pub trait FrontendMetaClient: Send + Sync {
         sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()>;
 
     async fn alter_iceberg_table_props(
@@ -165,7 +168,7 @@ pub trait FrontendMetaClient: Send + Sync {
         source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()>;
 
     async fn alter_source_connector_props(
@@ -173,7 +176,7 @@ pub trait FrontendMetaClient: Send + Sync {
         source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()>;
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
@@ -410,7 +413,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         sink_id: SinkId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         self.0
             .alter_sink_props(
@@ -429,7 +432,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         self.0
             .alter_iceberg_table_props(
@@ -448,7 +451,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        connector_conn_ref: Option<u32>,
+        connector_conn_ref: Option<ConnectionId>,
     ) -> Result<()> {
         self.0
             .alter_source_connector_props(
@@ -508,5 +511,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>> {
         self.0.list_unmigrated_tables().await
+    }
+
+    async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
+        self.0.list_refresh_table_states().await
     }
 }

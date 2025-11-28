@@ -241,6 +241,9 @@ pub struct MetaOpts {
     /// Whether to split the compaction group when the size of the group exceeds the threshold.
     pub split_group_size_ratio: f64,
 
+    /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
+    pub refresh_scheduler_interval_sec: u64,
+
     /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
     pub table_stat_high_write_throughput_ratio_for_split: f64,
 
@@ -383,6 +386,7 @@ impl MetaOpts {
             cdc_table_split_init_sleep_duration_millis: 10,
             cdc_table_split_init_insert_batch_size: 1000,
             enable_legacy_table_migration: true,
+            refresh_scheduler_interval_sec: 60,
         }
     }
 }
