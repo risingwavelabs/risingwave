@@ -931,11 +931,7 @@ impl CatalogController {
             last_success_time: Set(None),
         };
         match RefreshJob::insert(active)
-            .on_conflict(
-                OnConflict::column(refresh_job::Column::TableId)
-                    .do_nothing()
-                    .to_owned(),
-            )
+            .on_conflict_do_nothing()
             .exec(&inner.db)
             .await
         {
