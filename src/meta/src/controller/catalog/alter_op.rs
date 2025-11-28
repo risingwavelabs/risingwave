@@ -17,7 +17,7 @@ use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
-use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 
 use super::*;
