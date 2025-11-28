@@ -1,31 +1,59 @@
 statement ok
-create table t (v int);
+create table cf (v int);
 
 statement ok
-alter table t set config (
-    streaming.developer.chunk_size = 512,
+alter table cf set config (
+    streaming.developer.chunk_size = 511,
     streaming.developer.join_encoding_type = "cpu_optimized",
     streaming.developer.enable_executor_row_count = TrUe
 );
 
-# TODO(config): check the config is actually set
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf';
+----
+cf	streaming.developer.chunk_size	511
+cf	streaming.developer.enable_executor_row_count	true
+cf	streaming.developer.join_encoding_type	"cpu_optimized"
+
+# Update existing override
+statement ok
+alter table cf set config (
+    streaming.developer.chunk_size = 1023
+);
+
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf';
+----
+cf	streaming.developer.chunk_size	1023
+cf	streaming.developer.enable_executor_row_count	true
+cf	streaming.developer.join_encoding_type	"cpu_optimized"
 
 # Reset to default with `NULL`
 statement ok
-alter table t set config (
+alter table cf set config (
     streaming.developer.chunk_size = NULL
 )
 
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf';
+----
+cf	streaming.developer.enable_executor_row_count	true
+cf	streaming.developer.join_encoding_type	"cpu_optimized"
+
 # Reset to default with `reset`
 statement ok
-alter table t reset config (
+alter table cf reset config (
     streaming.developer.join_encoding_type,
     streaming.developer.enable_executor_row_count
 );
 
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf';
+----
+
 # Error: duplicated key
 statement error
-alter table t set config (
+alter table cf set config (
     streaming.developer.chunk_size = 512,
     streaming.developer.chunk_size = 1024
 );
@@ -38,7 +66,7 @@ Caused by:
 
 # Error: not streaming configuration
 statement error
-alter table t set config (
+alter table cf set config (
     batch.not_streaming = 1
 );
 ----
@@ -51,7 +79,7 @@ Caused by:
 # Error: invalid type
 skipif madsim
 statement error
-alter table t set config (
+alter table cf set config (
     streaming.developer.chunk_size = "omakase"
 );
 ----
@@ -68,7 +96,7 @@ in `developer.chunk_size`
 # Error: invalid value
 skipif madsim
 statement error
-alter table t set config (
+alter table cf set config (
     streaming.developer.join_encoding_type = "nothing_optimized"
 );
 ----
@@ -84,7 +112,7 @@ in `developer.join_encoding_type`
 
 # Error: unrecognized key
 statement error
-alter table t set config (
+alter table cf set config (
     streaming.unknown = 1,
     streaming.developer.dev_unknown = 2
 );
@@ -98,7 +126,7 @@ Caused by:
 # Error: using deprecated prefixed config key
 skipif madsim
 statement error
-alter table t set config (
+alter table cf set config (
     streaming.developer.stream_chunk_size = 512
 );
 ----
@@ -114,4 +142,4 @@ in `developer`
 
 
 statement ok
-drop table t;
+drop table cf;

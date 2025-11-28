@@ -21,13 +21,13 @@ use crate::error::Result;
 use crate::session::current::notice_to_user;
 
 #[derive(Fields)]
-#[primary_key(id, config_key)]
+#[primary_key(id, key)]
 struct RwStreamingJobConfig {
     id: i32,
     name: String,
     database_id: i32,
-    config_key: String,
-    config_value: String,
+    key: String, // dot-separated key, e.g., `streaming.developer.chunk_size`
+    value: String,
 }
 
 /// Collect all config override as dot-separated key and stringified value.
@@ -82,12 +82,12 @@ async fn read_rw_streaming_job_config(
 
             collect_config_kv(&state)
                 .into_iter()
-                .map(move |(config_key, config_value)| RwStreamingJobConfig {
+                .map(move |(key, value)| RwStreamingJobConfig {
                     id,
                     name: name.clone(),
                     database_id,
-                    config_key,
-                    config_value,
+                    key,
+                    value,
                 })
         })
         .collect())
