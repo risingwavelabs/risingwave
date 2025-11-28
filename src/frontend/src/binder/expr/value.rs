@@ -280,7 +280,7 @@ impl Binder {
             .iter()
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
-        let data_type = StructType::unnamed(exprs.iter().map(|e| e.return_type())).into();
+        let data_type = StructType::row_expr_type(exprs.iter().map(|e| e.return_type())).into();
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }

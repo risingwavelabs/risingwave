@@ -103,6 +103,11 @@ impl StructType {
         }))
     }
 
+    /// Creates a struct type for `ROW` expression with unnamed fields.
+    pub fn row_expr_type(fields: impl IntoIterator<Item = DataType>) -> Self {
+        Self::unnamed(fields)
+    }
+
     /// Attaches given field ids to the struct type.
     ///
     /// Note that for empty struct, this method is a no-op, as [`StructType::ids`] will always

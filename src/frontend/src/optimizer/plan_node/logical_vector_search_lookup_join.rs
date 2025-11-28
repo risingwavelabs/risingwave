@@ -66,7 +66,7 @@ impl VectorSearchLookupJoinCore {
     }
 
     fn struct_type(&self) -> StructType {
-        StructType::unnamed(
+        StructType::row_expr_type(
             self.lookup_output_indices
                 .iter()
                 .map(|i| {
