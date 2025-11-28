@@ -678,12 +678,21 @@ impl DiagnoseCommand {
                 )
             })
             .collect::<BTreeMap<_, _>>();
+        let views = self
+            .metadata_manager
+            .catalog_controller
+            .list_views()
+            .await?
+            .into_iter()
+            .map(|v| (v.id.into(), (v.name, v.schema_id, v.sql, None)))
+            .collect::<BTreeMap<_, _>>();
         let catalogs = [
             ("SOURCE", sources),
             ("TABLE", user_tables),
             ("MATERIALIZED VIEW", mvs),
             ("INDEX", indexes),
             ("SINK", sinks),
+            ("VIEW", views),
             ("INTERNAL TABLE", internal_tables),
         ];
         let mut obj_id_to_name: HashMap<ObjectId, _> = HashMap::new();

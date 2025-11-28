@@ -24,6 +24,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("IDLE"),
                     )
+                    .col(ColumnDef::new(RefreshJob::LastSuccessTime).big_integer())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_refresh_job_table")
@@ -78,6 +79,7 @@ enum RefreshJob {
     LastTriggerTime,
     TriggerIntervalSecs,
     CurrentStatus,
+    LastSuccessTime,
 }
 
 #[derive(DeriveIden)]

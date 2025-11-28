@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -226,6 +226,13 @@ pub trait CatalogWriter: Send + Sync {
         job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
+    ) -> Result<()>;
+
+    async fn alter_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
     ) -> Result<()>;
 
     async fn alter_resource_group(
@@ -620,9 +627,19 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         self.meta_client
             .alter_parallelism(job_id, parallelism, deferred)
-            .await
-            .map_err(|e| anyhow!(e))?;
+            .await?;
+        Ok(())
+    }
 
+    async fn alter_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
+            .await?;
         Ok(())
     }
 

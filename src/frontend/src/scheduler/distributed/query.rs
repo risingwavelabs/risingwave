@@ -729,7 +729,6 @@ pub(crate) mod tests {
             worker_node_selector,
             catalog_reader,
             None,
-            "UTC".to_owned(),
             batch_exchange_node.clone(),
         )
         .unwrap();
