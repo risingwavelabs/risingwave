@@ -19,12 +19,10 @@ use std::str::FromStr;
 
 use regex::Regex;
 use risingwave_common::system_param::ParamValue;
-use serde::Serialize;
-use serde_with::DeserializeFromStr;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
-#[derive(PartialEq, Copy, Clone, Debug, Serialize, DeserializeFromStr, Default)]
-#[serde(rename_all = "snake_case")]
+#[derive(PartialEq, Copy, Clone, Debug, SerializeDisplay, DeserializeFromStr, Default)]
 pub enum AdaptiveParallelismStrategy {
     #[default]
     Auto,
