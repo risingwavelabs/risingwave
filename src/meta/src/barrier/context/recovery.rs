@@ -15,7 +15,6 @@
 use std::cmp::{Ordering, max, min};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::Ordering as AtomicOrdering;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
