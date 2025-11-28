@@ -178,8 +178,8 @@ impl TwoPhaseCommitHandler {
                     };
                     self.curr_hummock_committed_epoch = recv_epoch;
                     while let Some((epoch, metadata)) = self.pending_epochs.pop_front_if(|(epoch, _)| *epoch <= recv_epoch) {
-                        if !self.prepared_epochs.is_empty() {
-                            assert!(epoch > self.prepared_epochs.back().expect("non-empty").0);
+                        if let Some((last_epoch, _)) = self.prepared_epochs.back() {
+                            assert!(epoch > *last_epoch, "prepared epochs must be in increasing order");
                         }
                         self.prepared_epochs.push_back((epoch, metadata));
                     }
@@ -190,14 +190,20 @@ impl TwoPhaseCommitHandler {
 
     fn push_new_item(&mut self, epoch: u64, metadata: Vec<u8>) {
         if epoch > self.curr_hummock_committed_epoch {
-            if !self.pending_epochs.is_empty() {
-                assert!(epoch > self.pending_epochs.back().expect("non-empty").0);
+            if let Some((last_epoch, _)) = self.pending_epochs.back() {
+                assert!(
+                    epoch > *last_epoch,
+                    "pending epochs must be in increasing order"
+                );
             }
             self.pending_epochs.push_back((epoch, metadata));
         } else {
             assert!(self.pending_epochs.is_empty());
-            if !self.prepared_epochs.is_empty() {
-                assert!(epoch > self.prepared_epochs.back().expect("non-empty").0);
+            if let Some((last_epoch, _)) = self.prepared_epochs.back() {
+                assert!(
+                    epoch > *last_epoch,
+                    "prepared epochs must be in increasing order"
+                );
             }
             self.prepared_epochs.push_back((epoch, metadata));
         }
