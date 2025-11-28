@@ -92,10 +92,6 @@ mod sink_properties {
     impl_sink_name_to_config_type_name!();
 }
 
-// Constants for CDC-related field names that are allowed to be altered on the fly
-const CDC_SOURCE_WAIT_STREAMING_START_TIMEOUT: &str = "cdc.source.wait.streaming.start.timeout";
-const DEBEZIUM_MAX_QUEUE_SIZE: &str = "debezium.max.queue.size";
-
 /// Map of source connector names to their `allow_alter_on_fly` field names
 pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<String>>> = LazyLock::new(|| {
     use source_properties::*;
@@ -103,32 +99,20 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
     // CDC Properties - added for schema.change.failure.policy
     map.try_insert(
         std::any::type_name::<MysqlCdcProperties>().to_owned(),
-        [
-            CDC_SOURCE_WAIT_STREAMING_START_TIMEOUT.to_owned(),
-            DEBEZIUM_MAX_QUEUE_SIZE.to_owned(),
-        ].into_iter().collect(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
     ).unwrap();
     map.try_insert(
         std::any::type_name::<PostgresCdcProperties>().to_owned(),
-        [
-            CDC_SOURCE_WAIT_STREAMING_START_TIMEOUT.to_owned(),
-            DEBEZIUM_MAX_QUEUE_SIZE.to_owned(),
-        ].into_iter().collect(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
     ).unwrap();
     map.try_insert(
         std::any::type_name::<SqlServerCdcProperties>().to_owned(),
-        [
-            CDC_SOURCE_WAIT_STREAMING_START_TIMEOUT.to_owned(),
-            DEBEZIUM_MAX_QUEUE_SIZE.to_owned(),
-        ].into_iter().collect(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
     ).unwrap();
 
     map.try_insert(
         std::any::type_name::<MongodbCdcProperties>().to_owned(),
-        [
-            CDC_SOURCE_WAIT_STREAMING_START_TIMEOUT.to_owned(),
-            DEBEZIUM_MAX_QUEUE_SIZE.to_owned(),
-        ].into_iter().collect(),
+        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
     ).unwrap();
     // KafkaProperties
     map.try_insert(
@@ -194,7 +178,12 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "snapshot_expiration_retain_last".to_owned(),
             "snapshot_expiration_clear_expired_files".to_owned(),
             "snapshot_expiration_clear_expired_meta_data".to_owned(),
-            "max_snapshots_num_before_compaction".to_owned(),
+            "compaction.max_snapshots_num".to_owned(),
+            "compaction.small_files_threshold_mb".to_owned(),
+            "compaction.delete_files_count_threshold".to_owned(),
+            "compaction.trigger_snapshot_count".to_owned(),
+            "compaction.target_file_size_mb".to_owned(),
+            "compaction.type".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig
