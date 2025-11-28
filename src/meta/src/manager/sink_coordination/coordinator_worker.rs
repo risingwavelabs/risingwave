@@ -177,8 +177,7 @@ impl TwoPhaseCommitHandler {
                         ));
                     };
                     self.curr_hummock_committed_epoch = recv_epoch;
-                    while let Some((epoch, _)) = self.pending_epochs.front() && *epoch <= recv_epoch {
-                        let (epoch, metadata) = self.pending_epochs.pop_front().expect("should have prepared epoch");
+                    while let Some((epoch, metadata)) = self.pending_epochs.pop_front_if(|(epoch, _)| *epoch <= recv_epoch) {
                         if !self.prepared_epochs.is_empty() {
                             assert!(epoch > self.prepared_epochs.back().expect("non-empty").0);
                         }
