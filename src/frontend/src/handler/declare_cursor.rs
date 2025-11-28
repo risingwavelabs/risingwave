@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::util::epoch::Epoch;
@@ -161,7 +162,11 @@ pub async fn create_stream_for_cursor_stmt(
     let session = handler_args.session.clone();
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
+        let super::query::BatchPlanChoice::Rw(plan_result) =
+            gen_batch_plan_by_statement(&session, context.into(), stmt)?
+        else {
+            bail_not_implemented!("creating cursor with datafusion plan is not supported yet");
+        };
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
     create_chunk_stream_for_cursor(session, plan_fragmenter_result).await

@@ -16,6 +16,7 @@
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbView;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
@@ -52,15 +53,18 @@ pub async fn handle_create_view(
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let super::query::BatchQueryPlanResult {
+        let super::query::BatchPlanChoice::Rw(super::query::BatchQueryPlanResult {
             schema,
             dependent_relations,
             ..
-        } = super::query::gen_batch_plan_by_statement(
+        }) = super::query::gen_batch_plan_by_statement(
             &session,
             context.into(),
             Statement::Query(Box::new(query.clone())),
-        )?;
+        )?
+        else {
+            bail_not_implemented!("creating view with datafusion plan is not supported yet");
+        };
 
         (dependent_relations, schema)
     };

@@ -32,7 +32,8 @@ mod plan_rewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ExecutionModeDecider, LogicalIcebergScanExt, LogicalPlanToDataFusionExt, PlanVisitor,
+    RelationCollectorVisitor, SysTableVisitor,
 };
 use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 

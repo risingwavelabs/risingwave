@@ -194,8 +194,14 @@ pub async fn do_handle_explain(
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context, stmt)
-                            .map(|x| (PhysicalPlanRef::Batch(x.plan), None))
+                        let super::query::BatchPlanChoice::Rw(plan_result) =
+                            gen_batch_plan_by_statement(&session, context, stmt)?
+                        else {
+                            bail_not_implemented!(
+                                "explaining datafusion plan is not supported yet"
+                            );
+                        };
+                        Ok((PhysicalPlanRef::Batch(plan_result.plan), None))
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
