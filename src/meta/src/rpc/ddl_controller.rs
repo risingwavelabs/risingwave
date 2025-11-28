@@ -1653,7 +1653,7 @@ impl DdlController {
             tracing::warn!(
                 max_parallelism = max.get(),
                 resource_group,
-                "too many parallelism available, use max parallelism instead",
+                "default parallelism exceeds max parallelism, capping to max",
             );
         }
         Ok(default_parallelism.min(max))
@@ -2376,7 +2376,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn specified_parallelism_can_exceed_available() {
+    fn test_specified_parallelism_exceeds_available() {
         let result = DdlController::resolve_stream_parallelism_inner(
             Some(NonZeroUsize::new(100).unwrap()),
             NonZeroUsize::new(256).unwrap(),
@@ -2389,7 +2389,7 @@ mod tests {
     }
 
     #[test]
-    fn default_parallelism_can_exceed_available() {
+    fn test_allows_default_parallelism_over_available() {
         let result = DdlController::resolve_stream_parallelism_inner(
             None,
             NonZeroUsize::new(256).unwrap(),
@@ -2402,7 +2402,7 @@ mod tests {
     }
 
     #[test]
-    fn full_parallelism_respects_max_parallelism_cap() {
+    fn test_full_parallelism_capped_by_max() {
         let result = DdlController::resolve_stream_parallelism_inner(
             None,
             NonZeroUsize::new(6).unwrap(),
@@ -2415,7 +2415,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_available_returns_unavailable_error() {
+    fn test_no_available_slots_returns_error() {
         let result = DdlController::resolve_stream_parallelism_inner(
             None,
             NonZeroUsize::new(4).unwrap(),
@@ -2430,7 +2430,7 @@ mod tests {
     }
 
     #[test]
-    fn specified_over_max_is_rejected() {
+    fn test_specified_over_max_returns_error() {
         let result = DdlController::resolve_stream_parallelism_inner(
             Some(NonZeroUsize::new(8).unwrap()),
             NonZeroUsize::new(4).unwrap(),
