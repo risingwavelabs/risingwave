@@ -39,10 +39,15 @@ pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
     iceberg_scan_type: IcebergScanType,
+    snapshot_id: Option<i64>,
 }
 
 impl LogicalIcebergScan {
-    pub fn new(logical_source: &LogicalSource, iceberg_scan_type: IcebergScanType) -> Self {
+    pub fn new(
+        logical_source: &LogicalSource,
+        iceberg_scan_type: IcebergScanType,
+        snapshot_id: Option<i64>,
+    ) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
 
         let core = logical_source.core.clone();
@@ -54,6 +59,7 @@ impl LogicalIcebergScan {
             base,
             core,
             iceberg_scan_type,
+            snapshot_id,
         }
     }
 
@@ -83,6 +89,7 @@ impl LogicalIcebergScan {
             base,
             core,
             iceberg_scan_type: self.iceberg_scan_type,
+            snapshot_id: self.snapshot_id,
         }
     }
 }
@@ -134,7 +141,9 @@ impl PredicatePushdown for LogicalIcebergScan {
 
 impl ToBatch for LogicalIcebergScan {
     fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
-        let plan = BatchIcebergScan::new(self.core.clone(), self.iceberg_scan_type).into();
+        let plan =
+            BatchIcebergScan::new(self.core.clone(), self.iceberg_scan_type, self.snapshot_id)
+                .into();
         Ok(plan)
     }
 }
