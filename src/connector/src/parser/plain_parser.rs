@@ -136,7 +136,7 @@ impl PlainParser {
 
                     return match parse_schema_change(
                         &accessor,
-                        self.source_ctx.source_id.as_raw_id(),
+                        self.source_ctx.source_id,
                         &self.source_ctx.source_name,
                         &self.source_ctx.connector_props,
                     ) {

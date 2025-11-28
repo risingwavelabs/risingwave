@@ -128,7 +128,7 @@ impl SinkDesc {
 
     pub fn to_proto(&self) -> PbSinkDesc {
         PbSinkDesc {
-            id: self.id.sink_id,
+            id: self.id,
             name: self.name.clone(),
             definition: self.definition.clone(),
             column_catalogs: self

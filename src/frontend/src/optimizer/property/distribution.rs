@@ -106,8 +106,12 @@ pub enum RequiredDist {
     AnyShard,
     /// records are shard on partitions based on some keys(order-irrelevance, ShardByKey({a,b}) is
     /// equivalent with ShardByKey({b,a})), which means the records with same keys must be on
-    /// the same partition, as required property only.
+    /// the same partition, as required property only. Any distribution sharded by a subset of this
+    /// key set satisfies the requirement.
     ShardByKey(FixedBitSet),
+    /// records are shard on partitions based on an exact set of keys (order-irrelevance).
+    /// Only distribution sharded by the same key set satisfies this requirement.
+    ShardByExactKey(FixedBitSet),
     /// must be the same with the physical distribution
     PhysicalDist(Distribution),
 }
@@ -150,7 +154,7 @@ impl Distribution {
                     );
 
                     let vnode_mapping = worker_node_manager
-                        .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
+                        .fragment_mapping(Self::get_fragment_id(catalog_reader, *table_id)?)?;
 
                     let worker_slot_to_id_map: HashMap<WorkerSlotId, u32> = vnode_mapping
                         .iter_unique()
@@ -191,6 +195,14 @@ impl Distribution {
                 }
                 _ => false,
             },
+            RequiredDist::ShardByExactKey(required_key) => match self {
+                Distribution::HashShard(hash_key)
+                | Distribution::UpstreamHashShard(hash_key, _) => {
+                    hash_key.len() == required_key.count_ones(..)
+                        && hash_key.iter().all(|idx| required_key.contains(*idx))
+                }
+                _ => false,
+            },
             RequiredDist::PhysicalDist(other) => self == other,
         }
     }
@@ -213,7 +225,7 @@ impl Distribution {
     }
 
     #[inline(always)]
-    fn get_fragment_id(catalog_reader: &CatalogReader, table_id: &TableId) -> Result<FragmentId> {
+    fn get_fragment_id(catalog_reader: &CatalogReader, table_id: TableId) -> Result<FragmentId> {
         catalog_reader
             .read_guard()
             .get_any_table_by_id(table_id)
@@ -301,6 +313,15 @@ impl RequiredDist {
         Self::ShardByKey(cols)
     }
 
+    pub fn shard_by_exact_key(tot_col_num: usize, key: &[usize]) -> Self {
+        let mut cols = FixedBitSet::with_capacity(tot_col_num);
+        for i in key {
+            cols.insert(*i);
+        }
+        assert!(!cols.is_clear());
+        Self::ShardByExactKey(cols)
+    }
+
     pub fn hash_shard(key: &[usize]) -> Self {
         assert!(!key.is_empty());
         Self::PhysicalDist(Distribution::HashShard(key.to_vec()))
@@ -341,6 +362,15 @@ impl RequiredDist {
             RequiredDist::ShardByKey(key) => match required {
                 RequiredDist::Any | RequiredDist::AnyShard => true,
                 RequiredDist::ShardByKey(required_key) => key.is_subset(required_key),
+                RequiredDist::ShardByExactKey(required_key) => {
+                    key == required_key && key.count_ones(..) == 1
+                }
+                _ => false,
+            },
+            RequiredDist::ShardByExactKey(key) => match required {
+                RequiredDist::Any | RequiredDist::AnyShard => true,
+                RequiredDist::ShardByKey(required_key) => key.is_subset(required_key),
+                RequiredDist::ShardByExactKey(required_key) => key == required_key,
                 _ => false,
             },
             RequiredDist::PhysicalDist(dist) => dist.satisfies(required),
@@ -365,6 +395,9 @@ impl RequiredDist {
             // TODO: add round robin distributed type
             RequiredDist::AnyShard => todo!(),
             RequiredDist::ShardByKey(required_keys) => {
+                Distribution::HashShard(required_keys.ones().collect())
+            }
+            RequiredDist::ShardByExactKey(required_keys) => {
                 Distribution::HashShard(required_keys.ones().collect())
             }
             RequiredDist::PhysicalDist(dist) => dist.clone(),
@@ -400,6 +433,8 @@ mod tests {
         let r1 = RequiredDist::shard_by_key(2, &[0, 1]);
         let r3 = RequiredDist::shard_by_key(2, &[0]);
         let r4 = RequiredDist::shard_by_key(2, &[1]);
+        let r_exact = RequiredDist::shard_by_exact_key(2, &[0, 1]);
+        let r_exact_single = RequiredDist::shard_by_exact_key(2, &[0]);
         assert!(d1.satisfies(&RequiredDist::PhysicalDist(d1.clone())));
         assert!(d2.satisfies(&RequiredDist::PhysicalDist(d2.clone())));
         assert!(d3.satisfies(&RequiredDist::PhysicalDist(d3.clone())));
@@ -429,11 +464,24 @@ mod tests {
         assert!(!d3.satisfies(&r4));
         assert!(d4.satisfies(&r4));
 
+        assert!(d1.satisfies(&r_exact));
+        assert!(d2.satisfies(&r_exact));
+        assert!(!d3.satisfies(&r_exact));
+        assert!(!d4.satisfies(&r_exact));
+
         assert!(r3.satisfies(&r1));
         assert!(r4.satisfies(&r1));
         assert!(!r1.satisfies(&r3));
         assert!(!r1.satisfies(&r4));
         assert!(!r3.satisfies(&r4));
         assert!(!r4.satisfies(&r3));
+
+        assert!(r_exact.satisfies(&r1));
+        assert!(!r1.satisfies(&r_exact));
+        assert!(!r3.satisfies(&r_exact));
+        assert!(!r_exact.satisfies(&r3));
+
+        assert!(r3.satisfies(&r_exact_single));
+        assert!(r_exact_single.satisfies(&r3));
     }
 }

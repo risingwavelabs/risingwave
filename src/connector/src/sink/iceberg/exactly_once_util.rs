@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::SinkId;
 use risingwave_meta_model::exactly_once_iceberg_sink::{self, Column, Entity, Model};
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, Order, PaginatorTrait, QueryFilter, QueryOrder,
@@ -25,7 +26,7 @@ use crate::sink::Result;
 // after enabling exactly once semantics.
 
 pub async fn persist_pre_commit_metadata(
-    sink_id: u32,
+    sink_id: SinkId,
     db: DatabaseConnection,
     start_epoch: u64,
     end_epoch: u64,
@@ -33,7 +34,7 @@ pub async fn persist_pre_commit_metadata(
     snapshot_id: i64,
 ) -> Result<()> {
     let m = exactly_once_iceberg_sink::ActiveModel {
-        sink_id: Set(sink_id as i32),
+        sink_id: Set(sink_id),
         end_epoch: Set(end_epoch.try_into().unwrap()),
         start_epoch: Set(start_epoch.try_into().unwrap()),
         metadata: Set(pre_commit_metadata),
@@ -51,11 +52,11 @@ pub async fn persist_pre_commit_metadata(
 
 pub async fn mark_row_is_committed_by_sink_id_and_end_epoch(
     db: &DatabaseConnection,
-    sink_id: u32,
+    sink_id: SinkId,
     end_epoch: u64,
 ) -> Result<()> {
     match Entity::update(exactly_once_iceberg_sink::ActiveModel {
-        sink_id: Set(sink_id as i32),
+        sink_id: Set(sink_id),
         end_epoch: Set(end_epoch.try_into().unwrap()),
         committed: Set(true),
         ..Default::default()
@@ -83,7 +84,7 @@ pub async fn mark_row_is_committed_by_sink_id_and_end_epoch(
 
 pub async fn delete_row_by_sink_id_and_end_epoch(
     db: &DatabaseConnection,
-    sink_id: u32,
+    sink_id: SinkId,
     end_epoch: u64,
 ) -> Result<()> {
     let end_epoch_i64: i64 = end_epoch.try_into().unwrap();
@@ -124,10 +125,10 @@ pub async fn delete_row_by_sink_id_and_end_epoch(
 
 pub async fn iceberg_sink_has_pre_commit_metadata(
     db: &DatabaseConnection,
-    sink_id: u32,
+    sink_id: SinkId,
 ) -> Result<bool> {
     match exactly_once_iceberg_sink::Entity::find()
-        .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id as i32))
+        .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
         .count(db)
         .await
     {
@@ -144,10 +145,10 @@ pub async fn iceberg_sink_has_pre_commit_metadata(
 
 pub async fn get_pre_commit_info_by_sink_id(
     db: &DatabaseConnection,
-    sink_id: u32,
+    sink_id: SinkId,
 ) -> Result<Vec<(u64, Vec<u8>, i64, bool)>> {
     let models: Vec<Model> = Entity::find()
-        .filter(Column::SinkId.eq(sink_id as i32))
+        .filter(Column::SinkId.eq(sink_id))
         .order_by(Column::EndEpoch, Order::Asc)
         .all(db)
         .await?;

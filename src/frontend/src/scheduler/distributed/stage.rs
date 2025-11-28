@@ -734,7 +734,7 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
+    fn get_fragment_id(&self, table_id: TableId) -> SchedulerResult<FragmentId> {
         self.catalog_reader
             .read_guard()
             .get_any_table_by_id(table_id)
@@ -743,10 +743,7 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_table_dml_vnode_mapping(
-        &self,
-        table_id: &TableId,
-    ) -> SchedulerResult<WorkerSlotMapping> {
+    fn get_table_dml_vnode_mapping(&self, table_id: TableId) -> SchedulerResult<WorkerSlotMapping> {
         let guard = self.catalog_reader.read_guard();
 
         let table = guard
@@ -774,7 +771,7 @@ impl StageRunner {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
 
         if let Some(table_id) = dml_table_id {
-            let vnode_mapping = self.get_table_dml_vnode_mapping(&table_id)?;
+            let vnode_mapping = self.get_table_dml_vnode_mapping(table_id)?;
             let worker_slot_ids = vnode_mapping.iter_unique().collect_vec();
             let candidates = self
                 .worker_node_manager
@@ -799,7 +796,7 @@ impl StageRunner {
             Self::find_distributed_lookup_join_node(plan_node)
         {
             let fragment_id = self.get_fragment_id(
-                &distributed_lookup_join_node
+                distributed_lookup_join_node
                     .inner_side_table_desc
                     .as_ref()
                     .unwrap()

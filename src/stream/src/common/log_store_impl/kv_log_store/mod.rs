@@ -211,7 +211,7 @@ impl KvLogStoreMetrics {
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
-        let id = sink_param.sink_id.sink_id;
+        let id = sink_param.sink_id.as_raw_id();
         let name = &sink_param.sink_name;
         Self::new_inner(metrics, actor_id, id, name, connector)
     }

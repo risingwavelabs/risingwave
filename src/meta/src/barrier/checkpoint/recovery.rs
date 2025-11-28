@@ -162,11 +162,11 @@ impl DatabaseRecoveringState {
             DatabaseRecoveringStage::Initializing {
                 initial_barrier_collector,
             } => {
-                let worker_id = resp.worker_id as WorkerId;
+                let worker_id = resp.worker_id;
                 initial_barrier_collector.collect_resp(resp);
                 info!(
                     ?database_id,
-                    worker_id,
+                    %worker_id,
                     remaining_workers = ?initial_barrier_collector,
                     "initializing database barrier collected"
                 );
@@ -204,7 +204,7 @@ impl DatabaseRecoveringState {
                 if resp.reset_request_id < *reset_request_id {
                     info!(
                         database_id = %resp.database_id,
-                        worker_id,
+                        %worker_id,
                         received_request_id = resp.reset_request_id,
                         ongoing_request_id = reset_request_id,
                         "ignore stale reset response"

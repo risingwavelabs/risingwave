@@ -16,8 +16,10 @@ use std::assert_matches::assert_matches;
 use std::fmt::{Display, Formatter};
 
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
+use crate::executor::ActorContext;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
 use crate::task::barrier_worker::managed_state::DatabaseManagedBarrierState;
 use crate::task::cdc_progress::CdcTableBackfillState;
@@ -36,7 +38,7 @@ pub(crate) enum BackfillState {
 }
 
 impl BackfillState {
-    pub fn to_pb(self, actor_id: ActorId) -> PbCreateMviewProgress {
+    pub fn to_pb(self, fragment_id: FragmentId, actor_id: ActorId) -> PbCreateMviewProgress {
         let (done, consumed_epoch, consumed_rows, pending_epoch_lag, buffered_rows) = match self {
             BackfillState::ConsumingUpstreamTableOrSource(
                 consumed_epoch,
@@ -58,6 +60,7 @@ impl BackfillState {
             consumed_rows,
             pending_epoch_lag,
             buffered_rows,
+            fragment_id,
         }
     }
 }
@@ -96,6 +99,7 @@ impl DatabaseManagedBarrierState {
     pub(crate) fn update_create_mview_progress(
         &mut self,
         epoch: EpochPair,
+        fragment_id: FragmentId,
         actor: ActorId,
         state: BackfillState,
     ) {
@@ -103,11 +107,14 @@ impl DatabaseManagedBarrierState {
             && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
             && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
         {
-            graph_state
+            if let Some((prev_fragment_id, _)) = graph_state
                 .create_mview_progress
                 .entry(epoch.curr)
                 .or_default()
-                .insert(actor, state);
+                .insert(actor, (fragment_id, state))
+            {
+                assert_eq!(prev_fragment_id, fragment_id)
+            }
         } else {
             warn!(?epoch, %actor, ?state, "ignore create mview progress");
         }
@@ -135,9 +142,16 @@ impl DatabaseManagedBarrierState {
 }
 
 impl LocalBarrierManager {
-    fn update_create_mview_progress(&self, epoch: EpochPair, actor: ActorId, state: BackfillState) {
+    fn update_create_mview_progress(
+        &self,
+        epoch: EpochPair,
+        fragment_id: FragmentId,
+        actor: ActorId,
+        state: BackfillState,
+    ) {
         self.send_event(ReportCreateProgress {
             epoch,
+            fragment_id,
             actor,
             state,
         })
@@ -177,6 +191,8 @@ impl LocalBarrierManager {
 pub struct CreateMviewProgressReporter {
     barrier_manager: LocalBarrierManager,
 
+    fragment_id: FragmentId,
+
     /// The id of the actor containing the backfill executors.
     backfill_actor_id: ActorId,
 
@@ -184,9 +200,14 @@ pub struct CreateMviewProgressReporter {
 }
 
 impl CreateMviewProgressReporter {
-    pub fn new(barrier_manager: LocalBarrierManager, backfill_actor_id: ActorId) -> Self {
+    pub fn new(
+        barrier_manager: LocalBarrierManager,
+        fragment_id: FragmentId,
+        backfill_actor_id: ActorId,
+    ) -> Self {
         Self {
             barrier_manager,
+            fragment_id,
             backfill_actor_id,
             state: None,
         }
@@ -194,7 +215,7 @@ impl CreateMviewProgressReporter {
 
     #[cfg(test)]
     pub fn for_test(barrier_manager: LocalBarrierManager) -> Self {
-        Self::new(barrier_manager, 0.into())
+        Self::new(barrier_manager, 0.into(), 0.into())
     }
 
     pub fn actor_id(&self) -> ActorId {
@@ -203,8 +224,12 @@ impl CreateMviewProgressReporter {
 
     fn update_inner(&mut self, epoch: EpochPair, state: BackfillState) {
         self.state = Some(state);
-        self.barrier_manager
-            .update_create_mview_progress(epoch, self.backfill_actor_id, state);
+        self.barrier_manager.update_create_mview_progress(
+            epoch,
+            self.fragment_id,
+            self.backfill_actor_id,
+            state,
+        );
     }
 
     /// Update the progress to `ConsumingUpstream(consumed_epoch, consumed_rows)`. The epoch must be
@@ -368,9 +393,11 @@ impl LocalBarrierManager {
     /// frontend and the mview will be exposed to the user.
     pub(crate) fn register_create_mview_progress(
         &self,
-        backfill_actor_id: ActorId,
+        actor_ctx: &ActorContext,
     ) -> CreateMviewProgressReporter {
-        trace!("register create mview progress: {}", backfill_actor_id);
-        CreateMviewProgressReporter::new(self.clone(), backfill_actor_id)
+        let fragment_id = actor_ctx.fragment_id;
+        let backfill_actor_id = actor_ctx.id;
+        trace!(%fragment_id, %backfill_actor_id, "register create mview progress");
+        CreateMviewProgressReporter::new(self.clone(), fragment_id, backfill_actor_id)
     }
 }

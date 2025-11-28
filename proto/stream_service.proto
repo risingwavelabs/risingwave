@@ -34,6 +34,7 @@ message InjectBarrierRequest {
     common.Buffer vnode_bitmap = 4;
     string mview_definition = 5;
     plan_common.ExprContext expr_context = 6;
+    string config_override = 9;
     repeated uint32 initial_subscriber_ids = 7;
   }
 
@@ -53,6 +54,7 @@ message BarrierCompleteResponse {
     uint64 pending_epoch_lag = 5;
     // Buffered rows that are yet to be consumed (used by locality backfill to report precise progress)
     uint64 buffered_rows = 6;
+    uint32 fragment_id = 7;
   }
   message CdcTableBackfillProgress {
     uint32 actor_id = 1;

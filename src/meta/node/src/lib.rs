@@ -498,6 +498,10 @@ pub fn start(
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
                 split_group_size_ratio: config.meta.split_group_size_ratio,
+                refresh_scheduler_interval_sec: config
+                    .streaming
+                    .developer
+                    .refresh_scheduler_interval_sec,
                 table_stat_high_write_throughput_ratio_for_split: config
                     .meta
                     .table_stat_high_write_throughput_ratio_for_split,
@@ -546,6 +550,8 @@ pub fn start(
                 cdc_table_split_init_insert_batch_size: config
                     .meta
                     .cdc_table_split_init_insert_batch_size,
+
+                enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
             },
             config.system.into_init_system_params(),
             Default::default(),

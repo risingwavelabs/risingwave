@@ -51,9 +51,9 @@ impl ClusterLimitServiceImpl {
             .list_worker_node(Some(WorkerType::ComputeNode), Some(State::Running))
             .await?
             .into_iter()
-            .map(|e| (e.id as _, e.compute_node_parallelism()))
+            .map(|e| (e.id, e.compute_node_parallelism()))
             .collect();
-        let worker_actor_count: HashMap<u32, WorkerActorCount> = self
+        let worker_actor_count: HashMap<WorkerId, WorkerActorCount> = self
             .metadata_manager
             .worker_actor_count()?
             .into_iter()
@@ -62,7 +62,7 @@ impl ClusterLimitServiceImpl {
                     .get(&worker_id)
                     .map(|parallelism| {
                         (
-                            worker_id as _,
+                            worker_id,
                             WorkerActorCount {
                                 actor_count,
                                 parallelism: *parallelism,

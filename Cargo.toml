@@ -155,7 +155,8 @@ criterion = { version = "0.7", features = ["async_futures"] }
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
-foyer = { version = "0.20.0", features = ["serde", "tracing", "nightly"] }
+# TODO(MrCroxx): Switch to a release version.
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "66056d08a50cce0ba92b815dee1b82be0dab26ef", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.16", features = [
@@ -166,21 +167,24 @@ hashbrown = { version = "0.16", features = [
 hashbrown0_14 = { package = "hashbrown", version = "0.14", features = [
     "nightly",
 ] }
+hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
+    "nightly",
+] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
 
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
-jsonbb = { version = "0.2.2", features = ["float_roundtrip"] }
+jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
@@ -289,6 +293,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
     "fs",
 ] }
 tokio-util = "0.7"
+toml = "0.9"
 tonic = { package = "madsim-tonic", version = "0.5.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 tracing-opentelemetry = "0.30"

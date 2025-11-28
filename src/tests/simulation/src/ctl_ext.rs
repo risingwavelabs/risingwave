@@ -24,6 +24,7 @@ use rand::seq::IteratorRandom;
 use rand::{Rng, rng as thread_rng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_common::id::WorkerId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_pb::id::{ActorId, FragmentId};
@@ -130,7 +131,7 @@ impl Fragment {
         self.inner.fragment_id
     }
 
-    pub fn all_worker_count(&self) -> HashMap<u32, usize> {
+    pub fn all_worker_count(&self) -> HashMap<WorkerId, usize> {
         self.r
             .worker_nodes
             .iter()
@@ -149,7 +150,7 @@ impl Fragment {
         self.inner.actors.len()
     }
 
-    pub fn used_worker_count(&self) -> HashMap<u32, usize> {
+    pub fn used_worker_count(&self) -> HashMap<WorkerId, usize> {
         let actor_to_worker: HashMap<_, _> = self
             .r
             .table_fragments
@@ -165,7 +166,7 @@ impl Fragment {
             .actors
             .iter()
             .map(|a| actor_to_worker[&a.actor_id])
-            .fold(HashMap::<u32, usize>::new(), |mut acc, num| {
+            .fold(HashMap::<WorkerId, usize>::new(), |mut acc, num| {
                 *acc.entry(num).or_insert(0) += 1;
                 acc
             })
@@ -292,7 +293,7 @@ impl Cluster {
     #[cfg_or_panic(madsim)]
     async fn update_worker_node_schedulability(
         &self,
-        worker_ids: Vec<u32>,
+        worker_ids: Vec<WorkerId>,
         target: Schedulability,
     ) -> Result<()> {
         let worker_ids = worker_ids
@@ -314,12 +315,12 @@ impl Cluster {
         Ok(())
     }
 
-    pub async fn cordon_worker(&self, id: u32) -> Result<()> {
+    pub async fn cordon_worker(&self, id: WorkerId) -> Result<()> {
         self.update_worker_node_schedulability(vec![id], Schedulability::Unschedulable)
             .await
     }
 
-    pub async fn uncordon_worker(&self, id: u32) -> Result<()> {
+    pub async fn uncordon_worker(&self, id: WorkerId) -> Result<()> {
         self.update_worker_node_schedulability(vec![id], Schedulability::Schedulable)
             .await
     }

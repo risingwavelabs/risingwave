@@ -134,3 +134,36 @@
               └─StreamLocalityProvider { locality_columns: [t.a] }
                 └─StreamExchange { dist: HashShard(t.a) }
                   └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (
+      id int
+    , p1 int
+    , p2 int
+    , time int
+    , v1 int
+    , v2 int
+    );
+    select
+        *
+        , lag(v1, 0) over (partition by p1 order by id) as out5
+        , lag(v1, 1) over (partition by p1, p2 order by id) as out6
+        , lag(v1) over (partition by p1, p2 order by time, id) as out7
+        , lead(v2, 1) over (partition by p1, p2 order by time, id) as out8
+        , lead(v2, 2) over (partition by p1, p2 order by v1, v2) as out9
+    from t;
+  stream_plan: |-
+    StreamMaterialize { columns: [id, p1, p2, time, v1, v2, t._row_id(hidden), out5, out6, out7, out8, out9], stream_key: [p1, p2, t._row_id], pk_columns: [p1, p2, t._row_id], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [first_value(t.v2) OVER(PARTITION BY t.p1, t.p2 ORDER BY t.v1 ASC, t.v2 ASC ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING)] }
+      └─StreamLocalityProvider { locality_columns: [t.p1, t.p2] }
+        └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.p1, t.p2) }
+          └─StreamOverWindow { window_functions: [first_value(t.v1) OVER(PARTITION BY t.p1, t.p2 ORDER BY t.time ASC, t.id ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING), first_value(t.v2) OVER(PARTITION BY t.p1, t.p2 ORDER BY t.time ASC, t.id ASC ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING)] }
+            └─StreamLocalityProvider { locality_columns: [t.p1, t.p2] }
+              └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.p1, t.p2) }
+                └─StreamOverWindow { window_functions: [first_value(t.v1) OVER(PARTITION BY t.p1, t.p2 ORDER BY t.id ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
+                  └─StreamLocalityProvider { locality_columns: [t.p1, t.p2] }
+                    └─StreamExchange { dist: HashShard(t.p1, t.p2) }
+                      └─StreamOverWindow { window_functions: [first_value(t.v1) OVER(PARTITION BY t.p1 ORDER BY t.id ASC ROWS BETWEEN 0 PRECEDING AND 0 PRECEDING)] }
+                        └─StreamLocalityProvider { locality_columns: [t.p1] }
+                          └─StreamExchange { dist: HashShard(t.p1) }
+                            └─StreamTableScan { table: t, columns: [t.id, t.p1, t.p2, t.time, t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

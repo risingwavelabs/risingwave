@@ -34,7 +34,7 @@ use crate::executor::source::{
     BatchIcebergListExecutor, BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor,
     IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
-use crate::from_proto::source::is_full_recompute_refresh;
+use crate::from_proto::source::is_full_reload_refresh;
 
 pub struct SourceExecutorBuilder;
 
@@ -143,12 +143,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let is_full_recompute_refresh = is_full_recompute_refresh(&source.refresh_mode);
+            let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
             let exec = {
-                let source_id = TableId::new(source.source_id);
+                let source_id = source.source_id;
                 let source_name = source.source_name.clone();
                 let mut source_info = source.get_info()?.clone();
-                let associated_table_id = source.associated_table_id.map(TableId::new);
+                let associated_table_id = source.associated_table_id;
 
                 if source_info.format_encode_options.is_empty() {
                     // compatible code: quick fix for <https://github.com/risingwavelabs/risingwave/issues/14755>,
@@ -214,7 +214,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    if is_full_recompute_refresh {
+                    if is_full_reload_refresh {
                         BatchIcebergListExecutor::new(
                             params.actor_context.clone(),
                             stream_source_core,

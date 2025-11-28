@@ -15,7 +15,6 @@
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::SourceRefreshMode;
 use risingwave_sqlparser::ast;
@@ -88,9 +87,7 @@ impl SourceCatalog {
             connection_id: self.connection_id,
             initialized_at_epoch: self.initialized_at_epoch.map(|x| x.0),
             created_at_epoch: self.created_at_epoch.map(|x| x.0),
-            optional_associated_table_id: self
-                .associated_table_id
-                .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.as_raw_id())),
+            optional_associated_table_id: self.associated_table_id.map(Into::into),
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
@@ -184,9 +181,7 @@ impl From<&PbSource> for SourceCatalog {
         let owner = prost.owner;
         let watermark_descs = prost.get_watermark_descs().clone();
 
-        let associated_table_id = prost.optional_associated_table_id.map(|id| match id {
-            OptionalAssociatedTableId::AssociatedTableId(id) => id,
-        });
+        let associated_table_id = prost.optional_associated_table_id.map(Into::into);
         let version = prost.version;
 
         let connection_id = prost.connection_id;
@@ -205,7 +200,7 @@ impl From<&PbSource> for SourceCatalog {
             row_id_index,
             with_properties: connector_props_with_secrets,
             watermark_descs,
-            associated_table_id: associated_table_id.map(|x| x.into()),
+            associated_table_id,
             definition: prost.definition.clone(),
             connection_id,
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),

@@ -419,7 +419,7 @@ mod runner {
                 })
                 .await
             {
-                let err_string = err.to_string();
+                let err_string = err.to_string().to_ascii_lowercase();
                 // cluster could be still under recovering if killed before, retry if
                 // meets `no reader for dml in table with id {}`.
                 let allowed_errs = [
@@ -428,11 +428,12 @@ mod runner {
                     "failed to inject barrier",
                     "get error from control stream",
                     "cluster is under recovering",
+                    "streaming vnode mapping has not been initialized",
                 ];
                 let should_retry = i < MAX_RETRY
                     && allowed_errs
                         .iter()
-                        .any(|allowed_err| err_string.contains(allowed_err));
+                        .any(|allowed_err| err_string.contains(&allowed_err.to_ascii_lowercase()));
                 if !should_retry {
                     panic!("{}", err);
                 }

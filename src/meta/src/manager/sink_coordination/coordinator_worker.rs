@@ -530,7 +530,7 @@ impl CoordinatorWorker {
                     || {
                         warn!(
                             elapsed = ?start_time.elapsed(),
-                            sink_id = sink_id.sink_id,
+                            %sink_id,
                             "committing"
                         );
                     },

@@ -74,7 +74,7 @@ struct WorkerInfo(
 impl From<WorkerInfo> for PbWorkerNode {
     fn from(info: WorkerInfo) -> Self {
         Self {
-            id: info.0.worker_id as _,
+            id: info.0.worker_id,
             r#type: PbWorkerType::from(info.0.worker_type) as _,
             host: Some(PbHostAddress {
                 host: info.0.host,
@@ -228,7 +228,7 @@ impl ClusterController {
 
     /// Invoked when it receives a heartbeat from a worker node.
     pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
-        tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
+        tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
         self.inner
             .write()
             .await
@@ -298,7 +298,7 @@ impl ClusterController {
                     match cluster_controller.delete_worker(host_addr.clone()).await {
                         Ok(_) => {
                             tracing::warn!(
-                                worker_id,
+                                %worker_id,
                                 ?host_addr,
                                 %now,
                                 "Deleted expired worker"
@@ -414,13 +414,13 @@ impl ClusterController {
 #[derive(Debug, Clone)]
 pub struct StreamingClusterInfo {
     /// All **active** compute nodes in the cluster.
-    pub worker_nodes: HashMap<u32, WorkerNode>,
+    pub worker_nodes: HashMap<WorkerId, WorkerNode>,
 
     /// All schedulable compute nodes in the cluster. Normally for resource group based scheduling.
-    pub schedulable_workers: HashSet<u32>,
+    pub schedulable_workers: HashSet<WorkerId>,
 
     /// All unschedulable compute nodes in the cluster.
-    pub unschedulable_workers: HashSet<u32>,
+    pub unschedulable_workers: HashSet<WorkerId>,
 }
 
 // Encapsulating the use of parallelism
@@ -431,7 +431,7 @@ impl StreamingClusterInfo {
 
         self.worker_nodes
             .values()
-            .filter(|worker| available_worker_ids.contains(&(worker.id as WorkerId)))
+            .filter(|worker| available_worker_ids.contains(&(worker.id)))
             .map(|worker| worker.compute_node_parallelism())
             .sum()
     }
@@ -439,11 +439,11 @@ impl StreamingClusterInfo {
     pub fn filter_schedulable_workers_by_resource_group(
         &self,
         resource_group: &str,
-    ) -> HashMap<u32, WorkerNode> {
+    ) -> HashMap<WorkerId, WorkerNode> {
         let worker_ids = filter_workers_by_resource_group(&self.worker_nodes, resource_group);
         self.worker_nodes
             .iter()
-            .filter(|(id, _)| worker_ids.contains(&(**id as WorkerId)))
+            .filter(|(id, _)| worker_ids.contains(*id))
             .map(|(id, worker)| (*id, worker.clone()))
             .collect()
     }
@@ -912,7 +912,7 @@ impl ClusterControllerInner {
         Ok(worker_parallelisms
             .into_iter()
             .flat_map(|(worker_id, parallelism)| {
-                (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id as u32, idx as usize))
+                (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id, idx as usize))
             })
             .collect_vec())
     }

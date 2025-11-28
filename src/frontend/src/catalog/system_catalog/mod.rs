@@ -29,6 +29,7 @@ use risingwave_common::catalog::{
     SYS_CATALOG_START_ID, SysCatalogReader, TableId,
 };
 use risingwave_common::error::BoxedError;
+use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
@@ -174,7 +175,7 @@ impl From<&BuiltinTable> for SystemTableCatalog {
 impl From<&BuiltinView> for ViewCatalog {
     fn from(val: &BuiltinView) -> Self {
         ViewCatalog {
-            id: 0,
+            id: 0.into(),
             name: val.name.to_owned(),
             schema_id: 0.into(),
             database_id: 0.into(),
@@ -299,16 +300,16 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Vec<ViewCatalog> {
         .iter()
         .enumerate()
         .filter_map(|(idx, c)| match c {
-            BuiltinCatalog::View(v) if v.schema == schema_name => {
-                Some(ViewCatalog::from(v).with_id(idx as u32 + SYS_CATALOG_START_ID as u32))
-            }
+            BuiltinCatalog::View(v) if v.schema == schema_name => Some(
+                ViewCatalog::from(v).with_id((idx as u32 + SYS_CATALOG_START_ID as u32).into()),
+            ),
             _ => None,
         })
         .collect()
 }
 
-pub fn is_system_catalog(oid: u32) -> bool {
-    oid >= SYS_CATALOG_START_ID as u32
+pub fn is_system_catalog(oid: ObjectId) -> bool {
+    oid.as_raw_id() >= SYS_CATALOG_START_ID as u32
 }
 
 /// The global registry of all builtin catalogs.

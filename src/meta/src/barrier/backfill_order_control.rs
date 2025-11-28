@@ -57,7 +57,7 @@ pub fn get_nodes_with_backfill_dependencies(
 // constructor
 impl BackfillOrderState {
     pub fn new(
-        backfill_orders: HashMap<FragmentId, Vec<FragmentId>>,
+        backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
         stream_job_fragments: &StreamJobFragments,
         locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> Self {
@@ -93,9 +93,9 @@ impl BackfillOrderState {
         }
 
         for (fragment_id, children) in backfill_orders {
-            for child in &children {
+            for child in children {
                 let child_node = backfill_nodes.get_mut(child).unwrap();
-                child_node.remaining_dependencies.insert(fragment_id);
+                child_node.remaining_dependencies.insert(*fragment_id);
             }
         }
 

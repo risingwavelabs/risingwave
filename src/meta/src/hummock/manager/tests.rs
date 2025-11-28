@@ -33,8 +33,8 @@ use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, FIRST_VERSION_ID, HummockContextId, HummockEpoch, HummockObjectId,
-    HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SyncResult,
+    CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockObjectId, HummockSstableObjectId,
+    HummockVersionId, LocalSstableInfo, SyncResult,
 };
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
@@ -435,7 +435,7 @@ async fn test_release_context_resource() {
 #[tokio::test]
 async fn test_context_id_validation() {
     let (_env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
-    let invalid_context_id = HummockContextId::MAX;
+    let invalid_context_id = 233.into();
     let context_id = worker_id as _;
 
     // Invalid context id is rejected.
@@ -781,8 +781,10 @@ async fn test_invalid_sst_id() {
     let ssts = to_local_sstable_info(&ssts);
     // reject due to invalid context id
     {
-        let hummock_meta_client: Arc<dyn HummockMetaClient> =
-            Arc::new(MockHummockMetaClient::new(hummock_manager.clone(), 23333));
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager.clone(),
+            23333.into(),
+        ));
         let error = hummock_meta_client
             .commit_epoch(
                 epoch,
@@ -2585,7 +2587,7 @@ async fn test_merge_compaction_group_task_expired() {
 #[tokio::test]
 async fn test_vacuum() {
     let (_env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
-    let context_id = worker_id as _;
+    let context_id = worker_id;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
         context_id,

@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, JsonbRef, ListValue, ScalarRefImpl};
+use risingwave_common::types::{JsonbRef, ScalarRefImpl};
 use risingwave_expr::{ExprError, Result, function};
 
 /// Extracts JSON object field with the given key.
@@ -135,7 +133,11 @@ pub fn jsonb_extract_path(v: JsonbRef<'_>, path: impl Row) -> Option<JsonbRef<'_
 /// NULL
 /// ```
 #[function("jsonb_access_str(jsonb, varchar) -> varchar")]
-pub fn jsonb_object_field_str(v: JsonbRef<'_>, p: &str, writer: &mut impl Write) -> Option<()> {
+pub fn jsonb_object_field_str(
+    v: JsonbRef<'_>,
+    p: &str,
+    writer: &mut impl std::fmt::Write,
+) -> Option<()> {
     let jsonb = jsonb_object_field(v, p)?;
     if jsonb.is_jsonb_null() {
         return None;
@@ -162,7 +164,11 @@ pub fn jsonb_object_field_str(v: JsonbRef<'_>, p: &str, writer: &mut impl Write)
 /// NULL
 /// ```
 #[function("jsonb_access_str(jsonb, int4) -> varchar")]
-pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write) -> Option<()> {
+pub fn jsonb_array_element_str(
+    v: JsonbRef<'_>,
+    p: i32,
+    writer: &mut impl std::fmt::Write,
+) -> Option<()> {
     let jsonb = jsonb_array_element(v, p)?;
     if jsonb.is_jsonb_null() {
         return None;
@@ -208,7 +214,7 @@ pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write)
 pub fn jsonb_extract_path_text(
     v: JsonbRef<'_>,
     path: impl Row,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Option<()> {
     let jsonb = jsonb_extract_path(v, path)?;
     if jsonb.is_jsonb_null() {
@@ -249,7 +255,10 @@ pub fn jsonb_extract_path_text(
 /// select jsonb_to_array('{"a": 1}');
 /// ```
 #[function("jsonb_to_array(jsonb) -> jsonb[]")]
-fn jsonb_to_array(v: JsonbRef<'_>) -> Result<ListValue> {
+fn jsonb_to_array(
+    v: JsonbRef<'_>,
+    writer: &mut impl risingwave_common::array::ListWrite,
+) -> Result<()> {
     let iter = v
         .array_elements()
         .map_err(|e| ExprError::InvalidParam {
@@ -257,5 +266,6 @@ fn jsonb_to_array(v: JsonbRef<'_>) -> Result<ListValue> {
             reason: e.into(),
         })?
         .map(|elem| Some(ScalarRefImpl::Jsonb(elem)));
-    Ok(ListValue::from_datum_iter(&DataType::Jsonb, iter))
+    writer.write_iter(iter);
+    Ok(())
 }

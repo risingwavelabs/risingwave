@@ -22,14 +22,12 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 pub use error::*;
-pub use risingwave_common::id::{ActorId, FragmentId};
+pub use risingwave_common::id::{ActorId, FragmentId, SubscriptionId};
 pub use stream::*;
 use uuid::Uuid;
 
 /// Should be used together with `ActorId` to uniquely identify a dispatcher
 pub type DispatcherId = u64;
-
-pub type SubscriptionId = u32;
 
 #[derive(Clone, Debug)]
 pub struct ClusterId(String);

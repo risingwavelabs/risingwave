@@ -458,6 +458,27 @@ IcebergConfig:
   - name: s3.secret.key
     field_type: String
     required: false
+  - name: s3.iam_role_arn
+    field_type: String
+    required: false
+  - name: glue.access.key
+    field_type: String
+    required: false
+  - name: glue.secret.key
+    field_type: String
+    required: false
+  - name: glue.iam_role_arn
+    field_type: String
+    required: false
+  - name: glue.region
+    field_type: String
+    required: false
+  - name: glue.id
+    field_type: String
+    comments: |-
+      AWS Client id, can be omitted for storage catalog or when
+      caller's AWS account ID matches glue id
+    required: false
   - name: gcs.credential
     field_type: String
     required: false
@@ -482,12 +503,6 @@ IcebergConfig:
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse.
-    required: false
-  - name: glue.id
-    field_type: String
-    comments: |-
-      AWS Client id, can be omitted for storage catalog or when
-      caller's AWS account ID matches glue id
     required: false
   - name: catalog.name
     field_type: String
@@ -647,11 +662,39 @@ IcebergConfig:
     required: false
     default: 'true'
     allow_alter_on_fly: true
-  - name: max_snapshots_num_before_compaction
+  - name: compaction.max_snapshots_num
     field_type: usize
     comments: |-
       The maximum number of snapshots allowed since the last rewrite operation
       If set, sink will check snapshot count and wait if exceeded
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.small_files_threshold_mb
+    field_type: u64
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.delete_files_count_threshold
+    field_type: usize
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.trigger_snapshot_count
+    field_type: usize
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.target_file_size_mb
+    field_type: u64
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.type
+    field_type: String
+    comments: |-
+      Compaction type: `full`, `small-files`, or `files-with-delete`
+      If not set, will default to `full`
     required: false
     default: Default::default
     allow_alter_on_fly: true

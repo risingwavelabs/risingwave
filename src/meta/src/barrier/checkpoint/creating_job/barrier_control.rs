@@ -155,10 +155,10 @@ impl CreatingStreamingJobBarrierControl {
 
     pub(super) fn collect(&mut self, resp: BarrierCompleteResponse) {
         let epoch = resp.epoch;
-        let worker_id = resp.worker_id as WorkerId;
+        let worker_id = resp.worker_id;
         debug!(
             epoch,
-            worker_id,
+            %worker_id,
             job_id = %self.job_id,
             "collect barrier from worker"
         );
