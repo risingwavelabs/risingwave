@@ -2469,61 +2469,61 @@
               │     │     ├─StreamProject { exprs: ['{}':Jsonb, Coalesce(array_agg($expr1 order_by($expr1 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Bytea)) as $expr2] }
               │     │     │ └─StreamHashAgg { group_key: ['{}':Jsonb], aggs: [array_agg($expr1 order_by($expr1 ASC)) filter(IsNotNull(1:Int32)), count] }
               │     │     │   └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr1, 1:Int32, '{}':Jsonb, projected_row_id] }
-              │     │     │     ├─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │     │     │     │ └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │     │     │     │   └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │     │     ├─StreamProject { exprs: ['{}':Jsonb] }
+              │     │     │     │ └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │     │     │     │   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │     │     │     │     └─StreamShare { id: 1 }
               │     │     │     │       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               │     │     │     └─StreamProject { exprs: ['{}':Jsonb, Decode(JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.binary_set_attribute':Varchar), '$.BS':Varchar)), ARRAY[]:List(Varchar)), 'base64':Varchar) as $expr1, 1:Int32, projected_row_id] }
               │     │     │       └─StreamProjectSet { select_list: [$0, JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.binary_set_attribute':Varchar), '$.BS':Varchar))] }
-              │     │     │         └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │     │     │           └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │     │     │             └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │     │         └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │     │           └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │     │     │             └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │     │     │               └─StreamShare { id: 1 }
               │     │     │                 └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               │     │     └─StreamProject { exprs: ['{}':Jsonb, Coalesce(array_agg($expr3 order_by($expr3 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Int64)) as $expr4] }
               │     │       └─StreamHashAgg { group_key: ['{}':Jsonb], aggs: [array_agg($expr3 order_by($expr3 ASC)) filter(IsNotNull(1:Int32)), count] }
               │     │         └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr3, 1:Int32, '{}':Jsonb, projected_row_id] }
-              │     │           ├─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │     │           │ └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │     │           │   └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │           ├─StreamProject { exprs: ['{}':Jsonb] }
+              │     │           │ └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │     │           │   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │     │           │     └─StreamShare { id: 1 }
               │     │           │       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               │     │           └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.number_set_attribute':Varchar), '$.NS':Varchar)), ARRAY[]:List(Varchar))::Int64 as $expr3, 1:Int32, projected_row_id] }
               │     │             └─StreamProjectSet { select_list: [$0, JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.number_set_attribute':Varchar), '$.NS':Varchar))] }
-              │     │               └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │     │                 └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │     │                   └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │               └─StreamProject { exprs: ['{}':Jsonb] }
+              │     │                 └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │     │                   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │     │                     └─StreamShare { id: 1 }
               │     │                       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               │     └─StreamProject { exprs: ['{}':Jsonb, Coalesce(array_agg($expr5 order_by($expr5 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Float64)) as $expr6] }
               │       └─StreamHashAgg { group_key: ['{}':Jsonb], aggs: [array_agg($expr5 order_by($expr5 ASC)) filter(IsNotNull(1:Int32)), count] }
               │         └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr5, 1:Int32, '{}':Jsonb, projected_row_id] }
-              │           ├─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │           │ └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │           │   └─StreamProject { exprs: ['{}':Jsonb] }
+              │           ├─StreamProject { exprs: ['{}':Jsonb] }
+              │           │ └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │           │   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │           │     └─StreamShare { id: 1 }
               │           │       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               │           └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.float_set_attribute':Varchar), '$.NS':Varchar)), ARRAY[]:List(Varchar))::Float64 as $expr5, 1:Int32, projected_row_id] }
               │             └─StreamProjectSet { select_list: [$0, JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.float_set_attribute':Varchar), '$.NS':Varchar))] }
-              │               └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-              │                 └─StreamExchange { dist: HashShard('{}':Jsonb) }
-              │                   └─StreamProject { exprs: ['{}':Jsonb] }
+              │               └─StreamProject { exprs: ['{}':Jsonb] }
+              │                 └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+              │                   └─StreamExchange { dist: HashShard('{}':Jsonb) }
               │                     └─StreamShare { id: 1 }
               │                       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
               └─StreamProject { exprs: ['{}':Jsonb, Coalesce(array_agg($expr7 order_by($expr7 ASC)) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr8] }
                 └─StreamHashAgg { group_key: ['{}':Jsonb], aggs: [array_agg($expr7 order_by($expr7 ASC)) filter(IsNotNull(1:Int32)), count] }
                   └─StreamHashJoin { type: LeftOuter, predicate: '{}':Jsonb IS NOT DISTINCT FROM '{}':Jsonb, output: ['{}':Jsonb, $expr7, 1:Int32, '{}':Jsonb, projected_row_id] }
-                    ├─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-                    │ └─StreamExchange { dist: HashShard('{}':Jsonb) }
-                    │   └─StreamProject { exprs: ['{}':Jsonb] }
+                    ├─StreamProject { exprs: ['{}':Jsonb] }
+                    │ └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+                    │   └─StreamExchange { dist: HashShard('{}':Jsonb) }
                     │     └─StreamShare { id: 1 }
                     │       └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
                     └─StreamProject { exprs: ['{}':Jsonb, JsonbExtractPathTextVariadic(JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.string_set_attribute':Varchar), '$.SS':Varchar)), ARRAY[]:List(Varchar)) as $expr7, 1:Int32, projected_row_id], noop_update_hint: true }
                       └─StreamProjectSet { select_list: [$0, JsonbArrayElements(JsonbPathQueryFirst(JsonbPathQueryFirst($0, '$.string_set_attribute':Varchar), '$.SS':Varchar))] }
-                        └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
-                          └─StreamExchange { dist: HashShard('{}':Jsonb) }
-                            └─StreamProject { exprs: ['{}':Jsonb] }
+                        └─StreamProject { exprs: ['{}':Jsonb] }
+                          └─StreamAppendOnlyDedup { dedup_cols: ['{}':Jsonb] }
+                            └─StreamExchange { dist: HashShard('{}':Jsonb) }
                               └─StreamShare { id: 1 }
                                 └─StreamValues { rows: [['Empty JSON item':Varchar, '{}':Jsonb, 0:Int64]] }
 - name: test case for PullUpCorrelatedProjectValueRule
