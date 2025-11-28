@@ -59,7 +59,7 @@ impl DebeziumCdcMeta {
 
     pub fn extract_database_name(&self) -> DatumRef<'_> {
         Some(ScalarRefImpl::Utf8(
-            &self.full_table_name.as_str()[0..self.db_name_prefix_len],
+            &self.full_table_name.as_str()[0..self.db_name_prefix_len.saturating_sub(1)],
         ))
     }
 
