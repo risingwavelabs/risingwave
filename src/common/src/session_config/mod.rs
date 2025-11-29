@@ -568,7 +568,7 @@ impl SessionConfig {
         }
 
         if let Some(v) = self.streaming_join_encoding.as_ref() {
-            add(&mut map, "streaming.developer.stream_join_encoding_type", v)?;
+            add(&mut map, "streaming.developer.join_encoding_type", v)?;
         }
 
         let res = toml::to_string(&map)?;
@@ -627,7 +627,7 @@ mod test {
         let override_str = config.to_initial_streaming_config_override().unwrap();
         expect![[r#"
             [streaming.developer]
-            stream_join_encoding_type = "cpu_optimized"
+            join_encoding_type = "cpu_optimized"
         "#]]
         .assert_eq(&override_str);
 
