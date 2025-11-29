@@ -23,6 +23,7 @@ use risingwave_pb::id::{ActorId, FragmentId, WorkerId};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use tracing::warn;
 
+use crate::MetaResult;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
@@ -153,7 +154,7 @@ impl BarrierWorkerState {
         >,
         edges: &mut Option<FragmentEdgeBuildResult>,
         control_stream_manager: &ControlStreamManager,
-    ) -> ApplyCommandInfo {
+    ) -> MetaResult<ApplyCommandInfo> {
         // update the fragment_infos outside pre_apply
         let post_apply_changes = if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(_),
@@ -161,10 +162,10 @@ impl BarrierWorkerState {
         }) = command
         {
             None
-        } else if let Some((new_job_id, fragment_changes)) =
+        } else if let Some((new_job, fragment_changes)) =
             command.and_then(Command::fragment_changes)
         {
-            Some(self.database_info.pre_apply(new_job_id, fragment_changes))
+            Some(self.database_info.pre_apply(new_job, fragment_changes))
         } else {
             None
         };
@@ -229,6 +230,7 @@ impl BarrierWorkerState {
                     fragment_infos: job_fragments,
                     subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
                     status: CreateStreamingJobStatus::Created,
+                    cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
                 });
             }
         } else {
@@ -278,11 +280,18 @@ impl BarrierWorkerState {
         let table_ids_to_sync =
             InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()).collect();
 
-        let mutation = command
-            .as_ref()
-            .and_then(|c| c.to_mutation(prev_is_paused, edges, control_stream_manager));
+        let mutation = if let Some(c) = &command {
+            c.to_mutation(
+                prev_is_paused,
+                edges,
+                control_stream_manager,
+                &mut self.database_info,
+            )?
+        } else {
+            None
+        };
 
-        ApplyCommandInfo {
+        Ok(ApplyCommandInfo {
             node_actors,
             actors_to_create,
             mv_subscription_max_retention: self.database_info.max_subscription_retention(),
@@ -290,6 +299,6 @@ impl BarrierWorkerState {
             table_ids_to_sync,
             jobs_to_wait,
             mutation,
-        }
+        })
     }
 }

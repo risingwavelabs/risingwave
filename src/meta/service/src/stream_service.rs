@@ -745,9 +745,9 @@ impl StreamManagerService for StreamServiceImpl {
         _request: Request<ListCdcProgressRequest>,
     ) -> Result<Response<ListCdcProgressResponse>, Status> {
         let cdc_progress = self
-            .env
-            .cdc_table_backfill_tracker()
-            .list_cdc_progress()
+            .barrier_manager
+            .get_cdc_progress()
+            .await?
             .into_iter()
             .map(|(job_id, p)| {
                 (

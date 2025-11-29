@@ -19,10 +19,9 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -37,7 +36,7 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
-use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
+use crate::stream::cdc::reload_cdc_table_snapshot_splits;
 use crate::stream::{SourceChange, StreamFragmentGraph};
 
 impl GlobalBarrierWorkerContextImpl {
@@ -257,29 +256,6 @@ impl GlobalBarrierWorkerContextImpl {
             }
         }
         Ok((table_committed_epoch, log_epochs))
-    }
-
-    fn collect_cdc_table_backfill_actors<'a, I>(jobs: I) -> HashMap<JobId, HashSet<ActorId>>
-    where
-        I: Iterator<Item = (&'a JobId, &'a HashMap<FragmentId, InflightFragmentInfo>)>,
-    {
-        let mut cdc_table_backfill_actors = HashMap::new();
-
-        for (job_id, fragments) in jobs {
-            for fragment_infos in fragments.values() {
-                if fragment_infos
-                    .fragment_type_mask
-                    .contains(FragmentTypeFlag::StreamCdcScan)
-                {
-                    cdc_table_backfill_actors
-                        .entry(*job_id)
-                        .or_insert_with(HashSet::new)
-                        .extend(fragment_infos.actors.keys().cloned());
-                }
-            }
-        }
-
-        cdc_table_backfill_actors
     }
 
     /// For normal DDL operations, the `UpstreamSinkUnion` operator is modified dynamically, and does not persist the
@@ -527,34 +503,10 @@ impl GlobalBarrierWorkerContextImpl {
                         }
                     }
 
-                    let cdc_table_backfill_actors = Self::collect_cdc_table_backfill_actors(
-                        info.values().flat_map(|jobs| jobs.iter()),
-                    );
+                    let cdc_table_snapshot_splits =
+                        reload_cdc_table_snapshot_splits(&self.env.meta_store_ref().conn, None)
+                            .await?;
 
-                    let cdc_table_ids = cdc_table_backfill_actors
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    let cdc_table_snapshot_split_assignment =
-                        assign_cdc_table_snapshot_splits_pairs(
-                            cdc_table_backfill_actors,
-                            self.env.meta_store_ref(),
-                            self.env.cdc_table_backfill_tracker.completed_job_ids(),
-                        )
-                        .await?;
-                    let cdc_table_snapshot_split_assignment =
-                        if cdc_table_snapshot_split_assignment.is_empty() {
-                            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
-                        } else {
-                            let generation = self
-                                .env
-                                .cdc_table_backfill_tracker
-                                .next_generation(cdc_table_ids.into_iter());
-                            CdcTableSnapshotSplitAssignmentWithGeneration::new(
-                                cdc_table_snapshot_split_assignment,
-                                generation,
-                            )
-                        };
                     Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
                         database_job_infos: info,
@@ -567,7 +519,7 @@ impl GlobalBarrierWorkerContextImpl {
                         background_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
                         database_infos,
-                        cdc_table_snapshot_split_assignment,
+                        cdc_table_snapshot_splits,
                     })
                 }
             }
@@ -673,29 +625,9 @@ impl GlobalBarrierWorkerContextImpl {
             }
         }
 
-        let cdc_table_backfill_actors = Self::collect_cdc_table_backfill_actors(info.iter());
-
-        let cdc_table_ids = cdc_table_backfill_actors
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits_pairs(
-            cdc_table_backfill_actors,
-            self.env.meta_store_ref(),
-            self.env.cdc_table_backfill_tracker.completed_job_ids(),
-        )
-        .await?;
-        let cdc_table_snapshot_split_assignment = if cdc_table_snapshot_split_assignment.is_empty()
-        {
-            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
-        } else {
-            CdcTableSnapshotSplitAssignmentWithGeneration::new(
-                cdc_table_snapshot_split_assignment,
-                self.env
-                    .cdc_table_backfill_tracker
-                    .next_generation(cdc_table_ids.into_iter()),
-            )
-        };
+        let cdc_table_snapshot_splits =
+            reload_cdc_table_snapshot_splits(&self.env.meta_store_ref().conn, Some(database_id))
+                .await?;
 
         self.refresh_manager
             .remove_trackers_by_database(database_id);
@@ -709,7 +641,7 @@ impl GlobalBarrierWorkerContextImpl {
             fragment_relations,
             source_splits,
             background_jobs,
-            cdc_table_snapshot_split_assignment,
+            cdc_table_snapshot_splits,
         }))
     }
 
