@@ -49,6 +49,7 @@ mod m20250722_155040_table_refreshable;
 mod m20250729_174630_add_vector_index_info;
 mod m20250810_000000_add_user_admin_field;
 mod m20250819_014448_add_version_column_indices_to_table;
+mod m20250820_080903_snowflake_redshift_sink_file_path;
 mod m20250820_120000_add_cdc_table_type;
 mod m20250821_081110_cdc_table_snapshot_splits_add_column;
 mod m20250905_144810_deprecate_table_incoming_sinks;
@@ -147,6 +148,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250819_014448_add_version_column_indices_to_table::Migration),
             Box::new(m20250820_120000_add_cdc_table_type::Migration),
             Box::new(m20250821_081110_cdc_table_snapshot_splits_add_column::Migration),
+            Box::new(m20250820_080903_snowflake_redshift_sink_file_path::Migration),
             Box::new(m20250905_144810_deprecate_table_incoming_sinks::Migration),
             Box::new(m20250916_120000_add_refresh_fields::Migration),
             Box::new(m20251005_000000_fragment_splits::Migration),

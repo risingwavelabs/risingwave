@@ -15,11 +15,13 @@ use std::fmt::Write;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use anyhow::anyhow;
 use bytes::BytesMut;
 use opendal::Operator;
 use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::Row;
+use risingwave_common::types::DataType;
 use serde_json::{Map, Value};
 use thiserror_ext::AsReport;
 
@@ -29,8 +31,11 @@ use crate::sink::encoder::{
 };
 use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Common, S3Sink};
-use crate::sink::{Result, SinkError, SinkWriterParam};
+use crate::sink::remote::CoordinatedRemoteSinkWriter;
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam};
 
+pub mod file_manager_util;
 pub mod redshift;
 pub mod snowflake;
 
@@ -241,5 +246,137 @@ impl SnowflakeRedshiftSinkS3Writer {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ConnectorType {
+    Redshift,
+    Snowflake,
+}
+
+/// Generic JDBC writer for both Redshift and Snowflake sinks
+pub struct SnowflakeRedshiftSinkJdbcWriter {
+    augmented_row: AugmentedChunk,
+    jdbc_sink_writer: CoordinatedRemoteSinkWriter,
+}
+
+impl SnowflakeRedshiftSinkJdbcWriter {
+    pub async fn new(
+        database: Option<&str>,
+        schema: Option<&str>,
+        target_table: &str,
+        cdc_table: Option<&str>,
+        connector_type: ConnectorType,
+        is_append_only: bool,
+        writer_param: SinkWriterParam,
+        mut param: SinkParam,
+    ) -> Result<Self> {
+        let metrics = SinkWriterMetrics::new(&writer_param);
+        let column_descs = &mut param.columns;
+
+        // Build full table name based on connector type
+        let full_table_name = if is_append_only {
+            Self::build_full_table_name(database, schema, target_table, connector_type)
+        } else {
+            // Add CDC-specific columns for upsert mode
+            let max_column_id = column_descs
+                .iter()
+                .map(|column| column.column_id.get_id())
+                .max()
+                .unwrap_or(0);
+
+            (*column_descs).push(ColumnDesc::named(
+                __ROW_ID,
+                ColumnId::new(max_column_id + 1),
+                DataType::Varchar,
+            ));
+            (*column_descs).push(ColumnDesc::named(
+                __OP,
+                ColumnId::new(max_column_id + 2),
+                DataType::Int32,
+            ));
+
+            Self::build_full_table_name(
+                database,
+                schema,
+                cdc_table.ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "intermediate.table.name is required for non-append-only sink"
+                    ))
+                })?,
+                connector_type,
+            )
+        };
+
+        if let Some(schema_name) = param.properties.remove("schema") {
+            param
+                .properties
+                .insert("schema.name".to_owned(), schema_name);
+        }
+        if let Some(database_name) = param.properties.remove("database") {
+            param
+                .properties
+                .insert("database.name".to_owned(), database_name);
+        }
+
+        if let Some(user) = param.properties.remove("user") {
+            param.properties.insert("user".to_owned(), user);
+        }
+        param
+            .properties
+            .insert("table.name".to_owned(), full_table_name.clone());
+        param
+            .properties
+            .insert("type".to_owned(), "append-only".to_owned());
+
+        let jdbc_sink_writer =
+            CoordinatedRemoteSinkWriter::new(param.clone(), metrics.clone()).await?;
+
+        Ok(Self {
+            augmented_row: AugmentedChunk::new(0, is_append_only),
+            jdbc_sink_writer,
+        })
+    }
+
+    /// Build table name with proper quoting based on connector type
+    fn build_full_table_name(
+        database: Option<&str>,
+        schema: Option<&str>,
+        table: &str,
+        connector_type: ConnectorType,
+    ) -> String {
+        match connector_type {
+            ConnectorType::Redshift => redshift::build_full_table_name(schema, table),
+            ConnectorType::Snowflake => {
+                // Snowflake uses database.schema.table format
+                let database = database.unwrap_or_default();
+                let schema = schema.unwrap_or_default();
+                format!(r#""{}"."{}"."{}""#, database, schema, table)
+            }
+        }
+    }
+
+    pub async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.augmented_row.reset_epoch(epoch);
+        self.jdbc_sink_writer.begin_epoch(epoch).await?;
+        Ok(())
+    }
+
+    pub async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        let chunk = self.augmented_row.augmented_chunk(chunk)?;
+        self.jdbc_sink_writer.write_batch(chunk).await?;
+        Ok(())
+    }
+
+    pub async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        self.jdbc_sink_writer.barrier(is_checkpoint).await?;
+        Ok(())
+    }
+
+    pub async fn abort(&mut self) -> Result<()> {
+        // TODO: abort should clean up all the data written in this epoch
+        self.jdbc_sink_writer.abort().await?;
+        Ok(())
     }
 }

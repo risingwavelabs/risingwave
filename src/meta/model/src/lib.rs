@@ -59,6 +59,7 @@ pub mod secret;
 pub mod serde_seaql_migration;
 pub mod session_parameter;
 pub mod sink;
+pub mod snowflake_redshift_sink_file;
 pub mod source;
 pub mod streaming_job;
 pub mod subscription;
@@ -333,6 +334,14 @@ impl From<Vec<u32>> for I32Array {
 
 impl I32Array {
     pub fn into_u32_array(self) -> Vec<u32> {
+        self.0.into_iter().map(|id| id as _).collect()
+    }
+}
+
+derive_from_json_struct!(StringArray, Vec<String>);
+
+impl StringArray {
+    pub fn into_string_array(self) -> Vec<String> {
         self.0.into_iter().map(|id| id as _).collect()
     }
 }
