@@ -136,6 +136,7 @@ impl Strong {
             | ExprType::MakeDate
             | ExprType::MakeTime
             | ExprType::MakeTimestamp
+            | ExprType::MakeInterval
             | ExprType::SecToTimestamptz
             | ExprType::AtTimeZone
             | ExprType::DateTrunc
