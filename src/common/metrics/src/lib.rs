@@ -109,11 +109,16 @@ impl MetricsLayer {
 }
 
 #[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MetricLevel {
     #[default]
+    #[serde(alias = "Disabled")]
     Disabled = 0,
+    #[serde(alias = "Critical")]
     Critical = 1,
+    #[serde(alias = "Info")]
     Info = 2,
+    #[serde(alias = "Debug")]
     Debug = 3,
 }
 
