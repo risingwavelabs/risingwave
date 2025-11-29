@@ -186,6 +186,7 @@ pub enum DdlCommand {
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
+    AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
 
 impl DdlCommand {
@@ -220,6 +221,7 @@ impl DdlCommand {
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
     }
 
@@ -246,7 +248,8 @@ impl DdlCommand {
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
-            | DdlCommand::AlterDatabaseParam(_, _) => true,
+            | DdlCommand::AlterDatabaseParam(_, _)
+            | DdlCommand::AlterStreamingJobConfig(_, _, _) => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -451,6 +454,10 @@ impl DdlController {
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
+                }
+                DdlCommand::AlterStreamingJobConfig(job_id, entries_to_add, keys_to_remove) => {
+                    ctrl.alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
+                        .await
                 }
             }
         }
@@ -2229,6 +2236,18 @@ impl DdlController {
         self.metadata_manager
             .catalog_controller
             .comment_on(comment)
+            .await
+    }
+
+    async fn alter_streaming_job_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> MetaResult<NotificationVersion> {
+        self.metadata_manager
+            .catalog_controller
+            .alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
             .await
     }
 }
