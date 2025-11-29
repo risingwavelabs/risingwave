@@ -149,6 +149,7 @@ impl DiagnoseCommand {
             row.add_cell("parallelism".into());
             row.add_cell("is_streaming".into());
             row.add_cell("is_serving".into());
+            row.add_cell("is_iceberg_compactor".into());
             row.add_cell("rw_version".into());
             row.add_cell("total_memory_bytes".into());
             row.add_cell("total_cpu_cores".into());
@@ -175,14 +176,35 @@ impl DiagnoseCommand {
                 worker_node.get_state().ok().map(|s| s.as_str_name()),
             );
             try_add_cell(&mut row, worker_node.parallelism());
-            try_add_cell(
-                &mut row,
-                worker_node.property.as_ref().map(|p| p.is_streaming),
-            );
-            try_add_cell(
-                &mut row,
-                worker_node.property.as_ref().map(|p| p.is_serving),
-            );
+            // is_streaming and is_serving are only meaningful for ComputeNode
+            let (is_streaming, is_serving) = {
+                if let Ok(t) = worker_node.get_type()
+                    && t == WorkerType::ComputeNode
+                {
+                    (
+                        worker_node.property.as_ref().map(|p| p.is_streaming),
+                        worker_node.property.as_ref().map(|p| p.is_serving),
+                    )
+                } else {
+                    (None, None)
+                }
+            };
+            try_add_cell(&mut row, is_streaming);
+            try_add_cell(&mut row, is_serving);
+            // is_iceberg_compactor is only meaningful for Compactor worker type
+            let is_iceberg_compactor = {
+                if let Ok(t) = worker_node.get_type()
+                    && t == WorkerType::Compactor
+                {
+                    worker_node
+                        .property
+                        .as_ref()
+                        .map(|p| p.is_iceberg_compactor)
+                } else {
+                    None
+                }
+            };
+            try_add_cell(&mut row, is_iceberg_compactor);
             try_add_cell(
                 &mut row,
                 worker_node.resource.as_ref().map(|r| r.rw_version.clone()),

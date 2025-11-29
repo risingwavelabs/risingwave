@@ -33,6 +33,7 @@ use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
@@ -198,12 +199,21 @@ pub async fn compactor_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
+    let is_iceberg_compactor = matches!(
+        compactor_mode,
+        CompactorMode::DedicatedIceberg | CompactorMode::SharedIceberg
+    );
+
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
         opts.meta_address.clone(),
         WorkerType::Compactor,
         &advertise_addr,
-        Default::default(),
+        Property {
+            is_iceberg_compactor,
+            ..Default::default()
+        },
         Arc::new(config.meta.clone()),
     )
     .await;
