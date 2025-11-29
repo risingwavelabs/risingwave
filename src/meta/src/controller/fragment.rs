@@ -1033,20 +1033,23 @@ impl CatalogController {
             fragment_objects
                 .into_iter()
                 .flat_map(|(fragment_id, object_id, schema_id, object_type)| {
-                    let SharedFragmentInfo {
-                        fragment_id,
-                        actors,
-                        ..
-                    } = info.get_fragment(fragment_id as _).unwrap();
-                    actors.keys().map(move |actor_id| {
-                        (
-                            *actor_id as _,
-                            *fragment_id as _,
-                            object_id,
-                            schema_id,
-                            object_type,
-                        )
-                    })
+                    info.get_fragment(fragment_id).into_iter().flat_map(
+                        move |SharedFragmentInfo {
+                                  fragment_id,
+                                  actors,
+                                  ..
+                              }| {
+                            actors.keys().map(move |actor_id| {
+                                (
+                                    *actor_id as _,
+                                    *fragment_id as _,
+                                    object_id,
+                                    schema_id,
+                                    object_type,
+                                )
+                            })
+                        },
+                    )
                 })
                 .collect_vec()
         };
