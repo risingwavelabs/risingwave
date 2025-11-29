@@ -1589,8 +1589,24 @@ impl DdlController {
         cluster_info: &StreamingClusterInfo,
         resource_group: String,
     ) -> MetaResult<NonZeroUsize> {
-        let available = cluster_info.parallelism(&resource_group);
-        let Some(available) = NonZeroUsize::new(available) else {
+        let available = NonZeroUsize::new(cluster_info.parallelism(&resource_group));
+        DdlController::resolve_stream_parallelism_inner(
+            specified,
+            max,
+            available,
+            &self.env.opts.default_parallelism,
+            &resource_group,
+        )
+    }
+
+    fn resolve_stream_parallelism_inner(
+        specified: Option<NonZeroUsize>,
+        max: NonZeroUsize,
+        available: Option<NonZeroUsize>,
+        default_parallelism: &DefaultParallelism,
+        resource_group: &str,
+    ) -> MetaResult<NonZeroUsize> {
+        let Some(available) = available else {
             bail_unavailable!(
                 "no available slots to schedule in resource group \"{}\", \
                  have you allocated any compute nodes within this resource group?",
@@ -1607,42 +1623,40 @@ impl DdlController {
                 );
             }
             if specified > available {
-                bail_unavailable!(
-                    "insufficient parallelism to schedule in resource group \"{}\", \
-                     required: {}, available: {}",
-                    resource_group,
-                    specified,
-                    available,
-                );
-            }
-            Ok(specified)
-        } else {
-            // Use configured parallelism if no default parallelism is specified.
-            let default_parallelism = match self.env.opts.default_parallelism {
-                DefaultParallelism::Full => available,
-                DefaultParallelism::Default(num) => {
-                    if num > available {
-                        bail_unavailable!(
-                            "insufficient parallelism to schedule in resource group \"{}\", \
-                            required: {}, available: {}",
-                            resource_group,
-                            num,
-                            available,
-                        );
-                    }
-                    num
-                }
-            };
-
-            if default_parallelism > max {
                 tracing::warn!(
-                    max_parallelism = max.get(),
                     resource_group,
-                    "too many parallelism available, use max parallelism instead",
+                    specified_parallelism = specified.get(),
+                    available_parallelism = available.get(),
+                    "specified parallelism exceeds available slots, scheduling with specified value",
                 );
             }
-            Ok(default_parallelism.min(max))
+            return Ok(specified);
         }
+
+        // Use default parallelism when no specific parallelism is provided by the user.
+        let default_parallelism = match default_parallelism {
+            DefaultParallelism::Full => available,
+            DefaultParallelism::Default(num) => {
+                if *num > available {
+                    tracing::warn!(
+                        resource_group,
+                        configured_parallelism = num.get(),
+                        available_parallelism = available.get(),
+                        "default parallelism exceeds available slots, scheduling with configured value",
+                    );
+                }
+                *num
+            }
+        };
+
+        if default_parallelism > max {
+            tracing::warn!(
+                max_parallelism = max.get(),
+                resource_group,
+                "default parallelism exceeds max parallelism, capping to max",
+            );
+        }
+        Ok(default_parallelism.min(max))
     }
 
     /// Builds the actor graph:
@@ -2355,4 +2369,80 @@ pub fn refill_upstream_sink_union_in_table(
             true
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+
+    use super::*;
+
+    #[test]
+    fn test_specified_parallelism_exceeds_available() {
+        let result = DdlController::resolve_stream_parallelism_inner(
+            Some(NonZeroUsize::new(100).unwrap()),
+            NonZeroUsize::new(256).unwrap(),
+            Some(NonZeroUsize::new(4).unwrap()),
+            &DefaultParallelism::Full,
+            "default",
+        )
+        .unwrap();
+        assert_eq!(result.get(), 100);
+    }
+
+    #[test]
+    fn test_allows_default_parallelism_over_available() {
+        let result = DdlController::resolve_stream_parallelism_inner(
+            None,
+            NonZeroUsize::new(256).unwrap(),
+            Some(NonZeroUsize::new(4).unwrap()),
+            &DefaultParallelism::Default(NonZeroUsize::new(50).unwrap()),
+            "default",
+        )
+        .unwrap();
+        assert_eq!(result.get(), 50);
+    }
+
+    #[test]
+    fn test_full_parallelism_capped_by_max() {
+        let result = DdlController::resolve_stream_parallelism_inner(
+            None,
+            NonZeroUsize::new(6).unwrap(),
+            Some(NonZeroUsize::new(10).unwrap()),
+            &DefaultParallelism::Full,
+            "default",
+        )
+        .unwrap();
+        assert_eq!(result.get(), 6);
+    }
+
+    #[test]
+    fn test_no_available_slots_returns_error() {
+        let result = DdlController::resolve_stream_parallelism_inner(
+            None,
+            NonZeroUsize::new(4).unwrap(),
+            None,
+            &DefaultParallelism::Full,
+            "default",
+        );
+        assert!(matches!(
+            result,
+            Err(ref e) if matches!(e.inner(), MetaErrorInner::Unavailable(_))
+        ));
+    }
+
+    #[test]
+    fn test_specified_over_max_returns_error() {
+        let result = DdlController::resolve_stream_parallelism_inner(
+            Some(NonZeroUsize::new(8).unwrap()),
+            NonZeroUsize::new(4).unwrap(),
+            Some(NonZeroUsize::new(10).unwrap()),
+            &DefaultParallelism::Full,
+            "default",
+        );
+        assert!(matches!(
+            result,
+            Err(ref e) if matches!(e.inner(), MetaErrorInner::InvalidParameter(_))
+        ));
+    }
 }
