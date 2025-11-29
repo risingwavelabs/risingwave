@@ -34,7 +34,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::{Command, Reschedule, SharedFragmentInfo};
+use crate::barrier::{Command, Reschedule, SharedActorInfo, SharedFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
     find_fragment_no_shuffle_dags_detailed, render_fragments, render_jobs,
@@ -77,6 +77,63 @@ pub struct ScaleController {
     /// We will acquire lock during DDL to prevent scaling operations on jobs that are in the creating state.
     /// e.g., a MV cannot be rescheduled during foreground backfill.
     pub reschedule_lock: RwLock<()>,
+}
+
+fn actor_info_equal(prev: &SharedActorInfo, curr: &InflightActorInfo) -> bool {
+    prev.worker_id == curr.worker_id
+        && prev.vnode_bitmap == curr.vnode_bitmap
+        && prev.splits == curr.splits
+}
+
+fn actors_equivalent_ignore_id(
+    prev: &HashMap<ActorId, SharedActorInfo>,
+    curr: &HashMap<ActorId, InflightActorInfo>,
+) -> bool {
+    if prev.len() != curr.len() {
+        return false;
+    }
+
+    let mut prev_by_worker: BTreeMap<WorkerId, Vec<&SharedActorInfo>> = BTreeMap::new();
+    let mut curr_by_worker: BTreeMap<WorkerId, Vec<&InflightActorInfo>> = BTreeMap::new();
+
+    for info in prev.values() {
+        prev_by_worker.entry(info.worker_id).or_default().push(info);
+    }
+    for info in curr.values() {
+        curr_by_worker.entry(info.worker_id).or_default().push(info);
+    }
+
+    if prev_by_worker.len() != curr_by_worker.len() {
+        return false;
+    }
+
+    for (worker_id, prev_infos) in prev_by_worker {
+        let Some(curr_infos) = curr_by_worker.remove(&worker_id) else {
+            return false;
+        };
+
+        if prev_infos.len() != curr_infos.len() {
+            return false;
+        }
+
+        let mut unmatched = prev_infos;
+        for curr_info in curr_infos {
+            if let Some(pos) = unmatched
+                .iter()
+                .position(|prev_info| actor_info_equal(prev_info, curr_info))
+            {
+                unmatched.swap_remove(pos);
+            } else {
+                return false;
+            }
+        }
+
+        if !unmatched.is_empty() {
+            return false;
+        }
+    }
+
+    curr_by_worker.is_empty()
 }
 
 impl ScaleController {
@@ -585,14 +642,6 @@ impl ScaleController {
 
         let all_related_fragment_ids = all_related_fragment_ids.into_iter().collect_vec();
 
-        // let all_fragments_from_db: HashMap<_, _> = Fragment::find()
-        //     .filter(fragment::Column::FragmentId.is_in(all_related_fragment_ids.clone()))
-        //     .all(&txn)
-        //     .await?
-        //     .into_iter()
-        //     .map(|f| (f.fragment_id, f))
-        //     .collect();
-
         let all_prev_fragments: HashMap<_, _> = {
             let read_guard = self.env.shared_actor_infos().read_guard();
             all_related_fragment_ids
@@ -754,6 +803,10 @@ impl ScaleController {
                     ))
                 })?;
 
+                if actors_equivalent_ignore_id(&prev_fragment.actors, actors) {
+                    continue;
+                }
+
                 let mut reschedule = self.diff_fragment(
                     prev_fragment,
                     actors,
@@ -800,6 +853,84 @@ impl ScaleController {
         }
 
         Ok(commands)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use risingwave_common::bitmap::Bitmap;
+
+    use super::*;
+
+    fn inflight_info(
+        worker_id: impl Into<WorkerId>,
+        vnode_bitmap: Option<Bitmap>,
+    ) -> InflightActorInfo {
+        InflightActorInfo {
+            worker_id: worker_id.into(),
+            vnode_bitmap,
+            splits: vec![],
+        }
+    }
+
+    fn shared_info(
+        worker_id: impl Into<WorkerId>,
+        vnode_bitmap: Option<Bitmap>,
+    ) -> SharedActorInfo {
+        SharedActorInfo {
+            worker_id: worker_id.into(),
+            vnode_bitmap,
+            splits: vec![],
+        }
+    }
+
+    #[test]
+    fn actors_equivalent_ignore_id_simple() {
+        let bitmap = Bitmap::from_indices(8, &[1, 3, 5]);
+        let prev = HashMap::from([(1.into(), shared_info(100, Some(bitmap.clone())))]);
+        let curr = HashMap::from([(7.into(), inflight_info(100, Some(bitmap)))]);
+
+        assert!(actors_equivalent_ignore_id(&prev, &curr));
+    }
+
+    #[test]
+    fn actors_equivalent_ignore_id_multiple_per_worker() {
+        let bitmap_a = Bitmap::from_indices(8, &[0, 2]);
+        let bitmap_b = Bitmap::from_indices(8, &[1, 3]);
+
+        let prev = HashMap::from([
+            (1.into(), shared_info(100, Some(bitmap_a.clone()))),
+            (2.into(), shared_info(100, Some(bitmap_b.clone()))),
+        ]);
+        let curr = HashMap::from([
+            (10.into(), inflight_info(100, Some(bitmap_b))),
+            (11.into(), inflight_info(100, Some(bitmap_a))),
+        ]);
+
+        assert!(actors_equivalent_ignore_id(&prev, &curr));
+    }
+
+    #[test]
+    fn actors_equivalent_ignore_id_detects_differences() {
+        let bitmap = Bitmap::from_indices(8, &[1, 3, 5]);
+        let prev = HashMap::from([(1.into(), shared_info(100, Some(bitmap.clone())))]);
+        let curr = HashMap::from([(7.into(), inflight_info(200, Some(bitmap)))]);
+
+        assert!(!actors_equivalent_ignore_id(&prev, &curr));
+    }
+
+    #[test]
+    fn actors_equivalent_ignore_id_requires_same_count() {
+        let bitmap = Bitmap::from_indices(8, &[1, 3]);
+        let prev = HashMap::from([(1.into(), shared_info(100, Some(bitmap.clone())))]);
+        let curr = HashMap::from([
+            (7.into(), inflight_info(100, Some(bitmap.clone()))),
+            (8.into(), inflight_info(100, Some(bitmap))),
+        ]);
+
+        assert!(!actors_equivalent_ignore_id(&prev, &curr));
     }
 }
 

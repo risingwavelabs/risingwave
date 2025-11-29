@@ -244,6 +244,8 @@ async fn test_active_online() -> Result<()> {
 
     assert_eq!(all_worker_slots.len(), config.compute_nodes - 1);
 
+    println!("1111");
+
     cluster
         .simple_restart_nodes(vec!["compute-2".to_owned()])
         .await;
@@ -253,12 +255,16 @@ async fn test_active_online() -> Result<()> {
     ))
     .await;
 
+    println!("2222");
+
     let table_mat_fragment = cluster
         .locate_one_fragment(vec![
             identity_contains("materialize"),
             no_identity_contains("simpleAgg"),
         ])
         .await?;
+
+    println!("3333");
 
     let all_worker_slots = table_mat_fragment.all_worker_count();
 
