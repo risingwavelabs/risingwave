@@ -3584,6 +3584,27 @@ impl Parser<'_> {
         Ok(Some(rate_limit))
     }
 
+    /// BACKFILL_RATE_LIMIT {TO | =} {default | NUMBER}
+    pub fn parse_alter_sink_backfill_rate_limit(&mut self) -> ModalResult<Option<i32>> {
+        if !self.parse_word("BACKFILL_RATE_LIMIT") {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER SINK SET BACKFILL_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
     pub fn parse_alter_sink(&mut self) -> ModalResult<Statement> {
         let sink_name = self.parse_object_name()?;
         let operation = if self.parse_keyword(Keyword::RENAME) {
@@ -3624,6 +3645,8 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_sink_backfill_rate_limit()? {
+                AlterSinkOperation::SetBackfillRateLimit { rate_limit }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSinkOperation::SetConfig { entries }

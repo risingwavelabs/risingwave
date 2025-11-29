@@ -1,0 +1,51 @@
+statement ok
+set rw_implicit_flush=true;
+
+statement ok
+set sink_decouple = true;
+
+statement ok
+CREATE TABLE IF NOT EXISTS t1 (v1 int);
+
+statement ok
+INSERT INTO t1 SELECT * FROM generate_series(1, 1000);
+
+statement ok
+CREATE SINK kafka_sink
+AS
+SELECT * FROM t1
+with (
+    properties.bootstrap.server = 'message_queue:29092',
+    topic = 'test_sink_backfill_rate_limit',
+    type = 'append-only',
+    force_append_only='true',
+    connector = 'kafka',
+    backfill_rate_limit = 0,
+);
+
+statement ok
+ALTER SINK kafaka_sink SET BACKFILL_RATE_LIMIT = 0;
+
+statement ok
+CREATE TABLE kafka_source (v1 int) with (
+  connector = 'kafka',
+  topic = 'test_sink_backfill_rate_limit',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest',
+) FORMAT PLAIN ENCODE JSON;
+
+sleep 3s
+
+query I
+SELECT count(*) FROM kafka_source;
+----
+0
+
+statement ok
+DROP SINK kafka_sink;
+
+statement ok 
+DROP TABLE kafka_source;
+
+statement ok
+DROP TABLE t1;
