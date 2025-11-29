@@ -245,7 +245,9 @@ impl KafkaMuxReader {
         tpl: TopicPartitionList,
     ) -> anyhow::Result<mpsc::Receiver<Vec<OwnedMessage>>> {
         if tpl.count() == 0 {
-            anyhow::bail!("splits list is empty");
+            // Nothing to register; return an empty channel so caller can proceed gracefully.
+            let (_tx, rx) = mpsc::channel(1);
+            return Ok(rx);
         }
 
         tracing::info!(
@@ -253,22 +255,17 @@ impl KafkaMuxReader {
             tpl,
             self.key
         );
-        {
-            let map = self.senders.read().await;
-            for element in tpl.elements() {
-                let key = (element.topic().to_owned(), element.partition());
-                if map.contains_key(&key) {
-                    anyhow::bail!("split ({:?}) already registered", key);
-                }
-            }
-        }
         // sender / receiver
         let (tx, rx) = mpsc::channel(128);
         {
             let mut map = self.senders.write().await;
             for element in tpl.elements() {
+                let key = (element.topic().to_owned(), element.partition());
+                if map.contains_key(&key) {
+                    tracing::warn!("re-registering split {:?} in mux reader {}", key, self.key);
+                }
                 map.insert(
-                    (element.topic().to_owned(), element.partition()),
+                    key,
                     tx.clone(),
                 );
             }

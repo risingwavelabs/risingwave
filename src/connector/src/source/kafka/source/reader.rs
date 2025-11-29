@@ -183,13 +183,28 @@ impl SplitReader for KafkaSplitReader {
         let mux_enabled = properties.enable_mux_reader.unwrap_or(false);
 
         let (message_reader, backfill_info) = if mux_enabled {
-            let connection_id = connection_id.ok_or_else(|| {
-                ConnectorError::from(anyhow!(
-                    "Kafka mux reader requires a connection bound via WITH CONNECTION when `enable.mux.reader` is true"
-                ))
-            })?;
+            tracing::info!(
+                source_id = ?source_ctx.source_id,
+                actor_id = ?source_ctx.actor_id,
+                ?connection_id,
+                topic = %properties.common.topic,
+                "Kafka mux reader connection info"
+            );
+            // Prefer the explicit connection id; fallback to a stable key derived from brokers+topic.
+            let mux_key = if let Some(id) = connection_id {
+                id.to_string()
+            } else {
+                let key = format!("{}|{}", properties.connection.brokers, properties.common.topic);
+                tracing::warn!(
+                    source_id = ?source_ctx.source_id,
+                    actor_id = ?source_ctx.actor_id,
+                    %key,
+                    "Kafka mux reader missing connection_id, falling back to broker/topic key"
+                );
+                key
+            };
             let reader = KafkaMuxReader::get_or_create(
-                connection_id.to_string(),
+                mux_key,
                 properties.clone(),
                 source_ctx.clone(),
             )

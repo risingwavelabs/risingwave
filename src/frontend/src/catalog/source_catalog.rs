@@ -62,6 +62,15 @@ impl SourceCatalog {
         self.definition.clone()
     }
 
+    /// Returns a cloned `StreamSourceInfo` with connector `connection_id` populated when missing.
+    pub fn info_with_connection(&self) -> StreamSourceInfo {
+        let mut info = self.info.clone();
+        if info.connection_id.is_none() {
+            info.connection_id = self.connection_id;
+        }
+        info
+    }
+
     /// Returns the parsed SQL definition when the source was created.
     ///
     /// Returns error if it's invalid.

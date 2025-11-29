@@ -123,7 +123,10 @@ async fn produce_kafka_values(
                 .context("failed to create kafka producer")?;
             for payload in payloads {
                 loop {
-                    let record = BaseRecord::<(), [u8]>::to(&topic).payload(payload.as_bytes());
+                    // Pin to partition 0 to avoid falling onto unassigned partitions in mux tests.
+                    let record = BaseRecord::<(), [u8]>::to(&topic)
+                        .partition(0)
+                        .payload(payload.as_bytes());
                     match producer.send(record) {
                         Ok(_) => break,
                         Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), _)) => {
@@ -262,7 +265,11 @@ async fn test_issue_19563() -> Result<()> {
         .with_env_filter("risingwave_stream::executor::source::source_backfill_executor=DEBUG,integration_tests=DEBUG")
         .init();
 
-    let configuration = Configuration::for_scale_shared_source();
+    let mut configuration = Configuration::for_scale_shared_source();
+    configuration.frontend_nodes = 1;
+    configuration.compute_nodes = 1;
+    configuration.compactor_nodes = 1;
+    configuration.compute_node_cores = 1;
     let mut cluster = Cluster::start(configuration).await?;
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "shared_source" => 4,
@@ -335,7 +342,11 @@ async fn test_mux_reader_release_handles_on_drop() -> Result<()> {
         .with_max_level(tracing::Level::ERROR)
         .try_init();
 
-    let configuration = Configuration::for_scale_shared_source();
+    let mut configuration = Configuration::for_scale_shared_source();
+    configuration.frontend_nodes = 1;
+    configuration.compute_nodes = 1;
+    configuration.compactor_nodes = 1;
+    configuration.compute_node_cores = 1;
     let mut cluster = Cluster::start(configuration).await?;
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "mux_release" => 4,
@@ -390,7 +401,11 @@ async fn test_mux_reader_seek_to_latest_skips_backlog() -> Result<()> {
         .with_max_level(tracing::Level::ERROR)
         .try_init();
 
-    let configuration = Configuration::for_scale_shared_source();
+    let mut configuration = Configuration::for_scale_shared_source();
+    configuration.frontend_nodes = 1;
+    configuration.compute_nodes = 1;
+    configuration.compactor_nodes = 1;
+    configuration.compute_node_cores = 1;
     let mut cluster = Cluster::start(configuration).await?;
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "mux_seek" => 4,
