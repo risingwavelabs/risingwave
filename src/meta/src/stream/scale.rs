@@ -232,21 +232,17 @@ pub fn rebalance_actor_vnode(
 
     let (prev_expected, _) = vnode_count.div_rem(&actors.len());
 
-    // Guard rail: if any existing actor (excluding the ones to remove) holds fewer than
-    // `prev_expected` vnodes, the historical distribution is already invalid. Instead of
-    // panicking, rebuild a fresh even distribution across the surviving + new actors so that
-    // meta can proceed.
-    let has_under_allocated = actors
-        .iter()
-        .filter(|actor| !actors_to_remove.contains(&actor.actor_id))
-        .any(|actor| {
-            let count = actor
-                .vnode_bitmap
-                .as_ref()
-                .expect("vnode bitmap unset")
-                .count_ones();
-            count < prev_expected
-        });
+    // Guard rail: if any actor (even one to be removed) holds fewer than `prev_expected` vnodes,
+    // the historical distribution is already invalid. Instead of panicking later, rebuild a fresh
+    // even distribution across the surviving + new actors so that meta can proceed.
+    let has_under_allocated = actors.iter().any(|actor| {
+        let count = actor
+            .vnode_bitmap
+            .as_ref()
+            .expect("vnode bitmap unset")
+            .count_ones();
+        count < prev_expected
+    });
 
     if has_under_allocated {
         tracing::warn!(
