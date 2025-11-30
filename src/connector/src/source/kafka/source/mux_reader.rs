@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::env;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -66,7 +65,6 @@ type Registry = HashMap<ReaderKey, Arc<TokioOnceCell<Arc<KafkaMuxReader>>>>;
 
 static GLOBAL: OnceCell<RwLock<Registry>> = OnceCell::new();
 static ACTIVE_MUX_READERS: AtomicUsize = AtomicUsize::new(0);
-#[cfg(any(test, madsim))]
 static TEST_MUX_CAPS: OnceCell<(usize, usize)> = OnceCell::new();
 
 impl KafkaMuxReader {
@@ -76,7 +74,6 @@ impl KafkaMuxReader {
 
     /// Capacity knobs used by mux reader. Tests can override via `set_test_capacities`.
     fn mux_capacities() -> (usize, usize) {
-        #[cfg(any(test, madsim))]
         if let Some(caps) = TEST_MUX_CAPS.get() {
             return *caps;
         }
@@ -91,8 +88,7 @@ impl KafkaMuxReader {
         }
     }
 
-    /// TEST ONLY (or madsim): override channel/pending capacities for mux reader.
-    #[cfg(any(test, madsim))]
+    /// Override channel/pending capacities for mux reader (intended for tests).
     pub fn set_test_capacities(channel_cap: usize, max_pending_batches: usize) {
         let _ = TEST_MUX_CAPS.set((channel_cap, max_pending_batches));
     }
@@ -225,7 +221,7 @@ impl KafkaMuxReader {
             };
 
             // First, try to flush pending queues to avoid starvation.
-            for (key, queue) in pending.iter_mut() {
+            for (key, queue) in &mut pending {
                 if queue.is_empty() {
                     continue;
                 }
@@ -376,16 +372,17 @@ impl KafkaMuxReader {
                                 partition,
                                 "Mux reader failed to deliver messages; receiver dropped"
                             );
-                            if USE_PAUSE_RESUME_ON_FULL && paused.remove(&key) {
-                                if let Err(err) = this.resume_partition(&key) {
-                                    tracing::warn!(
-                                        reader = %this.key,
-                                        topic = %topic,
-                                        partition,
-                                        error = %err,
-                                        "Failed to resume paused mux partition after receiver drop"
-                                    );
-                                }
+                            if USE_PAUSE_RESUME_ON_FULL
+                                && paused.remove(&key)
+                                && let Err(err) = this.resume_partition(&key)
+                            {
+                                tracing::warn!(
+                                    reader = %this.key,
+                                    topic = %topic,
+                                    partition,
+                                    error = %err,
+                                    "Failed to resume paused mux partition after receiver drop"
+                                );
                             }
                             let mut guard = this.senders.write().await;
                             guard.remove(&key);

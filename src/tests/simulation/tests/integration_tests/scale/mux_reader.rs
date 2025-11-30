@@ -214,7 +214,7 @@ async fn test_mux_reader_release_handles_on_drop() -> anyhow::Result<()> {
     #[cfg(test)]
     KafkaMuxReader::clear_registry_for_test().await;
 
-    let mut configuration = Configuration::for_scale_shared_source();
+    let configuration = Configuration::for_scale_shared_source();
     let mut cluster = Cluster::start(configuration).await?;
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "mux_release" => 4,
@@ -274,7 +274,7 @@ async fn test_mux_reader_backpressure_no_loss() -> anyhow::Result<()> {
     #[cfg(test)]
     KafkaMuxReader::clear_registry_for_test().await;
 
-    let mut cluster = Cluster::start(Configuration::for_scale_shared_source()).await?;
+    let cluster = Cluster::start(Configuration::for_scale_shared_source()).await?;
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "mux_backpressure" => 1,
     )));
@@ -392,7 +392,7 @@ async fn test_mux_reader_drop_and_recreate_source() -> anyhow::Result<()> {
     #[cfg(test)]
     KafkaMuxReader::clear_registry_for_test().await;
 
-    let mut configuration = Configuration::for_scale_shared_source();
+    let configuration = Configuration::for_scale_shared_source();
     let mut cluster = Cluster::start(configuration).await?;
     cluster.create_kafka_topics(convert_args!(hashmap!(
         "mux_recreate" => 2,

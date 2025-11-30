@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use risingwave_pb::id::ActorId;

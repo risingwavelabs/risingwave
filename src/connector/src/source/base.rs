@@ -761,10 +761,10 @@ impl ConnectorProperties {
     }
 
     pub fn unique_key_under_connection(&self) -> Option<String> {
-        if let ConnectorProperties::Kafka(k) = self {
-            if k.enable_mux_reader.unwrap_or(false) {
-                return Some(k.common.topic.clone());
-            }
+        if let ConnectorProperties::Kafka(k) = self
+            && k.enable_mux_reader.unwrap_or(false)
+        {
+            return Some(k.common.topic.clone());
         }
         None
     }
