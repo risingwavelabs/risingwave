@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -42,6 +42,15 @@ type PartitionRoute = (String, i32);
 
 const MUX_CHANNEL_CAP: usize = 16 * 1024;
 const MAX_PENDING_BATCHES_PER_PARTITION: usize = 1024;
+/// When `true`, the mux reader will pause/resume the specific Kafka partition once the
+/// pending queue reaches `MAX_PENDING_BATCHES_PER_PARTITION`. When `false`, it will only queue
+/// the batch (no dropping) without pause/resume control.
+#[cfg(not(madsim))]
+const USE_PAUSE_RESUME_ON_FULL: bool = true;
+
+/// madsim-rdkafka does not support pause/resume; disable the path in simulation.
+#[cfg(madsim)]
+const USE_PAUSE_RESUME_ON_FULL: bool = false;
 
 pub struct KafkaMuxReader {
     key: ReaderKey,
@@ -182,6 +191,7 @@ impl KafkaMuxReader {
     async fn poll_loop(this: Arc<Self>, max_chunk_size: usize) {
         let mut stream = this.consumer.stream().ready_chunks(max_chunk_size).fuse();
         let mut pending: HashMap<PartitionRoute, VecDeque<Vec<OwnedMessage>>> = HashMap::new();
+        let mut paused: HashSet<PartitionRoute> = HashSet::new();
 
         loop {
             let maybe_chunk = tokio::select! {
@@ -222,6 +232,24 @@ impl KafkaMuxReader {
                             queue.clear();
                             break;
                         }
+                    }
+                }
+                if USE_PAUSE_RESUME_ON_FULL && queue.is_empty() && paused.remove(key) {
+                    if let Err(err) = this.resume_partition(key) {
+                        tracing::warn!(
+                            reader = %this.key,
+                            partition = key.1,
+                            topic = %key.0,
+                            error = %err,
+                            "Failed to resume paused mux partition after drain"
+                        );
+                    } else {
+                        tracing::info!(
+                            reader = %this.key,
+                            partition = key.1,
+                            topic = %key.0,
+                            "Resumed paused mux partition after drain"
+                        );
                     }
                 }
             }
@@ -291,15 +319,35 @@ impl KafkaMuxReader {
                         Ok(()) => {}
                         Err(tokio::sync::mpsc::error::TrySendError::Full(messages)) => {
                             let queue = pending.entry(key.clone()).or_default();
-                            if queue.len() >= MAX_PENDING_BATCHES_PER_PARTITION {
+                            let pending_len = queue.len();
+                            if pending_len >= MAX_PENDING_BATCHES_PER_PARTITION {
                                 tracing::warn!(
                                     reader = %this.key,
                                     topic = %topic,
                                     partition,
-                                    pending_len = queue.len(),
-                                    "Mux reader pending queue full; applying backpressure and queuing batch"
+                                    pending_len,
+                                    "Mux reader pending queue reached limit on full channel"
                                 );
-                                tokio::time::sleep(Duration::from_millis(50)).await;
+                                if USE_PAUSE_RESUME_ON_FULL && paused.insert(key.clone()) {
+                                    if let Err(err) = this.pause_partition(&key) {
+                                        tracing::warn!(
+                                            reader = %this.key,
+                                            topic = %topic,
+                                            partition,
+                                            error = %err,
+                                            "Failed to pause mux reader partition on backpressure"
+                                        );
+                                        // If pause fails, keep processing without dropping.
+                                        paused.remove(&key);
+                                    } else {
+                                        tracing::info!(
+                                            reader = %this.key,
+                                            topic = %topic,
+                                            partition,
+                                            "Paused mux reader partition due to backpressure"
+                                        );
+                                    }
+                                }
                             }
                             queue.push_back(messages);
                         }
@@ -310,6 +358,17 @@ impl KafkaMuxReader {
                                 partition,
                                 "Mux reader failed to deliver messages; receiver dropped"
                             );
+                            if USE_PAUSE_RESUME_ON_FULL && paused.remove(&key) {
+                                if let Err(err) = this.resume_partition(&key) {
+                                    tracing::warn!(
+                                        reader = %this.key,
+                                        topic = %topic,
+                                        partition,
+                                        error = %err,
+                                        "Failed to resume paused mux partition after receiver drop"
+                                    );
+                                }
+                            }
                             let mut guard = this.senders.write().await;
                             guard.remove(&key);
                         }
@@ -321,6 +380,42 @@ impl KafkaMuxReader {
         tracing::info!(reader = %this.key, "Kafka mux poll loop exited");
         // Best-effort cleanup in case unregister path missed.
         Self::registry().write().await.remove(&this.key);
+    }
+
+    #[cfg(not(madsim))]
+    fn pause_partition(&self, route: &PartitionRoute) -> KafkaResult<()> {
+        let mut tpl = TopicPartitionList::new();
+        tpl.add_partition(&route.0, route.1);
+        self.consumer.pause(&tpl)
+    }
+
+    #[cfg(madsim)]
+    fn pause_partition(&self, route: &PartitionRoute) -> KafkaResult<()> {
+        tracing::debug!(
+            reader = %self.key,
+            topic = %route.0,
+            partition = route.1,
+            "pause_partition is a no-op under madsim"
+        );
+        Ok(())
+    }
+
+    #[cfg(not(madsim))]
+    fn resume_partition(&self, route: &PartitionRoute) -> KafkaResult<()> {
+        let mut tpl = TopicPartitionList::new();
+        tpl.add_partition(&route.0, route.1);
+        self.consumer.resume(&tpl)
+    }
+
+    #[cfg(madsim)]
+    fn resume_partition(&self, route: &PartitionRoute) -> KafkaResult<()> {
+        tracing::debug!(
+            reader = %self.key,
+            topic = %route.0,
+            partition = route.1,
+            "resume_partition is a no-op under madsim"
+        );
+        Ok(())
     }
 
     pub async fn register_topic_partition_list(
