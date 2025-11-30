@@ -13,17 +13,22 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use maplit::{convert_args, hashmap};
-use rdkafka::ClientConfig;
+use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
+use rdkafka::{ClientConfig, TopicPartitionList};
+use risingwave_connector::source::kafka::KafkaProperties;
 #[cfg(test)]
 use risingwave_connector::source::kafka::source::mux_reader::KafkaMuxReader;
+use risingwave_connector::source::{SourceContext, SourceContextRef};
 use risingwave_pb::id::ActorId;
 use risingwave_simulation::cluster::{Cluster, Configuration};
+use uuid::Uuid;
 
 use crate::scale::shared_source::validate_splits_aligned;
 
@@ -257,5 +262,190 @@ async fn test_mux_reader_release_handles_on_drop() -> anyhow::Result<()> {
     session.run("drop materialized view mux_mv;").await?;
     session.run("drop source mux_source;").await?;
     session.run("drop connection mux_conn;").await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mux_reader_backpressure_no_loss() -> anyhow::Result<()> {
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_max_level(tracing::Level::ERROR)
+        .try_init();
+
+    #[cfg(test)]
+    KafkaMuxReader::clear_registry_for_test().await;
+
+    let mut cluster = Cluster::start(Configuration::for_scale_shared_source()).await?;
+    cluster.create_kafka_topics(convert_args!(hashmap!(
+        "mux_backpressure" => 1,
+    )));
+
+    // Shrink mux capacities only for this test.
+    #[cfg(test)]
+    KafkaMuxReader::set_test_capacities(4, 8);
+
+    const TOTAL_MESSAGES: usize = 50;
+
+    // Run reader/producer inside simulated client so it can reach the in-cluster Kafka.
+    let received = cluster
+        .run_on_client(async move {
+            let props: KafkaProperties = serde_json::from_value(serde_json::json!({
+                "properties.bootstrap.server": "192.168.11.1:29092",
+                "topic": "mux_backpressure",
+                "enable.mux.reader": "true",
+                "group.id.prefix": "mux-test",
+            }))?;
+
+            // Ensure topic exists in the same network namespace.
+            let admin: AdminClient<_> = ClientConfig::new()
+                .set("bootstrap.servers", "192.168.11.1:29092")
+                .create()
+                .await
+                .context("create admin client")?;
+            let opts = AdminOptions::new();
+            let topics = [NewTopic::new(
+                "mux_backpressure",
+                1,
+                TopicReplication::Fixed(1),
+            )];
+            let _ = admin.create_topics(topics.iter(), &opts).await;
+
+            let connection_id = format!("mux-backpressure-{}", Uuid::new_v4());
+            let source_ctx: SourceContextRef = Arc::new(SourceContext::dummy());
+            let reader = KafkaMuxReader::get_or_create(
+                connection_id.clone(),
+                props.clone(),
+                source_ctx.clone(),
+            )
+            .await?;
+
+            let mut tpl = TopicPartitionList::new();
+            tpl.add_partition("mux_backpressure", 0);
+            let mut rx = reader.register_topic_partition_list(tpl.clone()).await?;
+
+            let values = (0..TOTAL_MESSAGES as i64).map(|v| v + 1);
+            // Produce inside client so network reachability matches the consumer.
+            let producer: BaseProducer = ClientConfig::new()
+                .set("bootstrap.servers", "192.168.11.1:29092")
+                .create()
+                .await
+                .context("create producer in client")?;
+            for v in values {
+                let payload = format!(r#"{{"v1": {v}}}"#);
+                loop {
+                    let record = BaseRecord::<(), [u8]>::to("mux_backpressure")
+                        .partition(0)
+                        .payload(payload.as_bytes());
+                    match producer.send(record) {
+                        Ok(_) => break,
+                        Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), _)) => {
+                            producer.flush(None).await?;
+                        }
+                        Err((e, _)) => return Err(anyhow!(e)),
+                    }
+                }
+            }
+            producer.flush(None).await?;
+
+            let mut received = 0usize;
+            let start = tokio::time::Instant::now();
+            let overall_deadline = Duration::from_secs(60);
+            loop {
+                match tokio::time::timeout(Duration::from_secs(1), rx.recv()).await {
+                    Ok(Some(batch)) => {
+                        received += batch.len();
+                        if received >= TOTAL_MESSAGES {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(_) => {
+                        if start.elapsed() >= overall_deadline {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            reader
+                .unregister_topic_partition_list(tpl)
+                .await
+                .context("unregister mux reader in client")?;
+            anyhow::Ok(received)
+        })
+        .await
+        .context("client task failed")?;
+
+    ensure!(
+        received == TOTAL_MESSAGES,
+        "expected to receive {TOTAL_MESSAGES} messages, got {received}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_mux_reader_drop_and_recreate_source() -> anyhow::Result<()> {
+    let _ = tracing_subscriber::fmt::Subscriber::builder()
+        .with_max_level(tracing::Level::ERROR)
+        .try_init();
+
+    #[cfg(test)]
+    KafkaMuxReader::clear_registry_for_test().await;
+
+    let mut configuration = Configuration::for_scale_shared_source();
+    let mut cluster = Cluster::start(configuration).await?;
+    cluster.create_kafka_topics(convert_args!(hashmap!(
+        "mux_recreate" => 2,
+    )));
+
+    let mut session = cluster.start_session();
+    session.run("set rw_implicit_flush = true;").await?;
+    session
+        .run("create connection mux_conn_recreate with (type = 'kafka', properties.bootstrap.server = '192.168.11.1:29092');")
+        .await?;
+    session
+        .run(
+            "create source mux_source_recreate(v1 int) with \
+        (connector = 'kafka', connection = mux_conn_recreate, topic = 'mux_recreate', enable.mux.reader = true) \
+        format plain encode json;",
+        )
+        .await?;
+    session
+        .run("create materialized view mux_mv_recreate as select v1 from mux_source_recreate;")
+        .await?;
+
+    produce_kafka_values(&cluster, "mux_recreate", [1_i64, 2, 3]).await?;
+    wait_for_row_count(&mut cluster, "select count(*) from mux_mv_recreate", 3).await?;
+
+    // Drop and recreate the same source/connection to ensure mux registry and assignments clean up.
+    session
+        .run("drop materialized view mux_mv_recreate;")
+        .await?;
+    session.run("drop source mux_source_recreate;").await?;
+    session.run("drop connection mux_conn_recreate;").await?;
+
+    session
+        .run("create connection mux_conn_recreate with (type = 'kafka', properties.bootstrap.server = '192.168.11.1:29092');")
+        .await?;
+    session
+        .run(
+            "create source mux_source_recreate(v1 int) with \
+        (connector = 'kafka', connection = mux_conn_recreate, topic = 'mux_recreate', enable.mux.reader = true) \
+        format plain encode json;",
+        )
+        .await?;
+    session
+        .run("create materialized view mux_mv_recreate as select v1 from mux_source_recreate;")
+        .await?;
+
+    // Topic still contains prior data; new source should consume seamlessly without conflicts.
+    produce_kafka_values(&cluster, "mux_recreate", [11_i64, 12, 13]).await?;
+    wait_for_row_count(&mut cluster, "select count(*) from mux_mv_recreate", 6).await?;
+
+    session
+        .run("drop materialized view mux_mv_recreate;")
+        .await?;
+    session.run("drop source mux_source_recreate;").await?;
+    session.run("drop connection mux_conn_recreate;").await?;
     Ok(())
 }

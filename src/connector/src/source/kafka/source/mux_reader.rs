@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::env;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -20,7 +21,6 @@ use std::time::Duration;
 use anyhow::{Context, ensure};
 use async_trait::async_trait;
 use futures::StreamExt;
-use futures_async_stream::for_await;
 use once_cell::sync::OnceCell;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaResult;
@@ -66,10 +66,21 @@ type Registry = HashMap<ReaderKey, Arc<TokioOnceCell<Arc<KafkaMuxReader>>>>;
 
 static GLOBAL: OnceCell<RwLock<Registry>> = OnceCell::new();
 static ACTIVE_MUX_READERS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(any(test, madsim))]
+static TEST_MUX_CAPS: OnceCell<(usize, usize)> = OnceCell::new();
 
 impl KafkaMuxReader {
     fn registry() -> &'static RwLock<Registry> {
         GLOBAL.get_or_init(|| RwLock::new(HashMap::new()))
+    }
+
+    /// Capacity knobs used by mux reader. Tests can override via `set_test_capacities`.
+    fn mux_capacities() -> (usize, usize) {
+        #[cfg(any(test, madsim))]
+        if let Some(caps) = TEST_MUX_CAPS.get() {
+            return *caps;
+        }
+        (MUX_CHANNEL_CAP, MAX_PENDING_BATCHES_PER_PARTITION)
     }
 
     /// TEST ONLY: clear the global registry. Intended for isolation in tests.
@@ -78,6 +89,12 @@ impl KafkaMuxReader {
             registry.write().await.clear();
             ACTIVE_MUX_READERS.store(0, Ordering::Relaxed);
         }
+    }
+
+    /// TEST ONLY (or madsim): override channel/pending capacities for mux reader.
+    #[cfg(any(test, madsim))]
+    pub fn set_test_capacities(channel_cap: usize, max_pending_batches: usize) {
+        let _ = TEST_MUX_CAPS.set((channel_cap, max_pending_batches));
     }
 
     /// Create or reuse the reader for a given connection.
@@ -192,6 +209,7 @@ impl KafkaMuxReader {
         let mut stream = this.consumer.stream().ready_chunks(max_chunk_size).fuse();
         let mut pending: HashMap<PartitionRoute, VecDeque<Vec<OwnedMessage>>> = HashMap::new();
         let mut paused: HashSet<PartitionRoute> = HashSet::new();
+        let (_, max_pending) = Self::mux_capacities();
 
         loop {
             let maybe_chunk = tokio::select! {
@@ -320,7 +338,7 @@ impl KafkaMuxReader {
                         Err(tokio::sync::mpsc::error::TrySendError::Full(messages)) => {
                             let queue = pending.entry(key.clone()).or_default();
                             let pending_len = queue.len();
-                            if pending_len >= MAX_PENDING_BATCHES_PER_PARTITION {
+                            if pending_len >= max_pending {
                                 tracing::warn!(
                                     reader = %this.key,
                                     topic = %topic,
