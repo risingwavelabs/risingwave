@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -26,7 +26,8 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::message::OwnedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
-use tokio::sync::{OnceCell as TokioOnceCell, RwLock, mpsc};
+use tokio::sync::{Mutex, OnceCell as TokioOnceCell, RwLock, mpsc};
+use tokio_util::sync::CancellationToken;
 
 use crate::connector_common::read_kafka_log_level;
 use crate::error::ConnectorResult as Result;
@@ -39,12 +40,17 @@ pub type ReaderKey = String;
 
 type PartitionRoute = (String, i32);
 
+const MUX_CHANNEL_CAP: usize = 16 * 1024;
+const MAX_PENDING_BATCHES_PER_PARTITION: usize = 1024;
+
 pub struct KafkaMuxReader {
     key: ReaderKey,
 
     consumer: StreamConsumer<RwConsumerContext>,
     /// (topic, partition) -> sender (each topic unique within this connection)
     senders: RwLock<HashMap<PartitionRoute, mpsc::Sender<Vec<OwnedMessage>>>>,
+    assign_lock: Mutex<()>,
+    shutdown: CancellationToken,
 }
 
 type Registry = HashMap<ReaderKey, Arc<TokioOnceCell<Arc<KafkaMuxReader>>>>;
@@ -55,6 +61,14 @@ static ACTIVE_MUX_READERS: AtomicUsize = AtomicUsize::new(0);
 impl KafkaMuxReader {
     fn registry() -> &'static RwLock<Registry> {
         GLOBAL.get_or_init(|| RwLock::new(HashMap::new()))
+    }
+
+    /// TEST ONLY: clear the global registry. Intended for isolation in tests.
+    pub async fn clear_registry_for_test() {
+        if let Some(registry) = GLOBAL.get() {
+            registry.write().await.clear();
+            ACTIVE_MUX_READERS.store(0, Ordering::Relaxed);
+        }
     }
 
     /// Create or reuse the reader for a given connection.
@@ -76,7 +90,7 @@ impl KafkaMuxReader {
             return Ok(reader.clone());
         }
 
-        let reader_ref = cell
+        match cell
             .get_or_try_init(|| {
                 let properties = properties.clone();
                 let source_ctx = source_ctx.clone();
@@ -86,9 +100,15 @@ impl KafkaMuxReader {
                     Self::build_reader(key, properties, source_ctx).await
                 }
             })
-            .await?;
-
-        Ok(reader_ref.clone())
+            .await
+        {
+            Ok(reader_ref) => Ok(reader_ref.clone()),
+            Err(e) => {
+                // remove failed cell to allow future retries
+                Self::registry().write().await.remove(&connection_id);
+                Err(e)
+            }
+        }
     }
 
     async fn build_reader(
@@ -142,6 +162,8 @@ impl KafkaMuxReader {
             key: connection_id.clone(),
             consumer,
             senders: RwLock::new(HashMap::new()),
+            assign_lock: Mutex::new(()),
+            shutdown: CancellationToken::new(),
         });
 
         let active = ACTIVE_MUX_READERS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -158,10 +180,54 @@ impl KafkaMuxReader {
     }
 
     async fn poll_loop(this: Arc<Self>, max_chunk_size: usize) {
-        let stream = this.consumer.stream();
+        let mut stream = this.consumer.stream().ready_chunks(max_chunk_size).fuse();
+        let mut pending: HashMap<PartitionRoute, VecDeque<Vec<OwnedMessage>>> = HashMap::new();
 
-        #[for_await]
-        for messages_result in stream.ready_chunks(max_chunk_size) {
+        loop {
+            let maybe_chunk = tokio::select! {
+                _ = this.shutdown.cancelled() => {
+                    tracing::info!(reader = %this.key, "Kafka mux poll loop received shutdown");
+                    None
+                }
+                res = stream.next() => res,
+            };
+
+            let Some(messages_result) = maybe_chunk else {
+                break;
+            };
+
+            // First, try to flush pending queues to avoid starvation.
+            for (key, queue) in pending.iter_mut() {
+                if queue.is_empty() {
+                    continue;
+                }
+                let sender_opt = {
+                    let guard = this.senders.read().await;
+                    guard.get(key).cloned()
+                };
+                let Some(sender) = sender_opt else {
+                    queue.clear();
+                    continue;
+                };
+                while let Some(batch) = queue.pop_front() {
+                    match sender.try_send(batch) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(messages)) => {
+                            queue.push_front(messages);
+                            break;
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_messages)) => {
+                            let mut guard = this.senders.write().await;
+                            guard.remove(key);
+                            queue.clear();
+                            break;
+                        }
+                    }
+                }
+            }
+            // drop empty pending entries
+            pending.retain(|_, q| !q.is_empty());
+
             let mut grouped_messages: HashMap<String, HashMap<i32, Vec<OwnedMessage>>> =
                 HashMap::new();
 
@@ -187,10 +253,12 @@ impl KafkaMuxReader {
             }
 
             if grouped_messages.is_empty() {
+                if this.senders.read().await.is_empty() {
+                    this.shutdown.cancel();
+                    break;
+                }
                 continue;
             }
-
-            println!("xxk grouped msg {:#?}", grouped_messages);
 
             for (topic, partition_map) in grouped_messages {
                 for (partition, messages) in partition_map {
@@ -219,10 +287,23 @@ impl KafkaMuxReader {
                         "Dispatching mux reader batch"
                     );
 
-                    println!("xxk sending {:?} to {:?}", messages, key);
-                    match sender.send(messages).await {
+                    match sender.try_send(messages) {
                         Ok(()) => {}
-                        Err(tokio::sync::mpsc::error::SendError(_messages)) => {
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(messages)) => {
+                            let queue = pending.entry(key.clone()).or_default();
+                            if queue.len() >= MAX_PENDING_BATCHES_PER_PARTITION {
+                                tracing::warn!(
+                                    reader = %this.key,
+                                    topic = %topic,
+                                    partition,
+                                    pending_len = queue.len(),
+                                    "Mux reader pending queue full; applying backpressure and queuing batch"
+                                );
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            }
+                            queue.push_back(messages);
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_messages)) => {
                             tracing::warn!(
                                 reader = %this.key,
                                 topic = %topic,
@@ -237,16 +318,17 @@ impl KafkaMuxReader {
             }
         }
 
-        tracing::info!(
-            reader = %this.key,
-            "Kafka mux poll loop exited"
-        );
+        tracing::info!(reader = %this.key, "Kafka mux poll loop exited");
+        // Best-effort cleanup in case unregister path missed.
+        Self::registry().write().await.remove(&this.key);
     }
 
     pub async fn register_topic_partition_list(
         &self,
         tpl: TopicPartitionList,
     ) -> anyhow::Result<mpsc::Receiver<Vec<OwnedMessage>>> {
+        let _assign_guard = self.assign_lock.lock().await;
+
         if tpl.count() == 0 {
             tracing::warn!(
                 reader = %self.key,
@@ -264,21 +346,13 @@ impl KafkaMuxReader {
             "Kafka mux register topic partition list (before assign)"
         );
 
-        // sender / receiver
-        let (tx, rx) = mpsc::channel(128);
+        let (tx, rx) = mpsc::channel(MUX_CHANNEL_CAP);
+        let elements: Vec<_> = tpl.elements().into_iter().collect();
+
         {
-            // Proactively unassign all partitions in `tpl` to avoid `_CONFLICT` when re-registering
-            // after drop/recreate. Best-effort: warn on failure but continue.
-            if let Err(e) = self.consumer.incremental_unassign(&tpl) {
-                tracing::warn!(
-                    reader = %self.key,
-                    error = %e,
-                    "Kafka mux pre-unassign before register failed, proceeding"
-                );
-            }
             let mut map = self.senders.write().await;
-            for element in tpl.elements() {
-                let key = (element.topic().to_owned(), element.partition());
+            for element in &elements {
+                let key: PartitionRoute = (element.topic().to_owned(), element.partition());
                 if map.remove(&key).is_some() {
                     tracing::warn!(
                         reader = %self.key,
@@ -292,10 +366,7 @@ impl KafkaMuxReader {
                     senders_size = map.len() + 1,
                     "Kafka mux register split sender"
                 );
-                map.insert(
-                    key,
-                    tx.clone(),
-                );
+                map.insert(key, tx.clone());
             }
             tracing::info!(
                 reader = %self.key,
@@ -304,9 +375,23 @@ impl KafkaMuxReader {
             );
         }
 
-        self.consumer
-            .incremental_assign(&tpl)
-            .context("assign failed")?;
+        if let Err(e) = self.consumer.incremental_unassign(&tpl) {
+            tracing::debug!(
+                reader = %self.key,
+                error = %e,
+                "Kafka mux pre-unassign before register failed, continuing"
+            );
+        }
+
+        if let Err(e) = self.consumer.incremental_assign(&tpl) {
+            // rollback senders
+            let mut map = self.senders.write().await;
+            for element in &elements {
+                let key: PartitionRoute = (element.topic().to_owned(), element.partition());
+                map.remove(&key);
+            }
+            return Err(e.into());
+        }
         Ok(rx)
     }
 
@@ -314,6 +399,8 @@ impl KafkaMuxReader {
         self: Arc<Self>,
         tpl: TopicPartitionList,
     ) -> anyhow::Result<()> {
+        let _assign_guard = self.assign_lock.lock().await;
+
         if tpl.count() == 0 {
             return Ok(());
         }
@@ -375,6 +462,7 @@ impl KafkaMuxReader {
                 "Successfully removed mux reader {} from the global registry.",
                 self.key
             );
+            self.shutdown.cancel();
         }
 
         Ok(())
@@ -384,6 +472,7 @@ impl KafkaMuxReader {
         &self,
         tpl_with_offset: TopicPartitionList,
     ) -> anyhow::Result<()> {
+        let _assign_guard = self.assign_lock.lock().await;
         let count = tpl_with_offset.count();
         if count == 0 {
             return Ok(());
@@ -416,20 +505,11 @@ impl KafkaMuxReader {
 
         Ok(())
     }
-
-    // pub async fn seek(
-    //     &self,
-    //     topic_partition_list: TopicPartitionList,
-    //     _sync_call_timeout: Duration,
-    // ) -> KafkaResult<TopicPartitionList> {
-    //         // self.consumer
-    //     //     .seek_partitions(topic_partition_list.clone(), sync_call_timeout)
-    //     //     .await
-    // }
 }
 
 impl Drop for KafkaMuxReader {
     fn drop(&mut self) {
+        self.shutdown.cancel();
         let prev = ACTIVE_MUX_READERS.fetch_sub(1, Ordering::Relaxed);
         let active = prev.saturating_sub(1);
         tracing::info!(

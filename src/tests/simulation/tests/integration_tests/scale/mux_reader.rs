@@ -15,13 +15,16 @@
 use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
-use anyhow::{ensure, Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use maplit::{convert_args, hashmap};
 use rdkafka::ClientConfig;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
+#[cfg(test)]
+use risingwave_connector::source::kafka::source::mux_reader::KafkaMuxReader;
 use risingwave_pb::id::ActorId;
 use risingwave_simulation::cluster::{Cluster, Configuration};
+
 use crate::scale::shared_source::validate_splits_aligned;
 
 async fn produce_kafka_values(
@@ -138,6 +141,9 @@ async fn test_mux_reader_rescale_incremental_assign() -> anyhow::Result<()> {
         .with_max_level(tracing::Level::ERROR)
         .try_init();
 
+    #[cfg(test)]
+    KafkaMuxReader::clear_registry_for_test().await;
+
     let configuration = Configuration::for_scale_shared_source();
     let mut cluster = Cluster::start(configuration).await?;
     cluster.create_kafka_topics(convert_args!(hashmap!(
@@ -199,6 +205,9 @@ async fn test_mux_reader_release_handles_on_drop() -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt::Subscriber::builder()
         .with_max_level(tracing::Level::ERROR)
         .try_init();
+
+    #[cfg(test)]
+    KafkaMuxReader::clear_registry_for_test().await;
 
     let mut configuration = Configuration::for_scale_shared_source();
     let mut cluster = Cluster::start(configuration).await?;

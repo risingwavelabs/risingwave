@@ -29,8 +29,8 @@ use risingwave_connector::source::cdc::split::extract_postgres_lsn_from_offset_s
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorState, ReleaseHandle, SplitId, SplitImpl,
-    SplitMetaData, StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
+    ConnectorState, ReleaseHandle, SplitId, SplitImpl, SplitMetaData, StreamChunkWithState,
+    WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::id::SourceId;
