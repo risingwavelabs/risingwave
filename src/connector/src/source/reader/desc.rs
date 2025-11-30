@@ -106,6 +106,14 @@ impl SourceDescBuilder {
         }
     }
 
+    /// Disable mux reader by forcing property `enable.mux.reader` to false.
+    /// Used by backfill executors which should not share the mux reader path.
+    pub fn disable_mux_reader(mut self) -> Self {
+        self.with_properties
+            .insert("enable.mux.reader".to_owned(), "false".to_owned());
+        self
+    }
+
     /// This function builds `SourceColumnDesc` from `ColumnCatalog`, and handle the creation
     /// of hidden columns like partition/file, offset that are not specified by user.
     pub fn column_catalogs_to_source_column_descs(&self) -> Vec<SourceColumnDesc> {

@@ -357,6 +357,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         yield Message::Barrier(barrier);
 
         let source_desc_builder: SourceDescBuilder = self.source_desc_builder.take().unwrap();
+        // Backfill should not share mux reader; force disable.
+        let source_desc_builder = source_desc_builder.disable_mux_reader();
         let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;

@@ -123,8 +123,6 @@ async fn get_split_metadata<F: KafkaMetaFetcher + ?Sized>(
     splits: &[KafkaSplit],
     sync_call_timeout: Duration,
 ) -> Result<(TopicPartitionList, HashMap<SplitId, BackfillInfo>)> {
-    println!("calling get split meta {:#?}", splits);
-
     let mut tpl = TopicPartitionList::with_capacity(splits.len());
     let mut backfill_info = HashMap::new();
 
@@ -183,18 +181,44 @@ impl SplitReader for KafkaSplitReader {
         let mux_enabled = properties.enable_mux_reader.unwrap_or(false);
 
         let (message_reader, backfill_info) = if mux_enabled {
-            let connection_id = connection_id.ok_or_else(|| {
-                ConnectorError::from(anyhow!(
-                    "Kafka mux reader requires a connection bound via WITH CONNECTION when `enable.mux.reader` is true"
-                ))
-            })?;
-            let reader = KafkaMuxReader::get_or_create(
-                connection_id.to_string(),
-                properties.clone(),
-                source_ctx.clone(),
-            )
-            .await?;
+            // Prefer the explicit connection id; fallback to a stable key derived from brokers+topic.
+            let mux_key = if let Some(id) = connection_id {
+                id.to_string()
+            } else {
+                let key = format!(
+                    "{}|{}",
+                    properties.connection.brokers, properties.common.topic
+                );
+                tracing::warn!(
+                    source_id = ?source_ctx.source_id,
+                    actor_id = ?source_ctx.actor_id,
+                    %key,
+                    topic = %properties.common.topic,
+                    brokers = %properties.connection.brokers,
+                    "Kafka mux reader missing connection_id, falling back to broker/topic key"
+                );
+                key
+            };
+            tracing::info!(
+                source_id = ?source_ctx.source_id,
+                actor_id = ?source_ctx.actor_id,
+                topic = %properties.common.topic,
+                %mux_key,
+                ?connection_id,
+                brokers = %properties.connection.brokers,
+                splits = splits.len(),
+                splits_detail = ?splits,
+                "Kafka mux reader enabled; building shared reader"
+            );
+            let reader =
+                KafkaMuxReader::get_or_create(mux_key, properties.clone(), source_ctx.clone())
+                    .await?;
 
+            tracing::info!(
+                splits = splits.len(),
+                splits_detail = ?splits,
+                "Kafka mux fetching split metadata"
+            );
             let (tpl, backfill_info) =
                 get_split_metadata(&*reader, &splits, properties.common.sync_call_timeout).await?;
 
@@ -311,8 +335,9 @@ impl SplitReader for KafkaSplitReader {
 
             ReleaseHandle::new(async move {
                 tracing::info!(
-                    "Kafka split reader dropping (mux reader mode), unregistering topic partition list: {:?}",
-                    tpl
+                    splits = tpl.count(),
+                    splits_detail = ?tpl,
+                    "Kafka mux split reader dropping, unregistering partitions"
                 );
                 if let Err(e) = reader.unregister_topic_partition_list(tpl).await {
                     tracing::error!(error = %e.as_report(), "Failed to unregister topic partition list");

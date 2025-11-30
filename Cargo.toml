@@ -409,6 +409,9 @@ opt-level = 2
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
+# Ensure all madsim dependencies point to the same git revision to avoid duplicate symbols.
+madsim = { git = "https://github.com/madsim-rs/madsim", rev = "8c5a80504d0921232a721bb360388acfc2e2aa48" }
+madsim-macros = { git = "https://github.com/madsim-rs/madsim", rev = "8c5a80504d0921232a721bb360388acfc2e2aa48" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
 # Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.
 # tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }

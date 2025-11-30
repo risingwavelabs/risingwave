@@ -99,6 +99,7 @@ impl StreamNode for StreamSource {
         let source_inner = source_catalog.map(|source_catalog| {
             let (with_properties, secret_refs) =
                 source_catalog.with_properties.clone().into_parts();
+            let source_info = source_catalog.info_with_connection();
             PbStreamSource {
                 source_id: source_catalog.id,
                 source_name: source_catalog.name.clone(),
@@ -107,7 +108,7 @@ impl StreamNode for StreamSource {
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                info: Some(source_catalog.info.clone()),
+                info: Some(source_info),
                 row_id_index: self.core.row_id_index.map(|index| index as _),
                 columns: self
                     .core

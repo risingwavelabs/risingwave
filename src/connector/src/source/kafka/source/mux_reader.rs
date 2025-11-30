@@ -190,6 +190,8 @@ impl KafkaMuxReader {
                 continue;
             }
 
+            println!("xxk grouped msg {:#?}", grouped_messages);
+
             for (topic, partition_map) in grouped_messages {
                 for (partition, messages) in partition_map {
                     let key = (topic.clone(), partition);
@@ -217,6 +219,7 @@ impl KafkaMuxReader {
                         "Dispatching mux reader batch"
                     );
 
+                    println!("xxk sending {:?} to {:?}", messages, key);
                     match sender.send(messages).await {
                         Ok(()) => {}
                         Err(tokio::sync::mpsc::error::SendError(_messages)) => {
@@ -245,33 +248,60 @@ impl KafkaMuxReader {
         tpl: TopicPartitionList,
     ) -> anyhow::Result<mpsc::Receiver<Vec<OwnedMessage>>> {
         if tpl.count() == 0 {
-            anyhow::bail!("splits list is empty");
+            tracing::warn!(
+                reader = %self.key,
+                "Kafka mux register called with empty topic/partition list"
+            );
+            // Nothing to register; return an empty channel so caller can proceed gracefully.
+            let (_tx, rx) = mpsc::channel(1);
+            return Ok(rx);
         }
 
         tracing::info!(
-            "Registering topic partition list: {:?} in mux reader {}",
-            tpl,
-            self.key
+            reader = %self.key,
+            partitions = tpl.count(),
+            partitions_detail = ?tpl,
+            "Kafka mux register topic partition list (before assign)"
         );
-        {
-            let map = self.senders.read().await;
-            for element in tpl.elements() {
-                let key = (element.topic().to_owned(), element.partition());
-                if map.contains_key(&key) {
-                    anyhow::bail!("split ({:?}) already registered", key);
-                }
-            }
-        }
+
         // sender / receiver
         let (tx, rx) = mpsc::channel(128);
         {
+            // Proactively unassign all partitions in `tpl` to avoid `_CONFLICT` when re-registering
+            // after drop/recreate. Best-effort: warn on failure but continue.
+            if let Err(e) = self.consumer.incremental_unassign(&tpl) {
+                tracing::warn!(
+                    reader = %self.key,
+                    error = %e,
+                    "Kafka mux pre-unassign before register failed, proceeding"
+                );
+            }
             let mut map = self.senders.write().await;
             for element in tpl.elements() {
+                let key = (element.topic().to_owned(), element.partition());
+                if map.remove(&key).is_some() {
+                    tracing::warn!(
+                        reader = %self.key,
+                        ?key,
+                        "Kafka mux re-registering split, removed existing sender first"
+                    );
+                }
+                tracing::debug!(
+                    reader = %self.key,
+                    ?key,
+                    senders_size = map.len() + 1,
+                    "Kafka mux register split sender"
+                );
                 map.insert(
-                    (element.topic().to_owned(), element.partition()),
+                    key,
                     tx.clone(),
                 );
             }
+            tracing::info!(
+                reader = %self.key,
+                senders_size = map.len(),
+                "Kafka mux sender map size after register"
+            );
         }
 
         self.consumer
@@ -289,9 +319,10 @@ impl KafkaMuxReader {
         }
 
         tracing::info!(
-            "Unregistering topic partition list: {:?} in mux reader {}",
-            tpl,
-            self.key
+            reader = %self.key,
+            partitions = tpl.count(),
+            partitions_detail = ?tpl,
+            "Kafka mux unregister topic partition list (before unassign)"
         );
 
         const MAX_RETRIES: usize = 3;
@@ -323,6 +354,11 @@ impl KafkaMuxReader {
             for element in tpl.elements() {
                 map.remove(&(element.topic().to_owned(), element.partition()));
             }
+            tracing::info!(
+                reader = %self.key,
+                senders_size = map.len(),
+                "Kafka mux sender map size after unregister"
+            );
             map.is_empty()
         };
 
