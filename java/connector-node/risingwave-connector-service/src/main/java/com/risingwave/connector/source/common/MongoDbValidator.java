@@ -36,6 +36,7 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
     ConnectionString connStr;
     MongoClient client;
 
+    @Override
     public void close() {
         if (client != null) {
             client.close();
@@ -95,9 +96,15 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
             }
         } catch (CdcConnectorException e) {
             // Re-throw our custom exceptions
+            LOG.error("MongoDB validation failed: {}", e.getMessage(), e);
             throw e;
         } catch (Exception e) {
             // Wrap other exceptions with clear error message
+            LOG.error(
+                    "Failed to connect to MongoDB at {} within {} seconds",
+                    mongodbUrl,
+                    validationTimeoutSeconds,
+                    e);
             throw new CdcConnectorException(
                     String.format(
                             "Failed to connect to MongoDB at %s within %d seconds: %s",
