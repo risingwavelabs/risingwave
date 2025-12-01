@@ -39,7 +39,7 @@ pub struct StreamingConfig {
     pub async_stack_trace: AsyncStackTraceOption,
 
     #[serde(default)]
-    #[config_doc(omitted)]
+    #[config_doc(nested)]
     pub developer: StreamingDeveloperConfig,
 
     /// Max unique user stream errors per actor
