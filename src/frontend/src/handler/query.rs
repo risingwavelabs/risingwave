@@ -59,12 +59,14 @@ pub enum BatchPlanChoice {
 }
 
 impl BatchPlanChoice {
-    pub fn unwrap_rw(self) -> BatchQueryPlanResult {
+    pub fn unwrap_rw(self) -> Result<BatchQueryPlanResult> {
         match self {
-            BatchPlanChoice::Rw(result) => result,
+            BatchPlanChoice::Rw(result) => Ok(result),
             #[cfg(feature = "datafusion")]
             BatchPlanChoice::Df { .. } => {
-                panic!("called `BatchPlanChoice::unwrap_rw()` on a `DataFusion` plan")
+                risingwave_common::bail!(
+                    "Expected RisingWave plan in BatchPlanChoice, but got DataFusion plan"
+                )
             }
         }
     }
@@ -164,7 +166,7 @@ pub async fn handle_execute(
             let plan_fragmenter_result = {
                 let context = OptimizerContext::from_handler_args(handler_args);
                 let plan_result =
-                    gen_batch_query_plan(&session, context.into(), bound_result)?.unwrap_rw();
+                    gen_batch_query_plan(&session, context.into(), bound_result)?.unwrap_rw()?;
                 // Time zone is used by Hummock time travel query.
                 risingwave_expr::expr_context::TIME_ZONE::sync_scope(
                     session.config().timezone(),
@@ -225,8 +227,8 @@ pub async fn handle_execute(
                 let session = handler_args.session.clone();
                 let plan_fragmenter_result = {
                     let context = OptimizerContext::from_handler_args(handler_args.clone());
-                    let plan_result =
-                        gen_batch_query_plan(&session, context.into(), bound_result)?.unwrap_rw();
+                    let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?
+                        .unwrap_rw()?;
                     gen_batch_plan_fragmenter(&session, plan_result)?
                 };
                 declare_cursor::handle_bound_declare_query_cursor(

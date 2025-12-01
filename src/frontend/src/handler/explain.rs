@@ -195,7 +195,7 @@ pub async fn do_handle_explain(
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
                         let plan_result =
-                            gen_batch_plan_by_statement(&session, context, stmt)?.unwrap_rw();
+                            gen_batch_plan_by_statement(&session, context, stmt)?.unwrap_rw()?;
                         Ok((PhysicalPlanRef::Batch(plan_result.plan), None))
                     }
 

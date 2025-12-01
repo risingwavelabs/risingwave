@@ -23,6 +23,7 @@ use datafusion::error::Result as DFResult;
 use datafusion::logical_expr::TableProviderFilterPushDown;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::*;
+use risingwave_common::array::ArrayError;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::IcebergProperties;
@@ -64,7 +65,9 @@ impl TableProvider for IcebergTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(IcebergScan::new(self, projection, filters, limit)))
+        Ok(Arc::new(IcebergScan::new(
+            self, projection, filters, limit,
+        )?))
     }
 
     fn supports_filters_pushdown(
@@ -98,11 +101,10 @@ impl IcebergTableProvider {
             .map(|column| {
                 let column_desc = &column.column_desc;
                 let field = IcebergArrowConvert
-                    .to_arrow_field(&column_desc.name, &column_desc.data_type)
-                    .unwrap();
-                field.with_nullable(column_desc.nullable)
+                    .to_arrow_field(&column_desc.name, &column_desc.data_type)?;
+                Ok(field.with_nullable(column_desc.nullable))
             })
-            .collect();
+            .collect::<Result<_, ArrayError>>()?;
         let arrow_schema = Arc::new(ArrowSchema::new(arrow_fields));
 
         Ok(Self {

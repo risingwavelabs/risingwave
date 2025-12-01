@@ -61,7 +61,7 @@ pub async fn handle_create_view(
             context.into(),
             Statement::Query(Box::new(query.clone())),
         )?
-        .unwrap_rw();
+        .unwrap_rw()?;
 
         (dependent_relations, schema)
     };

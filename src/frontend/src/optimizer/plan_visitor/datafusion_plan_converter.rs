@@ -219,7 +219,7 @@ impl DefaultBehavior<RwResult<Arc<DFLogicalPlan>>> for DefaultValueBehavior {
 pub impl LogicalPlanRef {
     /// Convert RisingWave logical plan to DataFusion logical plan.
     ///
-    /// Returns `None` if any part of the plan cannot be converted.
+    /// Returns an error if the plan contains unsupported nodes or expressions.
     fn to_datafusion_logical_plan(&self) -> RwResult<Arc<DFLogicalPlan>> {
         let result = DataFusionPlanConverter.visit(self.clone())?;
         Ok(result)

@@ -18,6 +18,7 @@ use std::sync::Arc;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::compute::concat_batches;
 use datafusion::catalog::TableProvider;
+use datafusion::error::Result as DFResult;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
@@ -93,7 +94,11 @@ impl ExecutionPlan for IcebergScan {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> datafusion_common::Result<SendableRecordBatchStream> {
-        assert!(partition == 0, "IcebergScan only supports single partition");
+        if partition != 0 {
+            return Err(DataFusionError::Internal(
+                "IcebergScan only supports single partition".to_owned(),
+            ));
+        }
 
         let chunk_size = context.session_config().batch_size();
         let stream = self.inner.clone().execute_inner(chunk_size);
@@ -111,11 +116,12 @@ impl IcebergScan {
         _projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
-    ) -> Self {
-        assert!(
-            provider.iceberg_scan_type == IcebergScanType::DataScan,
-            "Only DataScan is supported currently"
-        );
+    ) -> DFResult<Self> {
+        if provider.iceberg_scan_type != IcebergScanType::DataScan {
+            return Err(DataFusionError::NotImplemented(
+                "Only DataScan is supported currently".to_owned(),
+            ));
+        }
 
         let plan_properties = PlanProperties::new(
             EquivalenceProperties::new(provider.schema()),
@@ -140,9 +146,9 @@ impl IcebergScan {
             need_file_path_and_pos: false,
             plan_properties,
         };
-        Self {
+        Ok(Self {
             inner: Arc::new(inner),
-        }
+        })
     }
 }
 
