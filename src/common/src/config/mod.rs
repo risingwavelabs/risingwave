@@ -117,6 +117,7 @@ pub struct RwConfig {
 /// `[batch.developer.batch_compute_client_config]`
 /// `[batch.developer.batch_frontend_client_config]`
 /// `[streaming.developer.stream_compute_client_config]`
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct RpcClientConfig {
     #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
