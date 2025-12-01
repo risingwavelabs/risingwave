@@ -1075,7 +1075,7 @@ dependencies = [
  "flexstr",
  "indextree",
  "itertools 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project",
  "serde",
  "task-local",
@@ -3080,7 +3080,7 @@ dependencies = [
  "derive_more 2.0.1",
  "document-features",
  "mio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "rustix 1.0.3",
  "signal-hook",
  "signal-hook-mio",
@@ -3296,7 +3296,7 @@ dependencies = [
  "hashbrown 0.14.5",
  "lock_api",
  "once_cell",
- "parking_lot_core 0.9.8",
+ "parking_lot_core 0.9.12",
 ]
 
 [[package]]
@@ -3348,7 +3348,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "object_store 0.11.2",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parquet 54.2.0",
  "rand 0.8.5",
  "regex",
@@ -3404,7 +3404,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "object_store 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parquet 55.0.0",
  "rand 0.8.5",
  "regex",
@@ -3434,7 +3434,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "log",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "sqlparser 0.53.0",
 ]
 
@@ -3460,7 +3460,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "object_store 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "tokio",
 ]
 
@@ -3670,7 +3670,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "object_store 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parquet 55.0.0",
  "rand 0.8.5",
  "tokio",
@@ -3701,7 +3701,7 @@ dependencies = [
  "futures",
  "log",
  "object_store 0.11.2",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "rand 0.8.5",
  "tempfile",
  "url",
@@ -3720,7 +3720,7 @@ dependencies = [
  "futures",
  "log",
  "object_store 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "rand 0.8.5",
  "tempfile",
  "url",
@@ -3979,7 +3979,7 @@ dependencies = [
  "datafusion-common 45.0.0",
  "datafusion-expr 45.0.0",
  "datafusion-physical-plan 45.0.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "paste",
 ]
 
@@ -3995,7 +3995,7 @@ dependencies = [
  "datafusion-common 47.0.0",
  "datafusion-expr 47.0.0",
  "datafusion-physical-plan 47.0.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "paste",
 ]
 
@@ -4257,7 +4257,7 @@ dependencies = [
  "indexmap 2.12.0",
  "itertools 0.14.0",
  "log",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project-lite",
  "tokio",
 ]
@@ -4287,7 +4287,7 @@ dependencies = [
  "indexmap 2.12.0",
  "itertools 0.14.0",
  "log",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project-lite",
  "tokio",
 ]
@@ -4339,7 +4339,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "object_store 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "tokio",
 ]
 
@@ -4535,7 +4535,7 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "object_store 0.12.1",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parquet 55.0.0",
  "percent-encoding",
  "pin-project-lite",
@@ -4738,7 +4738,7 @@ dependencies = [
  "backtrace",
  "lazy_static",
  "mintex",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",
@@ -5348,9 +5348,9 @@ dependencies = [
 
 [[package]]
 name = "fastant"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62bf7fa928ce0c4a43bd6e7d1235318fc32ac3a3dea06a2208c44e729449471a"
+checksum = "2e825441bfb2d831c47c97d05821552db8832479f44c571b97fededbf0099c07"
 dependencies = [
  "small_ctor",
  "web-time",
@@ -5365,7 +5365,7 @@ dependencies = [
  "fastant",
  "fastrace-macro",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project",
  "rand 0.9.0",
  "rtrb",
@@ -5613,15 +5613,15 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa5d15035074ac205314ecc39ffb7697d59ba9deed2380fa12a7d54ddf35e9ba"
+version = "0.21.0-dev"
+source = "git+https://github.com/foyer-rs/foyer?rev=66056d08a50cce0ba92b815dee1b82be0dab26ef#66056d08a50cce0ba92b815dee1b82be0dab26ef"
 dependencies = [
  "equivalent",
  "fastrace",
  "foyer-common",
  "foyer-memory",
  "foyer-storage",
+ "futures-util",
  "madsim-tokio",
  "mixtrics",
  "pin-project",
@@ -5633,9 +5633,8 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "181bfdf387bd81442dd529e46b4cf632fd75076349d962b8a96aea24eddf5848"
+version = "0.21.0-dev"
+source = "git+https://github.com/foyer-rs/foyer?rev=66056d08a50cce0ba92b815dee1b82be0dab26ef#66056d08a50cce0ba92b815dee1b82be0dab26ef"
 dependencies = [
  "bincode 1.3.3",
  "bytes",
@@ -5644,7 +5643,7 @@ dependencies = [
  "itertools 0.14.0",
  "madsim-tokio",
  "mixtrics",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project",
  "serde",
  "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -5663,9 +5662,8 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "757d608277911c2292b7563638b5b7f804904ff71a4e4757d97a94cd6a067e57"
+version = "0.21.0-dev"
+source = "git+https://github.com/foyer-rs/foyer?rev=66056d08a50cce0ba92b815dee1b82be0dab26ef#66056d08a50cce0ba92b815dee1b82be0dab26ef"
 dependencies = [
  "arc-swap",
  "bitflags 2.10.0",
@@ -5674,11 +5672,13 @@ dependencies = [
  "fastrace",
  "foyer-common",
  "foyer-intrusive-collections",
- "hashbrown 0.15.5",
+ "futures-util",
+ "hashbrown 0.16.0",
  "itertools 0.14.0",
  "madsim-tokio",
  "mixtrics",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
+ "paste",
  "pin-project",
  "serde",
  "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -5688,9 +5688,8 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e1045dd1812baa313d8cb97b53f540bd8ed315f4585982f78ae7f6a1cdde4e2"
+version = "0.21.0-dev"
+source = "git+https://github.com/foyer-rs/foyer?rev=66056d08a50cce0ba92b815dee1b82be0dab26ef#66056d08a50cce0ba92b815dee1b82be0dab26ef"
 dependencies = [
  "allocator-api2",
  "anyhow",
@@ -5705,13 +5704,13 @@ dependencies = [
  "fs4",
  "futures-core",
  "futures-util",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.0",
  "io-uring",
  "itertools 0.14.0",
  "libc",
  "lz4",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project",
  "rand 0.9.0",
  "serde",
@@ -5861,7 +5860,7 @@ checksum = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f"
 dependencies = [
  "futures-core",
  "lock_api",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
 ]
 
 [[package]]
@@ -6221,7 +6220,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.15.5",
  "nonzero_ext",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "portable-atomic",
  "smallvec",
  "spinning_top",
@@ -6469,7 +6468,7 @@ dependencies = [
  "ipconfig",
  "lru-cache",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "rand 0.8.5",
  "resolv-conf",
  "smallvec",
@@ -7694,11 +7693,10 @@ checksum = "f5e54036fe321fd421e10d732f155734c4e4afd610dd556d9a82833ab3ee0bed"
 
 [[package]]
 name = "lock_api"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1cc9717a20b1bb222f333e6a92fd32f7d8a18ddc5a3191a11af45dcbf4dcd16"
+checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
- "autocfg",
  "scopeguard",
 ]
 
@@ -8188,7 +8186,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adbcddf5a90b959eea97ae505e0391f5c6dd411fbf546d43b9c59ad1c3bd4391"
 dependencies = [
  "itertools 0.14.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "prometheus",
 ]
 
@@ -8232,7 +8230,7 @@ dependencies = [
  "event-listener 5.3.1",
  "futures-util",
  "loom",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "portable-atomic",
  "rustc_version",
  "smallvec",
@@ -8794,7 +8792,7 @@ dependencies = [
  "futures",
  "humantime",
  "itertools 0.13.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "percent-encoding",
  "snafu",
  "tokio",
@@ -8822,7 +8820,7 @@ dependencies = [
  "hyper 1.6.0",
  "itertools 0.14.0",
  "md-5",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "percent-encoding",
  "quick-xml 0.37.1",
  "rand 0.9.0",
@@ -9260,12 +9258,12 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.12.1"
+version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
+checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
 dependencies = [
  "lock_api",
- "parking_lot_core 0.9.8",
+ "parking_lot_core 0.9.12",
 ]
 
 [[package]]
@@ -9284,18 +9282,17 @@ dependencies = [
 
 [[package]]
 name = "parking_lot_core"
-version = "0.9.8"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93f00c865fe7cabf650081affecd3871070f26767e7b2070a3ffae14c654b447"
+checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
 dependencies = [
  "backtrace",
  "cfg-if",
  "libc",
  "petgraph 0.6.5",
- "redox_syscall 0.3.5",
+ "redox_syscall 0.5.7",
  "smallvec",
- "thread-id",
- "windows-targets 0.48.5",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -9579,7 +9576,7 @@ dependencies = [
  "madsim-tokio",
  "openssl",
  "panic-message",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "peekable",
  "postgres-types",
  "rand 0.8.5",
@@ -10170,7 +10167,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "memchr",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "procfs 0.17.0",
  "protobuf",
  "thiserror 2.0.12 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -10819,15 +10816,6 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "567664f262709473930a4bf9e51bf2ebf3348f2e748ccc50dea20646858f8f29"
-dependencies = [
- "bitflags 1.3.2",
-]
-
-[[package]]
-name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4722d768eff46b75989dd134e5c353f0d6296e5aaa3132e776cbdb56be7731aa"
@@ -11247,7 +11235,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "itertools 0.14.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "prost 0.13.4",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -11281,7 +11269,7 @@ dependencies = [
  "mysql_async",
  "opendal",
  "panic-message",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parquet 54.2.0",
  "prometheus",
  "rand 0.9.0",
@@ -11364,7 +11352,6 @@ dependencies = [
  "risingwave_common",
  "risingwave_connector",
  "risingwave_stream",
- "sea-orm",
  "serde",
  "serde_yaml",
  "thiserror-ext",
@@ -11466,6 +11453,7 @@ dependencies = [
  "foyer",
  "futures",
  "hashbrown 0.14.5",
+ "hashbrown 0.15.5",
  "hashbrown 0.16.0",
  "hex",
  "http 1.3.1",
@@ -11488,7 +11476,7 @@ dependencies = [
  "num-traits",
  "opentelemetry",
  "opentelemetry_sdk",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parse-display",
  "paste",
  "pin-project-lite",
@@ -11567,7 +11555,7 @@ version = "2.7.0-alpha"
 dependencies = [
  "chrono",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "risingwave_common",
  "thiserror 2.0.12 (git+https://github.com/BugenZhao/thiserror.git?tag=bz-provide-3)",
  "thiserror-ext",
@@ -11608,7 +11596,7 @@ dependencies = [
  "mach2 0.6.0",
  "madsim-tokio",
  "madsim-tonic",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project-lite",
  "procfs 0.18.0",
  "prometheus",
@@ -11639,7 +11627,7 @@ version = "2.7.0-alpha"
 dependencies = [
  "arc-swap",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project-lite",
  "prometheus",
  "rand 0.9.0",
@@ -11658,7 +11646,7 @@ dependencies = [
  "hex",
  "madsim-tokio",
  "moka",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "prost 0.13.4",
  "reqwest 0.12.15",
  "risingwave_pb",
@@ -11857,7 +11845,7 @@ dependencies = [
  "opendal",
  "opensearch",
  "openssl",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parquet 54.2.0",
  "paste",
  "pg_bigdecimal",
@@ -11881,7 +11869,6 @@ dependencies = [
  "risingwave_common_rate_limit",
  "risingwave_connector_codec",
  "risingwave_jni_core",
- "risingwave_meta_model",
  "risingwave_pb",
  "risingwave_rpc_client",
  "rumqttc",
@@ -12009,7 +11996,7 @@ dependencies = [
  "futures-async-stream",
  "itertools 0.14.0",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "paste",
  "risingwave_common",
  "tempfile",
@@ -12196,7 +12183,7 @@ dependencies = [
  "mysql_async",
  "mysql_common",
  "num-integer",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parse-display",
  "paste",
  "percent-encoding",
@@ -12240,6 +12227,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
+ "toml 0.9.6",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -12288,7 +12276,7 @@ dependencies = [
  "futures-async-stream",
  "itertools 0.14.0",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "rand 0.9.0",
  "risingwave_common",
  "risingwave_common_service",
@@ -12319,7 +12307,7 @@ dependencies = [
  "itertools 0.14.0",
  "madsim-tokio",
  "mockall",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "prost 0.13.4",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -12442,7 +12430,7 @@ dependencies = [
  "maplit",
  "notify",
  "otlp-embedded",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pretty_assertions",
  "prometheus",
  "prometheus-http-query",
@@ -12474,6 +12462,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
+ "toml 0.9.6",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -12736,7 +12725,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pprof",
  "risingwave_common",
  "risingwave_variables",
@@ -12785,7 +12774,6 @@ dependencies = [
  "risingwave_expr_impl",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
- "risingwave_meta_model",
  "risingwave_meta_node",
  "risingwave_object_store",
  "risingwave_pb",
@@ -12914,7 +12902,7 @@ dependencies = [
  "more-asserts",
  "nix 0.30.1",
  "num-integer",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "parquet 54.2.0",
  "procfs 0.18.0",
  "prometheus",
@@ -12986,7 +12974,7 @@ dependencies = [
  "memcomparable",
  "moka",
  "multimap 0.10.0",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project",
  "pretty_assertions",
  "prometheus",
@@ -14163,7 +14151,7 @@ dependencies = [
  "futures",
  "log",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "scc",
  "serial_test_derive",
 ]
@@ -15313,17 +15301,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820"
 
 [[package]]
-name = "thread-id"
-version = "4.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79474f573561cdc4871a0de34a51c92f7f5a56039113fbb5b9c9f96bdb756669"
-dependencies = [
- "libc",
- "redox_syscall 0.2.16",
- "winapi",
-]
-
-[[package]]
 name = "thread_local"
 version = "1.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15500,7 +15477,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.5.10",
@@ -15567,7 +15544,7 @@ dependencies = [
  "futures-util",
  "log",
  "madsim-tokio",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "percent-encoding",
  "phf 0.11.3",
  "pin-project-lite",
@@ -15986,7 +15963,7 @@ dependencies = [
  "matchers",
  "nu-ansi-term",
  "once_cell",
- "parking_lot 0.12.1",
+ "parking_lot 0.12.5",
  "regex-automata",
  "serde",
  "serde_json",

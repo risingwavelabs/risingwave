@@ -292,9 +292,8 @@ create sink si_kafka_without_snapshot from t_kafka with (
     snapshot = 'false',
 );
 
-sleep 2s
 
-query T
+query T retry 4 backoff 1s
 select rw_key from t_sink_text_id order by rw_key
 ----
 \x31

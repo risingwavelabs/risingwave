@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common_proc_macro::serde_prefix_all;
+
 use super::*;
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
@@ -285,7 +287,7 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::event_log_channel_max_size")]
     pub event_log_channel_max_size: u32,
 
-    #[serde(default, with = "meta_prefix")]
+    #[serde(default)]
     #[config_doc(omitted)]
     pub developer: MetaDeveloperConfig,
     /// Whether compactor should rewrite row to remove dropped column.
@@ -364,8 +366,6 @@ pub struct MetaConfig {
     pub meta_store_config: MetaStoreConfig,
 }
 
-serde_with::with_prefix!(meta_prefix "meta_");
-
 /// Note: only applies to meta store backends other than `SQLite`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
@@ -389,6 +389,7 @@ pub struct MetaStoreConfig {
 /// The subsections `[meta.developer]`.
 ///
 /// It is put at [`MetaConfig::developer`].
+#[serde_prefix_all("meta_", mode = "alias")]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaDeveloperConfig {
     /// The number of traces to be cached in-memory by the tracing collector

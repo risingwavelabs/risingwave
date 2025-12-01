@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
+use crate::config::mutate::TomlTableMutateExt;
 use crate::config::streaming::JoinEncodingType;
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
@@ -545,46 +546,26 @@ impl SessionConfig {
     pub fn to_initial_streaming_config_override(
         &self,
     ) -> Result<String, SessionConfigToOverrideError> {
-        type Map = toml::map::Map<String, toml::Value>;
-        let mut map = Map::new();
+        let mut table = toml::Table::new();
 
         // TODO: make this more type safe.
-        fn add(map: &mut Map, path: &str, val: impl Serialize) -> Result<(), toml::ser::Error> {
-            let value = toml::Value::try_from(val)?;
-            let segments = path.split('.').collect_vec();
-            let (key, segments) = segments.split_last().expect("empty path");
-
-            let mut map = map;
-            for segment in segments {
-                map = map
-                    .entry(segment.to_owned())
-                    .or_insert_with(|| toml::Value::Table(Map::new()))
-                    .as_table_mut()
-                    .expect("expect table");
-            }
-            map.insert(key.to_string(), value);
-
-            Ok(())
-        }
-
+        // We `unwrap` here to assert the hard-coded keys are correct.
         if let Some(v) = self.streaming_join_encoding.as_ref() {
-            add(&mut map, "streaming.developer.stream_join_encoding_type", v)?;
+            table
+                .upsert("streaming.developer.join_encoding_type", v)
+                .unwrap();
         }
 
-        let res = toml::to_string(&map)?;
+        let res = toml::to_string(&table)?;
 
         // Validate all fields are valid by trying to merge it to the default config.
         if !res.is_empty() {
             let merged =
                 merge_streaming_config_section(&StreamingConfig::default(), res.as_str())?.unwrap();
 
-            for u in [
-                merged.unrecognized.into_inner(),
-                merged.developer.unrecognized.into_inner(),
-            ] {
-                if !u.is_empty() {
-                    bail!("unrecognized config entries: {:?}", u);
-                }
+            let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+            if !unrecognized_keys.is_empty() {
+                bail!("unrecognized configs: {:?}", unrecognized_keys);
             }
         }
 
@@ -627,7 +608,7 @@ mod test {
         let override_str = config.to_initial_streaming_config_override().unwrap();
         expect![[r#"
             [streaming.developer]
-            stream_join_encoding_type = "cpu_optimized"
+            join_encoding_type = "cpu_optimized"
         "#]]
         .assert_eq(&override_str);
 

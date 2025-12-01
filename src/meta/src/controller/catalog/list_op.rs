@@ -336,4 +336,20 @@ impl CatalogController {
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
             .collect())
     }
+
+    pub async fn list_sink_ids(&self, database_id: Option<DatabaseId>) -> MetaResult<Vec<SinkId>> {
+        let inner = self.inner.read().await;
+
+        let mut query = Sink::find().select_only().column(sink::Column::SinkId);
+
+        if let Some(database_id) = database_id {
+            query = query
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .filter(object::Column::DatabaseId.eq(database_id));
+        }
+
+        let sink_ids: Vec<SinkId> = query.into_tuple().all(&inner.db).await?;
+
+        Ok(sink_ids)
+    }
 }

@@ -65,11 +65,10 @@ format plain encode protobuf (
   message = 'test.Event');
 
 
-sleep 2s
 
 
 # reading messages with oneof containing empty message should work
-query III
+query III retry 4 backoff 1s
 select event_id, empty, text from s order by event_id;
 ----
 1	()	NULL

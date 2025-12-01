@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListRef, ListValue};
+use risingwave_common::array::ListRef;
 use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::function;
 
@@ -59,12 +59,12 @@ fn array_replace(
     array: ListRef<'_>,
     elem_from: Option<ScalarRefImpl<'_>>,
     elem_to: Option<ScalarRefImpl<'_>>,
-) -> ListValue {
-    ListValue::from_datum_iter(
-        &array.elem_type(),
-        array.iter().map(|val| match val == elem_from {
-            true => elem_to,
-            false => val,
-        }),
-    )
+    writer: &mut impl risingwave_common::array::ListWrite,
+) {
+    for val in array.iter() {
+        match val == elem_from {
+            true => writer.write(elem_to),
+            false => writer.write(val),
+        }
+    }
 }
