@@ -36,17 +36,177 @@ use crate::executor::source::{
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
 
+/// Type alias for file entries in the queue: (`file_name`, `scan_task_json`)
+type FileEntry = (String, JsonbVal);
+
+// ============================================================================
+// Fetch State Management
+// ============================================================================
+
+/// Tracks the state of the fetch executor during its lifecycle.
+///
+/// The fetch executor goes through a refresh cycle:
+/// 1. `RefreshStart` mutation triggers a new refresh cycle
+/// 2. Files are received from upstream list executor and queued
+/// 3. Files are batched and read concurrently
+/// 4. `ListFinish` mutation signals no more files coming
+/// 5. Once all files are processed, report load finished
+struct FetchState {
+    /// Whether we are in a refresh cycle (started by `RefreshStart`, ended by load finished report)
+    is_refreshing: bool,
+
+    /// Whether the upstream list executor has finished listing all files
+    is_list_finished: bool,
+
+    /// Number of files currently being fetched in the active batch reader
+    splits_on_fetch: usize,
+
+    /// Shared flag indicating whether the current batch reader has finished reading all files
+    is_batch_finished: Arc<RwLock<bool>>,
+
+    /// Queue of files waiting to be processed
+    file_queue: VecDeque<FileEntry>,
+
+    /// Files currently being fetched by the batch reader.
+    /// Used for at-least-once recovery: on error, these files are re-queued.
+    in_flight_files: Vec<FileEntry>,
+}
+
+impl FetchState {
+    fn new() -> Self {
+        Self {
+            is_refreshing: false,
+            is_list_finished: false,
+            splits_on_fetch: 0,
+            is_batch_finished: Arc::new(RwLock::new(false)),
+            file_queue: VecDeque::new(),
+            in_flight_files: Vec::new(),
+        }
+    }
+
+    /// Reset all state for a new refresh cycle.
+    fn reset_for_refresh(&mut self) {
+        self.file_queue.clear();
+        self.in_flight_files.clear();
+        self.splits_on_fetch = 0;
+        self.is_refreshing = true;
+        self.is_list_finished = false;
+        *self.is_batch_finished.write() = false;
+    }
+
+    /// Check if we should report load finished to the barrier manager.
+    fn should_report_load_finished(&self, is_checkpoint: bool) -> bool {
+        self.splits_on_fetch == 0
+            && self.file_queue.is_empty()
+            && self.in_flight_files.is_empty()
+            && self.is_list_finished
+            && self.is_refreshing
+            && is_checkpoint
+    }
+
+    /// Mark the refresh cycle as complete after reporting load finished.
+    fn mark_refresh_complete(&mut self) {
+        self.is_list_finished = false;
+        self.is_refreshing = false;
+    }
+
+    /// Check if we should start a new batch reader.
+    fn should_start_batch_reader(&self, need_rebuild: bool) -> bool {
+        need_rebuild
+            || (self.splits_on_fetch == 0 && !self.file_queue.is_empty() && self.is_refreshing)
+    }
+
+    /// Mark one file as successfully fetched.
+    fn mark_file_fetched(&mut self) {
+        self.splits_on_fetch -= 1;
+
+        // When all files in the batch complete successfully, clear in-flight tracking.
+        if self.splits_on_fetch == 0 && *self.is_batch_finished.read() {
+            self.in_flight_files.clear();
+        }
+    }
+
+    /// Handle fetch error with at-least-once recovery.
+    /// Re-queues in-flight files to ensure no file is skipped.
+    fn handle_error_recovery(&mut self) {
+        if !self.in_flight_files.is_empty() {
+            // Re-queue in-flight files to the front (reverse to maintain original order)
+            for file in self.in_flight_files.drain(..).rev() {
+                self.file_queue.push_front(file);
+            }
+        }
+        self.splits_on_fetch = 0;
+        *self.is_batch_finished.write() = false;
+    }
+
+    /// Enqueue new file assignments from upstream.
+    fn enqueue_files(&mut self, files: impl IntoIterator<Item = FileEntry>) {
+        self.file_queue.extend(files);
+    }
+}
+
+// ============================================================================
+// Column Indices Helper
+// ============================================================================
+
+/// Indices of special columns that need to be pruned from output.
+struct ColumnIndices {
+    file_path_idx: usize,
+    file_pos_idx: usize,
+}
+
+impl ColumnIndices {
+    fn from_source_desc(source_desc: &SourceDesc) -> Self {
+        let file_path_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ICEBERG_FILE_PATH_COLUMN_NAME)
+            .expect("file path column not found");
+        let file_pos_idx = source_desc
+            .columns
+            .iter()
+            .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
+            .expect("file pos column not found");
+        Self {
+            file_path_idx,
+            file_pos_idx,
+        }
+    }
+
+    fn to_prune(&self) -> [usize; 2] {
+        [self.file_path_idx, self.file_pos_idx]
+    }
+}
+
+// ============================================================================
+// Batch Iceberg Fetch Executor
+// ============================================================================
+
+/// Executor that fetches data from Iceberg files discovered by an upstream list executor.
+///
+///
+/// # Refresh Cycle
+///
+/// 1. Receives `RefreshStart` mutation - clears state and starts new cycle
+/// 2. Receives file chunks from upstream list executor - queues files for processing
+/// 3. On each barrier, starts batch reader if files are pending
+/// 4. Receives `ListFinish` mutation - marks listing as complete
+/// 5. When all files processed, reports load finished
+///
+/// # At-Least-Once Semantics
+///
+/// On fetch errors, in-flight files are re-queued to ensure no file is skipped.
+/// This may cause duplicate reads, but guarantees data completeness.
 pub struct BatchIcebergFetchExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Core component for managing external streaming source state
     stream_source_core: Option<StreamSourceCore<S>>,
 
-    /// Upstream list executor that provides the list of files to read.
-    /// This executor is responsible for discovering new files and changes in the Iceberg table.
+    /// Upstream list executor that provides file scan tasks
     upstream: Option<Executor>,
 
-    // barrier manager for reporting load finished
+    /// Barrier manager for reporting load finished
     barrier_manager: LocalBarrierManager,
 
     streaming_config: Arc<StreamingConfig>,
@@ -78,44 +238,37 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 impl<S: StateStore> BatchIcebergFetchExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
+        // Initialize upstream and wait for first barrier
         let mut upstream = self.upstream.take().unwrap().execute();
-        let barrier = expect_first_barrier(&mut upstream).await?;
-        yield Message::Barrier(barrier);
+        let first_barrier = expect_first_barrier(&mut upstream).await?;
+        yield Message::Barrier(first_barrier);
 
-        let mut is_refreshing = false;
-        let mut is_list_finished = false;
-        let mut splits_on_fetch: usize = 0;
-        let is_load_finished = Arc::new(RwLock::new(false));
-        let mut file_queue = VecDeque::new();
-
+        // Initialize source description
         let mut core = self.stream_source_core.take().unwrap();
-        let source_desc_builder = core.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let source_desc = core
+            .source_desc_builder
+            .take()
+            .unwrap()
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let file_path_idx = source_desc
-            .columns
-            .iter()
-            .position(|c| c.name == ICEBERG_FILE_PATH_COLUMN_NAME)
-            .unwrap();
-        let file_pos_idx = source_desc
-            .columns
-            .iter()
-            .position(|c| c.name == ICEBERG_FILE_POS_COLUMN_NAME)
-            .unwrap();
+        // Find column indices for pruning
+        let column_indices = ColumnIndices::from_source_desc(&source_desc);
 
+        // Initialize state and stream reader
+        let mut state = FetchState::new();
         let mut stream = StreamReaderWithPause::<true, ChunksWithState>::new(
             upstream,
             stream::pending().boxed(),
         );
 
+        // Main processing loop
         while let Some(msg) = stream.next().await {
             match msg {
+                // ----- Error Handling with At-Least-Once Recovery -----
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
 
-                    // Report error to global metrics with proper error reporting
                     GLOBAL_ERROR_METRICS.user_source_error.report([
                         e.variant_name().to_owned(),
                         core.source_id.to_string(),
@@ -123,178 +276,188 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                         self.associated_table_id.to_string(),
                     ]);
 
-                    file_queue.clear();
-                    *is_load_finished.write() = false;
+                    let in_flight_count = state.in_flight_files.len();
+                    state.handle_error_recovery();
 
-                    // Instead of immediately returning error, attempt to recover
+                    if in_flight_count > 0 {
+                        tracing::info!(
+                            source_id = %core.source_id,
+                            table_id = %self.associated_table_id,
+                            in_flight_count = %in_flight_count,
+                            "re-queued in-flight files for retry to ensure at-least-once semantics"
+                        );
+                    }
+
+                    stream.replace_data_stream(stream::pending().boxed());
+
                     tracing::info!(
                         source_id = %core.source_id,
                         table_id = %self.associated_table_id,
-                        "attempting to recover from fetch error instead of exiting"
+                        remaining_files = %state.file_queue.len(),
+                        "attempting to recover from fetch error, will retry on next barrier"
                     );
-
-                    // Add a short delay before retrying to avoid tight error loops
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    continue; // Continue processing instead of erroring out
                 }
-                Ok(msg) => {
-                    match msg {
-                        Either::Left(msg) => {
-                            match msg {
-                                Message::Barrier(barrier) => {
-                                    let mut need_rebuild_reader = false;
-                                    if let Some(mutation) = barrier.mutation.as_deref() {
-                                        match mutation {
-                                            Mutation::Pause => stream.pause_stream(),
-                                            Mutation::Resume => stream.resume_stream(),
-                                            Mutation::RefreshStart {
-                                                associated_source_id,
-                                                ..
-                                            } if associated_source_id == &core.source_id => {
-                                                tracing::info!(
-                                                    ?barrier.epoch,
-                                                    actor_id = %self.actor_ctx.id,
-                                                    source_id = %core.source_id,
-                                                    table_id = %self.associated_table_id,
-                                                    "RefreshStart:"
-                                                );
 
-                                                // reset states and abort current workload
-                                                file_queue.clear();
-                                                splits_on_fetch = 0;
-                                                is_refreshing = true;
-                                                is_list_finished = false;
-                                                *is_load_finished.write() = false;
+                // ----- Upstream Messages (barriers, file assignments) -----
+                Ok(Either::Left(msg)) => match msg {
+                    Message::Barrier(barrier) => {
+                        let need_rebuild = Self::handle_barrier_mutations(
+                            &barrier,
+                            &core,
+                            &mut state,
+                            &mut stream,
+                        );
 
-                                                need_rebuild_reader = true;
-                                            }
-                                            Mutation::ListFinish {
-                                                associated_source_id,
-                                            } if associated_source_id == &core.source_id => {
-                                                tracing::info!(
-                                                    ?barrier.epoch,
-                                                    actor_id = %self.actor_ctx.id,
-                                                    source_id = %core.source_id,
-                                                    table_id = %self.associated_table_id,
-                                                    "ListFinish:"
-                                                );
-                                                is_list_finished = true;
-                                            }
-                                            _ => {
-                                                // ignore other mutations
-                                            }
-                                        }
-                                    }
-
-                                    if splits_on_fetch == 0
-                                        && file_queue.is_empty()
-                                        && is_list_finished
-                                        && is_refreshing
-                                        && barrier.is_checkpoint()
-                                    {
-                                        tracing::info!(
-                                            ?barrier.epoch,
-                                            actor_id = %self.actor_ctx.id,
-                                            source_id = %core.source_id,
-                                            table_id = %self.associated_table_id,
-                                            "Reporting load finished"
-                                        );
-                                        self.barrier_manager.report_source_load_finished(
-                                            barrier.epoch,
-                                            self.actor_ctx.id,
-                                            self.associated_table_id,
-                                            core.source_id,
-                                        );
-
-                                        // reset flags
-                                        is_list_finished = false;
-                                        is_refreshing = false;
-                                    }
-
-                                    yield Message::Barrier(barrier);
-
-                                    if need_rebuild_reader
-                                        || (splits_on_fetch == 0
-                                            && !file_queue.is_empty()
-                                            && is_refreshing)
-                                    {
-                                        Self::replace_with_new_batch_reader(
-                                            &mut file_queue,
-                                            &mut stream,
-                                            self.streaming_config.clone(),
-                                            &mut splits_on_fetch,
-                                            source_desc.clone(),
-                                            is_load_finished.clone(),
-                                        )?;
-                                    }
-                                }
-                                Message::Chunk(chunk) => {
-                                    let jsonb_values: Vec<(String, JsonbVal)> = chunk
-                                        .data_chunk()
-                                        .rows()
-                                        .map(|row| {
-                                            let file_name = row.datum_at(0).unwrap().into_utf8();
-                                            let split = row.datum_at(1).unwrap().into_jsonb();
-                                            (file_name.to_owned(), split.to_owned_scalar())
-                                        })
-                                        .collect();
-                                    tracing::debug!(
-                                        "received file assignments: {:?}",
-                                        jsonb_values
-                                    );
-                                    file_queue.extend(jsonb_values);
-                                }
-                                Message::Watermark(_) => unreachable!(),
-                            }
+                        if state.should_report_load_finished(barrier.is_checkpoint()) {
+                            tracing::info!(
+                                ?barrier.epoch,
+                                actor_id = %self.actor_ctx.id,
+                                source_id = %core.source_id,
+                                table_id = %self.associated_table_id,
+                                "Reporting load finished"
+                            );
+                            self.barrier_manager.report_source_load_finished(
+                                barrier.epoch,
+                                self.actor_ctx.id,
+                                self.associated_table_id,
+                                core.source_id,
+                            );
+                            state.mark_refresh_complete();
                         }
-                        Either::Right(ChunksWithState { chunks, .. }) => {
-                            splits_on_fetch -= 1;
 
-                            for chunk in &chunks {
-                                let chunk = prune_additional_cols(
-                                    chunk,
-                                    &[file_path_idx, file_pos_idx],
-                                    &source_desc.columns,
-                                );
+                        yield Message::Barrier(barrier);
 
-                                yield Message::Chunk(chunk);
-                            }
+                        if state.should_start_batch_reader(need_rebuild) {
+                            Self::start_batch_reader(
+                                &mut state,
+                                &mut stream,
+                                source_desc.clone(),
+                                &self.streaming_config,
+                            )?;
                         }
+                    }
+
+                    Message::Chunk(chunk) => {
+                        let files = Self::parse_file_assignments(&chunk);
+                        tracing::debug!("received {} file assignments", files.len());
+                        state.enqueue_files(files);
+                    }
+
+                    Message::Watermark(_) => unreachable!(),
+                },
+
+                // ----- Fetched Data from Iceberg Files -----
+                Ok(Either::Right(ChunksWithState { chunks, .. })) => {
+                    state.mark_file_fetched();
+
+                    for chunk in &chunks {
+                        let pruned = prune_additional_cols(
+                            chunk,
+                            &column_indices.to_prune(),
+                            &source_desc.columns,
+                        );
+                        yield Message::Chunk(pruned);
                     }
                 }
             }
         }
     }
 
-    fn replace_with_new_batch_reader<const BIASED: bool>(
-        file_queue: &mut VecDeque<(String, JsonbVal)>,
-        stream: &mut StreamReaderWithPause<BIASED, ChunksWithState>,
-        streaming_config: Arc<StreamingConfig>,
-        splits_on_fetch: &mut usize,
-        source_desc: SourceDesc,
-        read_finished: Arc<RwLock<bool>>,
-    ) -> StreamExecutorResult<()> {
-        let mut batch =
-            Vec::with_capacity(streaming_config.developer.iceberg_fetch_batch_size as usize);
-        for _ in 0..streaming_config.developer.iceberg_fetch_batch_size {
-            if let Some((_, split_json)) = file_queue.pop_front() {
-                batch.push(PersistedFileScanTask::decode(split_json.as_scalar_ref())?);
-            } else {
-                break;
+    /// Handle barrier mutations and return whether reader needs to be rebuilt.
+    fn handle_barrier_mutations(
+        barrier: &Barrier,
+        core: &StreamSourceCore<S>,
+        state: &mut FetchState,
+        stream: &mut StreamReaderWithPause<true, ChunksWithState>,
+    ) -> bool {
+        let Some(mutation) = barrier.mutation.as_deref() else {
+            return false;
+        };
+
+        match mutation {
+            Mutation::Pause => {
+                stream.pause_stream();
+                false
             }
+            Mutation::Resume => {
+                stream.resume_stream();
+                false
+            }
+            Mutation::RefreshStart {
+                associated_source_id,
+                ..
+            } if associated_source_id == &core.source_id => {
+                tracing::info!(
+                    ?barrier.epoch,
+                    source_id = %core.source_id,
+                    "RefreshStart: resetting state for new refresh cycle"
+                );
+                state.reset_for_refresh();
+                true
+            }
+            Mutation::ListFinish {
+                associated_source_id,
+            } if associated_source_id == &core.source_id => {
+                tracing::info!(
+                    ?barrier.epoch,
+                    source_id = %core.source_id,
+                    "ListFinish: upstream finished listing files"
+                );
+                state.is_list_finished = true;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Parse file assignments from an upstream chunk.
+    fn parse_file_assignments(chunk: &StreamChunk) -> Vec<FileEntry> {
+        chunk
+            .data_chunk()
+            .rows()
+            .map(|row| {
+                let file_name = row.datum_at(0).unwrap().into_utf8().to_owned();
+                let scan_task = row.datum_at(1).unwrap().into_jsonb().to_owned_scalar();
+                (file_name, scan_task)
+            })
+            .collect()
+    }
+
+    /// Start a new batch reader for pending files.
+    fn start_batch_reader(
+        state: &mut FetchState,
+        stream: &mut StreamReaderWithPause<true, ChunksWithState>,
+        source_desc: SourceDesc,
+        streaming_config: &StreamingConfig,
+    ) -> StreamExecutorResult<()> {
+        // Clear previous in-flight files (should already be empty on success, re-queued on error)
+        state.in_flight_files.clear();
+
+        // Collect batch of files to process
+        let batch_size = streaming_config.developer.iceberg_fetch_batch_size as usize;
+        let mut batch = Vec::with_capacity(batch_size);
+
+        for _ in 0..batch_size {
+            let Some(file_entry) = state.file_queue.pop_front() else {
+                break;
+            };
+            // Track as in-flight for at-least-once recovery
+            state.in_flight_files.push(file_entry.clone());
+            batch.push(PersistedFileScanTask::decode(file_entry.1.as_scalar_ref())?);
         }
 
         if batch.is_empty() {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
-            tracing::debug!("building batch reader with {} files", batch.len());
-            *splits_on_fetch += batch.len();
-            *read_finished.write() = false;
+            tracing::debug!("starting batch reader with {} files", batch.len());
+            state.splits_on_fetch += batch.len();
+            *state.is_batch_finished.write() = false;
+
             let batch_reader = Self::build_batched_stream_reader(
                 source_desc,
                 batch,
-                streaming_config,
-                read_finished,
+                streaming_config.developer.chunk_size,
+                state.is_batch_finished.clone(),
             );
             stream.replace_data_stream(batch_reader.boxed());
         }
@@ -302,53 +465,53 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         Ok(())
     }
 
+    /// Build a stream reader that reads multiple Iceberg files in sequence.
     #[try_stream(ok = ChunksWithState, error = StreamExecutorError)]
     async fn build_batched_stream_reader(
         source_desc: SourceDesc,
-        read_batch: Vec<FileScanTask>,
-        streaming_config: Arc<StreamingConfig>,
-        read_finished: Arc<RwLock<bool>>,
+        tasks: Vec<FileScanTask>,
+        chunk_size: usize,
+        batch_finished: Arc<RwLock<bool>>,
     ) {
-        let properties = source_desc.source.config.clone();
-        let properties = match properties {
-            risingwave_connector::source::ConnectorProperties::Iceberg(iceberg_properties) => {
-                iceberg_properties
-            }
-            _ => unreachable!(),
+        let properties = match source_desc.source.config.clone() {
+            risingwave_connector::source::ConnectorProperties::Iceberg(props) => props,
+            _ => unreachable!("Expected Iceberg connector properties"),
         };
         let table = properties.load_table().await?;
 
-        for task in read_batch {
+        for task in tasks {
             let mut chunks = vec![];
             #[for_await]
-            for chunk in scan_task_to_chunk_with_deletes(
+            for chunk_result in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 task,
                 IcebergScanOpts {
-                    chunk_size: streaming_config.developer.chunk_size,
-                    need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
+                    chunk_size,
+                    need_seq_num: true, // Keep for potential future usage
                     need_file_path_and_pos: true,
-                    handle_delete_files: true, // Enable delete file handling for streaming source
+                    handle_delete_files: true,
                 },
                 None,
             ) {
-                let chunk = chunk?;
-
-                chunks.push(StreamChunk::from_parts(
-                    itertools::repeat_n(Op::Insert, chunk.capacity()).collect_vec(),
-                    chunk,
-                ));
+                let chunk = chunk_result?;
+                let ops = itertools::repeat_n(Op::Insert, chunk.capacity()).collect_vec();
+                chunks.push(StreamChunk::from_parts(ops, chunk));
             }
+
             yield ChunksWithState {
                 chunks,
-                data_file_path: "".to_owned(), /* we do not need data file path for refreshable iceberg fetch, as no state persisted */
+                data_file_path: String::new(), // Not needed for refreshable iceberg fetch
                 last_read_pos: None,
             };
         }
 
-        *read_finished.write() = true;
+        *batch_finished.write() = true;
     }
 }
+
+// ============================================================================
+// Trait Implementations
+// ============================================================================
 
 impl<S: StateStore> Execute for BatchIcebergFetchExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
