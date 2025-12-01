@@ -408,6 +408,12 @@ pub enum Command {
         table_id: TableId,
         associated_source_id: SourceId,
     },
+
+    /// `ResetSource` command generates a barrier to reset CDC source offset to latest.
+    /// Used when upstream binlog/oplog has expired.
+    ResetSource {
+        source_id: SourceId,
+    },
 }
 
 // For debugging and observability purposes. Can add more details later if needed.
@@ -470,6 +476,7 @@ impl std::fmt::Display for Command {
                 "LoadFinish: {} (source: {})",
                 table_id, associated_source_id
             ),
+            Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
         }
     }
 }
@@ -621,6 +628,7 @@ impl Command {
             Command::Refresh { .. } => None, // Refresh doesn't change fragment structure
             Command::ListFinish { .. } => None, // ListFinish doesn't change fragment structure
             Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
+            Command::ResetSource { .. } => None, // ResetSource doesn't change fragment structure
         }
     }
 
@@ -1344,6 +1352,11 @@ impl Command {
             } => Some(Mutation::LoadFinish(LoadFinishMutation {
                 associated_source_id: *associated_source_id,
             })),
+            Command::ResetSource { source_id } => Some(Mutation::ResetSource(
+                risingwave_pb::stream_plan::ResetSourceMutation {
+                    source_id: source_id.as_raw_id(),
+                },
+            )),
         }
     }
 

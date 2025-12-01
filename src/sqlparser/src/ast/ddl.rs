@@ -241,6 +241,8 @@ pub enum AlterSourceOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `RESET` - Reset CDC source offset to latest
+    ResetSource,
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -570,6 +572,9 @@ impl fmt::Display for AlterSourceOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterSourceOperation::ResetSource => {
+                write!(f, "RESET")
             }
             AlterSourceOperation::AlterConnectorProps { alter_props } => {
                 write!(

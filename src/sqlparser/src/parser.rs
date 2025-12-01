@@ -3700,6 +3700,9 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA, SOURCE_RATE_LIMIT or PARALLELISM after SET");
             }
+        } else if self.parse_keyword(Keyword::RESET) {
+            // RESET without CONFIG means reset CDC source offset to latest
+            AlterSourceOperation::ResetSource
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();
             if format_encode.key_encode.is_some() {

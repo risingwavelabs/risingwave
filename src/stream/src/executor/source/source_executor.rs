@@ -704,6 +704,134 @@ impl<S: StateStore> SourceExecutor<S> {
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }
                             }
+                            Mutation::ResetSource { source_id } => {
+                                if *source_id == self.stream_source_core.source_id {
+                                    tracing::info!(
+                                        actor_id = %self.actor_ctx.id,
+                                        source_id = source_id.as_raw_id(),
+                                        "Resetting CDC source: clearing offset (set to None)"
+                                    );
+
+                                    // Step 1: Collect all current splits and clear their offsets
+                                    let splits_with_cleared_offset: Vec<SplitImpl> = self.stream_source_core
+                                        .latest_split_info
+                                        .values()
+                                        .map(|split| {
+                                            // Clone the split and clear its offset
+                                            let mut new_split = split.clone();
+                                            match &mut new_split {
+                                                SplitImpl::MysqlCdc(debezium_split) => {
+                                                    if let Some(mysql_split) = debezium_split.mysql_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?mysql_split.inner.split_id,
+                                                            old_offset = ?mysql_split.inner.start_offset,
+                                                            "Clearing MySQL CDC offset"
+                                                        );
+                                                        mysql_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::PostgresCdc(debezium_split) => {
+                                                    if let Some(pg_split) = debezium_split.postgres_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?pg_split.inner.split_id,
+                                                            old_offset = ?pg_split.inner.start_offset,
+                                                            "Clearing PostgreSQL CDC offset"
+                                                        );
+                                                        pg_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::MongodbCdc(debezium_split) => {
+                                                    if let Some(mongo_split) = debezium_split.mongodb_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?mongo_split.inner.split_id,
+                                                            old_offset = ?mongo_split.inner.start_offset,
+                                                            "Clearing MongoDB CDC offset"
+                                                        );
+                                                        mongo_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::CitusCdc(debezium_split) => {
+                                                    if let Some(citus_split) = debezium_split.citus_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?citus_split.inner.split_id,
+                                                            old_offset = ?citus_split.inner.start_offset,
+                                                            "Clearing Citus CDC offset"
+                                                        );
+                                                        citus_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                SplitImpl::SqlServerCdc(debezium_split) => {
+                                                    if let Some(sqlserver_split) = debezium_split.sql_server_split.as_mut() {
+                                                        tracing::info!(
+                                                            split_id = ?sqlserver_split.inner.split_id,
+                                                            old_offset = ?sqlserver_split.inner.start_offset,
+                                                            "Clearing SQL Server CDC offset"
+                                                        );
+                                                        sqlserver_split.inner.start_offset = None;
+                                                    }
+                                                }
+                                                _ => {
+                                                    tracing::warn!(
+                                                        "RESET SOURCE called on non-CDC split type"
+                                                    );
+                                                }
+                                            }
+                                            new_split
+                                        })
+                                        .collect();
+
+                                    if !splits_with_cleared_offset.is_empty() {
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            split_count = splits_with_cleared_offset.len(),
+                                            "Updating state table with cleared offsets"
+                                        );
+
+                                        // Step 2: Write splits back to state table with offset = None
+                                        self.stream_source_core
+                                            .split_state_store
+                                            .set_states(splits_with_cleared_offset.clone())
+                                            .await?;
+
+                                        // Step 3: Update in-memory split info with cleared offsets
+                                        for split in splits_with_cleared_offset {
+                                            self.stream_source_core
+                                                .latest_split_info
+                                                .insert(split.id(), split.clone());
+                                            self.stream_source_core
+                                                .updated_splits_in_epoch
+                                                .insert(split.id(), split);
+                                        }
+
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            source_id = source_id.as_raw_id(),
+                                            "RESET SOURCE completed: offset cleared (set to None). \
+                                             Trigger recovery/restart to fetch latest offset from upstream."
+                                        );
+                                    } else {
+                                        tracing::warn!(
+                                            actor_id = %self.actor_ctx.id,
+                                            "No splits found to reset - source may not be initialized yet"
+                                        );
+                                    }
+
+                                    // Note: RESET SOURCE only clears the offset, does NOT pause the source.
+                                    // When offset is None, after recovery/restart, Debezium will automatically
+                                    // enter recovery mode and fetch the latest offset from upstream
+                                    // (MySQL binlog / MongoDB oplog).
+                                    //
+                                    // If user needs to pause for resnapshot, use: ALTER SOURCE s SET rate_limit = 0;
+                                    // To resume after resnapshot: ALTER SOURCE s SET rate_limit TO default;
+                                } else {
+                                    tracing::debug!(
+                                        actor_id = %self.actor_ctx.id,
+                                        target_source_id = source_id.as_raw_id(),
+                                        current_source_id = self.stream_source_core.source_id.as_raw_id(),
+                                        "ResetSource mutation for different source, ignoring"
+                                    );
+                                }
+                            }
                             _ => {}
                         }
                     }

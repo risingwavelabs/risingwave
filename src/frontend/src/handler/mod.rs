@@ -110,6 +110,7 @@ pub mod privilege;
 pub mod query;
 mod recover;
 mod refresh;
+mod reset_source;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -1206,6 +1207,9 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterSourceOperation::ResetSource => {
+                reset_source::handle_reset_source(handler_args, name).await
             }
         },
         Statement::AlterFunction {
