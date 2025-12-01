@@ -522,6 +522,7 @@ impl CommandContext {
                     .set_table_refresh_state(*table_id, RefreshState::Finishing)
                     .await?;
             }
+            Command::ResetSource { .. } => {}
         }
 
         Ok(())

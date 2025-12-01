@@ -110,6 +110,7 @@ pub mod privilege;
 pub mod query;
 mod recover;
 mod refresh;
+mod reset_source;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -1242,6 +1243,9 @@ pub async fn handle(
             }
             AlterSourceOperation::ResetConfig { .. } => {
                 bail_not_implemented!("ALTER SOURCE RESET CONFIG")
+            }
+            AlterSourceOperation::ResetSource => {
+                reset_source::handle_reset_source(handler_args, name).await
             }
         },
         Statement::AlterFunction {

@@ -406,6 +406,30 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn reset_source(
+        &self,
+        request: Request<ResetSourceRequest>,
+    ) -> Result<Response<ResetSourceResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+
+        tracing::info!(
+            source_id = %source_id,
+            "Received RESET SOURCE request, routing to DDL controller"
+        );
+
+        // Route to DDL controller
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::ResetSource(source_id))
+            .await?;
+
+        Ok(Response::new(ResetSourceResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_sink(
         &self,
         request: Request<CreateSinkRequest>,
