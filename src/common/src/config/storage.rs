@@ -35,6 +35,7 @@ pub struct StorageConfig {
     /// 1. `block_cache_capacity_mb` and `meta_cache_capacity_mb` are also configured explicitly.
     /// 2. `block_cache_capacity_mb` + `meta_cache_capacity_mb` + `meta_cache_capacity_mb` doesn't exceed 0.3 * non-reserved memory.
     #[serde(default)]
+    #[serde(with = "super::none_as_empty_string")]
     pub shared_buffer_capacity_mb: Option<usize>,
 
     /// The shared buffer will start flushing data to object when the ratio of memory usage to the

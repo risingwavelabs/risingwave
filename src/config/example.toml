@@ -233,6 +233,7 @@ connect_timeout_secs = 5
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
+shared_buffer_capacity_mb = ""
 shared_buffer_flush_ratio = 0.8
 shared_buffer_min_batch_flush_size_mb = 800
 imm_merge_threshold = 0
