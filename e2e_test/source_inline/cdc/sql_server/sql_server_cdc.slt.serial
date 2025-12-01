@@ -187,7 +187,7 @@ CREATE TABLE shared_orders (
 )  from mssql_source table 'mydb.wrong_dbo.orders';
 
 # wrong database name
-statement error The database name `wrong_mydb` in the FROM clause is not the same as the database name `mydb` in source definition
+statement error The database name 'wrong_mydb' in FROM clause does not match the database name 'mydb' specified in source definition
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
