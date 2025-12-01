@@ -23,6 +23,7 @@ use risingwave_common::array::Op;
 use risingwave_common::catalog::{ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::id::TableId;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
@@ -113,9 +114,28 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             match msg {
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
+
+                    // Report error to global metrics with proper error reporting
+                    GLOBAL_ERROR_METRICS.user_source_error.report([
+                        e.variant_name().to_owned(),
+                        core.source_id.to_string(),
+                        self.actor_ctx.fragment_id.to_string(),
+                        self.associated_table_id.to_string(),
+                    ]);
+
                     file_queue.clear();
                     *is_load_finished.write() = false;
-                    return Err(e);
+
+                    // Instead of immediately returning error, attempt to recover
+                    tracing::info!(
+                        source_id = %core.source_id,
+                        table_id = %self.associated_table_id,
+                        "attempting to recover from fetch error instead of exiting"
+                    );
+
+                    // Add a short delay before retrying to avoid tight error loops
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    continue; // Continue processing instead of erroring out
                 }
                 Ok(msg) => {
                     match msg {
