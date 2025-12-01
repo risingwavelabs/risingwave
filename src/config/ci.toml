@@ -16,7 +16,6 @@ stream_refresh_scheduler_interval_sec = 1
 
 [storage]
 share_buffers_sync_parallelism = 4
-imm_merge_threshold = 2
 max_cached_recent_versions_number = 200
 
 [storage.object_store.retry]

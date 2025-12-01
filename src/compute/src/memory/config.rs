@@ -103,6 +103,7 @@ pub fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
 
 /// Decide the memory limit for each storage cache. If not specified in `StorageConfig`, memory
 /// limits are calculated based on the proportions to total `non_reserved_memory_bytes`.
+#[allow(deprecated)]
 pub fn storage_memory_config(
     non_reserved_memory_bytes: usize,
     embedded_compactor_enabled: bool,

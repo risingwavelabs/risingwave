@@ -38,7 +38,7 @@ macro_rules! define_system_config {
 for_all_params!(define_system_config);
 
 impl SystemConfig {
-    #![allow(deprecated)]
+    #[allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
         macro_rules! fields {
             ($({ $field:ident, $($rest:tt)* },)*) => {

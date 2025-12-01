@@ -19,6 +19,7 @@ use foyer::{
 use super::*;
 
 /// The section `[storage]` in `risingwave.toml`.
+#[allow(deprecated)]
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StorageConfig {
@@ -48,11 +49,6 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_min_batch_flush_size_mb")]
     pub shared_buffer_min_batch_flush_size_mb: usize,
 
-    /// The threshold for the number of immutable memtables to merge to a new imm.
-    #[serde(default = "default::storage::imm_merge_threshold")]
-    #[deprecated]
-    pub imm_merge_threshold: usize,
-
     /// Whether to enable write conflict detection
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
@@ -62,15 +58,18 @@ pub struct StorageConfig {
     pub cache: CacheConfig,
 
     /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.block_cache_capacity_mb` instead.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
+    #[deprecated]
     pub block_cache_capacity_mb: Option<usize>,
 
     /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.meta_cache_capacity_mb` instead.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
+    #[deprecated]
     pub meta_cache_capacity_mb: Option<usize>,
 
     /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.block_cache_eviction.high_priority_ratio_in_percent` with `storage.cache.block_cache_eviction.algorithm = "Lru"` instead.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
+    #[deprecated]
     pub high_priority_ratio_in_percent: Option<usize>,
 
     /// max memory usage for large query
@@ -139,9 +138,6 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::compactor_max_sst_key_count")]
     pub compactor_max_sst_key_count: u64,
-    // DEPRECATED: This config will be deprecated in the future version, use `storage.compactor_iter_max_io_retry_times` instead.
-    #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
-    pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
     #[serde(default = "default::storage::enable_fast_compaction")]
@@ -156,11 +152,6 @@ pub struct StorageConfig {
     pub compactor_fast_max_compact_task_size: u64,
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
-
-    /// Deprecated: The window size of table info statistic history.
-    #[serde(default = "default::storage::table_info_statistic_history_times")]
-    #[deprecated]
-    pub table_info_statistic_history_times: usize,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -392,7 +383,11 @@ pub struct FileCacheConfig {
     pub recover_concurrency: usize,
 
     /// Deprecated soon. Please use `throttle` to do I/O throttling instead.
-    #[serde(default = "default::file_cache::insert_rate_limit_mb")]
+    #[serde(
+        default = "default::file_cache::insert_rate_limit_mb",
+        skip_serializing
+    )]
+    #[deprecated]
     pub insert_rate_limit_mb: usize,
 
     #[serde(default = "default::file_cache::indexer_shards")]
@@ -675,6 +670,7 @@ pub struct StorageMemoryConfig {
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
 }
 
+#[allow(deprecated)]
 pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
     let block_cache_capacity_mb = s.storage.cache.block_cache_capacity_mb.unwrap_or(
         // adapt to old version
@@ -837,10 +833,6 @@ pub mod default {
 
         pub fn shared_buffer_min_batch_flush_size_mb() -> usize {
             800
-        }
-
-        pub fn imm_merge_threshold() -> usize {
-            0 // disable
         }
 
         pub fn write_conflict_detection_enabled() -> bool {
@@ -1016,11 +1008,6 @@ pub mod default {
 
         pub fn vector_meta_cache_shard_num() -> usize {
             16
-        }
-
-        // deprecated
-        pub fn table_info_statistic_history_times() -> usize {
-            240
         }
 
         pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {

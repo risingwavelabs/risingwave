@@ -218,18 +218,6 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    #[serde(default = "default::meta::move_table_size_limit")]
-    #[deprecated]
-    pub move_table_size_limit: u64,
-
-    #[serde(default = "default::meta::split_group_size_limit")]
-    #[deprecated]
-    pub split_group_size_limit: u64,
-
-    #[serde(default = "default::meta::cut_table_size_limit")]
-    #[deprecated]
-    pub cut_table_size_limit: u64,
-
     /// Whether to protect dropping a table with incoming sink.
     #[serde(default = "default::meta::protect_drop_table_with_incoming_sink")]
     pub protect_drop_table_with_incoming_sink: bool,
@@ -624,16 +612,6 @@ pub mod default {
             600
         }
 
-        // limit the size of state table to trigger split by high throughput
-        pub fn move_table_size_limit() -> u64 {
-            10 * 1024 * 1024 * 1024 // 10GB
-        }
-
-        // limit the size of group to trigger split by group_size and avoid too many small groups
-        pub fn split_group_size_limit() -> u64 {
-            64 * 1024 * 1024 * 1024 // 64GB
-        }
-
         pub fn protect_drop_table_with_incoming_sink() -> bool {
             false
         }
@@ -656,10 +634,6 @@ pub mod default {
 
         pub fn compaction_task_max_progress_interval_secs() -> u64 {
             60 * 10 // 10min
-        }
-
-        pub fn cut_table_size_limit() -> u64 {
-            1024 * 1024 * 1024 // 1GB
         }
 
         pub fn hybrid_partition_vnode_count() -> u32 {

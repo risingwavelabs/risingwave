@@ -38,7 +38,6 @@ ldapsuffix = ",ou=people,dc=example,dc=com"
 in_flight_barrier_nums = 10
 
 [storage]
-imm_merge_threshold = 2
 
 [system]
 barrier_interval_ms = 250

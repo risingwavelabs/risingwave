@@ -72,9 +72,6 @@ pub struct StorageOpts {
     pub share_buffer_upload_concurrency: usize,
     /// Capacity of sstable meta cache.
     pub compactor_memory_limit_mb: usize,
-    /// compactor streaming iterator recreate timeout.
-    /// deprecated
-    pub compact_iter_recreate_timeout_ms: u64,
     /// Number of SST ids fetched from meta per RPC
     pub sstable_id_remote_fetch_number: u32,
     /// Whether to enable streaming upload for sstable.
@@ -193,6 +190,7 @@ impl Default for StorageOpts {
 }
 
 impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpts {
+    #[allow(deprecated)]
     fn from((c, p, s): (&RwConfig, &SystemParamsReader, &StorageMemoryConfig)) -> Self {
         let mut data_file_cache_throttle = c.storage.data_file_cache.throttle.clone();
         if data_file_cache_throttle.write_throughput.is_none() {
@@ -279,7 +277,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             cache_refill_threshold: c.storage.cache_refill.threshold,
             cache_refill_skip_recent_filter: c.storage.cache_refill.skip_recent_filter,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
-            compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
 
             max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_owned(),

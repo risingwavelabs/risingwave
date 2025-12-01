@@ -84,6 +84,16 @@ fn is_omitted_config_field(field: &Field) -> bool {
     })
 }
 
+fn is_deprecated_config_field(field: &Field) -> bool {
+    field.attrs.iter().any(|attr| {
+        if let Some(attr_name) = attr.path.get_ident() {
+            attr_name == "deprecated"
+        } else {
+            false
+        }
+    })
+}
+
 fn field_name(f: &Field) -> String {
     f.ident
         .as_ref()
@@ -113,6 +123,9 @@ impl StructFieldDocs {
                     .named
                     .iter()
                     .filter_map(|field| {
+                        if is_deprecated_config_field(field) {
+                            return None;
+                        }
                         if is_omitted_config_field(field) {
                             return None;
                         }
