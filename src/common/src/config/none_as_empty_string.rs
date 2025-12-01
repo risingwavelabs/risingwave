@@ -15,10 +15,11 @@
 //! Serialize and deserialize `Option<T>` as empty string if it is `None`. This is useful to:
 //!
 //! - Demonstrate config entries whose default values are `None` in `example.toml`
-//! - Allow users to reset config entries to default by explicitly overriding them to empty string
-//!   in `ALTER .. SET CONFIG`.
+//! - Allow users to override a config entry that's already set to `Some` back to `None` in
+//!   per-job configuration via `ALTER .. SET CONFIG`
 //!
-//! Note that using this utility on a `String` may confuse explicit empty string and `None`.
+//! Note that using this utility on a `String` should be carefully considered, as it will
+//! confuse explicit empty string and `None`.
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -40,6 +41,8 @@ where
     T: Deserialize<'de>,
 {
     use serde_content::{Deserializer, Value};
+
+    // Collect as `serde_content::Value` first to check if it is empty string.
     let v = Value::deserialize(deserializer)?;
 
     if let Value::String(s) = &v
@@ -48,9 +51,49 @@ where
         return Ok(None);
     }
 
+    // If it's not empty string, deserialize it again as `T`.
     let t = Deserializer::new(v)
+        .human_readable()
+        .coerce_numbers()
         .deserialize()
         .map_err(D::Error::custom)?;
 
     Ok(Some(t))
+}
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect;
+    use serde_default::DefaultFromSerde;
+
+    use super::*;
+
+    fn default_b() -> Option<usize> {
+        Some(42)
+    }
+
+    #[derive(Serialize, Deserialize, PartialEq, Debug, DefaultFromSerde)]
+    struct Config {
+        #[serde(with = "super")]
+        #[serde(default)]
+        a: Option<usize>,
+
+        #[serde(with = "super")]
+        #[serde(default = "default_b")]
+        b: Option<usize>,
+    }
+
+    #[test]
+    fn test_basic() {
+        let config = Config::default();
+        let toml = toml::to_string(&config).unwrap();
+        expect![[r#"
+            a = ""
+            b = 42
+        "#]]
+        .assert_eq(&toml);
+
+        let config2: Config = toml::from_str(&toml).unwrap();
+        assert_eq!(config2, config);
+    }
 }
