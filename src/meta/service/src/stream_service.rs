@@ -318,6 +318,7 @@ impl StreamManagerService for StreamServiceImpl {
                      resource_group,
                      database_id,
                      schema_id,
+                     config_override,
                      ..
                  }| {
                     let parallelism = match parallelism {
@@ -335,6 +336,7 @@ impl StreamManagerService for StreamServiceImpl {
                         resource_group,
                         database_id,
                         schema_id,
+                        config_override,
                     }
                 },
             )
