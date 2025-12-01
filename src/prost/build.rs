@@ -267,6 +267,9 @@ for_all_wrapped_id_fields! (
         GetTablesResponse {
             tables: TableId,
         }
+        ResetSourceRequest {
+            source_id: SourceId,
+        }
     }
     frontend_service {
         GetTableReplacePlanRequest {
