@@ -298,8 +298,9 @@ pub struct MetaConfig {
     pub event_log_channel_max_size: u32,
 
     #[serde(default)]
-    #[config_doc(omitted)]
+    #[config_doc(nested)]
     pub developer: MetaDeveloperConfig,
+
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,

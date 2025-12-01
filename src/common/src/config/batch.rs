@@ -25,7 +25,7 @@ pub struct BatchConfig {
     pub worker_threads_num: Option<usize>,
 
     #[serde(default)]
-    #[config_doc(omitted)]
+    #[config_doc(nested)]
     pub developer: BatchDeveloperConfig,
 
     /// This is the max number of queries per sql session.
