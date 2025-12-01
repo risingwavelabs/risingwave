@@ -1,0 +1,33 @@
+# https://github.com/risingwavelabs/risingwave/issues/23360
+# Panic when creating changelog MV over global aggregation
+
+statement ok
+create table t (v int);
+
+statement ok
+insert into t values (1), (2), (3);
+
+statement ok
+flush;
+
+# Create a global aggregation MV (aggregation without GROUP BY)
+statement ok
+create materialized view mv_global_agg as select count(*) as cnt from t;
+
+query I
+select * from mv_global_agg;
+----
+3
+
+# This should panic (or fail) when creating changelog MV over global agg
+statement ok
+create materialized view mv_changelog as with sub as changelog from mv_global_agg select * from sub;
+
+statement ok
+drop materialized view mv_changelog;
+
+statement ok
+drop materialized view mv_global_agg;
+
+statement ok
+drop table t;
