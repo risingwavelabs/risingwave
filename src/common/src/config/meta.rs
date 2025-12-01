@@ -88,6 +88,7 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
 }
 
 /// The section `[meta]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaConfig {
     /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
@@ -368,6 +369,7 @@ pub struct MetaConfig {
 }
 
 /// Note: only applies to meta store backends other than `SQLite`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
     /// Maximum number of connections for the meta store connection pool.
@@ -391,6 +393,7 @@ pub struct MetaStoreConfig {
 ///
 /// It is put at [`MetaConfig::developer`].
 #[serde_prefix_all("meta_", mode = "alias")]
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaDeveloperConfig {
     /// The number of traces to be cached in-memory by the tracing collector
@@ -468,6 +471,7 @@ pub struct MetaDeveloperConfig {
     pub frontend_client_config: RpcClientConfig,
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CompactionConfig {
     #[serde(default = "default::compaction_config::max_bytes_for_level_base")]

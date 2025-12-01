@@ -23,6 +23,7 @@ pub use async_stack_trace::*;
 pub use join_encoding_type::*;
 
 /// The section `[streaming]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingConfig {
     /// The maximum number of barriers in-flight in the compute nodes.
@@ -59,6 +60,7 @@ pub struct StreamingConfig {
 ///
 /// It is put at [`StreamingConfig::developer`].
 #[serde_prefix_all("stream_", mode = "alias")]
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingDeveloperConfig {
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
