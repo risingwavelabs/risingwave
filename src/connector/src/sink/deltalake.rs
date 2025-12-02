@@ -37,7 +37,6 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
@@ -49,8 +48,9 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
-    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
+    SinkWriterParam,
 };
 
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -327,7 +327,6 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
 }
 
 impl Sink for DeltaLakeSink {
-    type Coordinator = DeltaLakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
@@ -415,12 +414,12 @@ impl Sink for DeltaLakeSink {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
-        Ok(DeltaLakeSinkCommitter {
+    ) -> Result<SinkCommitCoordinator> {
+        let coordinator = DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
-        })
+        };
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -531,10 +530,10 @@ pub struct DeltaLakeSinkCommitter {
 }
 
 #[async_trait::async_trait]
-impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
         tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(None)
+        Ok(())
     }
 
     async fn commit(
@@ -638,7 +637,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::{DeltaLakeConfig, DeltaLakeSinkCommitter, DeltaLakeSinkWriter};
-    use crate::sink::SinkCommitCoordinator;
+    use crate::sink::SinglePhaseCommitCoordinator;
     use crate::sink::writer::SinkWriter;
 
     #[tokio::test]

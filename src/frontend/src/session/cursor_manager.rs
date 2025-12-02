@@ -908,7 +908,7 @@ impl SubscriptionCursor {
             } else {
                 let (right_data, right_types): (Vec<_>, Vec<_>) = values.into_iter().unzip();
                 let right_data = ScalarImpl::Struct(StructValue::new(right_data));
-                let right_type = DataType::Struct(StructType::unnamed(right_types));
+                let right_type = DataType::Struct(StructType::row_expr_type(right_types));
                 let left = FunctionCall::new_unchecked(
                     ExprType::Row,
                     pk_rows.into_iter().map(|pk| pk.into()).collect(),

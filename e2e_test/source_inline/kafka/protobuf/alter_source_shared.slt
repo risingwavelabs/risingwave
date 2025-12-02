@@ -91,10 +91,9 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 system ok
 python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_shared_test" 5 user_with_more_fields
 
-sleep 5s
 
 
-query ????
+query ???? retry 6 backoff 1s
 SELECT COUNT(*) FROM mv_user;
 ----
 30

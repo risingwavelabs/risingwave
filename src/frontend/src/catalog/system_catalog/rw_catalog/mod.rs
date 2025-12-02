@@ -49,6 +49,7 @@ mod rw_schemas;
 mod rw_secrets;
 pub(crate) mod rw_sinks;
 mod rw_sources;
+mod rw_streaming_job_config;
 mod rw_streaming_parallelism;
 mod rw_subscriptions;
 mod rw_system_tables;

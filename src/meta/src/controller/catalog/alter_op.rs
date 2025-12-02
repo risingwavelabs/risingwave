@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::config::mutate::TomlTableMutateExt as _;
+use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
-use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 
 use super::*;
+use crate::error::bail_invalid_parameter;
 
 impl CatalogController {
     async fn alter_database_name(
@@ -921,6 +926,76 @@ impl CatalogController {
         Ok((version, database))
     }
 
+    pub async fn alter_streaming_job_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let config_override: Option<String> = StreamingJob::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::ConfigOverride)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+        let config_override = config_override.unwrap_or_default();
+
+        let mut table: toml::Table =
+            toml::from_str(&config_override).context("invalid streaming job config")?;
+
+        // The frontend guarantees that there's no duplicated keys in `to_add` and `to_remove`.
+        for (key, value) in entries_to_add {
+            let value: toml::Value = value
+                .parse()
+                .with_context(|| format!("invalid config value for path {key}"))?;
+            table
+                .upsert(&key, value)
+                .with_context(|| format!("failed to set config path {key}"))?;
+        }
+        for key in keys_to_remove {
+            table
+                .delete(&key)
+                .with_context(|| format!("failed to reset config path {key}"))?;
+        }
+
+        let updated_config_override = table.to_string();
+
+        // Validate the config override by trying to merge it to the default config.
+        {
+            let merged = merge_streaming_config_section(
+                &StreamingConfig::default(),
+                &updated_config_override,
+            )
+            .context("invalid streaming job config override")?;
+
+            // Reject unrecognized entries.
+            // Note: If these unrecognized entries are pre-existing, we also reject them here.
+            // Users are able to fix them by issuing a `RESET` first.
+            if let Some(merged) = merged {
+                let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+                if !unrecognized_keys.is_empty() {
+                    bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
+                }
+            }
+        }
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            config_override: Set(Some(updated_config_override)),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        txn.commit().await?;
+
+        Ok(IGNORED_NOTIFICATION_VERSION)
+    }
+
     pub async fn ensure_refresh_job(&self, table_id: TableId) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let active = refresh_job::ActiveModel {
@@ -931,11 +1006,7 @@ impl CatalogController {
             last_success_time: Set(None),
         };
         match RefreshJob::insert(active)
-            .on_conflict(
-                OnConflict::column(refresh_job::Column::TableId)
-                    .do_nothing()
-                    .to_owned(),
-            )
+            .on_conflict_do_nothing()
             .exec(&inner.db)
             .await
         {

@@ -194,8 +194,9 @@ pub async fn do_handle_explain(
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context, stmt)
-                            .map(|x| (PhysicalPlanRef::Batch(x.plan), None))
+                        let plan_result =
+                            gen_batch_plan_by_statement(&session, context, stmt)?.unwrap_rw()?;
+                        Ok((PhysicalPlanRef::Batch(plan_result.plan), None))
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
@@ -232,7 +233,6 @@ pub async fn do_handle_explain(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
                                 session.config().batch_parallelism().0,
-                                session.config().timezone(),
                                 plan.clone(),
                             )?);
                             batch_plan_fragmenter_fmt = if explain_format == ExplainFormat::Dot {
