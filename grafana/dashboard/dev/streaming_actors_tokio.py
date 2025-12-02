@@ -169,6 +169,18 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_percentage(
+                    "Tokio: Actor Scheduling Delay Rate Per Actor",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_actor_scheduling_delay_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
+                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
             ],
         )
     ]
