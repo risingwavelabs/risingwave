@@ -289,6 +289,12 @@ impl ControlStreamManager {
                 }
                 Err(e) => {
                     unconnected_workers.insert(worker_id);
+                    println!(
+                        "xxk control_stream connect fail worker {} host {:?} err {:?}",
+                        worker_id,
+                        node.host.as_ref().map(|h| &h.host),
+                        e
+                    );
                     warn!(
                         e = %e.as_report(),
                         %worker_id,
