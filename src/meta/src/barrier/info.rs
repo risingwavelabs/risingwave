@@ -176,6 +176,7 @@ impl SharedActorInfos {
 
     pub(super) fn remove_database(&self, database_id: DatabaseId) {
         if let Some(database) = self.inner.write().info.remove(&database_id) {
+            println!("xxk shared_infos remove_database {}", database_id);
             let mapping = database
                 .into_values()
                 .map(|fragment| rebuild_fragment_mapping(&fragment))
@@ -198,6 +199,10 @@ impl SharedActorInfos {
             .extract_if(|database_id, _| !database_ids.contains(database_id))
             .flat_map(|(_, fragments)| fragments.into_values())
         {
+            println!(
+                "xxk shared_infos retain_databases dropping db of fragment {}",
+                fragment.fragment_id
+            );
             mapping.push(rebuild_fragment_mapping(&fragment));
         }
         if !mapping.is_empty() {
@@ -323,6 +328,27 @@ impl SharedActorInfoWriter<'_> {
     }
 
     pub(super) fn finish(self) {
+        if self.added_fragment_mapping.is_some()
+            || self.updated_fragment_mapping.is_some()
+            || self.deleted_fragment_mapping.is_some()
+        {
+            println!(
+                "xxk shared_infos finish db {} added {} updated {} deleted {}",
+                self.database_id,
+                self.added_fragment_mapping
+                    .as_ref()
+                    .map(|v| v.len())
+                    .unwrap_or(0),
+                self.updated_fragment_mapping
+                    .as_ref()
+                    .map(|v| v.len())
+                    .unwrap_or(0),
+                self.deleted_fragment_mapping
+                    .as_ref()
+                    .map(|v| v.len())
+                    .unwrap_or(0)
+            );
+        }
         if let Some(mapping) = self.added_fragment_mapping {
             self.notification_manager
                 .notify_fragment_mapping(Operation::Add, mapping);
