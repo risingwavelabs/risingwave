@@ -456,7 +456,11 @@ pub async fn compute_node_serve(
         .layer(TracingExtractLayer::new())
         // XXX: unlimit the max message size to allow arbitrary large SQL input.
         .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
-        .add_service(ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX))
+        .add_service(
+            ExchangeServiceServer::new(exchange_srv)
+                .max_decoding_message_size(usize::MAX)
+                .send_compressed(tonic::codec::CompressionEncoding::Gzip),
+        )
         .add_service({
             let await_tree_reg = stream_srv.mgr.await_tree_reg().cloned();
             let srv = StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);

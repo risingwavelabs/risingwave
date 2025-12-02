@@ -84,8 +84,9 @@ impl ComputeClient {
     }
 
     pub fn with_channel(addr: HostAddr, channel: Channel) -> Self {
-        let exchange_client =
-            ExchangeServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        let exchange_client = ExchangeServiceClient::new(channel.clone())
+            .max_decoding_message_size(usize::MAX)
+            .accept_compressed(tonic::codec::CompressionEncoding::Gzip);
         let task_client =
             TaskServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let monitor_client =

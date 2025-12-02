@@ -8,6 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
+__tonic = { package = "tonic", version = "0.12", features = ["gzip"] } # only to enable feature, use `tonic` instead
 anyhow = "1"
 async-trait = "0.1"
 easy-ext = "1"

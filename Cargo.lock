@@ -12700,6 +12700,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
+ "tonic",
  "tower 0.5.2",
  "tracing",
  "workspace-hack",
