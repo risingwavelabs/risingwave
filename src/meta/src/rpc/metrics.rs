@@ -248,7 +248,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
             "barrier latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
+            exponential_buckets(0.1, 1.5, 24).unwrap() // max 1683s
         );
         let barrier_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)

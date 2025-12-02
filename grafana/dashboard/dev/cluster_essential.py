@@ -232,11 +232,11 @@ def _(outer_panels: Panels):
                 ["last"],
             ),
             panels.timeseries_count(
-                "Failed recovery attempts",
-                "Total number of failed reocovery attempts",
+                "Recovery Failure Rate",
+                "The rate of failed recovery attempts",
                 [
                     panels.target(
-                        f"sum({metric('recovery_failure_cnt')}) by ({NODE_LABEL}, recovery_type)",
+                        f"sum(rate({metric('recovery_failure_cnt')}[$__rate_interval])) by ({NODE_LABEL}, recovery_type)",
                         "{{%s}} ({{recovery_type}})" % NODE_LABEL,
                     )
                 ],
