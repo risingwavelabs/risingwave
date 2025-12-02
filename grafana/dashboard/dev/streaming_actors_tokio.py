@@ -10,16 +10,6 @@ def _(outer_panels: Panels):
             "Streaming Actors (Tokio)",
             [
                 panels.timeseries_percentage(
-                    "Actor Execution Rate",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_execution_duration')}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
                     "Tokio: Actor Fast Poll Rate",
                     "",
                     [

@@ -54,7 +54,6 @@ pub struct StreamingMetrics {
     pub mem_stream_node_output_blocking_duration_ns: CountMap,
 
     // Streaming actor metrics from tokio (disabled by default)
-    actor_execution_duration: RelabeledGuardedIntCounterVec,
     actor_scheduled_duration: RelabeledGuardedIntCounterVec,
     actor_scheduled_cnt: RelabeledGuardedIntCounterVec,
     actor_fast_poll_duration: RelabeledGuardedIntCounterVec,
@@ -374,15 +373,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-
-        let actor_execution_duration = register_guarded_int_counter_vec_with_registry!(
-            "stream_actor_execution_duration",
-            "Total execution duration (ns) of an actor",
-            &["actor_id", "fragment_id"],
-            registry
-        )
-        .unwrap()
-        .relabel_debug_1(level);
 
         let actor_fast_poll_duration = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_fast_poll_duration",
@@ -1279,7 +1269,6 @@ impl StreamingMetrics {
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
-            actor_execution_duration,
             join_lookup_miss_count,
             join_lookup_total_count,
             join_insert_cache_miss_count,
@@ -1383,9 +1372,6 @@ impl StreamingMetrics {
 
     pub fn new_actor_metrics(&self, actor_id: ActorId, fragment_id: FragmentId) -> ActorMetrics {
         let label_list: &[&str; 2] = &[&actor_id.to_string(), &fragment_id.to_string()];
-        let actor_execution_duration = self
-            .actor_execution_duration
-            .with_guarded_label_values(label_list);
         let actor_scheduled_duration = self
             .actor_scheduled_duration
             .with_guarded_label_values(label_list);
@@ -1413,7 +1399,6 @@ impl StreamingMetrics {
             .with_guarded_label_values(label_list);
         let actor_idle_cnt = self.actor_idle_cnt.with_guarded_label_values(label_list);
         ActorMetrics {
-            actor_execution_duration,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,
@@ -1750,7 +1735,6 @@ pub(crate) struct ActorInputMetrics {
 
 /// Tokio metrics for actors
 pub struct ActorMetrics {
-    pub actor_execution_duration: LabelGuardedIntCounter,
     pub actor_scheduled_duration: LabelGuardedIntCounter,
     pub actor_scheduled_cnt: LabelGuardedIntCounter,
     pub actor_fast_poll_duration: LabelGuardedIntCounter,

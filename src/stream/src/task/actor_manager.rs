@@ -542,9 +542,6 @@ impl StreamActorManager {
                 let metrics = streaming_metrics.new_actor_metrics(actor_id, fragment_id);
                 for task_metrics in monitor.intervals() {
                     metrics
-                        .actor_execution_duration
-                        .inc_by(task_metrics.total_poll_duration.as_nanos() as u64);
-                    metrics
                         .actor_fast_poll_duration
                         .inc_by(task_metrics.total_fast_poll_duration.as_nanos() as u64);
                     metrics
