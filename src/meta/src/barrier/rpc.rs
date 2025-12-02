@@ -916,6 +916,11 @@ impl ControlStreamManager {
             );
         }
 
+        println!(
+            "xxk inject_database_initial_barrier before recover_database db {} jobs {:?}",
+            database_id,
+            database_jobs.keys().collect::<Vec<_>>()
+        );
         self.env.shared_actor_infos().recover_database(
             database_id,
             database_jobs
