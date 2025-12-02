@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::session_config::OverWindowCachePolicy;
+use risingwave_common::config::streaming::OverWindowCachePolicy;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::window_function::WindowFuncCall;
 use risingwave_pb::stream_plan::PbOverWindowNode;
@@ -62,6 +62,15 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
+
+        // Previously, the `cache_policy` is persisted in the plan node.
+        // Now it's always `Unspecified` and we should refer to the job's config override.
+        #[allow(deprecated)]
+        let cache_policy = (node.get_cache_policy())
+            .map_or(params.config.developer.over_window_cache_policy, |v| {
+                OverWindowCachePolicy::from_protobuf(v)
+            });
+
         let exec = OverWindowExecutor::new(OverWindowExecutorArgs {
             actor_ctx: params.actor_context,
 
@@ -78,9 +87,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             metrics: params.executor_stats,
 
             chunk_size: params.config.developer.chunk_size,
-            cache_policy: OverWindowCachePolicy::from_protobuf(
-                node.get_cache_policy().unwrap_or_default(),
-            ),
+            cache_policy,
         });
         Ok((params.info, exec).into())
     }
