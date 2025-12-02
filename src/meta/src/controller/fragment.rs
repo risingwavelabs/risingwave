@@ -557,6 +557,8 @@ impl CatalogController {
             .await?
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
 
+        println!("xxk job info {:?}", job_info);
+
         let fragment_actors =
             self.collect_fragment_actor_pairs(fragments, job_info.timezone.clone())?;
 
