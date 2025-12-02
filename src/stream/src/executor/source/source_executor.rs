@@ -705,9 +705,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                     tracing::info!(
                                         actor_id = %self.actor_ctx.id,
                                         source_id = source_id.as_raw_id(),
-                                        "Resetting CDC source: clearing offset (set to None) and pausing source"
+                                        "Resetting CDC source: clearing offset (set to None)"
                                     );
-                                    
+
                                     // Step 1: Collect all current splits and clear their offsets
                                     let splits_with_cleared_offset: Vec<SplitImpl> = self.stream_source_core
                                         .latest_split_info
@@ -775,29 +775,35 @@ impl<S: StateStore> SourceExecutor<S> {
                                             new_split
                                         })
                                         .collect();
-                                    
+
                                     if !splits_with_cleared_offset.is_empty() {
                                         tracing::info!(
                                             actor_id = %self.actor_ctx.id,
                                             split_count = splits_with_cleared_offset.len(),
                                             "Updating state table with cleared offsets"
                                         );
-                                        
+
                                         // Step 2: Write splits back to state table with offset = None
                                         self.stream_source_core
                                             .split_state_store
                                             .set_states(splits_with_cleared_offset.clone())
                                             .await?;
-                                        
+
                                         // Step 3: Update in-memory split info with cleared offsets
                                         for split in splits_with_cleared_offset {
-                                            self.stream_source_core.latest_split_info.insert(split.id(), split.clone());
-                                            self.stream_source_core.updated_splits_in_epoch.insert(split.id(), split);
+                                            self.stream_source_core
+                                                .latest_split_info
+                                                .insert(split.id(), split.clone());
+                                            self.stream_source_core
+                                                .updated_splits_in_epoch
+                                                .insert(split.id(), split);
                                         }
-                                        
+
                                         tracing::info!(
                                             actor_id = %self.actor_ctx.id,
-                                            "CDC offset cleared successfully (set to None)"
+                                            source_id = source_id.as_raw_id(),
+                                            "✅ RESET SOURCE completed: offset cleared (set to None). \
+                                             Trigger recovery/restart to fetch latest offset from upstream."
                                         );
                                     } else {
                                         tracing::warn!(
@@ -805,25 +811,14 @@ impl<S: StateStore> SourceExecutor<S> {
                                             "No splits found to reset - source may not be initialized yet"
                                         );
                                     }
-                                    
-                                    // Step 4: Pause the source
-                                    // This prevents the source from consuming new data until manually resumed
-                                    tracing::info!(
-                                        actor_id = %self.actor_ctx.id,
-                                        "Pausing source after reset"
-                                    );
-                                    command_paused = true;
-                                    stream.pause_stream();
-                                    
-                                    tracing::info!(
-                                        actor_id = %self.actor_ctx.id,
-                                        source_id = source_id.as_raw_id(),
-                                        "✅ RESET SOURCE completed: offset set to None, source paused. Ready for resnapshot."
-                                    );
-                                    
-                                    // Note: When offset is None, Debezium will automatically enter recovery mode
-                                    // and fetch the latest offset from upstream (MySQL binlog / MongoDB oplog).
-                                    // After resume, it will start consuming from the latest position.
+
+                                    // Note: RESET SOURCE only clears the offset, does NOT pause the source.
+                                    // When offset is None, after recovery/restart, Debezium will automatically
+                                    // enter recovery mode and fetch the latest offset from upstream
+                                    // (MySQL binlog / MongoDB oplog).
+                                    //
+                                    // If user needs to pause for resnapshot, use: ALTER SOURCE s SET rate_limit = 0;
+                                    // To resume after resnapshot: ALTER SOURCE s SET rate_limit TO default;
                                 } else {
                                     tracing::debug!(
                                         actor_id = %self.actor_ctx.id,
