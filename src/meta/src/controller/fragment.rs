@@ -871,6 +871,12 @@ impl CatalogController {
         timezone: Option<String>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorInfo>>> {
         let guard = self.env.shared_actor_infos().read_guard();
+
+        println!(
+            "xxk load fragments {:#?}",
+            guard.iter_over_fragments().collect_vec()
+        );
+
         let stream_context = StreamContext { timezone };
         let pb_expr_context = stream_context.to_expr_context();
         let expr_context: ExprContext = (&pb_expr_context).into();

@@ -159,6 +159,17 @@ where
     )
     .await?;
 
+    for (db_id, job_map) in &fragments {
+        for (job_id, fragment_map) in job_map {
+            println!(
+                "xxk loaded fragments for database {}, job {}: {:?}",
+                db_id,
+                job_id,
+                fragment_map.keys().collect_vec()
+            );
+        }
+    }
+
     Ok(fragments)
 }
 
