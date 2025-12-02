@@ -210,6 +210,7 @@ message Barrier {
   BarrierMutation mutation = 3;
 
   // Used for tracing.
+  // TODO: this is same for all barriers with the same epoch, can be deduplicated.
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
