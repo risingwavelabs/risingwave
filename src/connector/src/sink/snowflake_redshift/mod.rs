@@ -35,7 +35,6 @@ use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam};
 
-pub mod file_manager_util;
 pub mod redshift;
 pub mod snowflake;
 

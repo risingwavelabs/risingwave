@@ -42,9 +42,6 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Common, S3Sink};
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
-use crate::sink::snowflake_redshift::file_manager_util::{
-    delete_row_by_sink_id_and_end_epoch, get_file_paths_by_sink_id, insert_file_paths_with_sink_id,
-};
 use crate::sink::snowflake_redshift::{
     __OP, __ROW_ID, ConnectorType, SnowflakeRedshiftSinkJdbcWriter, SnowflakeRedshiftSinkS3Writer,
     build_opendal_writer_path,
