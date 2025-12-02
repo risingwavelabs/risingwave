@@ -315,6 +315,14 @@ impl ControlStreamManager {
         }
 
         info!(elapsed=?reset_start_time.elapsed(), ?unconnected_workers, "control stream reset");
+        println!(
+            "xxk control_stream recover connected {:?} unconnected {:?}",
+            workers
+                .iter()
+                .filter_map(|(id, (_, state))| matches!(state, WorkerNodeState::Connected { .. }).then_some(*id))
+                .collect::<Vec<_>>(),
+            unconnected_workers
+        );
 
         Self { workers, env }
     }
@@ -1039,6 +1047,13 @@ impl ControlStreamManager {
                 && let WorkerNodeState::Connected { .. } = worker_state
             {
             } else {
+                println!(
+                    "xxk inject_barrier unconnected worker {} connected {:?}",
+                    worker_id,
+                    self.connected_workers()
+                        .map(|(id, _)| id)
+                        .collect::<Vec<_>>()
+                );
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
