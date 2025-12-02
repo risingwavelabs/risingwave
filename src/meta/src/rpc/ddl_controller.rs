@@ -615,7 +615,6 @@ impl DdlController {
         // 1. Clear state table offset (set to None)
         // 2. Wait for Debezium to send latest offset
         // 3. Persist the new offset
-        // 4. Pause the source
         //
         // TODO: The actual state table clearing logic needs to be implemented in stream executors
 

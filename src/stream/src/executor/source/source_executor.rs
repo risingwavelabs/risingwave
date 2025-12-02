@@ -802,7 +802,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                         tracing::info!(
                                             actor_id = %self.actor_ctx.id,
                                             source_id = source_id.as_raw_id(),
-                                            "✅ RESET SOURCE completed: offset cleared (set to None). \
+                                            "RESET SOURCE completed: offset cleared (set to None). \
                                              Trigger recovery/restart to fetch latest offset from upstream."
                                         );
                                     } else {
