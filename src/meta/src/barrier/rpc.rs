@@ -1041,6 +1041,14 @@ impl ControlStreamManager {
         let partial_graph_id = to_partial_graph_id(creating_job_id);
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
+        println!(
+            "xxk inject_barrier node_actors {:?} workers {:?}",
+            node_actors
+                .iter()
+                .map(|(k, v)| (*k, v.clone()))
+                .collect::<Vec<_>>(),
+            self.workers.keys().collect::<Vec<_>>()
+        );
 
         for worker_id in node_actors.keys() {
             if let Some((_, worker_state)) = self.workers.get(worker_id)

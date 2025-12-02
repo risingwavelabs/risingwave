@@ -380,6 +380,13 @@ impl GlobalBarrierWorkerContextImpl {
                     let active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
                             .await?;
+                    println!(
+                        "xxk active_streaming_nodes {:?}",
+                        active_streaming_nodes
+                            .current()
+                            .keys()
+                            .collect::<Vec<_>>()
+                    );
 
                     let background_streaming_jobs = background_jobs.keys().cloned().collect_vec();
 
