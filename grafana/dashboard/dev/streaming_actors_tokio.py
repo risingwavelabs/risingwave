@@ -10,11 +10,13 @@ def _(outer_panels: Panels):
             "Streaming Actors (Tokio)",
             [
                 panels.timeseries_percentage(
-                    "Tokio: Actor Fast Poll Rate",
+                    "Tokio: Actor Fast Poll Rate Per Actor",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / 1000000000",
+                            f"sum(rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -30,7 +32,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Fast Poll Avg Rate",
+                    "Tokio: Actor Fast Poll Avg Rate Per Poll",
                     "",
                     [
                         panels.target(
@@ -40,11 +42,13 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Slow Poll Rate",
+                    "Tokio: Actor Slow Poll Rate Per Actor",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / 1000000000",
+                            f"sum(rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -60,7 +64,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Slow Poll Avg Rate",
+                    "Tokio: Actor Slow Poll Avg Rate Per Poll",
                     "",
                     [
                         panels.target(
@@ -70,11 +74,13 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Poll Rate",
+                    "Tokio: Actor Poll Rate Per Actor",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / 1000000000",
+                            f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -90,7 +96,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Poll Avg Rate",
+                    "Tokio: Actor Poll Avg Rate Per Poll",
                     "",
                     [
                         panels.target(
@@ -100,11 +106,13 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Idle Rate",
+                    "Tokio: Actor Idle Rate Per Actor",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / 1000000000",
+                            f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -120,7 +128,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Idle Avg Rate",
+                    "Tokio: Actor Idle Avg Rate Per Idle",
                     "",
                     [
                         panels.target(
@@ -130,11 +138,13 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Scheduled Rate",
+                    "Tokio: Actor Scheduled Rate Per Actor",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / 1000000000",
+                            f"sum(rate({metric('stream_actor_scheduled_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -150,7 +160,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Scheduled Avg Rate",
+                    "Tokio: Actor Scheduled Avg Rate Per Scheduled",
                     "",
                     [
                         panels.target(
