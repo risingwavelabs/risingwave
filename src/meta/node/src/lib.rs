@@ -356,11 +356,6 @@ pub fn start(
             max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
-        let mut init_system_params = config.system.into_init_system_params();
-        if config.meta.pause_on_next_bootstrap_offline {
-            init_system_params.pause_on_next_bootstrap = Some(true);
-        }
-
         rpc_serve(
             add_info,
             backend,
@@ -559,7 +554,7 @@ pub fn start(
                 enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
                 pause_on_next_bootstrap: config.meta.pause_on_next_bootstrap_offline,
             },
-            init_system_params,
+            config.system.into_init_system_params(),
             Default::default(),
             shutdown,
         )
