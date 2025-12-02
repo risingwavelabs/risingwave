@@ -205,6 +205,14 @@ pub async fn compactor_serve(
         CompactorMode::DedicatedIceberg | CompactorMode::SharedIceberg
     );
 
+    let compaction_executor = Arc::new(CompactionExecutor::new(
+        opts.compaction_worker_threads_number,
+    ));
+
+    let max_task_parallelism: u32 = (compaction_executor.worker_num() as f32
+        * config.storage.compactor_max_task_multiplier)
+        .ceil() as u32;
+
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
         opts.meta_address.clone(),
@@ -212,6 +220,7 @@ pub async fn compactor_serve(
         &advertise_addr,
         Property {
             is_iceberg_compactor,
+            parallelism: max_task_parallelism,
             ..Default::default()
         },
         Arc::new(config.meta.clone()),
@@ -258,10 +267,6 @@ pub async fn compactor_serve(
     let object_id_manager = Arc::new(ObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
-    ));
-
-    let compaction_executor = Arc::new(CompactionExecutor::new(
-        opts.compaction_worker_threads_number,
     ));
 
     let compactor_context = CompactorContext {
