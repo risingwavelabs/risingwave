@@ -137,6 +137,35 @@ impl Binder {
                     }
                 }
             }
+            BinaryOperator::Custom(name) if name == "&&" => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List(left_elem)), Some(DataType::List(right_elem))) => {
+                        // Validate that both arrays have the same element type
+                        if left_elem != right_elem {
+                            return Err(ErrorCode::BindError(format!(
+                                "operator does not exist: {}[] && {}[]\nHint: No operator matches the given name and argument types. You might need to add explicit type casts.",
+                                left_elem,
+                                right_elem,
+                            ))
+                            .into());
+                        }
+                        ExprType::ArrayOverlap
+                    }
+                    (Some(DataType::List { .. }), None) | (None, Some(DataType::List { .. })) => {
+                        ExprType::ArrayOverlap
+                    }
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} && {}",
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
             BinaryOperator::Custom(name) if name == "||" => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
