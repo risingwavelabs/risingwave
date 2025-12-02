@@ -127,6 +127,8 @@ where
 
     let jobs: Vec<JobId> = query.into_tuple().all(txn).await?;
 
+    println!("xxk load jobs {:?}", jobs);
+
     if jobs.is_empty() {
         return Ok(HashMap::new());
     }

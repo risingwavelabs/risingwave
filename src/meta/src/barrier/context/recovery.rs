@@ -355,6 +355,7 @@ impl GlobalBarrierWorkerContextImpl {
         {
             {
                 {
+                    println!("xxk clean dirty jobs");
                     self.clean_dirty_streaming_jobs(None)
                         .await
                         .context("clean dirty streaming jobs")?;
