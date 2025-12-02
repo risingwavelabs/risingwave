@@ -700,7 +700,7 @@ impl InflightDatabaseInfo {
         new_job_id: Option<JobId>,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
     ) {
-        println!("xxk pre apply {:?} {:?}", new_job_id, fragment_changes);
+        println!("xxk pre apply {:?}", new_job_id);
         if let Some(job_id) = new_job_id {
             self.jobs
                 .try_insert(
