@@ -804,8 +804,6 @@ impl DiagnoseCommand {
 
                 let expires_at = if license.exp == u64::MAX {
                     "never".to_owned()
-                } else if license.exp > i64::MAX as u64 {
-                    format!("invalid ({})", license.exp)
                 } else {
                     let exp_i64 = license.exp as i64;
                     chrono::DateTime::<chrono::Utc>::from_timestamp(exp_i64, 0)
@@ -820,7 +818,7 @@ impl DiagnoseCommand {
 
                 let mut row = Row::new();
                 row.add_cell("tier".into());
-                row.add_cell(format!("{:?}", license.tier).into());
+                row.add_cell(license.tier.name().into());
                 table.add_row(row);
 
                 let mut row = Row::new();
