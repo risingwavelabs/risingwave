@@ -558,6 +558,13 @@ impl CatalogController {
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
 
         println!("xxk job info {:?}", job_info);
+        {
+            let guard = self.env.shared_actor_infos().read_guard();
+            println!(
+                "xxk shared actors fragments {:?}",
+                guard.iter_over_fragments().map(|(id, _)| *id).collect_vec()
+            );
+        }
 
         let fragment_actors =
             self.collect_fragment_actor_pairs(fragments, job_info.timezone.clone())?;
@@ -883,10 +890,21 @@ impl CatalogController {
 
         let mut actor_map = HashMap::with_capacity(fragment_ids.len());
         for fragment_id in fragment_ids {
-            let fragment_info = guard
-                .get_fragment(*fragment_id as _)
-                .ok_or_else(|| anyhow!("fragment {} not found in shared actor info", fragment_id))
-                .unwrap();
+            let fragment_info = guard.get_fragment(*fragment_id as _).unwrap_or_else(|| {
+                println!(
+                    "xxk collect_fragment_actor_map missing fragment {} existing {:?}",
+                    fragment_id,
+                    guard
+                        .iter_over_fragments()
+                        .map(|(id, _)| *id)
+                        .collect_vec()
+                );
+                // keep panic to surface bug quickly
+                guard
+                    .get_fragment(*fragment_id as _)
+                    .ok_or_else(|| anyhow!("fragment {} not found in shared actor info", fragment_id))
+                    .unwrap()
+            });
 
             let actors = fragment_info
                 .actors

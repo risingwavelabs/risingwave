@@ -211,6 +211,10 @@ impl SharedActorInfos {
         database_id: DatabaseId,
         fragments: impl Iterator<Item = (&InflightFragmentInfo, JobId)>,
     ) {
+        println!(
+            "xxk recover_database start db {}",
+            database_id
+        );
         let mut remaining_fragments: HashMap<_, _> = fragments
             .map(|info @ (fragment, _)| (fragment.fragment_id, info))
             .collect();
@@ -243,6 +247,11 @@ impl SharedActorInfos {
                 .push(rebuild_fragment_mapping(&info));
             database.insert(fragment_id, info);
         }
+        println!(
+            "xxk recover_database done db {} fragments {:?}",
+            database_id,
+            database.keys().collect::<Vec<_>>()
+        );
         writer.finish();
     }
 

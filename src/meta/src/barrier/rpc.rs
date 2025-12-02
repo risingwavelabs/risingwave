@@ -927,6 +927,11 @@ impl ControlStreamManager {
                         }),
                 ),
         );
+        println!(
+            "xxk inject_database_initial_barrier recovered db {} jobs {:?}",
+            database_id,
+            database_jobs.keys().collect::<Vec<_>>()
+        );
 
         let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
