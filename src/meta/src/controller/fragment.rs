@@ -876,7 +876,7 @@ impl CatalogController {
         let mut actor_map = HashMap::with_capacity(fragment_ids.len());
         for fragment_id in fragment_ids {
             let fragment_info = guard.get_fragment(*fragment_id as _).ok_or_else(|| {
-                anyhow!("fragment {} not found in shared actor info", fragment_id)
+                panic!("fragment {} not found in shared actor info", fragment_id)
             })?;
 
             let actors = fragment_info
