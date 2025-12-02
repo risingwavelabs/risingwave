@@ -23,8 +23,6 @@ use anyhow::{Context, anyhow};
 use await_tree::InstrumentAwait;
 use either::Either;
 use itertools::Itertools;
-
-use crate::barrier::Command;
 use risingwave_common::catalog::{
     AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag,
 };
@@ -73,7 +71,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::Instrument;
 
-use crate::barrier::BarrierManagerRef;
+use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
@@ -394,9 +392,7 @@ impl DdlController {
                 DdlCommand::DropSource(source_id, drop_mode) => {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
-                DdlCommand::ResetSource(source_id) => {
-                    ctrl.reset_source(source_id).await
-                }
+                DdlCommand::ResetSource(source_id) => ctrl.reset_source(source_id).await,
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id, drop_mode) => {
                     ctrl.drop_function(function_id, drop_mode).await
@@ -597,14 +593,14 @@ impl DdlController {
         tracing::info!(source_id = %source_id, "resetting CDC source offset to latest");
 
         // Note: CDC source validation is already done in frontend handler
-        
+
         // Get database_id for the source
         let database_id = self
             .metadata_manager
             .catalog_controller
             .get_object_database_id(source_id)
             .await?;
-        
+
         // Send Command::ResetSource via barrier
         // This will trigger source executors to:
         // 1. Clear state table offset (set to None)
@@ -613,14 +609,18 @@ impl DdlController {
         // 4. Pause the source
         //
         // TODO: The actual state table clearing logic needs to be implemented in stream executors
-        
+
         self.stream_manager
             .barrier_scheduler
             .run_command(database_id, Command::ResetSource { source_id })
             .await?;
-        
+
         // RESET SOURCE doesn't modify catalog, so return the current catalog version
-        let version = self.metadata_manager.catalog_controller.current_notification_version().await;
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .current_notification_version()
+            .await;
         Ok(version)
     }
 

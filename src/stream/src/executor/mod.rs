@@ -926,7 +926,7 @@ impl Mutation {
             }),
             Mutation::ResetSource { source_id } => {
                 PbMutation::ResetSource(risingwave_pb::stream_plan::ResetSourceMutation {
-                    source_id: *source_id,
+                    source_id: source_id.as_raw_id(),
                 })
             }
         }

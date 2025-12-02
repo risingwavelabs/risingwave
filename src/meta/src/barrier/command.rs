@@ -406,7 +406,7 @@ pub enum Command {
         table_id: TableId,
         associated_source_id: SourceId,
     },
-    
+
     /// `ResetSource` command generates a barrier to reset CDC source offset to latest.
     /// Used when upstream binlog/oplog has expired.
     ResetSource {
@@ -1350,13 +1350,11 @@ impl Command {
             } => Some(Mutation::LoadFinish(LoadFinishMutation {
                 associated_source_id: *associated_source_id,
             })),
-            Command::ResetSource { source_id } => {
-                Some(Mutation::ResetSource(
-                    risingwave_pb::stream_plan::ResetSourceMutation {
-                        source_id: source_id.as_raw_id(),
-                    },
-                ))
-            }
+            Command::ResetSource { source_id } => Some(Mutation::ResetSource(
+                risingwave_pb::stream_plan::ResetSourceMutation {
+                    source_id: source_id.as_raw_id(),
+                },
+            )),
         }
     }
 
