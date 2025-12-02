@@ -67,7 +67,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
@@ -100,6 +100,29 @@ pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
 pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IcebergWriteMode {
+    #[default]
+    MergeOnRead,
+    CopyOnWrite,
+}
+
+impl IcebergWriteMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            IcebergWriteMode::MergeOnRead => ICEBERG_WRITE_MODE_MERGE_ON_READ,
+            IcebergWriteMode::CopyOnWrite => ICEBERG_WRITE_MODE_COPY_ON_WRITE,
+        }
+    }
+}
+
+impl std::fmt::Display for IcebergWriteMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 // Configuration constants
 pub const ENABLE_COMPACTION: &str = "enable_compaction";
 pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
@@ -120,32 +143,12 @@ pub const COMPACTION_TRIGGER_SNAPSHOT_COUNT: &str = "compaction.trigger_snapshot
 
 pub const COMPACTION_TARGET_FILE_SIZE_MB: &str = "compaction.target_file_size_mb";
 
-fn deserialize_and_normalize_string<'de, D>(
-    deserializer: D,
-) -> std::result::Result<String, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    Ok(s.to_lowercase().replace('_', "-"))
-}
-
-fn deserialize_and_normalize_optional_string<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let opt = Option::<String>::deserialize(deserializer)?;
-    Ok(opt.map(|s| s.to_lowercase().replace('_', "-")))
-}
-
 fn default_commit_retry_num() -> u32 {
     8
 }
 
-fn default_iceberg_write_mode() -> String {
-    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned()
+fn default_iceberg_write_mode() -> IcebergWriteMode {
+    IcebergWriteMode::MergeOnRead
 }
 
 fn default_true() -> bool {
@@ -157,7 +160,7 @@ fn default_some_true() -> Option<bool> {
 }
 
 /// Compaction type for Iceberg sink
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum CompactionType {
     /// Full compaction - rewrites all data files
@@ -182,25 +185,6 @@ impl CompactionType {
 impl std::fmt::Display for CompactionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
-    }
-}
-
-impl FromStr for CompactionType {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        // Normalize the input string first: lowercase and replace underscores with hyphens
-        let normalized = s.to_lowercase().replace('_', "-");
-
-        match normalized.as_str() {
-            "full" => Ok(CompactionType::Full),
-            "small-files" => Ok(CompactionType::SmallFiles),
-            "files-with-delete" => Ok(CompactionType::FilesWithDelete),
-            _ => Err(format!(
-                "Unknown compaction type '{}', must be one of: 'full', 'small-files', 'files-with-delete'",
-                s // 使用原始输入字符串来显示错误，而不是规范化后的
-            )),
-        }
     }
 }
 
@@ -277,12 +261,8 @@ pub struct IcebergConfig {
     pub enable_snapshot_expiration: bool,
 
     /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
-    #[serde(
-        rename = "write_mode",
-        default = "default_iceberg_write_mode",
-        deserialize_with = "deserialize_and_normalize_string"
-    )]
-    pub write_mode: String,
+    #[serde(rename = "write_mode", default = "default_iceberg_write_mode")]
+    pub write_mode: IcebergWriteMode,
 
     /// The maximum age (in milliseconds) for snapshots before they expire
     /// For example, if set to 3600000, snapshots older than 1 hour will be expired
@@ -342,13 +322,9 @@ pub struct IcebergConfig {
 
     /// Compaction type: `full`, `small-files`, or `files-with-delete`
     /// If not set, will default to `full`
-    #[serde(
-        rename = "compaction.type",
-        default,
-        deserialize_with = "deserialize_and_normalize_optional_string"
-    )]
+    #[serde(rename = "compaction.type", default)]
     #[with_option(allow_alter_on_fly)]
-    pub compaction_type: Option<String>,
+    pub compaction_type: Option<CompactionType>,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -416,12 +392,6 @@ impl IcebergConfig {
             )));
         }
 
-        // Validate compaction_type early
-        if let Some(ref compaction_type_str) = config.compaction_type {
-            CompactionType::from_str(compaction_type_str)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        }
-
         Ok(config)
     }
 
@@ -482,10 +452,7 @@ impl IcebergConfig {
     /// Get the compaction type as an enum
     /// This method parses the string and returns the enum value
     pub fn compaction_type(&self) -> CompactionType {
-        self.compaction_type
-            .as_deref()
-            .and_then(|s| CompactionType::from_str(s).ok())
-            .unwrap_or_default()
+        self.compaction_type.unwrap_or_default()
     }
 }
 
@@ -737,7 +704,7 @@ impl Sink for IcebergSink {
 
         // Check COW mode constraints
         // COW mode only supports 'full' compaction type
-        if self.config.write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE
+        if self.config.write_mode == IcebergWriteMode::CopyOnWrite
             && compaction_type != CompactionType::Full
         {
             bail!(
@@ -754,7 +721,7 @@ impl Sink for IcebergSink {
                     .map_err(|e| anyhow::anyhow!(e))?;
 
                 // 2. check write mode
-                if self.config.write_mode != ICEBERG_WRITE_MODE_MERGE_ON_READ {
+                if self.config.write_mode != IcebergWriteMode::MergeOnRead {
                     bail!(
                         "'small-files' compaction type only supports 'merge-on-read' write mode, got: '{}'",
                         self.config.write_mode
@@ -775,7 +742,7 @@ impl Sink for IcebergSink {
                     .map_err(|e| anyhow::anyhow!(e))?;
 
                 // 2. check write mode
-                if self.config.write_mode != ICEBERG_WRITE_MODE_MERGE_ON_READ {
+                if self.config.write_mode != IcebergWriteMode::MergeOnRead {
                     bail!(
                         "'files-with-delete' compaction type only supports 'merge-on-read' write mode, got: '{}'",
                         self.config.write_mode
@@ -2095,7 +2062,7 @@ impl IcebergSinkCommitter {
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
                 .with_to_branch(commit_branch(
                     self.config.r#type.as_str(),
-                    self.config.write_mode.as_str(),
+                    self.config.write_mode,
                 ));
             append_action
                 .add_data_files(data_files.clone())
@@ -2375,7 +2342,7 @@ pub fn parse_partition_by_exprs(
     }
     let caps = re.captures_iter(&expr);
 
-    let mut partition_columns = vec![];
+    let mut partition_columns: Vec<(String, Transform)> = Vec::new();
 
     for mat in caps {
         let (column, transform) = if mat.name("n").is_none() && mat.name("field").is_none() {
@@ -2400,7 +2367,7 @@ pub fn parse_partition_by_exprs(
     Ok(partition_columns)
 }
 
-pub fn commit_branch(sink_type: &str, write_mode: &str) -> String {
+pub fn commit_branch(sink_type: &str, write_mode: IcebergWriteMode) -> String {
     if should_enable_iceberg_cow(sink_type, write_mode) {
         ICEBERG_COW_BRANCH.to_owned()
     } else {
@@ -2408,9 +2375,13 @@ pub fn commit_branch(sink_type: &str, write_mode: &str) -> String {
     }
 }
 
-pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: &str) -> bool {
-    sink_type == SINK_TYPE_UPSERT && write_mode == ICEBERG_WRITE_MODE_COPY_ON_WRITE
+pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: IcebergWriteMode) -> bool {
+    sink_type == SINK_TYPE_UPSERT && write_mode == IcebergWriteMode::CopyOnWrite
 }
+
+impl crate::with_options::WithOptions for IcebergWriteMode {}
+
+impl crate::with_options::WithOptions for CompactionType {}
 
 #[cfg(test)]
 mod test {
@@ -2422,8 +2393,8 @@ mod test {
     use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
     use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
     use crate::sink::iceberg::{
-        COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION,
-        ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig,
+        COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, CompactionType, ENABLE_COMPACTION,
+        ENABLE_SNAPSHOT_EXPIRATION, IcebergConfig, IcebergWriteMode,
         SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
         SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
     };
@@ -2682,7 +2653,7 @@ mod test {
             enable_compaction: true,
             compaction_interval_sec: Some(DEFAULT_ICEBERG_COMPACTION_INTERVAL / 2),
             enable_snapshot_expiration: true,
-            write_mode: ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
+            write_mode: IcebergWriteMode::MergeOnRead,
             snapshot_expiration_max_age_millis: None,
             snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
@@ -2881,6 +2852,6 @@ mod test {
         assert_eq!(iceberg_config.delete_files_count_threshold, Some(50));
         assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
         assert_eq!(iceberg_config.target_file_size_mb, Some(256));
-        assert_eq!(iceberg_config.compaction_type, Some("full".to_owned()));
+        assert_eq!(iceberg_config.compaction_type, Some(CompactionType::Full));
     }
 }
