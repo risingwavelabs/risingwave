@@ -352,6 +352,7 @@ impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn reload_runtime_info_impl(
         &self,
     ) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
+        println!("xxk reload runtime info impl");
         {
             {
                 {
@@ -580,6 +581,7 @@ impl GlobalBarrierWorkerContextImpl {
         &self,
         database_id: DatabaseId,
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
+        println!("xxk reload database info");
         self.clean_dirty_streaming_jobs(Some(database_id))
             .await
             .context("clean dirty streaming jobs")?;
