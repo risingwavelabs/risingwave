@@ -194,8 +194,9 @@ pub async fn do_handle_explain(
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        gen_batch_plan_by_statement(&session, context, stmt)
-                            .map(|x| (PhysicalPlanRef::Batch(x.plan), None))
+                        let plan_result =
+                            gen_batch_plan_by_statement(&session, context, stmt)?.unwrap_rw()?;
+                        Ok((PhysicalPlanRef::Batch(plan_result.plan), None))
                     }
 
                     _ => bail_not_implemented!("unsupported statement for EXPLAIN: {stmt}"),
