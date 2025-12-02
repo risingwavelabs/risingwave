@@ -841,6 +841,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             info
                         }
                         Err(e) => {
+                            println!(
+                                "xxk inject_database_initial_barrier err db {} {:?}",
+                                database_id, e
+                            );
                             warn!(%database_id, e = %e.as_report(), "failed to inject database initial barrier");
                             assert!(failed_databases.insert(database_id), "non-duplicate");
                             continue;
