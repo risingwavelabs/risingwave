@@ -522,6 +522,7 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
+    println!("xxk global bm start before");
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
