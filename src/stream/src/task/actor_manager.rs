@@ -21,7 +21,7 @@ use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
-use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
+use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_config_section};
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -530,6 +530,7 @@ impl StreamActorManager {
             self.runtime.spawn(may_track_hummock)
         };
 
+        let enable_count_metrics = self.streaming_metrics.level >= MetricLevel::Debug;
         let monitor_handle = if self
             .env
             .global_config()
@@ -540,36 +541,40 @@ impl StreamActorManager {
             let streaming_metrics = self.streaming_metrics.clone();
             let actor_monitor_task = self.runtime.spawn(async move {
                 let metrics = streaming_metrics.new_actor_metrics(actor_id, fragment_id);
+                let mut interval = tokio::time::interval(Duration::from_secs(15));
                 for task_metrics in monitor.intervals() {
-                    metrics
-                        .actor_fast_poll_duration
-                        .inc_by(task_metrics.total_fast_poll_duration.as_nanos() as u64);
-                    metrics
-                        .actor_fast_poll_cnt
-                        .inc_by(task_metrics.total_fast_poll_count);
+                    interval.tick().await; // tick at the start since the first interval tick is at 0s.
                     metrics
                         .actor_slow_poll_duration
                         .inc_by(task_metrics.total_slow_poll_duration.as_nanos() as u64);
                     metrics
-                        .actor_slow_poll_cnt
-                        .inc_by(task_metrics.total_slow_poll_count);
+                        .actor_fast_poll_duration
+                        .inc_by(task_metrics.total_fast_poll_duration.as_nanos() as u64);
                     metrics
                         .actor_poll_duration
                         .inc_by(task_metrics.total_poll_duration.as_nanos() as u64);
-                    metrics.actor_poll_cnt.inc_by(task_metrics.total_poll_count);
                     metrics
                         .actor_idle_duration
                         .inc_by(task_metrics.total_idle_duration.as_nanos() as u64);
                     metrics
-                        .actor_idle_cnt
-                        .inc_by(task_metrics.total_idled_count);
-                    metrics
                         .actor_scheduled_duration
                         .inc_by(task_metrics.total_scheduled_duration.as_nanos() as u64);
-                    metrics
-                        .actor_scheduled_cnt
-                        .inc_by(task_metrics.total_scheduled_count);
-                    tokio::time::sleep(Duration::from_secs(15)).await; // Our scraping interval is at 15s.
+
+                    if enable_count_metrics {
+                        metrics
+                            .actor_slow_poll_cnt
+                            .inc_by(task_metrics.total_slow_poll_count);
+                        metrics
+                            .actor_fast_poll_cnt
+                            .inc_by(task_metrics.total_fast_poll_count);
+                        metrics.actor_poll_cnt.inc_by(task_metrics.total_poll_count);
+                        metrics
+                            .actor_idle_cnt
+                            .inc_by(task_metrics.total_idled_count);
+                        metrics
+                            .actor_scheduled_cnt
+                            .inc_by(task_metrics.total_scheduled_count);
+                    }
                 }
             });
             Some(actor_monitor_task)
