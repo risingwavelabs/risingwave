@@ -175,7 +175,8 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             .env
             .system_params_reader()
             .await
-            .pause_on_next_bootstrap();
+            .pause_on_next_bootstrap() || self.env.opts.pause_on_next_bootstrap;
+
         if paused {
             warn!(
                 "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
