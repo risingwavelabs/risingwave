@@ -33,6 +33,7 @@ openssl-vendored = ["workspace-config/openssl-vendored"]
 udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
 all-connectors = ["risingwave_connector/all-sinks", "risingwave_connector/all-sources"]
+datafusion = ["risingwave_frontend/datafusion"]
 
 [dependencies]
 clap = { workspace = true }

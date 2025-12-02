@@ -99,20 +99,32 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
     // CDC Properties - added for schema.change.failure.policy
     map.try_insert(
         std::any::type_name::<MysqlCdcProperties>().to_owned(),
-        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+        [
+            "cdc.source.wait.streaming.start.timeout".to_owned(),
+            "debezium.max.queue.size".to_owned(),
+        ].into_iter().collect(),
     ).unwrap();
     map.try_insert(
         std::any::type_name::<PostgresCdcProperties>().to_owned(),
-        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+        [
+            "cdc.source.wait.streaming.start.timeout".to_owned(),
+            "debezium.max.queue.size".to_owned(),
+        ].into_iter().collect(),
     ).unwrap();
     map.try_insert(
         std::any::type_name::<SqlServerCdcProperties>().to_owned(),
-        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+        [
+            "cdc.source.wait.streaming.start.timeout".to_owned(),
+            "debezium.max.queue.size".to_owned(),
+        ].into_iter().collect(),
     ).unwrap();
 
     map.try_insert(
         std::any::type_name::<MongodbCdcProperties>().to_owned(),
-        ["cdc.source.wait.streaming.start.timeout".to_owned()].into_iter().collect(),
+        [
+            "cdc.source.wait.streaming.start.timeout".to_owned(),
+            "debezium.max.queue.size".to_owned(),
+        ].into_iter().collect(),
     ).unwrap();
     // KafkaProperties
     map.try_insert(

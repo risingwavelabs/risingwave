@@ -10,6 +10,18 @@ create table phases (name varchar primary key, at timestamptz);
 statement ok
 insert into phases values ('00_begin', now());
 
+# Test invalid MongoDB URL - should fail during validation
+statement error Failed to connect to MongoDB
+CREATE TABLE users_invalid (_id JSONB PRIMARY KEY, payload JSONB)
+INCLUDE TIMESTAMP as commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE COLLECTION_NAME as collection_name
+WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://wrong-host:27017/?replicaSet=rs0',
+  collection.name = 'random_data.*'
+);
+
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF
 db.all_types.insertOne({
@@ -151,6 +163,7 @@ db.all_types.insertOne({
 });
 EOF
 
+sleep 3s
 
 query TTTTTT retry 3 backoff 1s
 select
@@ -162,6 +175,7 @@ from all_types_extjson order by commit_ts;
 ----
 {"$oid": "6911a33502454e0f774f8803"} test all_types <slt:ignore> <slt:ignore> f
 {"$oid": "6911a33502454e0f774f8804"} test all_types <slt:ignore> <slt:ignore> t
+
 
 query TTT
 select * from all_types_access order by _id, field;
@@ -200,6 +214,7 @@ select * from all_types_access order by _id, field;
 {"$oid": "6911a33502454e0f774f8804"} f17_timestamp  {"$timestamp": {"i": 7, "t": 4}}
 {"$oid": "6911a33502454e0f774f8804"} f18_long       {"$numberLong": "9007199254740993"}
 {"$oid": "6911a33502454e0f774f8804"} f19_decimal    {"$numberDecimal": "0.12345678901234567"}
+
 
 statement ok
 DROP TABLE all_types_extjson cascade;

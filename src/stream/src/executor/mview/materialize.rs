@@ -36,7 +36,7 @@ use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::catalog::table::Engine;
-use risingwave_pb::id::SourceId;
+use risingwave_pb::id::{SourceId, SubscriberId};
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
@@ -89,7 +89,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     may_have_downstream: bool,
 
-    subscriber_ids: HashSet<u32>,
+    subscriber_ids: HashSet<SubscriberId>,
 
     metrics: MaterializeMetrics,
 
@@ -179,7 +179,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
 fn get_op_consistency_level(
     conflict_behavior: ConflictBehavior,
     may_have_downstream: bool,
-    subscriber_ids: &HashSet<u32>,
+    subscriber_ids: &HashSet<SubscriberId>,
 ) -> StateTableOpConsistencyLevel {
     if !subscriber_ids.is_empty() {
         StateTableOpConsistencyLevel::LogStoreEnabled
@@ -1001,7 +1001,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
     /// return true when changed
     fn may_update_depended_subscriptions(
-        depended_subscriptions: &mut HashSet<u32>,
+        depended_subscriptions: &mut HashSet<SubscriberId>,
         barrier: &Barrier,
         mv_table_id: TableId,
     ) {
@@ -1009,8 +1009,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             if !depended_subscriptions.insert(subscriber_id) {
                 warn!(
                     ?depended_subscriptions,
-                    ?mv_table_id,
-                    subscriber_id,
+                    %mv_table_id,
+                    %subscriber_id,
                     "subscription id already exists"
                 );
             }
@@ -1026,8 +1026,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 {
                     warn!(
                         ?depended_subscriptions,
-                        ?mv_table_id,
-                        subscriber_id,
+                        %mv_table_id,
+                        %subscriber_id,
                         "drop non existing subscriber_id id"
                     );
                 }

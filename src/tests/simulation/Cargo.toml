@@ -36,7 +36,6 @@ risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
 risingwave_expr_impl = { workspace = true } # Note: no UDF support (except for SQL functions)
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_meta_model = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }

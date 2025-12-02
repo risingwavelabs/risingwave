@@ -203,7 +203,10 @@ impl LogicalJoin {
     }
 
     pub fn output_indices_are_trivial(&self) -> bool {
-        self.output_indices() == &(0..self.internal_column_num()).collect_vec()
+        itertools::equal(
+            self.output_indices().iter().cloned(),
+            0..self.internal_column_num(),
+        )
     }
 
     /// Try to simplify the outer join with the predicate on the top of the join

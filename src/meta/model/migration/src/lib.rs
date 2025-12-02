@@ -58,6 +58,7 @@ mod m20251016_220528_fragment_parallelism;
 mod m20251022_294610_source_refresh_mode;
 mod m20251030_120000_refresh_jobs;
 mod m20251112_114514_streaming_job_config_override;
+mod m20251124_195858_pending_sink_state;
 mod m20251126_093529_add_is_iceberg_compactor;
 mod utils;
 
@@ -156,6 +157,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20251030_120000_refresh_jobs::Migration),
             Box::new(m20251112_114514_streaming_job_config_override::Migration),
             Box::new(m20251126_093529_add_is_iceberg_compactor::Migration),
+            Box::new(m20251124_195858_pending_sink_state::Migration),
         ]
     }
 }
