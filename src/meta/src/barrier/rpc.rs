@@ -604,6 +604,13 @@ impl ControlStreamManager {
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_split_assignment: &mut CdcTableSnapshotSplitAssignmentWithGeneration,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
+        println!(
+            "xxk inject_database_initial_barrier enter db {} fragments {:?}",
+            database_id,
+            jobs.values()
+                .flat_map(|frags| frags.keys())
+                .collect::<Vec<_>>()
+        );
         self.add_partial_graph(database_id, None);
         let source_split_assignments = jobs
             .values()
@@ -928,9 +935,15 @@ impl ControlStreamManager {
                 ),
         );
         println!(
-            "xxk inject_database_initial_barrier recovered db {} jobs {:?}",
+            "xxk inject_database_initial_barrier recovered db {} jobs {:?} shared fragments {:?}",
             database_id,
-            database_jobs.keys().collect::<Vec<_>>()
+            database_jobs.keys().collect::<Vec<_>>(),
+            self.env
+                .shared_actor_infos()
+                .read_guard()
+                .iter_over_fragments()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>()
         );
 
         let committed_epoch = barrier_info.prev_epoch();
