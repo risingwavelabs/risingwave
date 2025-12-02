@@ -369,9 +369,7 @@ impl CatalogController {
                         .into_tuple::<SinkId>()
                         .one(&txn)
                         .await?
-                        .ok_or_else(|| {
-                            MetaError::catalog_id_not_found("iceberg sink", object_id)
-                        })?;
+                        .expect("iceberg sink must exist");
                     let sink_obj = object::ActiveModel {
                         oid: Set(iceberg_sink.as_object_id()),
                         owner_id: Set(new_owner),
@@ -401,9 +399,7 @@ impl CatalogController {
                         .into_tuple::<SourceId>()
                         .one(&txn)
                         .await?
-                        .ok_or_else(|| {
-                            MetaError::catalog_id_not_found("iceberg source", object_id)
-                        })?;
+                        .expect("iceberg source must exist");
                     let source_obj = object::ActiveModel {
                         oid: Set(iceberg_source.as_object_id()),
                         owner_id: Set(new_owner),
