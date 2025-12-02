@@ -50,6 +50,12 @@ pub async fn handle_rename_table(
             ))
             .into());
         }
+        if table.is_iceberg_engine_table() {
+            return Err(ErrorCode::PermissionDenied(
+                "Renaming Iceberg tables is not supported.".to_owned(),
+            )
+            .into());
+        }
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
         table.id
