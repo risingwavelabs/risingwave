@@ -1124,8 +1124,8 @@ impl<M> BarrierInner<M> {
                 curr: epoch.curr,
                 prev: epoch.prev,
             }),
-            mutation: Some(PbBarrierMutation {
-                mutation: barrier_fn(mutation),
+            mutation: barrier_fn(mutation).map(|mutation| PbBarrierMutation {
+                mutation: Some(mutation),
             }),
             tracing_context: tracing_context.to_protobuf(),
             kind: *kind as _,
@@ -1143,10 +1143,7 @@ impl<M> BarrierInner<M> {
             kind: prost.kind(),
             epoch: EpochPair::new(epoch.curr, epoch.prev),
             mutation: mutation_from_pb(
-                prost
-                    .mutation
-                    .as_ref()
-                    .and_then(|mutation| mutation.mutation.as_ref()),
+                (prost.mutation.as_ref()).and_then(|mutation| mutation.mutation.as_ref()),
             )?,
             passed_actors: prost.get_passed_actors().clone(),
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
