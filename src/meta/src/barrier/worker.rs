@@ -757,17 +757,21 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 .context
                 .reload_runtime_info()
                 .await?;
+            let actor_cnt: usize = runtime_info_snapshot
+                .database_job_infos
+                .values()
+                .flat_map(|jobs| {
+                    jobs.values()
+                        .flat_map(|frags| frags.values().map(|f| f.actors.len()))
+                })
+                .sum();
             println!(
                 "xxk recovery snapshot dbs {:?} actors {}",
                 runtime_info_snapshot
                     .database_job_infos
                     .keys()
                     .collect::<Vec<_>>(),
-                runtime_info_snapshot
-                    .database_job_infos
-                    .values()
-                    .map(|jobs| jobs.values().flat_map(|frags| frags.values().flat_map(|f| f.actors.len())).sum::<usize>())
-                    .sum::<usize>()
+                actor_cnt
             );
             runtime_info_snapshot.validate().inspect_err(|e| {
                 warn!(err = ?e.as_report(), ?runtime_info_snapshot, "reloaded runtime info failed to validate");
