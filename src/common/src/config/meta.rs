@@ -164,7 +164,7 @@ pub struct MetaConfig {
     /// This allows us to pause the cluster on next bootstrap in an offline way.
     /// It's important for standalone or single node deployments.
     /// In those cases, meta node, frontend and compute may all be co-located.
-    /// If the compute node enters an inconsistent state, and continously crashloops,
+    /// If the compute node enters an inconsistent state, and continuously crashloops,
     /// we may not be able to connect to the cluster to run `alter system set pause_on_next_bootstrap = true;`.
     /// By providing it in the static config, we can have an offline way to trigger the pause on bootstrap.
     #[serde(default = "default::meta::pause_on_next_bootstrap_offline")]
