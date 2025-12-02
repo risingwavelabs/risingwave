@@ -612,6 +612,10 @@ impl ControlStreamManager {
                 .collect::<Vec<_>>()
         );
         self.add_partial_graph(database_id, None);
+        println!(
+            "xxk inject_database_initial_barrier after add_partial_graph db {}",
+            database_id
+        );
         let source_split_assignments = jobs
             .values()
             .flat_map(|fragments| fragments.values())
@@ -949,6 +953,11 @@ impl ControlStreamManager {
                 .iter_over_fragments()
                 .map(|(id, _)| *id)
                 .collect::<Vec<_>>()
+        );
+        println!(
+            "xxk inject_database_initial_barrier exit db {} node_to_collect empty {}",
+            database_id,
+            node_to_collect.is_empty()
         );
 
         let committed_epoch = barrier_info.prev_epoch();
