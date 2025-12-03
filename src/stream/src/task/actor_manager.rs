@@ -545,12 +545,6 @@ impl StreamActorManager {
                 for task_metrics in monitor.intervals() {
                     interval.tick().await; // tick at the start since the first interval tick is at 0s.
                     metrics
-                        .actor_slow_poll_duration
-                        .inc_by(task_metrics.total_slow_poll_duration.as_nanos() as u64);
-                    metrics
-                        .actor_fast_poll_duration
-                        .inc_by(task_metrics.total_fast_poll_duration.as_nanos() as u64);
-                    metrics
                         .actor_poll_duration
                         .inc_by(task_metrics.total_poll_duration.as_nanos() as u64);
                     metrics
@@ -566,12 +560,6 @@ impl StreamActorManager {
                     );
 
                     if enable_count_metrics {
-                        metrics
-                            .actor_slow_poll_cnt
-                            .inc_by(task_metrics.total_slow_poll_count);
-                        metrics
-                            .actor_fast_poll_cnt
-                            .inc_by(task_metrics.total_fast_poll_count);
                         metrics.actor_poll_cnt.inc_by(task_metrics.total_poll_count);
                         metrics
                             .actor_idle_cnt
