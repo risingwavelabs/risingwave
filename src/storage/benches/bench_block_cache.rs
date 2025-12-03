@@ -156,18 +156,17 @@ impl FoyerCache {
 #[async_trait]
 impl CacheBase for FoyerCache {
     async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
+        let latency = self.fake_io_latency;
         let entry = self
             .inner
-            .fetch((sst_object_id, block_idx), || {
-                let latency = self.fake_io_latency;
-                async move {
-                    get_fake_block(sst_object_id, block_idx, latency)
-                        .await
-                        .map(Arc::new)
-                        .map_err(foyer::Error::other)
-                }
+            .get_or_fetch(&(sst_object_id, block_idx), move |_| async move {
+                get_fake_block(sst_object_id, block_idx, latency)
+                    .await
+                    .map(Arc::new)
+                    .map_err(foyer::MemoryError::other)
             })
             .await
+            .map_err(foyer::Error::from)
             .map_err(HummockError::foyer_error)?;
         Ok(entry.value().clone())
     }
@@ -220,16 +219,14 @@ impl FoyerHybridCache {
 #[async_trait]
 impl CacheBase for FoyerHybridCache {
     async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
+        let latency = self.fake_io_latency;
         let entry = self
             .inner
-            .fetch((sst_object_id, block_idx), || {
-                let latency = self.fake_io_latency;
-                async move {
-                    get_fake_block(sst_object_id, block_idx, latency)
-                        .await
-                        .map(Arc::new)
-                        .map_err(foyer::Error::other)
-                }
+            .get_or_fetch(&(sst_object_id, block_idx), move |_| async move {
+                get_fake_block(sst_object_id, block_idx, latency)
+                    .await
+                    .map(Arc::new)
+                    .map_err(foyer::Error::other)
             })
             .await
             .map_err(HummockError::foyer_error)?;

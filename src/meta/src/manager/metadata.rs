@@ -447,9 +447,10 @@ impl MetadataManager {
         table_id: TableId,
         status: RefreshState,
         trigger_time: Option<DateTime>,
+        is_success: bool,
     ) -> MetaResult<()> {
         self.catalog_controller
-            .update_refresh_job_status(table_id, status, trigger_time)
+            .update_refresh_job_status(table_id, status, trigger_time, is_success)
             .await
     }
 

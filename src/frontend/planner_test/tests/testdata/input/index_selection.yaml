@@ -557,3 +557,16 @@
     select * from t1 where c = 2 and a = 2 order by b desc nulls last limit 10;
   expected_outputs:
     - batch_plan
+- name: topn index selection + limit pushdown with multi point get + various order combination point get for primary table
+  sql: |
+    create table t1 (a int, b int, c int, primary key (a, b, c));
+    select * from t1 where a = 1 and b = 2 order by c limit 10;
+  expected_outputs:
+    - batch_plan
+- name: topn index selection + limit pushdown with multi point get + various order combination point get for primary table
+  sql: |
+    create table t1 (a int, b int, c int, primary key (a, b, c));
+    create index idx1 on t1(a, b, c desc);
+    select * from t1 where a = 1 and b = 2 order by c desc limit 10;
+  expected_outputs:
+    - batch_plan

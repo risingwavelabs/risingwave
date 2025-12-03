@@ -88,8 +88,6 @@ pub(super) struct GlobalBarrierWorker<C> {
 
     active_streaming_nodes: ActiveStreamingWorkerNodes,
 
-    sink_manager: SinkCoordinatorManager,
-
     control_stream_manager: ControlStreamManager,
 
     term_id: String,
@@ -98,7 +96,6 @@ pub(super) struct GlobalBarrierWorker<C> {
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     pub(super) async fn new_inner(
         env: MetaSrvEnv,
-        sink_manager: SinkCoordinatorManager,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         context: Arc<C>,
     ) -> Self {
@@ -124,7 +121,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             completing_task: CompletingTask::None,
             request_rx,
             active_streaming_nodes,
-            sink_manager,
             control_stream_manager,
             term_id: "uninitialized".into(),
         }
@@ -157,9 +153,10 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             env.clone(),
             barrier_scheduler,
             refresh_manager,
+            sink_manager,
         ));
 
-        Self::new_inner(env, sink_manager, request_rx, context).await
+        Self::new_inner(env, request_rx, context).await
     }
 
     pub fn start(self) -> (JoinHandle<()>, Sender<()>) {
@@ -753,6 +750,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             self.context
                 .notify_creating_job_failed(None, recovery_reason.clone())
                 .await;
+
             let runtime_info_snapshot = self
                 .context
                 .reload_runtime_info()
@@ -775,7 +773,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut cdc_table_snapshot_split_assignment,
             } = runtime_info_snapshot;
 
-            self.sink_manager.reset().await;
             let term_id = Uuid::new_v4().to_string();
 
 

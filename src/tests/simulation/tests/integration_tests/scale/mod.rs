@@ -23,6 +23,7 @@ mod nexmark_chaos;
 mod nexmark_q4;
 mod nexmark_source;
 mod no_shuffle;
+mod parallelism_exceeds_cores;
 mod resource_group;
 mod schedulability;
 mod shared_source;

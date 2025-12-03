@@ -100,31 +100,31 @@ level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = false
 
 [meta.developer]
-meta_cached_traces_num = 256
-meta_cached_traces_memory_limit_bytes = 134217728
-meta_enable_trivial_move = true
-meta_enable_check_task_level_overlap = false
-meta_max_trivial_move_task_count_per_loop = 256
-meta_max_get_task_probe_times = 5
-meta_actor_cnt_per_worker_parallelism_soft_limit = 100
-meta_actor_cnt_per_worker_parallelism_hard_limit = 400
-meta_hummock_time_travel_sst_info_fetch_batch_size = 10000
-meta_hummock_time_travel_sst_info_insert_batch_size = 100
-meta_time_travel_vacuum_interval_sec = 30
-meta_hummock_time_travel_epoch_version_insert_batch_size = 1000
-meta_hummock_gc_history_insert_batch_size = 1000
-meta_hummock_time_travel_filter_out_objects_batch_size = 1000
-meta_hummock_time_travel_filter_out_objects_v1 = false
-meta_hummock_time_travel_filter_out_objects_list_version_batch_size = 10
-meta_hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
+cached_traces_num = 256
+cached_traces_memory_limit_bytes = 134217728
+enable_trivial_move = true
+enable_check_task_level_overlap = false
+max_trivial_move_task_count_per_loop = 256
+max_get_task_probe_times = 5
+actor_cnt_per_worker_parallelism_soft_limit = 100
+actor_cnt_per_worker_parallelism_hard_limit = 400
+hummock_time_travel_sst_info_fetch_batch_size = 10000
+hummock_time_travel_sst_info_insert_batch_size = 100
+time_travel_vacuum_interval_sec = 30
+hummock_time_travel_epoch_version_insert_batch_size = 1000
+hummock_gc_history_insert_batch_size = 1000
+hummock_time_travel_filter_out_objects_batch_size = 1000
+hummock_time_travel_filter_out_objects_v1 = false
+hummock_time_travel_filter_out_objects_list_version_batch_size = 10
+hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
 
-[meta.developer.meta_compute_client_config]
+[meta.developer.compute_client_config]
 connect_timeout_secs = 5
 
-[meta.developer.meta_stream_client_config]
+[meta.developer.stream_client_config]
 connect_timeout_secs = 5
 
-[meta.developer.meta_frontend_client_config]
+[meta.developer.frontend_client_config]
 connect_timeout_secs = 5
 
 [meta.meta_store_config]
@@ -142,17 +142,17 @@ redact_sql_option_keywords = ["credential", "key", "password", "private", "secre
 enable_spill = true
 
 [batch.developer]
-batch_connector_message_buffer_size = 16
-batch_output_channel_size = 64
-batch_receiver_channel_size = 1000
-batch_root_stage_channel_size = 100
-batch_chunk_size = 1024
-batch_local_execute_buffer_size = 64
+connector_message_buffer_size = 16
+output_channel_size = 64
+receiver_channel_size = 1000
+root_stage_channel_size = 100
+chunk_size = 1024
+local_execute_buffer_size = 64
 
-[batch.developer.batch_compute_client_config]
+[batch.developer.compute_client_config]
 connect_timeout_secs = 5
 
-[batch.developer.batch_frontend_client_config]
+[batch.developer.frontend_client_config]
 connect_timeout_secs = 5
 
 [frontend]
@@ -180,47 +180,51 @@ unique_user_stream_errors = 10
 unsafe_enable_strict_consistency = true
 
 [streaming.developer]
-stream_enable_executor_row_count = false
-stream_connector_message_buffer_size = 16
-stream_unsafe_extreme_cache_size = 10
-stream_topn_cache_min_capacity = 10
-stream_chunk_size = 256
-stream_exchange_initial_permits = 2048
-stream_exchange_batched_permits = 256
-stream_exchange_concurrent_barriers = 1
-stream_exchange_concurrent_dispatchers = 0
-stream_dml_channel_initial_permits = 32768
-stream_hash_agg_max_dirty_groups_heap_size = 67108864
-stream_memory_controller_threshold_aggressive = 0.9
-stream_memory_controller_threshold_graceful = 0.81
-stream_memory_controller_threshold_stable = 0.72
-stream_memory_controller_eviction_factor_aggressive = 2.0
-stream_memory_controller_eviction_factor_graceful = 1.5
-stream_memory_controller_eviction_factor_stable = 1.0
-stream_memory_controller_update_interval_ms = 100
-stream_memory_controller_sequence_tls_step = 128
-stream_memory_controller_sequence_tls_lag = 32
-stream_enable_arrangement_backfill = true
-stream_high_join_amplification_threshold = 2048
-stream_enable_actor_tokio_metrics = false
-stream_exchange_connection_pool_size = 1
-stream_enable_auto_schema_change = true
-stream_enable_shared_source = true
-stream_switch_jdbc_pg_to_native = false
-stream_max_barrier_batch_size = 1024
-stream_hash_join_entry_state_max_rows = 30000
-stream_enable_explain_analyze_stats = true
-stream_iceberg_list_interval_sec = 10
-stream_iceberg_fetch_batch_size = 1024
-stream_iceberg_sink_positional_delete_cache_size = 1024
-stream_iceberg_sink_write_parquet_max_row_group_rows = 100000
-stream_default_enable_mem_preload_state_table = false
-stream_mem_preload_state_table_ids_whitelist = []
-stream_mem_preload_state_table_ids_blacklist = []
-stream_aggressive_noop_update_elimination = false
-stream_refresh_scheduler_interval_sec = 60
+enable_executor_row_count = false
+connector_message_buffer_size = 16
+unsafe_extreme_cache_size = 10
+topn_cache_min_capacity = 10
+chunk_size = 256
+exchange_initial_permits = 2048
+exchange_batched_permits = 256
+exchange_concurrent_barriers = 1
+exchange_concurrent_dispatchers = 0
+dml_channel_initial_permits = 32768
+hash_agg_max_dirty_groups_heap_size = 67108864
+memory_controller_threshold_aggressive = 0.9
+memory_controller_threshold_graceful = 0.81
+memory_controller_threshold_stable = 0.72
+memory_controller_eviction_factor_aggressive = 2.0
+memory_controller_eviction_factor_graceful = 1.5
+memory_controller_eviction_factor_stable = 1.0
+memory_controller_update_interval_ms = 100
+memory_controller_sequence_tls_step = 128
+memory_controller_sequence_tls_lag = 32
+enable_arrangement_backfill = true
+high_join_amplification_threshold = 2048
+enable_actor_tokio_metrics = true
+exchange_connection_pool_size = 1
+enable_auto_schema_change = true
+enable_shared_source = true
+switch_jdbc_pg_to_native = false
+max_barrier_batch_size = 1024
+hash_join_entry_state_max_rows = 30000
+enable_explain_analyze_stats = true
+iceberg_list_interval_sec = 10
+iceberg_fetch_batch_size = 1024
+iceberg_sink_positional_delete_cache_size = 1024
+iceberg_sink_write_parquet_max_row_group_rows = 100000
+default_enable_mem_preload_state_table = false
+mem_preload_state_table_ids_whitelist = []
+mem_preload_state_table_ids_blacklist = []
+aggressive_noop_update_elimination = false
+refresh_scheduler_interval_sec = 60
+join_encoding_type = "memory_optimized"
+sync_log_store_pause_duration_ms = 64
+sync_log_store_buffer_size = 2048
+over_window_cache_policy = "full"
 
-[streaming.developer.stream_compute_client_config]
+[streaming.developer.compute_client_config]
 connect_timeout_secs = 5
 
 [storage]
@@ -404,7 +408,7 @@ pause_on_next_bootstrap = false
 enable_tracing = false
 license_key = ""
 time_travel_retention_ms = 600000
-adaptive_parallelism_strategy = "Auto"
+adaptive_parallelism_strategy = "AUTO"
 per_database_isolation = true
 enforce_secret = false
 

@@ -74,9 +74,8 @@ statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 8s
 
-query II
+query II retry 9 backoff 1s
 SELECT
  "ID", "firstName", "lastName", "age", "height", "weight"
 FROM

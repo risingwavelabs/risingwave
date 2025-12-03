@@ -17,7 +17,7 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
@@ -54,31 +54,7 @@ impl TopNOnIndexRule {
         logical_scan: LogicalScan,
         required_order: &Order,
     ) -> Option<PlanRef> {
-        let scan_predicates = logical_scan.predicate();
-        let input_refs = scan_predicates.get_eq_const_input_refs();
-        let prefix = input_refs
-            .into_iter()
-            .flat_map(|input_ref| {
-                [
-                    ColumnOrder {
-                        column_index: input_ref.index,
-                        order_type: OrderType::ascending_nulls_first(),
-                    },
-                    ColumnOrder {
-                        column_index: input_ref.index,
-                        order_type: OrderType::ascending_nulls_last(),
-                    },
-                    ColumnOrder {
-                        column_index: input_ref.index,
-                        order_type: OrderType::descending_nulls_first(),
-                    },
-                    ColumnOrder {
-                        column_index: input_ref.index,
-                        order_type: OrderType::descending_nulls_last(),
-                    },
-                ]
-            })
-            .collect();
+        let prefix = Self::build_prefix_from_scan_predicates(&logical_scan);
         let order_satisfied_index =
             logical_scan.indexes_satisfy_order_with_prefix(required_order, &prefix);
         let mut longest_prefix: Option<Order> = None;
@@ -104,6 +80,7 @@ impl TopNOnIndexRule {
         logical_scan: LogicalScan,
         order: &Order,
     ) -> Option<PlanRef> {
+        let prefix = Self::build_prefix_from_scan_predicates(&logical_scan);
         let output_col_map = logical_scan
             .output_col_idx()
             .iter()
@@ -126,10 +103,60 @@ impl TopNOnIndexRule {
                 })
                 .collect::<Vec<_>>(),
         };
-        if primary_key_order.satisfies(order) {
-            Some(logical_top_n.clone_with_input(logical_scan.into()).into())
-        } else {
-            None
+        let mut pk_orders_iter = primary_key_order.column_orders.iter().cloned().peekable();
+        let fixed_prefix = {
+            let mut fixed_prefix = vec![];
+            loop {
+                match pk_orders_iter.peek() {
+                    Some(order) if prefix.contains(order) => {
+                        let order = pk_orders_iter.next().unwrap();
+                        fixed_prefix.push(order);
+                    }
+                    _ => break,
+                }
+            }
+            Order {
+                column_orders: fixed_prefix,
+            }
+        };
+        let remaining_orders = Order {
+            column_orders: pk_orders_iter.collect(),
+        };
+        if !remaining_orders.satisfies(order) {
+            return None;
         }
+        Some(
+            logical_top_n
+                .clone_with_input_and_prefix(logical_scan.into(), fixed_prefix)
+                .into(),
+        )
+    }
+
+    fn build_prefix_from_scan_predicates(logical_scan: &LogicalScan) -> HashSet<ColumnOrder> {
+        let scan_predicates = logical_scan.predicate();
+        let input_refs = scan_predicates.get_eq_const_input_refs();
+        input_refs
+            .into_iter()
+            .flat_map(|input_ref| {
+                [
+                    ColumnOrder {
+                        column_index: input_ref.index,
+                        order_type: OrderType::ascending_nulls_first(),
+                    },
+                    ColumnOrder {
+                        column_index: input_ref.index,
+                        order_type: OrderType::ascending_nulls_last(),
+                    },
+                    ColumnOrder {
+                        column_index: input_ref.index,
+                        order_type: OrderType::descending_nulls_first(),
+                    },
+                    ColumnOrder {
+                        column_index: input_ref.index,
+                        order_type: OrderType::descending_nulls_last(),
+                    },
+                ]
+            })
+            .collect()
     }
 }

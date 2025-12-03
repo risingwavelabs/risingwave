@@ -154,8 +154,9 @@ public class SourceValidateHandler {
             case MONGODB:
                 ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_URL);
                 ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_COLLECTION_NAME);
-                var validator = new MongoDbValidator(props);
-                validator.validateDbConfig();
+                try (var validator = new MongoDbValidator(props)) {
+                    validator.validateAll();
+                }
                 break;
             case SQL_SERVER:
                 ensureRequiredProps(props, isCdcSourceJob);
