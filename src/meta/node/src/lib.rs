@@ -552,7 +552,7 @@ pub fn start(
                     .cdc_table_split_init_insert_batch_size,
 
                 enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
-                pause_on_next_bootstrap: config.meta.pause_on_next_bootstrap_offline,
+                pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
             },
             config.system.into_init_system_params(),
             Default::default(),

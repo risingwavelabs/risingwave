@@ -176,7 +176,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             .system_params_reader()
             .await
             .pause_on_next_bootstrap()
-            || self.env.opts.pause_on_next_bootstrap;
+            || self.env.opts.pause_on_next_bootstrap_offline;
 
         if paused {
             warn!(
