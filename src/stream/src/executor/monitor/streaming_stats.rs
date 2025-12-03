@@ -60,7 +60,6 @@ pub struct StreamingMetrics {
     actor_poll_cnt: RelabeledGuardedIntCounterVec,
     actor_idle_duration: RelabeledGuardedIntCounterVec,
     actor_idle_cnt: RelabeledGuardedIntCounterVec,
-    actor_scheduling_delay_duration: RelabeledGuardedIntCounterVec,
 
     // Streaming actor
     pub actor_count: LabelGuardedIntGaugeVec,
@@ -418,15 +417,6 @@ impl StreamingMetrics {
 
         let actor_idle_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_idle_cnt",
-            "tokio's metrics",
-            &["actor_id", "fragment_id"],
-            registry
-        )
-        .unwrap()
-        .relabel_debug_1(level);
-
-        let actor_scheduling_delay_duration = register_guarded_int_counter_vec_with_registry!(
-            "stream_actor_scheduling_delay_duration",
             "tokio's metrics",
             &["actor_id", "fragment_id"],
             registry
@@ -1221,7 +1211,6 @@ impl StreamingMetrics {
             actor_poll_cnt,
             actor_idle_duration,
             actor_idle_cnt,
-            actor_scheduling_delay_duration,
             actor_count,
             actor_in_record_cnt,
             actor_out_record_cnt,
@@ -1353,9 +1342,6 @@ impl StreamingMetrics {
             .actor_idle_duration
             .with_guarded_label_values(label_list);
         let actor_idle_cnt = self.actor_idle_cnt.with_guarded_label_values(label_list);
-        let actor_scheduling_delay_duration = self
-            .actor_scheduling_delay_duration
-            .with_guarded_label_values(label_list);
         ActorMetrics {
             actor_scheduled_duration,
             actor_scheduled_cnt,
@@ -1363,7 +1349,6 @@ impl StreamingMetrics {
             actor_poll_cnt,
             actor_idle_duration,
             actor_idle_cnt,
-            actor_scheduling_delay_duration,
         }
     }
 
@@ -1696,7 +1681,6 @@ pub struct ActorMetrics {
     pub actor_poll_cnt: LabelGuardedIntCounter,
     pub actor_idle_duration: LabelGuardedIntCounter,
     pub actor_idle_cnt: LabelGuardedIntCounter,
-    pub actor_scheduling_delay_duration: LabelGuardedIntCounter,
 }
 
 pub struct SinkExecutorMetrics {

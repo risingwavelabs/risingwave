@@ -553,11 +553,6 @@ impl StreamActorManager {
                     metrics
                         .actor_scheduled_duration
                         .inc_by(task_metrics.total_scheduled_duration.as_nanos() as u64);
-                    metrics.actor_scheduling_delay_duration.inc_by(
-                        (task_metrics.total_long_delay_duration
-                            + task_metrics.total_short_delay_duration)
-                            .as_nanos() as u64,
-                    );
 
                     if enable_count_metrics {
                         metrics.actor_poll_cnt.inc_by(task_metrics.total_poll_count);

@@ -74,7 +74,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Tokio: Actor Scheduled Rate Per Actor",
+                    "Tokio: Actor Scheduling Delay Rate Per Actor",
                     "",
                     [
                         panels.target(
@@ -101,18 +101,6 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / (rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Tokio: Actor Scheduling Delay Rate Per Actor",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('stream_actor_scheduling_delay_duration')}[$__rate_interval])) by (fragment_id)"
-                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
-                            f" / 1000000000",
                             "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
