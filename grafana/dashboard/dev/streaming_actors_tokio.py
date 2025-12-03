@@ -17,7 +17,7 @@ def _(outer_panels: Panels):
                             f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
                             f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
                             f" / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -27,7 +27,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -37,7 +37,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -49,7 +49,7 @@ def _(outer_panels: Panels):
                             f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
                             f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
                             f" / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -59,7 +59,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -69,7 +69,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / (rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -81,7 +81,7 @@ def _(outer_panels: Panels):
                             f"sum(rate({metric('stream_actor_scheduled_duration')}[$__rate_interval])) by (fragment_id)"
                             f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
                             f" / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -91,7 +91,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -101,7 +101,7 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / (rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -113,7 +113,7 @@ def _(outer_panels: Panels):
                             f"sum(rate({metric('stream_actor_scheduling_delay_duration')}[$__rate_interval])) by (fragment_id)"
                             f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
                             f" / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            "fragment {{fragment_id}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
