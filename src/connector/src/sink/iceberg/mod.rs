@@ -856,6 +856,10 @@ impl Sink for IcebergSink {
         true
     }
 
+    fn support_schema_change() -> bool {
+        true
+    }
+
     async fn new_coordinator(
         &self,
         iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,

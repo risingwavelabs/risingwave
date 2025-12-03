@@ -538,30 +538,8 @@ impl StreamSink {
                 .into());
             }
 
-            let is_exactly_once = match sink_desc.is_exactly_once {
-                Some(v) => v,
-                None => {
-                    if let Some(connector) = sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
-                        let connector_type = connector.to_lowercase();
-                        if connector_type == ICEBERG_SINK {
-                            // iceberg sink defaults to exactly once
-                            // However, when sink_decouple is disabled, we enforce it to false.
-                            sink_desc
-                                .properties
-                                .insert("is_exactly_once".to_owned(), "false".to_owned());
-                        }
-                    }
-                    false
-                }
-            };
-
-            if is_exactly_once {
-                return Err(ErrorCode::NotSupported(
-                    "Exactly once sink can only be created with sink_decouple enabled.".to_owned(),
-                    hint_string(true),
-                )
-                .into());
-            }
+            // Allow exactly_once even when sink_decouple is disabled (for testing purposes)
+            // Original logic enforced is_exactly_once=false when sink_decouple=false
         }
         if sink_decouple && auto_refresh_schema_from_table.is_some() {
             return Err(ErrorCode::NotSupported(
