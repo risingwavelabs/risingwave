@@ -29,6 +29,7 @@ hummock_time_travel_snapshot_interval = 100
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 60
 disable_recovery = false
+pause_on_next_bootstrap_offline = false
 disable_automatic_parallelism_control = false
 parallelism_control_batch_size = 10
 parallelism_control_trigger_period_sec = 10
