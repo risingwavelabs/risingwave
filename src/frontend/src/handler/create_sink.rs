@@ -818,7 +818,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
                 KafkaSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf, Encode::Bytes],
-                    Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf, Encode::Bytes],
+                    Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(

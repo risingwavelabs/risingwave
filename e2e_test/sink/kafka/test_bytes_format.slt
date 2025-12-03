@@ -45,33 +45,12 @@ create sink sink_bytes_format_error2 from t_non_bytea with (
     topic = 'test-rw-sink-bytes-format-error2'
 ) format plain encode bytes (force_append_only = 'true');
 
-# Test upsert with bytes format
-statement ok
-create table t_upsert_bytea (
-    id integer primary key,
-    data bytea
-);
-
-statement error BYTES format requires exactly one column, got 2 columns
-create sink sink_upsert_bytes_error from t_upsert_bytea with (
+# Test that upsert format with bytes encoding is not supported
+statement error connector kafka does not support format Upsert with encode Bytes
+create sink sink_upsert_bytes_error from t_single_bytea with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
-    topic = 'test-rw-sink-upsert-bytes-error',
-    primary_key = 'id'
-) format upsert encode bytes;
-
-# Test single column upsert with bytes format
-statement ok
-create table t_single_bytea_pk (
-    data bytea primary key
-);
-
-statement ok
-create sink sink_upsert_bytes from t_single_bytea_pk with (
-    connector = 'kafka',
-    properties.bootstrap.server = 'message_queue:29092',
-    topic = 'test-rw-sink-upsert-bytes',
-    primary_key = 'data'
+    topic = 'test-rw-sink-upsert-bytes-error'
 ) format upsert encode bytes;
 
 # Test bytes format with key encoding
@@ -95,9 +74,6 @@ create sink sink_bytes_with_key_error from t_bytea_with_key with (
 statement ok
 insert into t_single_bytea values ('\xDEADBEEF'), ('\xCAFEBABE'), ('\x00112233');
 
-statement ok
-insert into t_single_bytea_pk values ('\xFEEDBEEF'), ('\x0BADC0DE');
-
 # Test source reading from bytes format sink
 statement ok
 create table t_source_bytes (data bytea)
@@ -105,15 +81,6 @@ with (
   connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
   topic = 'test-rw-sink-bytes-format',
-) format plain encode bytes;
-
-# Test source reading from upsert bytes format sink
-statement ok
-create table t_source_upsert_bytes (data bytea)
-with (
-  connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
-  topic = 'test-rw-sink-upsert-bytes',
 ) format plain encode bytes;
 
 sleep 2s
@@ -127,28 +94,12 @@ select data from t_source_bytes order by data;
 \xdeadbeef
 
 
-sleep 2s
-
-# Verify upsert data roundtrip
-query T retry 3 backoff 1s
-select data from t_source_upsert_bytes order by data;
-----
-\x0badc0de
-\xfeedbeef
-
-
 # Clean up
 statement ok
 drop table t_source_bytes;
 
 statement ok
-drop table t_source_upsert_bytes cascade;
-
-statement ok
 drop sink sink_bytes_format;
-
-statement ok
-drop sink sink_upsert_bytes;
 
 statement ok
 drop table t_single_bytea;
@@ -158,12 +109,6 @@ drop table t_multi_columns;
 
 statement ok
 drop table t_non_bytea;
-
-statement ok
-drop table t_upsert_bytea;
-
-statement ok
-drop table t_single_bytea_pk;
 
 statement ok
 drop table t_bytea_with_key;
