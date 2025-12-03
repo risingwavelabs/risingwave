@@ -136,7 +136,7 @@ impl ActorContext {
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
         static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
         if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
-            tracing::error!(identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
+            tracing::error!(target: "stream_expr_error", identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
         }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
