@@ -805,10 +805,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .post_yield_barrier(update_vnode_bitmap.clone())
                         .await?
                         && cache_may_stale
+                        && let Some(cache) = &mut self.materialize_cache
                     {
-                        if let Some(cache) = &mut self.materialize_cache {
-                            cache.clear();
-                        }
+                        cache.clear();
                     }
 
                     // Handle staging table post commit

@@ -63,7 +63,13 @@ impl MaterializeCache {
     ) -> Option<Self> {
         match conflict_behavior {
             checked_conflict_behaviors!() => {}
-            ConflictBehavior::NoCheck => return None,
+            ConflictBehavior::NoCheck => {
+                assert!(
+                    toastable_column_indices.is_none(),
+                    "when there are toastable columns, conflict handling must be enabled"
+                );
+                return None;
+            }
         }
 
         let lru_cache: ManagedLruCache<Vec<u8>, CacheValue> =
