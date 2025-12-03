@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::HashSet;
-use std::marker::PhantomData;
-use std::ops::{Bound, Deref, Index};
+use std::ops::Bound;
 
 use bytes::Bytes;
 use futures::future::Either;
@@ -28,11 +26,11 @@ use risingwave_common::catalog::{
     ColumnDesc, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{CompactedRow, OwnedRow, RowExt};
-use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DataType, ScalarImpl};
+use risingwave_common::row::{OwnedRow, RowExt};
+use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType, cmp_datum};
-use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::catalog::table::Engine;
@@ -41,7 +39,6 @@ use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew
 use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
 
-use crate::cache::ManagedLruCache;
 use crate::common::change_buffer::output_kind as cb_kind;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
@@ -50,6 +47,7 @@ use crate::common::table::state_table::{
 use crate::executor::error::ErrorKind;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
+use crate::executor::mview::cache::MaterializeCache;
 use crate::executor::prelude::*;
 use crate::executor::{BarrierInner, BarrierMutationType, EpochPair};
 use crate::task::LocalBarrierManager;
@@ -81,7 +79,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     actor_context: ActorContextRef,
 
-    materialize_cache: MaterializeCache<SD>,
+    materialize_cache: MaterializeCache,
 
     conflict_behavior: ConflictBehavior,
 
@@ -846,7 +844,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .await?
                         && cache_may_stale
                     {
-                        self.materialize_cache.lru_cache.clear();
+                        self.materialize_cache.clear();
                     }
 
                     // Handle staging table post commit
@@ -1127,79 +1125,6 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 }
 
-/// Fast string comparison to check if a string equals `DEBEZIUM_UNAVAILABLE_VALUE`.
-/// Optimized by checking length first to avoid expensive string comparison.
-fn is_unavailable_value_str(s: &str) -> bool {
-    s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE
-}
-
-/// Check if a datum represents Debezium's unavailable value placeholder.
-/// This function handles both scalar types and one-dimensional arrays.
-fn is_debezium_unavailable_value(
-    datum: &Option<risingwave_common::types::ScalarRefImpl<'_>>,
-) -> bool {
-    match datum {
-        Some(risingwave_common::types::ScalarRefImpl::Utf8(val)) => is_unavailable_value_str(val),
-        Some(risingwave_common::types::ScalarRefImpl::Jsonb(jsonb_ref)) => {
-            // For jsonb type, check if it's a string containing the unavailable value
-            jsonb_ref
-                .as_str()
-                .map(is_unavailable_value_str)
-                .unwrap_or(false)
-        }
-        Some(risingwave_common::types::ScalarRefImpl::Bytea(bytea)) => {
-            // For bytea type, we need to check if it contains the string bytes of DEBEZIUM_UNAVAILABLE_VALUE
-            // This is because when processing bytea from Debezium, we convert the base64-encoded string
-            // to `DEBEZIUM_UNAVAILABLE_VALUE` in the json.rs parser to maintain consistency
-            if let Ok(bytea_str) = std::str::from_utf8(bytea) {
-                is_unavailable_value_str(bytea_str)
-            } else {
-                false
-            }
-        }
-        Some(risingwave_common::types::ScalarRefImpl::List(list_ref)) => {
-            // For list type, check if it contains exactly one element with the unavailable value
-            // This is because when any element in an array triggers TOAST, Debezium treats the entire
-            // array as unchanged and sends a placeholder array with only one element
-            if list_ref.len() == 1 {
-                if let Some(Some(element)) = list_ref.get(0) {
-                    // Recursively check the array element
-                    is_debezium_unavailable_value(&Some(element))
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        }
-        _ => false,
-    }
-}
-
-/// Fix TOAST columns by replacing unavailable values with old row values.
-fn handle_toast_columns_for_postgres_cdc(
-    old_row: &OwnedRow,
-    new_row: &OwnedRow,
-    toastable_indices: &[usize],
-) -> OwnedRow {
-    let mut fixed_row_data = new_row.as_inner().to_vec();
-
-    for &toast_idx in toastable_indices {
-        // Check if the new value is Debezium's unavailable value placeholder
-        let is_unavailable = is_debezium_unavailable_value(&new_row.datum_at(toast_idx));
-        if is_unavailable {
-            // Replace with old row value if available
-            if let Some(old_datum_ref) = old_row.datum_at(toast_idx) {
-                fixed_row_data[toast_idx] = Some(old_datum_ref.into_scalar_impl());
-            }
-        }
-    }
-
-    OwnedRow::new(fixed_row_data)
-}
-
-type ChangeBuffer = crate::common::change_buffer::ChangeBuffer<Vec<u8>, OwnedRow>;
-
 impl<S: StateStore, SD: ValueRowSerde> Execute for MaterializeExecutor<S, SD> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
@@ -1212,325 +1137,6 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
             .field("arrange_key_indices", &self.arrange_key_indices)
             .finish()
     }
-}
-
-/// A cache for materialize executors.
-struct MaterializeCache<SD> {
-    lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
-    row_serde: BasicSerde,
-    version_column_indices: Vec<u32>,
-    _serde: PhantomData<SD>,
-}
-
-type CacheValue = Option<CompactedRow>;
-
-impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    fn new(
-        watermark_sequence: AtomicU64Ref,
-        metrics_info: MetricsInfo,
-        row_serde: BasicSerde,
-        version_column_indices: Vec<u32>,
-    ) -> Self {
-        let lru_cache: ManagedLruCache<Vec<u8>, CacheValue> =
-            ManagedLruCache::unbounded(watermark_sequence, metrics_info);
-        Self {
-            lru_cache,
-            row_serde,
-            version_column_indices,
-            _serde: PhantomData,
-        }
-    }
-
-    /// First populate the cache from `table`, and then calculate a [`ChangeBuffer`].
-    /// `table` will not be written in this method.
-    async fn handle<S: StateStore>(
-        &mut self,
-        row_ops: Vec<(Op, Vec<u8>, Bytes)>,
-        table: &StateTableInner<S, SD>,
-        conflict_behavior: ConflictBehavior,
-        metrics: &MaterializeMetrics,
-        toastable_column_indices: Option<&[usize]>,
-    ) -> StreamExecutorResult<ChangeBuffer> {
-        assert_matches!(conflict_behavior, checked_conflict_behaviors!());
-
-        let key_set: HashSet<Box<[u8]>> = row_ops
-            .iter()
-            .map(|(_, k, _)| k.as_slice().into())
-            .collect();
-
-        // Populate the LRU cache with the keys in input chunk.
-        // For new keys, row values are set to None.
-        self.fetch_keys(
-            key_set.iter().map(|v| v.deref()),
-            table,
-            conflict_behavior,
-            metrics,
-        )
-        .await?;
-
-        let mut change_buffer = ChangeBuffer::new();
-        let row_serde = self.row_serde.clone();
-        let version_column_indices = self.version_column_indices.clone();
-        for (op, key, row) in row_ops {
-            match op {
-                Op::Insert | Op::UpdateInsert => {
-                    let Some(old_row) = self.get_expected(&key) else {
-                        // not exists before, meaning no conflict, simply insert
-                        let new_row_deserialized =
-                            row_serde.deserializer.deserialize(row.clone())?;
-                        change_buffer.insert(key.clone(), new_row_deserialized);
-                        self.lru_cache.put(key, Some(CompactedRow { row }));
-                        continue;
-                    };
-
-                    // now conflict happens, handle it according to the specified behavior
-                    match conflict_behavior {
-                        ConflictBehavior::Overwrite => {
-                            let old_row_deserialized =
-                                row_serde.deserializer.deserialize(old_row.row.clone())?;
-                            let new_row_deserialized =
-                                row_serde.deserializer.deserialize(row.clone())?;
-
-                            let need_overwrite = if !version_column_indices.is_empty() {
-                                versions_are_newer_or_equal(
-                                    &old_row_deserialized,
-                                    &new_row_deserialized,
-                                    &version_column_indices,
-                                )
-                            } else {
-                                // no version column specified, just overwrite
-                                true
-                            };
-
-                            if need_overwrite {
-                                if let Some(toastable_indices) = toastable_column_indices {
-                                    // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
-                                    let final_row = handle_toast_columns_for_postgres_cdc(
-                                        &old_row_deserialized,
-                                        &new_row_deserialized,
-                                        toastable_indices,
-                                    );
-
-                                    change_buffer.update(
-                                        key.clone(),
-                                        old_row_deserialized,
-                                        final_row.clone(),
-                                    );
-                                    let final_row_bytes =
-                                        Bytes::from(row_serde.serializer.serialize(final_row));
-                                    self.lru_cache.put(
-                                        key.clone(),
-                                        Some(CompactedRow {
-                                            row: final_row_bytes,
-                                        }),
-                                    );
-                                } else {
-                                    // No TOAST columns, use the original row bytes directly to avoid unnecessary serialization
-                                    change_buffer.update(
-                                        key.clone(),
-                                        old_row_deserialized,
-                                        new_row_deserialized,
-                                    );
-                                    self.lru_cache
-                                        .put(key.clone(), Some(CompactedRow { row: row.clone() }));
-                                }
-                            };
-                        }
-                        ConflictBehavior::IgnoreConflict => {
-                            // ignore conflict, do nothing
-                        }
-                        ConflictBehavior::DoUpdateIfNotNull => {
-                            // In this section, we compare the new row and old row column by column and perform `DoUpdateIfNotNull` replacement.
-
-                            let old_row_deserialized =
-                                row_serde.deserializer.deserialize(old_row.row.clone())?;
-                            let new_row_deserialized =
-                                row_serde.deserializer.deserialize(row.clone())?;
-                            let need_overwrite = if !version_column_indices.is_empty() {
-                                versions_are_newer_or_equal(
-                                    &old_row_deserialized,
-                                    &new_row_deserialized,
-                                    &version_column_indices,
-                                )
-                            } else {
-                                true
-                            };
-
-                            if need_overwrite {
-                                let mut row_deserialized_vec =
-                                    old_row_deserialized.clone().into_inner().into_vec();
-                                replace_if_not_null(
-                                    &mut row_deserialized_vec,
-                                    new_row_deserialized.clone(),
-                                );
-                                let mut updated_row = OwnedRow::new(row_deserialized_vec);
-
-                                // Apply TOAST column fix for CDC tables with TOAST columns
-                                if let Some(toastable_indices) = toastable_column_indices {
-                                    // Note: we need to use old_row_deserialized again, but it was moved above
-                                    // So we re-deserialize the old row
-                                    let old_row_deserialized_again =
-                                        row_serde.deserializer.deserialize(old_row.row.clone())?;
-                                    updated_row = handle_toast_columns_for_postgres_cdc(
-                                        &old_row_deserialized_again,
-                                        &updated_row,
-                                        toastable_indices,
-                                    );
-                                }
-
-                                change_buffer.update(
-                                    key.clone(),
-                                    old_row_deserialized,
-                                    updated_row.clone(),
-                                );
-                                let updated_row_bytes =
-                                    Bytes::from(row_serde.serializer.serialize(updated_row));
-                                self.lru_cache.put(
-                                    key.clone(),
-                                    Some(CompactedRow {
-                                        row: updated_row_bytes,
-                                    }),
-                                );
-                            }
-                        }
-                        _ => unreachable!(),
-                    };
-                }
-
-                Op::UpdateDelete
-                    if matches!(
-                        conflict_behavior,
-                        ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull
-                    ) =>
-                {
-                    // For `UpdateDelete`s, we skip processing them but directly handle the following `UpdateInsert`
-                    // instead. This is because...
-                    //
-                    // - For `Overwrite`, we only care about the new row.
-                    // - For `DoUpdateIfNotNull`, we don't want the whole row to be deleted, but instead perform
-                    //   column-wise replacement when handling the `UpdateInsert`.
-                    //
-                    // However, for `IgnoreConflict`, we still need to delete the old row first, otherwise the row
-                    // cannot be updated at all.
-                }
-
-                Op::Delete | Op::UpdateDelete => {
-                    if let Some(old_row) = self.get_expected(&key) {
-                        let old_row_deserialized =
-                            row_serde.deserializer.deserialize(old_row.row.clone())?;
-                        change_buffer.delete(key.clone(), old_row_deserialized);
-                        // put a None into the cache to represent deletion
-                        self.lru_cache.put(key, None);
-                    } else {
-                        // delete a non-existent value
-                        // this is allowed in the case of mview conflict, so ignore
-                    }
-                }
-            }
-        }
-        Ok(change_buffer)
-    }
-
-    async fn fetch_keys<'a, S: StateStore>(
-        &mut self,
-        keys: impl Iterator<Item = &'a [u8]>,
-        table: &StateTableInner<S, SD>,
-        conflict_behavior: ConflictBehavior,
-        metrics: &MaterializeMetrics,
-    ) -> StreamExecutorResult<()> {
-        let mut futures = vec![];
-        for key in keys {
-            metrics.materialize_cache_total_count.inc();
-
-            if self.lru_cache.contains(key) {
-                if self.lru_cache.get(key).unwrap().is_some() {
-                    metrics.materialize_data_exist_count.inc();
-                }
-                metrics.materialize_cache_hit_count.inc();
-                continue;
-            }
-            futures.push(async {
-                let key_row = table.pk_serde().deserialize(key).unwrap();
-                let row = table.get_row(key_row).await?.map(CompactedRow::from);
-                StreamExecutorResult::Ok((key.to_vec(), row))
-            });
-        }
-
-        let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
-        while let Some(result) = buffered.next().await {
-            let (key, row) = result?;
-            if row.is_some() {
-                metrics.materialize_data_exist_count.inc();
-            }
-            // for keys that are not in the table, `value` is None
-            match conflict_behavior {
-                checked_conflict_behaviors!() => self.lru_cache.put(key, row),
-                _ => unreachable!(),
-            };
-        }
-
-        Ok(())
-    }
-
-    fn get_expected(&mut self, key: &[u8]) -> &CacheValue {
-        self.lru_cache.get(key).unwrap_or_else(|| {
-            panic!(
-                "the key {:?} has not been fetched in the materialize executor's cache ",
-                key
-            )
-        })
-    }
-
-    fn evict(&mut self) {
-        self.lru_cache.evict()
-    }
-}
-
-/// Replace columns in an existing row with the corresponding columns in a replacement row, if the
-/// column value in the replacement row is not null.
-///
-/// # Example
-///
-/// ```ignore
-/// let mut row = vec![Some(1), None, Some(3)];
-/// let replacement = vec![Some(10), Some(20), None];
-/// replace_if_not_null(&mut row, replacement);
-/// ```
-///
-/// After the call, `row` will be `[Some(10), Some(20), Some(3)]`.
-fn replace_if_not_null(row: &mut Vec<Option<ScalarImpl>>, replacement: OwnedRow) {
-    for (old_col, new_col) in row.iter_mut().zip_eq_fast(replacement) {
-        if let Some(new_value) = new_col {
-            *old_col = Some(new_value);
-        }
-    }
-}
-
-/// Compare multiple version columns lexicographically.
-/// Returns true if `new_row` has a newer or equal version compared to `old_row`.
-fn versions_are_newer_or_equal(
-    old_row: &OwnedRow,
-    new_row: &OwnedRow,
-    version_column_indices: &[u32],
-) -> bool {
-    if version_column_indices.is_empty() {
-        // No version columns specified, always consider new version as newer
-        return true;
-    }
-
-    for &idx in version_column_indices {
-        let old_value = old_row.index(idx as usize);
-        let new_value = new_row.index(idx as usize);
-
-        match cmp_datum(old_value, new_value, OrderType::ascending_nulls_first()) {
-            std::cmp::Ordering::Less => return true,     // new is newer
-            std::cmp::Ordering::Greater => return false, // old is newer
-            std::cmp::Ordering::Equal => continue,       // equal, check next column
-        }
-    }
-
-    // All version columns are equal, consider new version as equal (should overwrite)
-    true
 }
 
 #[cfg(test)]
