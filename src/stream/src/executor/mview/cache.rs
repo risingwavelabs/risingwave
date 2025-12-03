@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::HashSet;
 use std::ops::Deref as _;
 
@@ -32,7 +31,7 @@ use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTableInner;
 use crate::executor::StreamExecutorResult;
-use crate::executor::monitor::MaterializeMetrics;
+use crate::executor::monitor::MaterializeCacheMetrics;
 use crate::task::AtomicU64Ref;
 
 /// A cache for materialize executors.
@@ -40,25 +39,42 @@ pub struct MaterializeCache {
     lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
     row_serde: BasicSerde,
     version_column_indices: Vec<u32>,
+    conflict_behavior: ConflictBehavior,
+    toastable_column_indices: Option<Vec<usize>>,
+    metrics: MaterializeCacheMetrics,
 }
 
 type CacheValue = Option<CompactedRow>;
 type ChangeBuffer = crate::common::change_buffer::ChangeBuffer<Vec<u8>, OwnedRow>;
 
 impl MaterializeCache {
+    /// Create a new `MaterializeCache`.
+    ///
+    /// Returns `None` if the conflict behavior is `NoCheck`.
     pub fn new(
         watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
         version_column_indices: Vec<u32>,
-    ) -> Self {
+        conflict_behavior: ConflictBehavior,
+        toastable_column_indices: Option<Vec<usize>>,
+        materialize_cache_metrics: MaterializeCacheMetrics,
+    ) -> Option<Self> {
+        match conflict_behavior {
+            checked_conflict_behaviors!() => {}
+            ConflictBehavior::NoCheck => return None,
+        }
+
         let lru_cache: ManagedLruCache<Vec<u8>, CacheValue> =
             ManagedLruCache::unbounded(watermark_sequence, metrics_info);
-        Self {
+        Some(Self {
             lru_cache,
             row_serde,
             version_column_indices,
-        }
+            conflict_behavior,
+            toastable_column_indices,
+            metrics: materialize_cache_metrics,
+        })
     }
 
     /// First populate the cache from `table`, and then calculate a [`ChangeBuffer`].
@@ -67,12 +83,7 @@ impl MaterializeCache {
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
-        conflict_behavior: ConflictBehavior,
-        metrics: &MaterializeMetrics,
-        toastable_column_indices: Option<&[usize]>,
     ) -> StreamExecutorResult<ChangeBuffer> {
-        assert_matches!(conflict_behavior, checked_conflict_behaviors!());
-
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
@@ -80,21 +91,28 @@ impl MaterializeCache {
 
         // Populate the LRU cache with the keys in input chunk.
         // For new keys, row values are set to None.
-        self.fetch_keys(
-            key_set.iter().map(|v| v.deref()),
-            table,
-            conflict_behavior,
-            metrics,
-        )
-        .await?;
+        self.fetch_keys(key_set.iter().map(|v| v.deref()), table)
+            .await?;
 
         let mut change_buffer = ChangeBuffer::new();
         let row_serde = self.row_serde.clone();
         let version_column_indices = self.version_column_indices.clone();
         for (op, key, row) in row_ops {
+            // Use a macro instead of method to workaround partial borrow.
+            macro_rules! get_expected {
+                () => {
+                    self.lru_cache.get(&key).unwrap_or_else(|| {
+                        panic!(
+                            "the key {:?} has not been fetched in the materialize executor's cache",
+                            key
+                        )
+                    })
+                };
+            }
+
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    let Some(old_row) = self.get_expected(&key) else {
+                    let Some(old_row) = get_expected!() else {
                         // not exists before, meaning no conflict, simply insert
                         let new_row_deserialized =
                             row_serde.deserializer.deserialize(row.clone())?;
@@ -104,7 +122,7 @@ impl MaterializeCache {
                     };
 
                     // now conflict happens, handle it according to the specified behavior
-                    match conflict_behavior {
+                    match self.conflict_behavior {
                         ConflictBehavior::Overwrite => {
                             let old_row_deserialized =
                                 row_serde.deserializer.deserialize(old_row.row.clone())?;
@@ -123,7 +141,7 @@ impl MaterializeCache {
                             };
 
                             if need_overwrite {
-                                if let Some(toastable_indices) = toastable_column_indices {
+                                if let Some(toastable_indices) = &self.toastable_column_indices {
                                     // For TOAST-able columns, replace Debezium's unavailable value placeholder with old row values.
                                     let final_row = toast::handle_toast_columns_for_postgres_cdc(
                                         &old_row_deserialized,
@@ -186,7 +204,7 @@ impl MaterializeCache {
                                 let mut updated_row = OwnedRow::new(row_deserialized_vec);
 
                                 // Apply TOAST column fix for CDC tables with TOAST columns
-                                if let Some(toastable_indices) = toastable_column_indices {
+                                if let Some(toastable_indices) = &self.toastable_column_indices {
                                     // Note: we need to use old_row_deserialized again, but it was moved above
                                     // So we re-deserialize the old row
                                     let old_row_deserialized_again =
@@ -219,7 +237,7 @@ impl MaterializeCache {
 
                 Op::UpdateDelete
                     if matches!(
-                        conflict_behavior,
+                        self.conflict_behavior,
                         ConflictBehavior::Overwrite | ConflictBehavior::DoUpdateIfNotNull
                     ) =>
                 {
@@ -235,7 +253,7 @@ impl MaterializeCache {
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    if let Some(old_row) = self.get_expected(&key) {
+                    if let Some(old_row) = get_expected!() {
                         let old_row_deserialized =
                             row_serde.deserializer.deserialize(old_row.row.clone())?;
                         change_buffer.delete(key.clone(), old_row_deserialized);
@@ -255,18 +273,16 @@ impl MaterializeCache {
         &mut self,
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
-        conflict_behavior: ConflictBehavior,
-        metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
-            metrics.materialize_cache_total_count.inc();
+            self.metrics.materialize_cache_total_count.inc();
 
             if self.lru_cache.contains(key) {
                 if self.lru_cache.get(key).unwrap().is_some() {
-                    metrics.materialize_data_exist_count.inc();
+                    self.metrics.materialize_data_exist_count.inc();
                 }
-                metrics.materialize_cache_hit_count.inc();
+                self.metrics.materialize_cache_hit_count.inc();
                 continue;
             }
             futures.push(async {
@@ -280,10 +296,10 @@ impl MaterializeCache {
         while let Some(result) = buffered.next().await {
             let (key, row) = result?;
             if row.is_some() {
-                metrics.materialize_data_exist_count.inc();
+                self.metrics.materialize_data_exist_count.inc();
             }
             // for keys that are not in the table, `value` is None
-            match conflict_behavior {
+            match self.conflict_behavior {
                 checked_conflict_behaviors!() => self.lru_cache.put(key, row),
                 _ => unreachable!(),
             };
@@ -292,19 +308,12 @@ impl MaterializeCache {
         Ok(())
     }
 
-    fn get_expected(&mut self, key: &[u8]) -> &CacheValue {
-        self.lru_cache.get(key).unwrap_or_else(|| {
-            panic!(
-                "the key {:?} has not been fetched in the materialize executor's cache ",
-                key
-            )
-        })
-    }
-
+    /// Evict the LRU cache entries that are lower than the watermark.
     pub fn evict(&mut self) {
         self.lru_cache.evict()
     }
 
+    /// Clear the LRU cache.
     pub fn clear(&mut self) {
         self.lru_cache.clear()
     }
@@ -357,6 +366,7 @@ fn versions_are_newer_or_equal(
     true
 }
 
+/// TOAST column handling for CDC tables with TOAST columns.
 mod toast {
     use risingwave_common::row::Row as _;
     use risingwave_common::types::DEBEZIUM_UNAVAILABLE_VALUE;

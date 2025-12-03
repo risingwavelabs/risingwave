@@ -79,7 +79,8 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     actor_context: ActorContextRef,
 
-    materialize_cache: MaterializeCache,
+    /// The cache for conflict handling. `None` if conflict behavior is `NoCheck`.
+    materialize_cache: Option<MaterializeCache>,
 
     conflict_behavior: ConflictBehavior,
 
@@ -94,9 +95,6 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     /// No data will be written to hummock table. This Materialize is just a dummy node.
     /// Used for APPEND ONLY table with iceberg engine. All data will be written to iceberg table directly.
     is_dummy_table: bool,
-
-    /// Indices of TOAST-able columns for PostgreSQL CDC tables. None means either non-CDC table or CDC table without TOAST-able columns.
-    toastable_column_indices: Option<Vec<usize>>,
 
     /// Optional refresh arguments and state for refreshable materialized views
     refresh_args: Option<RefreshableMaterializeArgs<S, SD>>,
@@ -271,6 +269,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             actor_context.id,
             actor_context.fragment_id,
         );
+        let cache_metrics = metrics.new_materialize_cache_metrics(
+            table_catalog.id,
+            actor_context.id,
+            actor_context.fragment_id,
+        );
 
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
@@ -289,6 +292,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 metrics_info,
                 row_serde,
                 version_column_indices.clone(),
+                conflict_behavior,
+                toastable_column_indices,
+                cache_metrics,
             ),
             conflict_behavior,
             version_column_indices,
@@ -296,7 +302,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             may_have_downstream,
             subscriber_ids,
             metrics: mv_metrics,
-            toastable_column_indices,
             refresh_args,
             local_barrier_manager,
         }
@@ -390,7 +395,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     #[for_await]
                     '_normal_ingest: for msg in input.by_ref() {
                         let msg = msg?;
-                        self.materialize_cache.evict();
+                        if let Some(cache) = &mut self.materialize_cache {
+                            cache.evict();
+                        }
 
                         match msg {
                             Message::Watermark(w) => {
@@ -494,16 +501,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             })
                                             .collect_vec();
 
-                                        let change_buffer = self
-                                            .materialize_cache
-                                            .handle(
-                                                row_ops,
-                                                &self.state_table,
-                                                self.conflict_behavior,
-                                                &self.metrics,
-                                                self.toastable_column_indices.as_deref(),
-                                            )
-                                            .await?;
+                                        let cache = self.materialize_cache.as_mut().unwrap();
+                                        let change_buffer =
+                                            cache.handle(row_ops, &self.state_table).await?;
 
                                         match change_buffer
                                             .into_chunk::<{ cb_kind::RETRACT }>(data_types.clone())
@@ -844,7 +844,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .await?
                         && cache_may_stale
                     {
-                        self.materialize_cache.clear();
+                        if let Some(cache) = &mut self.materialize_cache {
+                            cache.clear();
+                        }
                     }
 
                     // Handle staging table post commit
@@ -1097,8 +1099,9 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         )
         .await;
 
-        let metrics =
-            StreamingMetrics::unused().new_materialize_metrics(table_id, 1.into(), 2.into());
+        let unused = StreamingMetrics::unused();
+        let metrics = unused.new_materialize_metrics(table_id, 1.into(), 2.into());
+        let cache_metrics = unused.new_materialize_cache_metrics(table_id, 1.into(), 2.into());
 
         Self {
             input,
@@ -1111,11 +1114,13 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 MetricsInfo::for_test(),
                 row_serde,
                 vec![],
+                conflict_behavior,
+                None,
+                cache_metrics,
             ),
             conflict_behavior,
             version_column_indices: vec![],
             is_dummy_table: false,
-            toastable_column_indices: None,
             may_have_downstream: true,
             subscriber_ids: HashSet::new(),
             metrics,
