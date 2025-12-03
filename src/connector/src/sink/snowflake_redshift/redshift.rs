@@ -464,9 +464,16 @@ impl RedshiftSinkCommitter {
         })
     }
 
-    async fn delete_manifests_from_s3(s3_config: &S3Common, manifest_dir: &str) -> Result<()> {
+    async fn delete_manifests_from_s3(s3_config: &S3Common,table: &str, manifest_dir: &str) -> Result<()> {
         let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_config)?;
-        s3_operator.remove_all(manifest_dir).await?;
+        let mut base_path = s3_config.path.clone().unwrap_or("".to_owned());
+        if !base_path.ends_with('/') {
+            base_path.push('/');
+        }
+        base_path.push_str(&format!("{}/", table));
+        base_path.push_str(manifest_dir);
+        let all_path = format!("s3://{}/{}", s3_config.bucket_name, base_path);
+        s3_operator.remove_all(&all_path).await?;
         Ok(())
     }
 
@@ -495,6 +502,8 @@ impl RedshiftSinkCommitter {
         Ok(manifest_path)
     }
 
+    
+
     pub async fn copy_into_from_s3_to_redshift(
         client: &JdbcJniClient,
         config: &RedShiftConfig,
@@ -502,6 +511,14 @@ impl RedshiftSinkCommitter {
         is_append_only: bool,
         manifest_dir: &str,
     ) -> Result<()> {
+        let mut base_path = s3_inner.path.clone().unwrap_or("".to_owned());
+        if !base_path.ends_with('/') {
+            base_path.push('/');
+        }
+        base_path.push_str(&format!("{}/", config.table));
+        base_path.push_str(manifest_dir);
+        let all_path = format!("s3://{}/{}", s3_inner.bucket_name, base_path);
+
         let table = if is_append_only {
             &config.table
         } else {
@@ -514,11 +531,12 @@ impl RedshiftSinkCommitter {
         let copy_into_sql = build_copy_into_sql(
             config.schema.as_deref(),
             table,
-            manifest_dir,
+            &all_path,
             &s3_inner.access,
             &s3_inner.secret,
             &s3_inner.assume_role,
         )?;
+        println!("Executing copy into SQL: {}", copy_into_sql);
         client.execute_sql_sync(vec![copy_into_sql]).await?;
         Ok(())
     }
@@ -563,7 +581,7 @@ impl RedshiftSinkCommitter {
                             manifest_dir_str
                         };
                         Self::copy_into_from_s3_to_redshift(&client, &config,s3_inner, false, &manifest_dir_str).await?;
-                        Self::delete_manifests_from_s3(s3_inner, &manifest_dir_str).await?;
+                        Self::delete_manifests_from_s3(s3_inner,&config.table, &manifest_dir_str).await?;
                         Ok::<(),SinkError>(())
                     }.await {
                         tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
@@ -604,7 +622,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 manifest_dir_str
                 };
                 Self::copy_into_from_s3_to_redshift(&self.client, &self.config,s3_inner, false, &manifest_dir_str).await?;
-                Self::delete_manifests_from_s3(s3_inner, &manifest_dir_str).await?;
+                Self::delete_manifests_from_s3(s3_inner,&self.config.table, &manifest_dir_str).await?;
         };
         Ok(None)
     }

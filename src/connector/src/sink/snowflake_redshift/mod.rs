@@ -244,6 +244,7 @@ pub async fn build_opendal_writer_path(
         create_time.as_secs(),
         "json",
     );
+    println!("Uploading to S3 path: {:?}", object_name);
     let all_path = format!("s3://{}/{}", s3_config.bucket_name, object_name);
     Ok((operator.writer_with(&object_name).concurrent(8).await?, all_path))
 }
