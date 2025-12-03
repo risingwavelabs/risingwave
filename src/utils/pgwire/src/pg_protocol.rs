@@ -698,6 +698,11 @@ where
         session.check_idle_in_transaction_timeout()?;
         // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
         let _exec_context_guard = session.init_exec_context(truncated_sql.into());
+
+        tracing::info!(
+            target: PGWIRE_QUERY_LOG,
+            "start to process query",
+        );
         self.inner_process_query_msg(sql, session.clone()).await
     }
 
