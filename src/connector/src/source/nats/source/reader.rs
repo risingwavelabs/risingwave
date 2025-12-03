@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 
 use super::message::NatsMessage;
 use super::{NatsOffset, NatsSplit};
@@ -37,6 +38,9 @@ pub struct NatsSplitReader {
     #[expect(dead_code)]
     start_position: NatsOffset,
     split_id: SplitId,
+    // Tracks the number of active NATS connections. When this guard is dropped,
+    // the metric is automatically decremented.
+    _connection_metric: LabelGuardedIntGauge,
 }
 
 #[async_trait]
@@ -95,6 +99,18 @@ impl SplitReader for NatsSplitReader {
             )
             .await?;
 
+        // Create a guarded metric to track the number of NATS connections.
+        // The metric is incremented here and will be automatically decremented when dropped.
+        let connection_metric = source_ctx
+            .metrics
+            .nats_source_connections
+            .with_guarded_label_values(&[
+                &source_ctx.source_id.to_string(),
+                &source_ctx.source_name,
+                &source_ctx.fragment_id.to_string(),
+            ]);
+        connection_metric.inc();
+
         Ok(Self {
             consumer,
             properties,
@@ -102,6 +118,7 @@ impl SplitReader for NatsSplitReader {
             source_ctx,
             start_position,
             split_id,
+            _connection_metric: connection_metric,
         })
     }
 
