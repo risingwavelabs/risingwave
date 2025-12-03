@@ -153,37 +153,7 @@ pub struct SnowflakeRedshiftSinkS3Writer {
     augmented_row: AugmentedRow,
     opendal_writer_path: Option<(opendal::Writer, String)>,
     executor_id: u64,
-    target_table_name: Option<String>,
-}
-
-pub async fn build_opendal_writer_path(
-    s3_config: &S3Common,
-    executor_id: u64,
-    operator: &Operator,
-    target_table_name: &Option<String>,
-) -> Result<(opendal::Writer, String)> {
-    let mut base_path = s3_config.path.clone().unwrap_or("".to_owned());
-    if !base_path.ends_with('/') {
-        base_path.push('/');
-    }
-    if let Some(table_name) = &target_table_name {
-        base_path.push_str(&format!("{}/", table_name));
-    }
-    let create_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
-    let object_name = format!(
-        "{}{}_{}.{}",
-        base_path,
-        executor_id,
-        create_time.as_secs(),
-        "json",
-    );
-    let all_path = format!("s3://{}/{}", s3_config.bucket_name, object_name);
-    Ok((
-        operator.writer_with(&object_name).concurrent(8).await?,
-        all_path,
-    ))
+    target_table_name: String,
 }
 
 impl SnowflakeRedshiftSinkS3Writer {
@@ -192,7 +162,7 @@ impl SnowflakeRedshiftSinkS3Writer {
         schema: Schema,
         is_append_only: bool,
         executor_id: u64,
-        target_table_name: Option<String>,
+        target_table_name: String,
     ) -> Result<Self> {
         let s3_operator = FileSink::<S3Sink>::new_s3_sink(&s3_config)?;
         Ok(Self {
@@ -216,6 +186,7 @@ impl SnowflakeRedshiftSinkS3Writer {
                 &self.s3_config,
                 self.executor_id,
                 &self.s3_operator,
+                None,
                 &self.target_table_name,
             )
             .await?;
@@ -246,6 +217,35 @@ impl SnowflakeRedshiftSinkS3Writer {
             Ok(None)
         }
     }
+}
+
+pub async fn build_opendal_writer_path(
+    s3_config: &S3Common,
+    executor_id: u64,
+    operator: &Operator,
+    dir: Option<&str>,
+    target_table_name: &str,
+) -> Result<(opendal::Writer, String)> {
+    let mut base_path = s3_config.path.clone().unwrap_or("".to_owned());
+    if !base_path.ends_with('/') {
+        base_path.push('/');
+    }
+    base_path.push_str(&format!("{}/", target_table_name));
+    if let Some(dir) = dir {
+        base_path.push_str(&format!("{}/", dir));
+    }
+    let create_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    let object_name = format!(
+        "{}{}_{}.{}",
+        base_path,
+        executor_id,
+        create_time.as_secs(),
+        "json",
+    );
+    let all_path = format!("s3://{}/{}", s3_config.bucket_name, object_name);
+    Ok((operator.writer_with(&object_name).concurrent(8).await?, all_path))
 }
 
 #[derive(Debug, Clone)]

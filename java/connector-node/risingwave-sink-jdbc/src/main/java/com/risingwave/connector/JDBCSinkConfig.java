@@ -17,8 +17,8 @@
 package com.risingwave.connector;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
 import java.sql.Connection;
 import java.sql.SQLException;

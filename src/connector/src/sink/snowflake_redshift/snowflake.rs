@@ -542,7 +542,11 @@ impl SnowflakeSinkWriter {
                 schema,
                 is_append_only,
                 executor_id,
-                config.snowflake_target_table_name,
+                config.snowflake_target_table_name.ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "table.name is required for Snowflake S3 sink",
+                    ))
+                })?,
             )?;
             Ok(Self::S3(s3_writer))
         } else {
