@@ -17,7 +17,8 @@ use std::ops::Deref as _;
 
 use bytes::Bytes;
 use futures::{StreamExt as _, stream};
-use risingwave_common::array::Op;
+use itertools::Itertools as _;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ConflictBehavior, checked_conflict_behaviors};
 use risingwave_common::row::{CompactedRow, OwnedRow, Row as _};
 use risingwave_common::types::ScalarImpl;
@@ -79,7 +80,47 @@ impl MaterializeCache {
 
     /// First populate the cache from `table`, and then calculate a [`ChangeBuffer`].
     /// `table` will not be written in this method.
-    pub async fn handle<S: StateStore, SD: ValueRowSerde>(
+    pub async fn handle_new<S: StateStore, SD: ValueRowSerde>(
+        &mut self,
+        chunk: StreamChunk,
+        table: &StateTableInner<S, SD>,
+    ) -> StreamExecutorResult<ChangeBuffer> {
+        if table.value_indices().is_some() {
+            // TODO(st1page): when materialize partial columns(), we should
+            // construct some columns in the pk
+            unimplemented!("materialize cache cannot handle conflicts with partial table values");
+        };
+
+        let (data_chunk, ops) = chunk.clone().into_parts();
+        let values = data_chunk.serialize();
+
+        let key_chunk = data_chunk.project(table.pk_indices());
+
+        let pks = {
+            let mut pks = vec![vec![]; data_chunk.capacity()];
+            key_chunk
+                .rows_with_holes()
+                .zip_eq_fast(pks.iter_mut())
+                .for_each(|(r, vnode_and_pk)| {
+                    if let Some(r) = r {
+                        table.pk_serde().serialize(r, vnode_and_pk);
+                    }
+                });
+            pks
+        };
+        let (_, vis) = key_chunk.into_parts();
+        let row_ops = ops
+            .iter()
+            .zip_eq_fast(pks.into_iter())
+            .zip_eq_fast(values.into_iter())
+            .zip_eq_fast(vis.iter())
+            .filter_map(|(((op, k), v), vis)| vis.then_some((*op, k, v)))
+            .collect_vec();
+
+        self.handle_inner(row_ops, table).await
+    }
+
+    async fn handle_inner<S: StateStore, SD: ValueRowSerde>(
         &mut self,
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,

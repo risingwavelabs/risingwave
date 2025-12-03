@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::{ZipEqFast};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -434,19 +434,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             // empty chunk
                                             continue;
                                         }
-                                        let (data_chunk, ops) = chunk.clone().into_parts();
-
-                                        if self.state_table.value_indices().is_some() {
-                                            // TODO(st1page): when materialize partial columns(), we should
-                                            // construct some columns in the pk
-                                            panic!(
-                                                "materialize executor with data check can not handle only materialize partial columns"
-                                            )
-                                        };
-                                        let values = data_chunk.serialize();
-
-                                        let key_chunk =
-                                            data_chunk.project(self.state_table.pk_indices());
 
                                         // For refreshable materialized views, write to staging table during refresh
                                         // Do not use generate_output here.
@@ -476,34 +463,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                             refresh_args.staging_table.try_flush().await?;
                                         }
 
-                                        let pks = {
-                                            let mut pks = vec![vec![]; data_chunk.capacity()];
-                                            key_chunk
-                                                .rows_with_holes()
-                                                .zip_eq_fast(pks.iter_mut())
-                                                .for_each(|(r, vnode_and_pk)| {
-                                                    if let Some(r) = r {
-                                                        self.state_table
-                                                            .pk_serde()
-                                                            .serialize(r, vnode_and_pk);
-                                                    }
-                                                });
-                                            pks
-                                        };
-                                        let (_, vis) = key_chunk.into_parts();
-                                        let row_ops = ops
-                                            .iter()
-                                            .zip_eq_debug(pks.into_iter())
-                                            .zip_eq_debug(values.into_iter())
-                                            .zip_eq_debug(vis.iter())
-                                            .filter_map(|(((op, k), v), vis)| {
-                                                vis.then_some((*op, k, v))
-                                            })
-                                            .collect_vec();
-
                                         let cache = self.materialize_cache.as_mut().unwrap();
                                         let change_buffer =
-                                            cache.handle(row_ops, &self.state_table).await?;
+                                            cache.handle_new(chunk, &self.state_table).await?;
 
                                         match change_buffer
                                             .into_chunk::<{ cb_kind::RETRACT }>(data_types.clone())
