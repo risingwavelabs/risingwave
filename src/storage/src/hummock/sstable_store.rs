@@ -15,7 +15,7 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::ops::{Deref, Range};
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,7 +27,7 @@ use foyer::{
     Cache, CacheBuilder, CacheEntry, EventListener, Hint, HybridCache, HybridCacheBuilder,
     HybridCacheEntry, HybridCacheProperties,
 };
-use futures::{StreamExt, future};
+use futures::{FutureExt, StreamExt, future};
 use prost::Message;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::vector_index::{HnswGraphFileInfo, VectorFileInfo};
@@ -468,57 +468,6 @@ impl SstableStore {
         )))
     }
 
-    async fn fetch_block(
-        store: ObjectStoreRef,
-        object_id: HummockSstableObjectId,
-        data_path: Arc<String>,
-        file_size: u32,
-        range: Range<usize>,
-        uncompressed_capacity: usize,
-    ) -> foyer::Result<Box<Block>> {
-        let block_data = match store
-            .read(&data_path, range.clone())
-            .instrument_await("get_block_response".verbose())
-            .await
-        {
-            Ok(data) => data,
-            Err(e) => {
-                tracing::error!(
-                    "get_block_response meet error when read {:?} from sst-{}, total length: {}",
-                    range,
-                    object_id,
-                    file_size
-                );
-                return Err(foyer::Error::other(HummockError::from(e)));
-            }
-        };
-        let block = Box::new(
-            Block::decode(block_data, uncompressed_capacity).map_err(foyer::Error::other)?,
-        );
-        Ok(block)
-    }
-
-    async fn fetch_block_with_hint(
-        store: ObjectStoreRef,
-        object_id: HummockSstableObjectId,
-        data_path: Arc<String>,
-        file_size: u32,
-        range: Range<usize>,
-        uncompressed_capacity: usize,
-        hint: Hint,
-    ) -> foyer::Result<(Box<Block>, HybridCacheProperties)> {
-        Self::fetch_block(
-            store,
-            object_id,
-            data_path,
-            file_size,
-            range,
-            uncompressed_capacity,
-        )
-        .await
-        .map(|block| (block, HybridCacheProperties::default().with_hint(hint)))
-    }
-
     pub async fn get_block_response(
         &self,
         sst: &Sstable,
@@ -551,18 +500,35 @@ impl SstableStore {
         self.recent_filter
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
 
+        // future: fetch block if hybrid cache miss
+        let fetch_block = async move {
+            let block_data = match store
+                .read(&data_path, range.clone())
+                .instrument_await("get_block_response".verbose())
+                .await
+            {
+                Ok(data) => data,
+                Err(e) => {
+                    tracing::error!(
+                        "get_block_response meet error when read {:?} from sst-{}, total length: {}",
+                        range,
+                        object_id,
+                        file_size
+                    );
+                    return Err(foyer::Error::other(HummockError::from(e)));
+                }
+            };
+            let block = Box::new(
+                Block::decode(block_data, uncompressed_capacity).map_err(foyer::Error::other)?,
+            );
+            Ok(block)
+        };
+
         match policy {
             CachePolicy::Fill(hint) => {
-                let fetch = self.block_cache.get_or_fetch(&idx, move |_| {
-                    Self::fetch_block_with_hint(
-                        store,
-                        object_id,
-                        data_path,
-                        file_size,
-                        range,
-                        uncompressed_capacity,
-                        hint,
-                    )
+                let properties = HybridCacheProperties::default().with_hint(hint);
+                let fetch = self.block_cache.get_or_fetch(&idx, |_| {
+                    fetch_block.map(|res| res.map(|block| (block, properties)))
                 });
                 Ok(BlockResponse::Fetch(fetch))
             }
@@ -577,31 +543,13 @@ impl SstableStore {
                         entry,
                     ))),
                     _ => {
-                        let block = Self::fetch_block(
-                            store,
-                            object_id,
-                            data_path,
-                            file_size,
-                            range,
-                            uncompressed_capacity,
-                        )
-                        .await
-                        .map_err(HummockError::foyer_error)?;
+                        let block = fetch_block.await.map_err(HummockError::foyer_error)?;
                         Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
                     }
                 }
             }
             CachePolicy::Disable => {
-                let block = Self::fetch_block(
-                    store,
-                    object_id,
-                    data_path,
-                    file_size,
-                    range,
-                    uncompressed_capacity,
-                )
-                .await
-                .map_err(HummockError::foyer_error)?;
+                let block = fetch_block.await.map_err(HummockError::foyer_error)?;
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
             }
         }
