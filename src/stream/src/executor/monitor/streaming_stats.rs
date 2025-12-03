@@ -1637,6 +1637,30 @@ impl StreamingMetrics {
         }
     }
 
+    pub fn new_materialize_cache_metrics(
+        &self,
+        table_id: TableId,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+    ) -> MaterializeCacheMetrics {
+        let label_list: &[&str; 3] = &[
+            &actor_id.to_string(),
+            &table_id.to_string(),
+            &fragment_id.to_string(),
+        ];
+        MaterializeCacheMetrics {
+            materialize_cache_hit_count: self
+                .materialize_cache_hit_count
+                .with_guarded_label_values(label_list),
+            materialize_data_exist_count: self
+                .materialize_data_exist_count
+                .with_guarded_label_values(label_list),
+            materialize_cache_total_count: self
+                .materialize_cache_total_count
+                .with_guarded_label_values(label_list),
+        }
+    }
+
     pub fn new_materialize_metrics(
         &self,
         table_id: TableId,
@@ -1649,15 +1673,6 @@ impl StreamingMetrics {
             &fragment_id.to_string(),
         ];
         MaterializeMetrics {
-            materialize_cache_hit_count: self
-                .materialize_cache_hit_count
-                .with_guarded_label_values(label_list),
-            materialize_data_exist_count: self
-                .materialize_data_exist_count
-                .with_guarded_label_values(label_list),
-            materialize_cache_total_count: self
-                .materialize_cache_total_count
-                .with_guarded_label_values(label_list),
             materialize_input_row_count: self
                 .materialize_input_row_count
                 .with_guarded_label_values(label_list),
@@ -1689,10 +1704,13 @@ pub struct SinkExecutorMetrics {
     pub sink_chunk_buffer_size: LabelGuardedIntGauge,
 }
 
-pub struct MaterializeMetrics {
+pub struct MaterializeCacheMetrics {
     pub materialize_cache_hit_count: LabelGuardedIntCounter,
     pub materialize_data_exist_count: LabelGuardedIntCounter,
     pub materialize_cache_total_count: LabelGuardedIntCounter,
+}
+
+pub struct MaterializeMetrics {
     pub materialize_input_row_count: LabelGuardedIntCounter,
     pub materialize_current_epoch: LabelGuardedIntGauge,
 }
