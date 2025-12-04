@@ -96,6 +96,50 @@ use crate::sink::{
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+
+// ============ Helper functions for schema change ============
+
+/// Serialize add_columns information to bytes for storage in metadata
+fn serialize_add_columns(fields: Vec<Field>) -> Result<Vec<u8>> {
+    use prost::Message;
+    use risingwave_pb::plan_common::PbField;
+    
+    // Convert Fields to protobuf format
+    let pb_fields: Vec<PbField> = fields.iter().map(|f| f.to_prost()).collect();
+    
+    // Use protobuf encoding
+    let mut buf = Vec::new();
+    for pb_field in pb_fields {
+        pb_field.encode_length_delimited(&mut buf).map_err(|e| {
+            SinkError::Iceberg(anyhow!(
+                "Failed to encode add_columns: {}",
+                e
+            ))
+        })?;
+    }
+    Ok(buf)
+}
+
+/// Deserialize add_columns information from bytes
+fn deserialize_add_columns(mut bytes: &[u8]) -> Result<Vec<Field>> {
+    use prost::Message;
+    use risingwave_pb::plan_common::PbField;
+    
+    let mut pb_fields = Vec::new();
+    while !bytes.is_empty() {
+        let pb_field = PbField::decode_length_delimited(&mut bytes).map_err(|e| {
+            SinkError::Iceberg(anyhow!(
+                "Failed to decode add_columns: {}",
+                e
+            ))
+        })?;
+        pb_fields.push(pb_field);
+    }
+    
+    // Convert protobuf format back to Fields
+    let fields: Vec<Field> = pb_fields.iter().map(Field::from_prost).collect();
+    Ok(fields)
+}
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
 pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
@@ -2421,6 +2465,7 @@ mod test {
     use std::collections::BTreeMap;
 
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
@@ -2429,7 +2474,7 @@ mod test {
         COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION,
         ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig,
         SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-        SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+        SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, deserialize_add_columns, serialize_add_columns,
     };
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -2886,5 +2931,52 @@ mod test {
         assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
         assert_eq!(iceberg_config.target_file_size_mb, Some(256));
         assert_eq!(iceberg_config.compaction_type, Some("full".to_owned()));
+    }
+
+    #[test]
+    fn test_serialize_deserialize_add_columns() {
+        use risingwave_common::types::DataType;
+
+        // Test with empty vec
+        let empty_fields: Vec<Field> = vec![];
+        let serialized = serialize_add_columns(empty_fields.clone()).unwrap();
+        let deserialized = deserialize_add_columns(serialized).unwrap();
+        assert_eq!(deserialized, empty_fields);
+
+        // Test with single field
+        let single_field = vec![Field::new("v2", DataType::Int32)];
+        let serialized = serialize_add_columns(single_field.clone()).unwrap();
+        let deserialized = deserialize_add_columns(serialized).unwrap();
+        assert_eq!(deserialized.len(), 1);
+        assert_eq!(deserialized[0].name, "v2");
+        assert_eq!(deserialized[0].data_type, DataType::Int32);
+
+        // Test with multiple fields of different types
+        let multi_fields = vec![
+            Field::new("v2", DataType::Int32),
+            Field::new("v3", DataType::Varchar),
+            Field::new("v4", DataType::Timestamptz),
+        ];
+        let serialized = serialize_add_columns(multi_fields.clone()).unwrap();
+        let deserialized = deserialize_add_columns(serialized).unwrap();
+        assert_eq!(deserialized.len(), 3);
+        assert_eq!(deserialized[0].name, "v2");
+        assert_eq!(deserialized[1].name, "v3");
+        assert_eq!(deserialized[2].name, "v4");
+        assert_eq!(deserialized[0].data_type, DataType::Int32);
+        assert_eq!(deserialized[1].data_type, DataType::Varchar);
+        assert_eq!(deserialized[2].data_type, DataType::Timestamptz);
+    }
+
+    #[test]
+    fn test_deserialize_invalid_bytes() {
+        // Test with invalid JSON
+        let invalid_bytes = vec![0xFF, 0xFE, 0xFD];
+        let result = deserialize_add_columns(invalid_bytes);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Failed to deserialize add_columns"));
     }
 }
