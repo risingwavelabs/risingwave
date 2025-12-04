@@ -106,7 +106,9 @@ mod upstream {
     use super::*;
 
     /// Trait unifying operations on [`SingletonUpstream`] and [`MergeUpstream`].
-    pub trait Upstream: Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin {
+    pub trait Upstream:
+        Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin + Send + 'static
+    {
         fn upstream_input_ids(&self) -> impl Iterator<Item = ActorId> + '_;
         fn flush_buffered_watermarks(&mut self);
         fn update(&mut self, to_add: Vec<BoxedActorInput>, to_remove: &HashSet<ActorId>);
@@ -155,10 +157,10 @@ mod upstream {
         }
     }
 }
+use upstream::Upstream;
 
-/// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
-/// will be stopped on barrier.
-pub struct MergeExecutor<U = MergeUpstream> {
+/// The core of `MergeExecutor` and `ReceiverExecutor`.
+pub struct MergeExecutorInner<U> {
     /// The context of the actor.
     actor_context: ActorContextRef,
 
@@ -179,7 +181,7 @@ pub struct MergeExecutor<U = MergeUpstream> {
     barrier_rx: mpsc::UnboundedReceiver<Barrier>,
 }
 
-impl<U> MergeExecutor<U> {
+impl<U> MergeExecutorInner<U> {
     pub fn new(
         ctx: ActorContextRef,
         fragment_id: FragmentId,
@@ -200,6 +202,9 @@ impl<U> MergeExecutor<U> {
         }
     }
 }
+
+/// `MergeExecutor` merges data from multiple upstream actors and aligns them with barriers.
+pub type MergeExecutor = MergeExecutorInner<MergeUpstream>;
 
 impl MergeExecutor {
     #[cfg(test)]
@@ -272,9 +277,9 @@ impl MergeExecutor {
     }
 }
 
-impl<U> MergeExecutor<U>
+impl<U> MergeExecutorInner<U>
 where
-    U: upstream::Upstream,
+    U: Upstream,
 {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub(crate) async fn execute_inner(mut self: Box<Self>) {
@@ -363,7 +368,10 @@ where
     }
 }
 
-impl Execute for MergeExecutor {
+impl<U> Execute for MergeExecutorInner<U>
+where
+    U: Upstream,
+{
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
