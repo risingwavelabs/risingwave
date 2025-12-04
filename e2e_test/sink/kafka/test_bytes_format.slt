@@ -91,7 +91,7 @@ select data from t_source_bytes order by data;
 ----
 \x00112233
 \xcafebabe
-\xdeadbeef
+\xdeadbe3f
 
 
 # Clean up
