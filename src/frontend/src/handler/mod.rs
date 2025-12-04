@@ -1355,10 +1355,13 @@ pub async fn handle(
             fragment_ids,
             operation,
         } => match operation {
-            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
+            AlterFragmentOperation::SetBackfillRateLimit { rate_limit }
+            | AlterFragmentOperation::SetSourceRateLimit { rate_limit }
+            | AlterFragmentOperation::SetDmlRateLimit { rate_limit }
+            | AlterFragmentOperation::SetSinkRateLimit { rate_limit } => {
                 let [fragment_id] = fragment_ids.as_slice() else {
                     return Err(ErrorCode::InvalidInputSyntax(
-                        "ALTER FRAGMENT ... SET RATE_LIMIT supports exactly one fragment id"
+                        "ALTER FRAGMENT ... SET rate limit supports exactly one fragment id"
                             .to_owned(),
                     )
                     .into());

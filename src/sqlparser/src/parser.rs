@@ -3864,34 +3864,23 @@ impl Parser<'_> {
             }
             let parallelism = self.parse_set_variable()?;
             AlterFragmentOperation::SetParallelism { parallelism }
+        } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
+            AlterFragmentOperation::SetBackfillRateLimit { rate_limit }
+        } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
+            AlterFragmentOperation::SetSourceRateLimit { rate_limit }
+        } else if let Some(rate_limit) = self.parse_alter_dml_rate_limit()? {
+            AlterFragmentOperation::SetDmlRateLimit { rate_limit }
+        } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
+            AlterFragmentOperation::SetSinkRateLimit { rate_limit }
         } else {
-            let rate_limit = self.parse_alter_fragment_rate_limit()?;
-            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit }
+            return self.expected(
+                "PARALLELISM/BACKFILL_RATE_LIMIT/SOURCE_RATE_LIMIT/DML_RATE_LIMIT/SINK_RATE_LIMIT after SET",
+            );
         };
         Ok(Statement::AlterFragment {
             fragment_ids,
             operation,
         })
-    }
-
-    fn parse_alter_fragment_rate_limit(&mut self) -> ModalResult<i32> {
-        if !self.parse_word("RATE_LIMIT") {
-            return self.expected("expected RATE_LIMIT after SET");
-        }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after RATE_LIMIT");
-        }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
-        } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(rate_limit)
     }
 
     /// Parse a copy statement

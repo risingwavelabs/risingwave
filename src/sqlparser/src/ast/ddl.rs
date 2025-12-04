@@ -304,7 +304,10 @@ pub enum AlterSecretOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterFragmentOperation {
-    AlterBackfillRateLimit { rate_limit: i32 },
+    SetBackfillRateLimit { rate_limit: i32 },
+    SetSourceRateLimit { rate_limit: i32 },
+    SetDmlRateLimit { rate_limit: i32 },
+    SetSinkRateLimit { rate_limit: i32 },
     SetParallelism { parallelism: SetVariableValue },
 }
 
@@ -729,8 +732,17 @@ impl fmt::Display for AlterColumnOperation {
 impl fmt::Display for AlterFragmentOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
+            AlterFragmentOperation::SetBackfillRateLimit { rate_limit } => {
                 write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterFragmentOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterFragmentOperation::SetDmlRateLimit { rate_limit } => {
+                write!(f, "SET DML_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterFragmentOperation::SetSinkRateLimit { rate_limit } => {
+                write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
             }
             AlterFragmentOperation::SetParallelism { parallelism } => {
                 write!(f, "SET PARALLELISM TO {}", parallelism)
