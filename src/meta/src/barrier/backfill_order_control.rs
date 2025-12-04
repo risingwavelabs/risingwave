@@ -204,4 +204,47 @@ impl BackfillOrderState {
     pub fn get_locality_fragment_state_table_mapping(&self) -> &HashMap<FragmentId, Vec<TableId>> {
         &self.locality_fragment_state_table_mapping
     }
+
+    /// Refresh actor mapping after reschedule and return newly scheduled fragments.
+    pub fn refresh_actors(
+        &mut self,
+        fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
+        done_actors: &HashSet<ActorId>,
+    ) -> Vec<FragmentId> {
+        self.actor_to_fragment_id = fragment_actors
+            .iter()
+            .flat_map(|(fragment_id, actors)| {
+                actors.iter().map(|actor_id| (*actor_id, *fragment_id))
+            })
+            .collect();
+
+        for node in self
+            .current_backfill_nodes
+            .values_mut()
+            .chain(self.remaining_backfill_nodes.values_mut())
+        {
+            if let Some(actors) = fragment_actors.get(&node.fragment_id) {
+                node.remaining_actors = actors
+                    .iter()
+                    .filter(|actor_id| !done_actors.contains(actor_id))
+                    .copied()
+                    .collect();
+            } else {
+                node.remaining_actors.clear();
+            }
+        }
+
+        let finished_fragments: Vec<_> = self
+            .current_backfill_nodes
+            .iter()
+            .filter(|(_, node)| node.remaining_actors.is_empty())
+            .map(|(fragment_id, _)| *fragment_id)
+            .collect();
+
+        let mut newly_scheduled = vec![];
+        for fragment_id in finished_fragments {
+            newly_scheduled.extend(self.finish_fragment(fragment_id));
+        }
+        newly_scheduled
+    }
 }

@@ -575,6 +575,21 @@ impl InflightDatabaseInfo {
                 }
             }
         }
+        if let Some(Command::RescheduleFragment { reschedules, .. }) = command {
+            let mut touched_jobs = HashSet::new();
+            for fragment_id in reschedules.keys() {
+                if let Some(job_id) = self.fragment_location.get(fragment_id) {
+                    touched_jobs.insert(*job_id);
+                }
+            }
+            for job_id in touched_jobs {
+                if let Some(job) = self.jobs.get_mut(&job_id)
+                    && let CreateStreamingJobStatus::Creating(tracker) = &mut job.status
+                {
+                    tracker.refresh_after_reschedule(&job.fragment_infos, version_stats);
+                }
+            }
+        }
         for progress in resps.iter().flat_map(|resp| &resp.create_mview_progress) {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
                 warn!(

@@ -18,7 +18,6 @@ use std::sync::Arc;
 use await_tree::span;
 use futures::future::join_all;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, SinkId};
@@ -658,26 +657,6 @@ impl GlobalStreamManager {
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
-
-        let background_jobs = self
-            .metadata_manager
-            .list_background_creating_jobs()
-            .await?;
-
-        if !background_jobs.is_empty() {
-            let related_jobs = self
-                .scale_controller
-                .resolve_related_no_shuffle_jobs(&background_jobs)
-                .await?;
-
-            if related_jobs.contains(&job_id) {
-                bail!(
-                    "Cannot alter the job {} because the related job {:?} is currently being created",
-                    job_id,
-                    background_jobs,
-                );
-            }
-        }
 
         let worker_nodes = self
             .metadata_manager

@@ -817,18 +817,23 @@ impl GlobalStreamManager {
             .await?;
 
         let skipped_jobs = if !background_streaming_jobs.is_empty() {
-            let jobs = self
+            let background_jobs: HashSet<_> = background_streaming_jobs.iter().copied().collect();
+            let related_jobs = self
                 .scale_controller
                 .resolve_related_no_shuffle_jobs(&background_streaming_jobs)
                 .await?;
 
+            let jobs_to_skip = related_jobs
+                .difference(&background_jobs)
+                .copied()
+                .collect::<HashSet<_>>();
             tracing::info!(
-                "skipping parallelism control of background jobs {:?} and associated jobs {:?}",
+                "skipping parallelism control of jobs {:?} because creating jobs {:?} are backfilling",
+                jobs_to_skip,
                 background_streaming_jobs,
-                jobs
             );
 
-            jobs
+            jobs_to_skip
         } else {
             HashSet::new()
         };
