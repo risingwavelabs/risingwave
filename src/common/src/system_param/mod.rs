@@ -543,9 +543,13 @@ mod tests {
         assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_owned())).is_ok());
         assert_eq!(p.checkpoint_frequency, Some(500));
         // Case-insensitive param name.
-        assert!(set_system_param(&mut p, "PAUSE_ON_NEXT_BOOTSTRAP", Some("true".to_owned())).is_ok());
+        assert!(
+            set_system_param(&mut p, "PAUSE_ON_NEXT_BOOTSTRAP", Some("true".to_owned())).is_ok()
+        );
         assert_eq!(p.pause_on_next_bootstrap, Some(true));
-        assert!(set_system_param(&mut p, "Pause_On_Next_Bootstrap", Some("false".to_owned())).is_ok());
+        assert!(
+            set_system_param(&mut p, "Pause_On_Next_Bootstrap", Some("false".to_owned())).is_ok()
+        );
         assert_eq!(p.pause_on_next_bootstrap, Some(false));
     }
 
