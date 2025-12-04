@@ -39,7 +39,7 @@ use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interva
 use crate::sink::file_sink::s3::S3Common;
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::snowflake_redshift::{
-    __OP, __ROW_ID, ConnectorType, SnowflakeRedshiftSinkJdbcWriter, SnowflakeRedshiftSinkS3Writer,
+    __OP, __ROW_ID, SnowflakeRedshiftSinkJdbcWriter, SnowflakeRedshiftSinkS3Writer,
 };
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
@@ -53,6 +53,10 @@ const AUTH_METHOD_PASSWORD: &str = "password";
 const AUTH_METHOD_KEY_PAIR_FILE: &str = "key_pair_file";
 const AUTH_METHOD_KEY_PAIR_OBJECT: &str = "key_pair_object";
 const PROP_AUTH_METHOD: &str = "auth.method";
+
+pub fn build_full_table_name(database: &str, schema_name: &str, table_name: &str) -> String {
+    format!(r#""{}"."{}"."{}""#, database, schema_name, table_name)
+}
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
@@ -72,12 +76,12 @@ pub struct SnowflakeV2Config {
     #[serde(rename = "schema")]
     pub snowflake_schema: Option<String>,
 
-    #[serde(default = "default_schedule")]
+    #[serde(default = "default_target_interval_schedule")]
     #[serde(rename = "write.target.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub writer_target_interval_seconds: u64,
 
-    #[serde(default = "default_schedule")]
+    #[serde(default = "default_intermediate_interval_schedule")]
     #[serde(rename = "write.intermediate.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub write_intermediate_interval_seconds: u64,
@@ -139,8 +143,12 @@ pub struct SnowflakeV2Config {
     pub stage: Option<String>,
 }
 
-fn default_schedule() -> u64 {
+fn default_target_interval_schedule() -> u64 {
     3600 // Default to 1 hour
+}
+
+fn default_intermediate_interval_schedule() -> u64 {
+    1800 // Default to 0.5 hour
 }
 
 fn default_with_s3() -> bool {
@@ -531,6 +539,15 @@ impl SnowflakeSinkWriter {
         param: SinkParam,
     ) -> Result<Self> {
         let schema = param.schema();
+        let database = config.snowflake_database.ok_or_else(|| {
+            SinkError::Config(anyhow!("database is required for Snowflake JDBC sink"))
+        })?;
+        let schema_name = config.snowflake_schema.ok_or_else(|| {
+            SinkError::Config(anyhow!("schema is required for Snowflake JDBC sink"))
+        })?;
+        let table_name = config.snowflake_target_table_name.ok_or_else(|| {
+            SinkError::Config(anyhow!("table.name is required for Snowflake JDBC sink"))
+        })?;
         if config.with_s3 {
             let executor_id = writer_param.executor_id;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
@@ -542,23 +559,15 @@ impl SnowflakeSinkWriter {
                 schema,
                 is_append_only,
                 executor_id,
-                config.snowflake_target_table_name.ok_or_else(|| {
-                    SinkError::Config(anyhow!(
-                        "table.name is required for Snowflake S3 sink",
-                    ))
-                })?,
+                table_name,
             )?;
             Ok(Self::S3(s3_writer))
         } else {
             let jdbc_writer = SnowflakeRedshiftSinkJdbcWriter::new(
-                config.snowflake_database.as_deref(),
-                config.snowflake_schema.as_deref(),
-                &config.snowflake_target_table_name.unwrap_or_default(),
-                config.snowflake_cdc_table_name.as_deref(),
-                ConnectorType::Snowflake,
                 is_append_only,
                 writer_param,
                 param,
+                build_full_table_name(&database, &schema_name, &table_name),
             )
             .await?;
             Ok(Self::Jdbc(jdbc_writer))
@@ -904,7 +913,7 @@ fn build_create_table_sql(
     schema: &Schema,
     need_op_and_row_id: bool,
 ) -> Result<String> {
-    let full_table_name = format!(r#""{}"."{}"."{}""#, database, schema_name, table_name);
+    let full_table_name = build_full_table_name(database, schema_name, table_name);
     let mut columns: Vec<String> = schema
         .fields
         .iter()
@@ -981,7 +990,7 @@ fn build_alter_add_column_sql(
     schema: &str,
     columns: &Vec<(String, String)>,
 ) -> String {
-    let full_table_name = format!(r#""{}"."{}"."{}""#, database, schema, table_name);
+    let full_table_name = build_full_table_name(database, schema, table_name);
     jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns, true)
 }
 

@@ -15,7 +15,6 @@ use std::fmt::Write;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::anyhow;
 use bytes::BytesMut;
 use opendal::Operator;
 use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
@@ -241,18 +240,14 @@ pub async fn build_opendal_writer_path(
         "{}{}_{}.{}",
         base_path,
         executor_id,
-        create_time.as_secs(),
+        create_time.as_millis(),
         "json",
     );
-    println!("Uploading to S3 path: {:?}", object_name);
     let all_path = format!("s3://{}/{}", s3_config.bucket_name, object_name);
-    Ok((operator.writer_with(&object_name).concurrent(8).await?, all_path))
-}
-
-#[derive(Debug, Clone)]
-pub enum ConnectorType {
-    Redshift,
-    Snowflake,
+    Ok((
+        operator.writer_with(&object_name).concurrent(8).await?,
+        all_path,
+    ))
 }
 
 /// Generic JDBC writer for both Redshift and Snowflake sinks
@@ -263,22 +258,16 @@ pub struct SnowflakeRedshiftSinkJdbcWriter {
 
 impl SnowflakeRedshiftSinkJdbcWriter {
     pub async fn new(
-        database: Option<&str>,
-        schema: Option<&str>,
-        target_table: &str,
-        cdc_table: Option<&str>,
-        connector_type: ConnectorType,
         is_append_only: bool,
         writer_param: SinkWriterParam,
         mut param: SinkParam,
+        full_table_name: String,
     ) -> Result<Self> {
         let metrics = SinkWriterMetrics::new(&writer_param);
         let column_descs = &mut param.columns;
 
         // Build full table name based on connector type
-        let full_table_name = if is_append_only {
-            Self::build_full_table_name(database, schema, target_table, connector_type)
-        } else {
+        if !is_append_only {
             // Add CDC-specific columns for upsert mode
             let max_column_id = column_descs
                 .iter()
@@ -296,17 +285,6 @@ impl SnowflakeRedshiftSinkJdbcWriter {
                 ColumnId::new(max_column_id + 2),
                 DataType::Int32,
             ));
-
-            Self::build_full_table_name(
-                database,
-                schema,
-                cdc_table.ok_or_else(|| {
-                    SinkError::Config(anyhow!(
-                        "intermediate.table.name is required for non-append-only sink"
-                    ))
-                })?,
-                connector_type,
-            )
         };
 
         if let Some(schema_name) = param.properties.remove("schema") {
@@ -337,24 +315,6 @@ impl SnowflakeRedshiftSinkJdbcWriter {
             augmented_row: AugmentedChunk::new(0, is_append_only),
             jdbc_sink_writer,
         })
-    }
-
-    /// Build table name with proper quoting based on connector type
-    fn build_full_table_name(
-        database: Option<&str>,
-        schema: Option<&str>,
-        table: &str,
-        connector_type: ConnectorType,
-    ) -> String {
-        match connector_type {
-            ConnectorType::Redshift => redshift::build_full_table_name(schema, table),
-            ConnectorType::Snowflake => {
-                // Snowflake uses database.schema.table format
-                let database = database.unwrap_or_default();
-                let schema = schema.unwrap_or_default();
-                format!(r#""{}"."{}"."{}""#, database, schema, table)
-            }
-        }
     }
 
     pub async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {

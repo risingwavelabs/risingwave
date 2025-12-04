@@ -1070,6 +1070,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("Redshift error: {0}")]
+    Redshift(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<sea_orm::DbErr> for SinkError {

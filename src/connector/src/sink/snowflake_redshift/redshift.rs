@@ -14,7 +14,6 @@
 
 use core::num::NonZero;
 use std::fmt::Write;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -30,12 +29,10 @@ use serde::Deserialize;
 use serde_json::json;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::time::{MissedTickBehavior, interval};
 use tonic::async_trait;
 use tracing::warn;
-use uuid::Uuid;
 use with_options::WithOptions;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
@@ -46,7 +43,7 @@ use crate::sink::file_sink::opendal_sink::FileSink;
 use crate::sink::file_sink::s3::{S3Common, S3Sink};
 use crate::sink::jdbc_jni_client::{self, JdbcJniClient};
 use crate::sink::snowflake_redshift::{
-    __OP, __ROW_ID, ConnectorType, SnowflakeRedshiftSinkJdbcWriter, SnowflakeRedshiftSinkS3Writer,
+    __OP, __ROW_ID, SnowflakeRedshiftSinkJdbcWriter, SnowflakeRedshiftSinkS3Writer,
     build_opendal_writer_path,
 };
 use crate::sink::writer::SinkWriter;
@@ -100,12 +97,12 @@ pub struct RedShiftConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub create_table_if_not_exists: bool,
 
-    #[serde(default = "default_schedule")]
+    #[serde(default = "default_target_interval_schedule")]
     #[serde(rename = "write.target.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub writer_target_interval_seconds: u64,
 
-    #[serde(default = "default_schedule")]
+    #[serde(default = "default_intermediate_interval_schedule")]
     #[serde(rename = "write.intermediate.interval.seconds")]
     #[serde_as(as = "DisplayFromStr")]
     pub write_intermediate_interval_seconds: u64,
@@ -124,8 +121,12 @@ pub struct RedShiftConfig {
     pub s3_inner: Option<S3Common>,
 }
 
-fn default_schedule() -> u64 {
+fn default_target_interval_schedule() -> u64 {
     3600 // Default to 1 hour
+}
+
+fn default_intermediate_interval_schedule() -> u64 {
+    1800 // Default to 0.5 hour
 }
 
 fn default_batch_insert_rows() -> u32 {
@@ -311,14 +312,10 @@ impl RedShiftSinkWriter {
             Ok(Self::S3(s3_writer))
         } else {
             let jdbc_writer = SnowflakeRedshiftSinkJdbcWriter::new(
-                None,
-                config.schema.as_deref(),
-                &config.table,
-                config.cdc_table.as_deref(),
-                ConnectorType::Redshift,
                 is_append_only,
                 writer_param,
                 param,
+                build_full_table_name(config.schema.as_deref(), &config.table),
             )
             .await?;
             Ok(Self::Jdbc(jdbc_writer))
@@ -374,9 +371,6 @@ impl SinkWriter for RedShiftSinkWriter {
     }
 }
 
-fn build_new_manifest_dir() -> String {
-    format!("manifest{}", Uuid::new_v4())
-}
 pub struct RedshiftSinkCommitter {
     config: RedShiftConfig,
     client: JdbcJniClient,
@@ -388,7 +382,6 @@ pub struct RedshiftSinkCommitter {
     is_append_only: bool,
     periodic_task_handle: Option<tokio::task::JoinHandle<()>>,
     shutdown_sender: Option<tokio::sync::mpsc::UnboundedSender<()>>,
-    manifest_dir: Option<Arc<RwLock<String>>>,
 }
 
 impl RedshiftSinkCommitter {
@@ -403,7 +396,7 @@ impl RedshiftSinkCommitter {
         let writer_target_interval_seconds = config.writer_target_interval_seconds;
         let write_intermediate_interval_seconds = config.write_intermediate_interval_seconds;
 
-        let (periodic_task_handle, shutdown_sender, manifest_dir) = match (is_append_only, config.with_s3) {
+        let (periodic_task_handle, shutdown_sender) = match (is_append_only, config.with_s3) {
             (true, true) | (false, _) => {
                 let task_client = config.build_client()?;
                 let config = config.clone();
@@ -423,13 +416,6 @@ impl RedshiftSinkCommitter {
                 } else {
                     None
                 };
-                let manifest_dir = if config.with_s3 {
-                    let manifest_dir = Arc::new(RwLock::new(build_new_manifest_dir()));
-                    Some(manifest_dir)
-                }else {
-                    None
-                };
-                let manifest_dir_clone = manifest_dir.clone();
                 let periodic_task_handle = tokio::spawn(async move {
                     Self::run_periodic_query_task(
                         task_client,
@@ -439,14 +425,14 @@ impl RedshiftSinkCommitter {
                         write_intermediate_interval_seconds,
                         sink_id,
                         config,
-                        manifest_dir_clone,
+                        is_append_only,
                         shutdown_receiver,
                     )
                     .await;
                 });
-                (Some(periodic_task_handle), Some(shutdown_sender),manifest_dir)
+                (Some(periodic_task_handle), Some(shutdown_sender))
             }
-            _ => (None, None,None),
+            _ => (None, None),
         };
 
         Ok(Self {
@@ -460,29 +446,41 @@ impl RedshiftSinkCommitter {
             write_intermediate_interval_seconds,
             periodic_task_handle,
             shutdown_sender,
-            manifest_dir,
         })
     }
 
-    async fn delete_manifests_from_s3(s3_config: &S3Common,table: &str, manifest_dir: &str) -> Result<()> {
-        let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_config)?;
-        let mut base_path = s3_config.path.clone().unwrap_or("".to_owned());
-        if !base_path.ends_with('/') {
-            base_path.push('/');
+    async fn flush_manifest_to_redshift(
+        client: &JdbcJniClient,
+        config: &RedShiftConfig,
+        s3_inner: &S3Common,
+        is_append_only: bool,
+    ) -> Result<()> {
+        let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_inner)?;
+        let mut manifest_path = s3_inner.path.clone().unwrap_or("".to_owned());
+        if !manifest_path.ends_with('/') {
+            manifest_path.push('/');
         }
-        base_path.push_str(&format!("{}/", table));
-        base_path.push_str(manifest_dir);
-        let all_path = format!("s3://{}/{}", s3_config.bucket_name, base_path);
-        s3_operator.remove_all(&all_path).await?;
+        manifest_path.push_str(&format!("{}/", config.table));
+        manifest_path.push_str("manifest/");
+        let manifests = s3_operator
+            .list(&manifest_path)
+            .await?
+            .into_iter()
+            .map(|e| e.path().to_owned())
+            .collect::<Vec<_>>();
+        for manifest in &manifests {
+            Self::copy_into_from_s3_to_redshift(client, config, s3_inner, is_append_only, manifest)
+                .await?;
+        }
+        s3_operator.delete_iter(manifests).await?;
         Ok(())
     }
 
     async fn write_manifest_to_s3(
         s3_inner: &S3Common,
         executor_id: u64,
-        manifest_dir: &str,
         paths: Vec<String>,
-        table: &str
+        table: &str,
     ) -> Result<String> {
         let manifest_entries: Vec<_> = paths
             .into_iter()
@@ -490,34 +488,29 @@ impl RedshiftSinkCommitter {
             .collect();
         let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_inner)?;
         let (mut writer, manifest_path) =
-            build_opendal_writer_path(s3_inner, executor_id, &s3_operator, Some(manifest_dir),table).await?;
+            build_opendal_writer_path(s3_inner, executor_id, &s3_operator, Some("manifest"), table)
+                .await?;
         let manifest_json = json!({ "entries": manifest_entries });
         let mut chunk_buf = BytesMut::new();
         writeln!(chunk_buf, "{}", manifest_json).unwrap();
         writer.write(chunk_buf.freeze()).await?;
-        writer
-            .close()
-            .await
-            .map_err(|e| SinkError::File(e.to_report_string()))?;
+        writer.close().await.map_err(|e| {
+            SinkError::Redshift(anyhow!(
+                "Failed to close manifest writer: {}",
+                e.to_report_string()
+            ))
+        })?;
         Ok(manifest_path)
     }
-
-    
 
     pub async fn copy_into_from_s3_to_redshift(
         client: &JdbcJniClient,
         config: &RedShiftConfig,
         s3_inner: &S3Common,
         is_append_only: bool,
-        manifest_dir: &str,
+        manifest: &str,
     ) -> Result<()> {
-        let mut base_path = s3_inner.path.clone().unwrap_or("".to_owned());
-        if !base_path.ends_with('/') {
-            base_path.push('/');
-        }
-        base_path.push_str(&format!("{}/", config.table));
-        base_path.push_str(manifest_dir);
-        let all_path = format!("s3://{}/{}", s3_inner.bucket_name, base_path);
+        let all_path = format!("s3://{}/{}", s3_inner.bucket_name, manifest);
 
         let table = if is_append_only {
             &config.table
@@ -536,7 +529,6 @@ impl RedshiftSinkCommitter {
             &s3_inner.secret,
             &s3_inner.assume_role,
         )?;
-        println!("Executing copy into SQL: {}", copy_into_sql);
         client.execute_sql_sync(vec![copy_into_sql]).await?;
         Ok(())
     }
@@ -549,7 +541,7 @@ impl RedshiftSinkCommitter {
         write_intermediate_interval_seconds: u64,
         sink_id: SinkId,
         config: RedShiftConfig,
-        manifest_dir: Option<Arc<RwLock<String>>>,
+        is_append_only: bool,
         mut shutdown_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,
     ) {
         let mut copy_timer = interval(Duration::from_secs(write_intermediate_interval_seconds));
@@ -562,8 +554,7 @@ impl RedshiftSinkCommitter {
                 _ = shutdown_receiver.recv() => break,
                 _ = merge_timer.tick(), if merge_into_sql.is_some() => {
                     if let Some(sql) = &merge_into_sql && let Err(e) = client.execute_sql_sync(sql.clone()).await {
-                            tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e);
-
+                        tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e);
                     }
                 },
                 _ = copy_timer.tick(), if need_copy_into => {
@@ -571,17 +562,7 @@ impl RedshiftSinkCommitter {
                         let s3_inner = config.s3_inner.as_ref().ok_or_else(|| {
                             SinkError::Config(anyhow!("S3 configuration is required for redshift s3 sink"))
                         })?;
-                        let manifest_dir = manifest_dir.as_ref().ok_or_else(|| {
-                            SinkError::Config(anyhow!("Manifest directory is not initialized"))
-                        })?;
-                        let manifest_dir_str = {
-                            let mut manifest_dir_guard = manifest_dir.write().await;
-                            let manifest_dir_str = manifest_dir_guard.clone();
-                            *manifest_dir_guard = build_new_manifest_dir();
-                            manifest_dir_str
-                        };
-                        Self::copy_into_from_s3_to_redshift(&client, &config,s3_inner, false, &manifest_dir_str).await?;
-                        Self::delete_manifests_from_s3(s3_inner,&config.table, &manifest_dir_str).await?;
+                        Self::flush_manifest_to_redshift(&client, &config,s3_inner, is_append_only).await?;
                         Ok::<(),SinkError>(())
                     }.await {
                         tracing::error!("Failed to execute copy into task for sink id {}: {}", sink_id, e.as_report());
@@ -611,19 +592,15 @@ impl Drop for RedshiftSinkCommitter {
 #[async_trait]
 impl SinkCommitCoordinator for RedshiftSinkCommitter {
     async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        if let Some(manifest_dir) = &self.manifest_dir {
-            let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
-                SinkError::Config(anyhow!("S3 configuration is required for redshift s3 sink"))
-            })?;
-            let manifest_dir_str = {
-                let mut manifest_dir_guard = manifest_dir.write().await;
-                let manifest_dir_str = manifest_dir_guard.clone();
-                *manifest_dir_guard = build_new_manifest_dir();
-                manifest_dir_str
-                };
-                Self::copy_into_from_s3_to_redshift(&self.client, &self.config,s3_inner, false, &manifest_dir_str).await?;
-                Self::delete_manifests_from_s3(s3_inner,&self.config.table, &manifest_dir_str).await?;
-        };
+        Self::flush_manifest_to_redshift(
+            &self.client,
+            &self.config,
+            self.config.s3_inner.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
+            })?,
+            self.is_append_only,
+        )
+        .await?;
         Ok(None)
     }
 
@@ -633,6 +610,19 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
         metadata: Vec<SinkMetadata>,
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
+        if let Some(handle) = &self.periodic_task_handle {
+            let is_finished = handle.is_finished();
+            if is_finished {
+                let handle = self.periodic_task_handle.take().unwrap();
+                handle.await.map_err(|e| {
+                    SinkError::Redshift(anyhow!(
+                        "Periodic task for sink id {} panicked: {}",
+                        self.sink_id,
+                        e
+                    ))
+                })?;
+            }
+        };
         let paths = metadata
             .into_iter()
             .filter(|m| {
@@ -663,10 +653,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
             })?;
             {
-                let manifest_dir = self.manifest_dir.as_ref().ok_or_else(|| {
-                    SinkError::Config(anyhow!("Manifest directory is not initialized"))
-                })?.read().await;
-                Self::write_manifest_to_s3(s3_inner, 0, &manifest_dir, paths,&self.config.table).await?;
+                Self::write_manifest_to_s3(s3_inner, 0, paths, &self.config.table).await?;
             }
             tracing::info!(
                 "Manifest file written to S3 for sink id {} at epoch {}",
@@ -745,7 +732,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                 let write_intermediate_interval_seconds = self.write_intermediate_interval_seconds;
                 let config = self.config.clone();
                 let sink_id = self.sink_id;
-                let manifest_dir = self.manifest_dir.clone();
+                let is_append_only = self.is_append_only;
                 let periodic_task_handle = tokio::spawn(async move {
                     Self::run_periodic_query_task(
                         client,
@@ -755,7 +742,7 @@ impl SinkCommitCoordinator for RedshiftSinkCommitter {
                         write_intermediate_interval_seconds,
                         sink_id,
                         config,
-                        manifest_dir,
+                        is_append_only,
                         shutdown_receiver,
                     )
                     .await;
