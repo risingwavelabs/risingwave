@@ -816,27 +816,10 @@ impl GlobalStreamManager {
             .list_background_creating_jobs()
             .await?;
 
-        let skipped_jobs = if !background_streaming_jobs.is_empty() {
-            let background_jobs: HashSet<_> = background_streaming_jobs.iter().copied().collect();
-            let related_jobs = self
-                .scale_controller
-                .resolve_related_no_shuffle_jobs(&background_streaming_jobs)
-                .await?;
-
-            let jobs_to_skip = related_jobs
-                .difference(&background_jobs)
-                .copied()
-                .collect::<HashSet<_>>();
-            tracing::info!(
-                "skipping parallelism control of jobs {:?} because creating jobs {:?} are backfilling",
-                jobs_to_skip,
-                background_streaming_jobs,
-            );
-
-            jobs_to_skip
-        } else {
-            HashSet::new()
-        };
+        let unreschedulable_jobs = self
+            .metadata_manager
+            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs)
+            .await?;
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
             .metadata_manager
@@ -856,7 +839,7 @@ impl GlobalStreamManager {
                 idx_a.cmp(idx_b).then(database_a.cmp(database_b))
             })
             .map(|(_, database_id, job_id)| (*database_id, *job_id))
-            .filter(|(_, job_id)| !skipped_jobs.contains(job_id))
+            .filter(|(_, job_id)| !unreschedulable_jobs.contains(job_id))
             .collect_vec();
 
         if job_ids.is_empty() {
