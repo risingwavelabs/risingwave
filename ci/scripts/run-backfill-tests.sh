@@ -207,6 +207,14 @@ test_sink_backfill_recovery() {
   kill_cluster
 }
 
+# Test sink backfill order validation
+test_sink_backfill_order_validation() {
+  echo "--- e2e, test_sink_backfill_order_validation"
+  risedev ci-start ci-backfill
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/test_sink_backfill_order_validation.slt'
+  kill_cluster
+}
+
 test_arrangement_backfill_snapshot_and_upstream_runtime() {
   echo "--- e2e, test_arrangement_backfill_snapshot_and_upstream_runtime, $RUNTIME_CLUSTER_PROFILE"
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
@@ -438,6 +446,7 @@ main() {
   test_backfill_tombstone
   test_replication_with_column_pruning
   test_sink_backfill_recovery
+  test_sink_backfill_order_validation
   test_snapshot_backfill
 
   test_scale_in
