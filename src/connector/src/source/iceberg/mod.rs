@@ -405,7 +405,6 @@ impl IcebergSplitEnumerator {
             .scan()
             .with_filter(predicate)
             .snapshot_id(snapshot_id)
-            .with_delete_file_processing_enabled(true)
             .select(require_names)
             .build()
             .map_err(|e| anyhow!(e))?;
@@ -491,7 +490,6 @@ impl IcebergSplitEnumerator {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
-            .with_delete_file_processing_enabled(true)
             .build()
             .map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
@@ -519,7 +517,6 @@ impl IcebergSplitEnumerator {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
-            .with_delete_file_processing_enabled(true)
             .build()
             .map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
@@ -534,7 +531,7 @@ impl IcebergSplitEnumerator {
                     iceberg::spec::DataContentType::Data => {}
                     iceberg::spec::DataContentType::EqualityDeletes => {
                         if equality_ids.is_empty() {
-                            equality_ids = delete_file.equality_ids.clone();
+                            equality_ids = delete_file.equality_ids.expect("should have equality_ids").clone();
                         } else if equality_ids != delete_file.equality_ids {
                             bail!("The schema of iceberg equality delete file must be consistent");
                         }

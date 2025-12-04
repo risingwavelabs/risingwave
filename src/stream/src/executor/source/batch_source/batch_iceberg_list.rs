@@ -212,8 +212,7 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
             let latest_snapshot = start_snapshot.snapshot_id();
             let snapshot_scan_builder = table
                 .scan()
-                .snapshot_id(latest_snapshot)
-                .with_delete_file_processing_enabled(true);
+                .snapshot_id(latest_snapshot);
             let snapshot_scan = if let Some(ref downstream_columns) = downstream_columns {
                 snapshot_scan_builder.select(downstream_columns)
             } else {
