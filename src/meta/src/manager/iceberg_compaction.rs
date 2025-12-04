@@ -837,8 +837,8 @@ impl IcebergCompactionManager {
             .clear_expire_files(iceberg_config.snapshot_expiration_clear_expired_files)
             .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
 
-        let tx = expired_snapshots.apply(txn)?;
-        tx.commit(&catalog)
+        let tx = expired_snapshots.apply(txn).map_err(|e| SinkError::Iceberg(e.into()))?;
+        tx.commit(catalog.as_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 
