@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
 use risingwave_common::catalog::TableId;
@@ -119,13 +119,20 @@ impl Progress {
         let mut result = PendingBackfillFragments::default();
         self.upstream_mvs_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
-        let backfill_upstream_type = self.backfill_upstream_types.get(&actor).unwrap();
+        let Some(backfill_upstream_type) = self.backfill_upstream_types.get(&actor) else {
+            tracing::warn!(%actor, "receive progress from unknown actor, likely removed after reschedule");
+            return result;
+        };
 
         let mut old_consumed_row = 0;
         let mut new_consumed_row = 0;
         let mut old_buffered_row = 0;
         let mut new_buffered_row = 0;
-        match self.states.remove(&actor).unwrap() {
+        let Some(prev_state) = self.states.remove(&actor) else {
+            tracing::warn!(%actor, "receive progress for actor not in state map");
+            return result;
+        };
+        match prev_state {
             BackfillState::Init => {}
             BackfillState::ConsumingUpstream(_, consumed_rows, buffered_rows) => {
                 old_consumed_row = consumed_rows;
@@ -547,6 +554,100 @@ impl CreateMviewProgressTracker {
                 }
             }
         }
+    }
+
+    /// Refresh tracker state after reschedule so new actors can report progress correctly.
+    pub fn refresh_after_reschedule(
+        &mut self,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        version_stats: &HummockVersionStats,
+    ) {
+        let CreateMviewStatus::Backfilling {
+            progress,
+            pending_backfill_nodes,
+            ..
+        } = &mut self.status
+        else {
+            return;
+        };
+
+        let new_tracking_actors = StreamJobFragments::tracking_progress_actor_ids_impl(
+            fragment_infos
+                .values()
+                .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
+        );
+
+        let mut new_states = HashMap::new();
+        let mut new_backfill_types = HashMap::new();
+        for (actor_id, upstream_type) in new_tracking_actors {
+            let state = progress
+                .states
+                .get(&actor_id)
+                .cloned()
+                .unwrap_or(BackfillState::Init);
+            new_states.insert(actor_id, state);
+            new_backfill_types.insert(actor_id, upstream_type);
+        }
+
+        let done_actors: HashSet<_> = new_states
+            .iter()
+            .filter(|(_, state)| matches!(state, BackfillState::Done(..)))
+            .map(|(actor_id, _)| *actor_id)
+            .collect();
+        let fragment_actors: HashMap<_, _> = fragment_infos
+            .iter()
+            .map(|(fragment_id, info)| (*fragment_id, info.actors.keys().copied().collect()))
+            .collect();
+
+        let newly_scheduled = progress
+            .backfill_order_state
+            .refresh_actors(&fragment_actors, &done_actors);
+
+        progress.backfill_upstream_types = new_backfill_types;
+        progress.states = new_states;
+        progress.done_count = progress
+            .states
+            .values()
+            .filter(|state| matches!(state, BackfillState::Done(..)))
+            .count();
+
+        progress.upstream_mv_count = StreamJobFragments::upstream_table_counts_impl(
+            fragment_infos.values().map(|fragment| &fragment.nodes),
+        );
+        progress.upstream_mvs_total_key_count =
+            calculate_total_key_count(&progress.upstream_mv_count, version_stats);
+
+        progress.mv_backfill_consumed_rows = 0;
+        progress.source_backfill_consumed_rows = 0;
+        progress.mv_backfill_buffered_rows = 0;
+        for (actor_id, state) in &progress.states {
+            let (consumed_rows, buffered_rows) = match state {
+                BackfillState::Init => (0, 0),
+                BackfillState::ConsumingUpstream(_, consumed, buffered) => (*consumed, *buffered),
+                BackfillState::Done(consumed, buffered) => (*consumed, *buffered),
+            };
+            match progress.backfill_upstream_types.get(actor_id) {
+                Some(BackfillUpstreamType::MView) => {
+                    progress.mv_backfill_consumed_rows += consumed_rows;
+                }
+                Some(BackfillUpstreamType::Source) => {
+                    progress.source_backfill_consumed_rows += consumed_rows;
+                }
+                Some(BackfillUpstreamType::LocalityProvider) => {
+                    progress.mv_backfill_consumed_rows += consumed_rows;
+                    progress.mv_backfill_buffered_rows += buffered_rows;
+                }
+                Some(BackfillUpstreamType::Values) | None => {}
+            }
+        }
+
+        let mut pending = progress
+            .backfill_order_state
+            .current_backfill_node_fragment_ids();
+        pending.extend(newly_scheduled);
+        pending.sort_unstable();
+        pending.dedup();
+        *pending_backfill_nodes = pending;
     }
 
     pub(super) fn take_pending_backfill_nodes(&mut self) -> impl Iterator<Item = FragmentId> + '_ {
