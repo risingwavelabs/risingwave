@@ -41,6 +41,16 @@ impl RustfsService {
     }
 
     /// Apply command args according to config
+    ///
+    /// This function configures the RustFS server command with necessary arguments and
+    /// environment variables based on the provided configuration.
+    ///
+    /// # Arguments
+    /// * `cmd` - The command to configure
+    /// * `config` - RustFS configuration settings
+    ///
+    /// # Returns
+    /// Returns `Ok(())` on success, or an error if configuration is invalid
     pub fn apply_command_args(cmd: &mut Command, config: &RustfsConfig) -> Result<()> {
         cmd.arg("server")
             .arg("--address")
@@ -49,18 +59,19 @@ impl RustfsService {
             .env("RUSTFS_ROOT_PASSWORD", &config.root_password)
             .env("RUSTFS_BUCKET", &config.hummock_bucket);
 
-        let provide_prometheus = config.provide_prometheus.as_ref().unwrap();
-        match provide_prometheus.len() {
-            0 => {}
-            1 => {
-                let prometheus = &provide_prometheus[0];
-                cmd.env(
-                    "RUSTFS_PROMETHEUS_URL",
-                    format!("http://{}:{}", prometheus.address, prometheus.port),
-                );
-            }
-            other_length => {
-                return Err(anyhow!("expected 0 or 1 prometheus, get {}", other_length));
+        if let Some(provide_prometheus) = &config.provide_prometheus {
+            match provide_prometheus.len() {
+                0 => {}
+                1 => {
+                    let prometheus = &provide_prometheus[0];
+                    cmd.env(
+                        "RUSTFS_PROMETHEUS_URL",
+                        format!("http://{}:{}", prometheus.address, prometheus.port),
+                    );
+                }
+                other_length => {
+                    return Err(anyhow!("expected 0 or 1 prometheus, get {}", other_length));
+                }
             }
         }
 
