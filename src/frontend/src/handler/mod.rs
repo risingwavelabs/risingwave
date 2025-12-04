@@ -1464,20 +1464,6 @@ fn check_ban_ddl_for_iceberg_engine_table(
 
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::ChangeOwner { .. },
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE CHANGE OWNER is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
-        }
-
-        Statement::AlterTable {
-            name,
             operation: AlterTableOperation::SetParallelism { .. },
         } => {
             let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;

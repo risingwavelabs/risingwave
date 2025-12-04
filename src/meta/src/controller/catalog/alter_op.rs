@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
-use risingwave_common::catalog::AlterDatabaseParam;
+use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::config::mutate::TomlTableMutateExt as _;
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::id::JobId;
@@ -349,6 +349,69 @@ impl CatalogController {
                             MetaError::catalog_id_not_found("source", associated_source_id)
                         })?;
                     objects.push(PbObjectInfo::Source(ObjectModel(source, src_obj).into()));
+                }
+
+                // associated sink and source for iceberg table.
+                if matches!(table.engine, Some(table::Engine::Iceberg)) {
+                    let iceberg_sink = Sink::find()
+                        .inner_join(Object)
+                        .select_only()
+                        .column(sink::Column::SinkId)
+                        .filter(
+                            object::Column::DatabaseId
+                                .eq(obj.database_id)
+                                .and(object::Column::SchemaId.eq(obj.schema_id))
+                                .and(
+                                    sink::Column::Name
+                                        .eq(format!("{}{}", ICEBERG_SINK_PREFIX, table.name)),
+                                ),
+                        )
+                        .into_tuple::<SinkId>()
+                        .one(&txn)
+                        .await?
+                        .expect("iceberg sink must exist");
+                    let sink_obj = object::ActiveModel {
+                        oid: Set(iceberg_sink.as_object_id()),
+                        owner_id: Set(new_owner),
+                        ..Default::default()
+                    }
+                    .update(&txn)
+                    .await?;
+                    let sink = Sink::find_by_id(iceberg_sink)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("sink", iceberg_sink))?;
+                    objects.push(PbObjectInfo::Sink(ObjectModel(sink, sink_obj).into()));
+
+                    let iceberg_source = Source::find()
+                        .inner_join(Object)
+                        .select_only()
+                        .column(source::Column::SourceId)
+                        .filter(
+                            object::Column::DatabaseId
+                                .eq(obj.database_id)
+                                .and(object::Column::SchemaId.eq(obj.schema_id))
+                                .and(
+                                    source::Column::Name
+                                        .eq(format!("{}{}", ICEBERG_SOURCE_PREFIX, table.name)),
+                                ),
+                        )
+                        .into_tuple::<SourceId>()
+                        .one(&txn)
+                        .await?
+                        .expect("iceberg source must exist");
+                    let source_obj = object::ActiveModel {
+                        oid: Set(iceberg_source.as_object_id()),
+                        owner_id: Set(new_owner),
+                        ..Default::default()
+                    }
+                    .update(&txn)
+                    .await?;
+                    let source = Source::find_by_id(iceberg_source)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("source", iceberg_source))?;
+                    objects.push(PbObjectInfo::Source(ObjectModel(source, source_obj).into()));
                 }
 
                 // indexes.
