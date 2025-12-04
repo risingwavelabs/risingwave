@@ -7760,7 +7760,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=8343ce5ea3c0c01edc34047f7bf5bc71f95af318#8343ce5ea3c0c01edc34047f7bf5bc71f95af318"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5cbc7f806afae67db489ae2dcc856e3271b40e54#5cbc7f806afae67db489ae2dcc856e3271b40e54"
 dependencies = [
  "anyhow",
  "apache-avro 0.20.0",
@@ -7818,7 +7818,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=8343ce5ea3c0c01edc34047f7bf5bc71f95af318#8343ce5ea3c0c01edc34047f7bf5bc71f95af318"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5cbc7f806afae67db489ae2dcc856e3271b40e54#5cbc7f806afae67db489ae2dcc856e3271b40e54"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7833,7 +7833,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=8343ce5ea3c0c01edc34047f7bf5bc71f95af318#8343ce5ea3c0c01edc34047f7bf5bc71f95af318"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5cbc7f806afae67db489ae2dcc856e3271b40e54#5cbc7f806afae67db489ae2dcc856e3271b40e54"
 dependencies = [
  "async-trait",
  "chrono",
@@ -7853,7 +7853,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=5a7b07013ae0b9396071483b78de5f6ea6d3b048#5a7b07013ae0b9396071483b78de5f6ea6d3b048"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=8e2294e6f0961f9e50e402a863923b79749ed56e#8e2294e6f0961f9e50e402a863923b79749ed56e"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -7883,7 +7883,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=8343ce5ea3c0c01edc34047f7bf5bc71f95af318#8343ce5ea3c0c01edc34047f7bf5bc71f95af318"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5cbc7f806afae67db489ae2dcc856e3271b40e54#5cbc7f806afae67db489ae2dcc856e3271b40e54"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12403,7 +12403,7 @@ dependencies = [
  "opendal 0.53.3",
  "panic-message",
  "parking_lot 0.12.5",
- "parquet 54.3.1",
+ "parquet 56.2.0",
  "prometheus",
  "rand 0.9.2",
  "risingwave_common",
@@ -12983,7 +12983,7 @@ dependencies = [
  "opensearch",
  "openssl",
  "parking_lot 0.12.5",
- "parquet 54.3.1",
+ "parquet 56.2.0",
  "paste",
  "pg_bigdecimal",
  "phf 0.13.1",
@@ -12993,6 +12993,7 @@ dependencies = [
  "prometheus",
  "prost 0.11.9",
  "prost 0.13.4",
+ "prost 0.14.1",
  "prost-reflect",
  "prost-types 0.13.4",
  "prost-types 0.14.1",
@@ -14044,7 +14045,7 @@ dependencies = [
  "nix 0.30.1",
  "num-integer",
  "parking_lot 0.12.5",
- "parquet 54.3.1",
+ "parquet 56.2.0",
  "procfs 0.18.0",
  "prometheus",
  "prost 0.13.4",

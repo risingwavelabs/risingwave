@@ -380,4 +380,15 @@ impl Catalog for StorageCatalog {
 
         self.load_table(commit.identifier()).await
     }
+
+    async fn register_table(
+        &self,
+        _table_ident: &TableIdent,
+        _metadata_location: String,
+    ) -> iceberg::Result<Table> {
+        Err(Error::new(
+            ErrorKind::Unexpected,
+            "register_table is not supported in storage catalog",
+        ))
+    }
 }

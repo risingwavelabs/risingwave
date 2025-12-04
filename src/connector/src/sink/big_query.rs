@@ -48,6 +48,7 @@ use prost_types::{
 };
 use prost_types014::DescriptorProto as DescriptorProto014;
 use prost::Message;
+use prost014::Message as Message014;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -902,7 +903,7 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflec
 
 fn to_gcloud_descriptor(desc: &DescriptorProto) -> Result<DescriptorProto014> {
     let bytes = Message::encode_to_vec(desc);
-    DescriptorProto014::decode(bytes.as_slice())
+    Message014::decode(bytes.as_slice())
         .map_err(|e| SinkError::BigQuery(anyhow!(e).context("failed to convert descriptor proto")))
 }
 

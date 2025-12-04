@@ -24,7 +24,7 @@ use ::iceberg::io::{
     S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use ::iceberg::table::Table;
-use ::iceberg::{Catalog, TableIdent};
+use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
 use anyhow::{Context, anyhow};
 use iceberg::io::{
     ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
@@ -667,20 +667,22 @@ impl IcebergCommon {
                     iceberg_configs.insert(format!("header.{}", header_name), header_value);
                 }
 
-                let config_builder =
-                    iceberg_catalog_rest::RestCatalogConfig::builder()
-                        .uri(self.catalog_uri.clone().with_context(|| {
-                            "`catalog.uri` must be set in rest catalog".to_owned()
-                        })?)
-                        .props(iceberg_configs);
-
-                let config = match &self.warehouse_path {
-                    Some(warehouse_path) => {
-                        config_builder.warehouse(warehouse_path.clone()).build()
-                    }
-                    None => config_builder.build(),
-                };
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
+                iceberg_configs.insert(
+                    iceberg_catalog_rest::REST_CATALOG_PROP_URI.to_owned(),
+                    self.catalog_uri
+                        .clone()
+                        .with_context(|| "`catalog.uri` must be set in rest catalog".to_owned())?,
+                );
+                if let Some(warehouse_path) = &self.warehouse_path {
+                    iceberg_configs.insert(
+                        iceberg_catalog_rest::REST_CATALOG_PROP_WAREHOUSE.to_owned(),
+                        warehouse_path.clone(),
+                    );
+                }
+                let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
+                    .load("rest", iceberg_configs)
+                    .await
+                    .map_err(|e: iceberg::Error| anyhow!(e))?;
                 Ok(Arc::new(catalog))
             }
             "glue_rust" => {
@@ -717,18 +719,22 @@ impl IcebergCommon {
                         path_style_access.to_string(),
                     );
                 }
-                let config_builder =
-                    iceberg_catalog_glue::GlueCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
-                            anyhow!("`warehouse.path` must be set in glue catalog")
-                        })?)
-                        .props(iceberg_configs);
-                let config = if let Some(uri) = self.catalog_uri.as_deref() {
-                    config_builder.uri(uri.to_owned()).build()
-                } else {
-                    config_builder.build()
-                };
-                let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
+                iceberg_configs.insert(
+                    iceberg_catalog_glue::GLUE_CATALOG_PROP_WAREHOUSE.to_owned(),
+                    self.warehouse_path
+                        .clone()
+                        .ok_or_else(|| anyhow!("`warehouse.path` must be set in glue catalog"))?,
+                );
+                if let Some(uri) = self.catalog_uri.as_deref() {
+                    iceberg_configs.insert(
+                        iceberg_catalog_glue::GLUE_CATALOG_PROP_URI.to_owned(),
+                        uri.to_owned(),
+                    );
+                }
+                let catalog = iceberg_catalog_glue::GlueCatalogBuilder::default()
+                    .load("glue", iceberg_configs)
+                    .await
+                    .map_err(|e: iceberg::Error| anyhow!(e))?;
                 Ok(Arc::new(catalog))
             }
             catalog_type

@@ -56,7 +56,7 @@ impl<R: FileRead> ParquetFileReader<R> {
 }
 
 impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
-    fn get_bytes(&mut self, range: Range<usize>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
+    fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         Box::pin(
             self.r
                 .read(range.start as _..range.end as _)
@@ -64,11 +64,16 @@ impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
         )
     }
 
-    fn get_metadata(&mut self) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
+    fn get_metadata(
+        &mut self,
+        _options: Option<&parquet::arrow::arrow_reader::ArrowReaderOptions>,
+    ) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
         async move {
             let reader = ParquetMetaDataReader::new();
-            let size = self.meta.size as usize;
-            let meta = reader.load_and_finish(self, size).await?;
+            let size = self.meta.size as u64;
+            let meta = reader
+                .load_and_finish(self, size)
+                .await?;
 
             Ok(Arc::new(meta))
         }
@@ -242,7 +247,10 @@ pub fn get_project_mask(
                         .iter()
                         .position(|&name| name == column.name)
                         .and_then(|pos| {
-                            let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_iceberg::DataType = converted_arrow_schema.field_with_name(&column.name).ok()?.data_type();
+                            let arrow_data_type = converted_arrow_schema
+                                .field_with_name(&column.name)
+                                .ok()?
+                                .data_type();
                             let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
                             if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
                                 Some(pos)
@@ -286,7 +294,10 @@ pub async fn read_parquet_file(
         .into_futures_async_read(..)
         .await?
         .compat();
-    let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+    let parquet_metadata = reader
+        .get_metadata(None)
+        .await
+        .map_err(anyhow::Error::from)?;
 
     let file_metadata = parquet_metadata.file_metadata();
     {
@@ -373,7 +384,7 @@ pub async fn get_parquet_fields(
         .into_futures_async_read(..)
         .await?
         .compat();
-    let parquet_metadata = reader.get_metadata().await?;
+    let parquet_metadata = reader.get_metadata(None).await?;
 
     let file_metadata = parquet_metadata.file_metadata();
     let converted_arrow_schema = parquet_to_arrow_schema(

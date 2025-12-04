@@ -25,8 +25,8 @@ use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
@@ -474,8 +474,10 @@ fn convert_rw_schema_to_arrow_schema(
     });
     let mut arrow_fields = vec![];
     for rw_field in &rw_schema.fields {
-        let arrow_field = IcebergArrowConvert
-            .to_arrow_field(&rw_field.name.clone(), &rw_field.data_type.clone())?;
+        let arrow_field = IcebergArrowConvert.to_arrow_field(
+            &rw_field.name.clone(),
+            &rw_field.data_type.clone(),
+        )?;
 
         arrow_fields.push(arrow_field);
     }

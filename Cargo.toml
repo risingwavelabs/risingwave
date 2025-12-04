@@ -172,14 +172,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8343ce5ea3c0c01edc34047f7bf5bc71f95af318", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5cbc7f806afae67db489ae2dcc856e3271b40e54", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8343ce5ea3c0c01edc34047f7bf5bc71f95af318" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8343ce5ea3c0c01edc34047f7bf5bc71f95af318" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5cbc7f806afae67db489ae2dcc856e3271b40e54" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5cbc7f806afae67db489ae2dcc856e3271b40e54" }
 
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
@@ -201,7 +201,7 @@ parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
-parquet = { version = "54", features = ["async"] }
+parquet = { version = "56", features = ["async"] }
 pin-project-lite = "0.2"
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
