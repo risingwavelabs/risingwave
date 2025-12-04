@@ -31,6 +31,7 @@ pub struct ComputeNodeConfig {
     pub enable_tiered_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_rustfs: Option<Vec<RustfsConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
@@ -86,6 +87,7 @@ pub struct MetaNodeConfig {
 
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_rustfs: Option<Vec<RustfsConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_moat: Option<Vec<MoatConfig>>,
 }
@@ -127,6 +129,7 @@ pub struct CompactorConfig {
     pub exporter_port: u16,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_rustfs: Option<Vec<RustfsConfig>>,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
@@ -168,6 +171,26 @@ pub struct MinioConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct RustfsConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    #[serde(with = "string")]
+    pub port: u16,
+    pub listen_address: String,
+
+    pub root_user: String,
+    pub root_password: String,
+    pub hummock_bucket: String,
+
+    pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct SqliteConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -198,6 +221,7 @@ pub struct PrometheusConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_rustfs: Option<Vec<RustfsConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub provide_frontend: Option<Vec<FrontendConfig>>,
 }
@@ -436,6 +460,7 @@ pub struct LakekeeperConfig {
     pub encryption_key: String,
     pub provide_postgres_backend: Option<Vec<PostgresConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_rustfs: Option<Vec<RustfsConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -450,6 +475,7 @@ pub struct MoatConfig {
     pub port: u16,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_rustfs: Option<Vec<RustfsConfig>>,
 }
 
 /// All service configuration
@@ -460,6 +486,7 @@ pub enum ServiceConfig {
     Frontend(FrontendConfig),
     Compactor(CompactorConfig),
     Minio(MinioConfig),
+    Rustfs(RustfsConfig),
     Sqlite(SqliteConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
@@ -501,6 +528,7 @@ impl ServiceConfig {
             Self::Frontend(c) => &c.id,
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
+            Self::Rustfs(c) => &c.id,
             Self::Sqlite(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
@@ -528,6 +556,7 @@ impl ServiceConfig {
             Self::Frontend(c) => Some(c.port),
             Self::Compactor(c) => Some(c.port),
             Self::Minio(c) => Some(c.port),
+            Self::Rustfs(c) => Some(c.port),
             Self::Sqlite(_) => None,
             Self::Prometheus(c) => Some(c.port),
             Self::Grafana(c) => Some(c.port),
@@ -554,6 +583,7 @@ impl ServiceConfig {
             Self::Frontend(c) => c.user_managed,
             Self::Compactor(c) => c.user_managed,
             Self::Minio(_c) => false,
+            Self::Rustfs(_c) => false,
             Self::Sqlite(_c) => false,
             Self::Prometheus(_c) => false,
             Self::Grafana(_c) => false,
@@ -581,6 +611,7 @@ impl ServiceConfig {
             | ServiceConfig::Frontend(_)
             | ServiceConfig::Compactor(_)
             | ServiceConfig::Minio(_)
+            | ServiceConfig::Rustfs(_)
             | ServiceConfig::Sqlite(_) => RisingWave,
             ServiceConfig::Prometheus(_) | ServiceConfig::Grafana(_) | ServiceConfig::Tempo(_) => {
                 Observability
