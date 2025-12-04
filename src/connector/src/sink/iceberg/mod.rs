@@ -99,6 +99,9 @@ pub const ICEBERG_SINK: &str = "iceberg";
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
 pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
+pub const ICEBERG_COMPACTION_TYPE_FULL: &str = "full";
+pub const ICEBERG_COMPACTION_TYPE_SMALL_FILES: &str = "small-files";
+pub const ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE: &str = "files-with-delete";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -114,6 +117,37 @@ impl IcebergWriteMode {
             IcebergWriteMode::MergeOnRead => ICEBERG_WRITE_MODE_MERGE_ON_READ,
             IcebergWriteMode::CopyOnWrite => ICEBERG_WRITE_MODE_COPY_ON_WRITE,
         }
+    }
+}
+
+impl std::str::FromStr for IcebergWriteMode {
+    type Err = SinkError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            ICEBERG_WRITE_MODE_MERGE_ON_READ => Ok(IcebergWriteMode::MergeOnRead),
+            ICEBERG_WRITE_MODE_COPY_ON_WRITE => Ok(IcebergWriteMode::CopyOnWrite),
+            _ => Err(SinkError::Config(anyhow!(format!(
+                "invalid write_mode: {}, must be one of: {}, {}",
+                s, ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
+            )))),
+        }
+    }
+}
+
+impl TryFrom<&str> for IcebergWriteMode {
+    type Error = <Self as std::str::FromStr>::Err;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl TryFrom<String> for IcebergWriteMode {
+    type Error = <Self as std::str::FromStr>::Err;
+
+    fn try_from(value: String) -> std::result::Result<Self, Self::Error> {
+        value.as_str().parse()
     }
 }
 
@@ -142,6 +176,8 @@ pub const COMPACTION_DELETE_FILES_COUNT_THRESHOLD: &str = "compaction.delete_fil
 pub const COMPACTION_TRIGGER_SNAPSHOT_COUNT: &str = "compaction.trigger_snapshot_count";
 
 pub const COMPACTION_TARGET_FILE_SIZE_MB: &str = "compaction.target_file_size_mb";
+
+pub const COMPACTION_TYPE: &str = "compaction.type";
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -175,10 +211,45 @@ pub enum CompactionType {
 impl CompactionType {
     pub fn as_str(&self) -> &'static str {
         match self {
-            CompactionType::Full => "full",
-            CompactionType::SmallFiles => "small-files",
-            CompactionType::FilesWithDelete => "files-with-delete",
+            CompactionType::Full => ICEBERG_COMPACTION_TYPE_FULL,
+            CompactionType::SmallFiles => ICEBERG_COMPACTION_TYPE_SMALL_FILES,
+            CompactionType::FilesWithDelete => ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE,
         }
+    }
+}
+
+impl std::str::FromStr for CompactionType {
+    type Err = SinkError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            ICEBERG_COMPACTION_TYPE_FULL => Ok(CompactionType::Full),
+            ICEBERG_COMPACTION_TYPE_SMALL_FILES => Ok(CompactionType::SmallFiles),
+            ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE => Ok(CompactionType::FilesWithDelete),
+            _ => Err(SinkError::Config(anyhow!(format!(
+                "invalid compaction_type: {}, must be one of: {}, {}, {}",
+                s,
+                ICEBERG_COMPACTION_TYPE_FULL,
+                ICEBERG_COMPACTION_TYPE_SMALL_FILES,
+                ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE
+            )))),
+        }
+    }
+}
+
+impl TryFrom<&str> for CompactionType {
+    type Error = <Self as std::str::FromStr>::Err;
+
+    fn try_from(value: &str) -> std::result::Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl TryFrom<String> for CompactionType {
+    type Error = <Self as std::str::FromStr>::Err;
+
+    fn try_from(value: String) -> std::result::Result<Self, Self::Error> {
+        value.as_str().parse()
     }
 }
 
