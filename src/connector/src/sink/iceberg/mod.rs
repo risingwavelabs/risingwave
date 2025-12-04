@@ -1396,7 +1396,7 @@ impl SinkWriter for IcebergSinkWriter {
     /// Begin a new epoch
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
         let Self::Created(args) = self else {
-            unreachable!("IcebergSinkWriter already initialized");
+            return Ok(());
         };
 
         let table = create_and_validate_table_impl(&args.config, &args.sink_param).await?;
