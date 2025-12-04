@@ -326,6 +326,8 @@ macro_rules! impl_set_system_param {
         ) -> Result<Option<(String, SystemParamsDiff)>> {
             use crate::system_param::reader::{SystemParamsReader, SystemParamsRead};
 
+            // System parameter names are case-insensitive.
+            let key = &key.to_ascii_lowercase() as &str;
             match key {
                 $(
                     key_of!($field) => {
@@ -369,6 +371,8 @@ macro_rules! impl_set_system_param {
 macro_rules! impl_is_mutable {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
         pub fn is_mutable(field: &str) -> Result<bool> {
+            // System parameter names are case-insensitive.
+            let field = &field.to_ascii_lowercase() as &str;
             match field {
                 $(
                     key_of!($field) => Ok($is_mutable),
@@ -538,6 +542,22 @@ mod tests {
         // Normal set.
         assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_owned())).is_ok());
         assert_eq!(p.checkpoint_frequency, Some(500));
+        // Case-insensitive param name.
+        assert!(set_system_param(&mut p, "PAUSE_ON_NEXT_BOOTSTRAP", Some("true".to_owned())).is_ok());
+        assert_eq!(p.pause_on_next_bootstrap, Some(true));
+        assert!(set_system_param(&mut p, "Pause_On_Next_Bootstrap", Some("false".to_owned())).is_ok());
+        assert_eq!(p.pause_on_next_bootstrap, Some(false));
+    }
+
+    #[test]
+    fn test_is_mutable_case_insensitive() {
+        // is_mutable should be case-insensitive
+        assert!(is_mutable("pause_on_next_bootstrap").is_ok());
+        assert!(is_mutable("PAUSE_ON_NEXT_BOOTSTRAP").is_ok());
+        assert!(is_mutable("Pause_On_Next_Bootstrap").is_ok());
+        // Verify the result is correct
+        assert!(is_mutable("state_store").unwrap() == false);
+        assert!(is_mutable("STATE_STORE").unwrap() == false);
     }
 
     #[test]
