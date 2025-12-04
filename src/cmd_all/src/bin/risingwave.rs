@@ -13,8 +13,11 @@
 // limitations under the License.
 
 #![feature(assert_matches)]
+#![feature(allocator_api)]
 #![feature(coverage_attribute)]
 
+use std::alloc::GlobalAlloc;
+use std::backtrace::Backtrace;
 use std::env;
 use std::ffi::OsString;
 use std::str::FromStr;
@@ -325,5 +328,40 @@ mod tests {
         let e = parse_args(["./risingwave", "--in-memory", "ctl"]).unwrap_err();
         assert_matches!(e.kind(), ErrorKind::ArgumentConflict);
         assert!(e.to_string().contains("cannot be used with"), "{e}");
+    }
+}
+
+static JEMALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(unix)]
+#[global_allocator]
+static DEBUG_JEMALLOC: DebugJemallocAllocator = DebugJemallocAllocator;
+
+pub struct DebugJemallocAllocator;
+
+unsafe impl GlobalAlloc for DebugJemallocAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        if layout.size() >= 2 * 1024 * 1024 * 1024 {
+            let backtrace = Backtrace::capture();
+            tracing::info!(
+                backtrace = format!("{backtrace}"),
+                size = layout.size(),
+                "allocating a large memory block",
+            );
+        }
+
+        unsafe { JEMALLOC.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        unsafe { JEMALLOC.dealloc(ptr, layout) }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+        unsafe { JEMALLOC.alloc_zeroed(layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
+        unsafe { JEMALLOC.realloc(ptr, layout, new_size) }
     }
 }
