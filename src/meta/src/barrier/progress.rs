@@ -829,3 +829,129 @@ fn calculate_total_key_count(
         })
         .sum()
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+    use risingwave_common::id::WorkerId;
+    use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
+
+    use super::*;
+    use crate::controller::fragment::InflightActorInfo;
+
+    fn sample_inflight_fragment(
+        fragment_id: FragmentId,
+        actor_ids: &[ActorId],
+        flag: FragmentTypeFlag,
+    ) -> InflightFragmentInfo {
+        let mut fragment_type_mask = FragmentTypeMask::empty();
+        fragment_type_mask.add(flag);
+        InflightFragmentInfo {
+            fragment_id,
+            distribution_type: DistributionType::Single,
+            fragment_type_mask,
+            vnode_count: 0,
+            nodes: PbStreamNode::default(),
+            actors: actor_ids
+                .iter()
+                .map(|actor_id| {
+                    (
+                        *actor_id,
+                        InflightActorInfo {
+                            worker_id: WorkerId::new(1),
+                            vnode_bitmap: None,
+                            splits: vec![],
+                        },
+                    )
+                })
+                .collect(),
+            state_table_ids: HashSet::new(),
+        }
+    }
+
+    fn sample_progress(actor_id: ActorId) -> Progress {
+        Progress {
+            job_id: JobId::new(1),
+            states: HashMap::from([(actor_id, BackfillState::Init)]),
+            backfill_order_state: BackfillOrderState::default(),
+            done_count: 0,
+            backfill_upstream_types: HashMap::from([(actor_id, BackfillUpstreamType::MView)]),
+            upstream_mv_count: HashMap::new(),
+            upstream_mvs_total_key_count: 0,
+            mv_backfill_consumed_rows: 0,
+            source_backfill_consumed_rows: 0,
+            mv_backfill_buffered_rows: 0,
+        }
+    }
+
+    #[test]
+    fn update_ignores_unknown_actor() {
+        let actor_known = ActorId::new(1);
+        let actor_unknown = ActorId::new(2);
+        let mut progress = sample_progress(actor_known);
+
+        let pending = progress.update(
+            actor_unknown,
+            BackfillState::Done(0, 0),
+            progress.upstream_mvs_total_key_count,
+        );
+
+        assert!(pending.next_backfill_nodes.is_empty());
+        assert_eq!(progress.states.len(), 1);
+        assert!(progress.states.contains_key(&actor_known));
+    }
+
+    #[test]
+    fn refresh_rebuilds_tracking_after_reschedule() {
+        let actor_old = ActorId::new(1);
+        let actor_new = ActorId::new(2);
+
+        let progress = Progress {
+            job_id: JobId::new(1),
+            states: HashMap::from([(actor_old, BackfillState::Done(5, 0))]),
+            backfill_order_state: BackfillOrderState::default(),
+            done_count: 1,
+            backfill_upstream_types: HashMap::from([(actor_old, BackfillUpstreamType::MView)]),
+            upstream_mv_count: HashMap::new(),
+            upstream_mvs_total_key_count: 0,
+            mv_backfill_consumed_rows: 5,
+            source_backfill_consumed_rows: 0,
+            mv_backfill_buffered_rows: 0,
+        };
+
+        let mut tracker = CreateMviewProgressTracker {
+            job_id: JobId::new(1),
+            definition: "def".to_owned(),
+            create_type: CreateType::Background,
+            tracking_job: TrackingJob {
+                job_id: JobId::new(1),
+                is_recovered: false,
+                source_change: None,
+            },
+            status: CreateMviewStatus::Backfilling {
+                progress,
+                pending_backfill_nodes: vec![],
+                table_ids_to_truncate: vec![],
+            },
+        };
+
+        let fragment_infos = HashMap::from([(
+            FragmentId::new(10),
+            sample_inflight_fragment(
+                FragmentId::new(10),
+                &[actor_new],
+                FragmentTypeFlag::StreamScan,
+            ),
+        )]);
+
+        tracker.refresh_after_reschedule(&fragment_infos, &HummockVersionStats::default());
+
+        let CreateMviewStatus::Backfilling { progress, .. } = tracker.status else {
+            panic!("expected backfilling status");
+        };
+        assert!(progress.states.contains_key(&actor_new));
+        assert!(!progress.states.contains_key(&actor_old));
+        assert_eq!(progress.done_count, 0);
+    }
+}
