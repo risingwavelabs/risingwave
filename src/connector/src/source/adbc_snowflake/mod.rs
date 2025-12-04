@@ -215,6 +215,30 @@ impl AdbcSnowflakeProperties {
             .map_err(|e| anyhow!("Failed to set SQL query: {}", e))?;
         Ok(statement)
     }
+
+    /// Execute a custom query and return the results as a vector of Arrow record batches.
+    /// This is useful for metadata queries needed for split generation.
+    pub fn execute_query(&self, query: &str) -> ConnectorResult<Vec<arrow_array_55::RecordBatch>> {
+        let database = self.create_database()?;
+        let mut connection = self.create_connection(&database)?;
+        let mut statement = connection
+            .new_statement()
+            .map_err(|e| anyhow!("Failed to create statement: {}", e))?;
+        statement
+            .set_sql_query(query)
+            .map_err(|e| anyhow!("Failed to set SQL query: {}", e))?;
+        let reader = statement
+            .execute()
+            .map_err(|e| anyhow!("Failed to execute query: {}", e))?;
+
+        // Collect all batches into a vector
+        let mut batches = Vec::new();
+        for batch_result in reader {
+            let batch = batch_result.map_err(|e| anyhow!("Failed to read record batch: {}", e))?;
+            batches.push(batch);
+        }
+        Ok(batches)
+    }
 }
 
 /// Split for ADBC Snowflake source.
