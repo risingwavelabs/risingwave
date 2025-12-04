@@ -28,10 +28,10 @@ macro_rules! enable_jemalloc {
             unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
                 if layout.size() >= 2 * 1024 * 1024 * 1024 {
                     let backtrace = std::backtrace::Backtrace::capture();
-                    tracing::info!(
-                        backtrace = format!("{backtrace}"),
-                        size = layout.size(),
-                        "allocating a large memory block",
+                    println!(
+                        "allocating a large memory block: {}, {}",
+                        layout.size(),
+                        backtrace
                     );
                 }
 
