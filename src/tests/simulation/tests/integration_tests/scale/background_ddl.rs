@@ -21,6 +21,38 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 #[tokio::test]
+async fn test_background_ddl_alter_parallelism_without_arrangement_backfill() -> Result<()> {
+    let config = Configuration::for_background_ddl();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session
+        .run("set STREAMING_USE_ARRANGEMENT_BACKFILL = false;")
+        .await?;
+    session.run("set BACKGROUND_DDL = true;").await?;
+    session.run("set BACKFILL_RATE_LIMIT = 1;").await?;
+
+    session.run("create table t(v int);").await?;
+    session
+        .run("insert into t select * from generate_series(1, 30);")
+        .await?;
+    session
+        .run("create materialized view m as select * from t;")
+        .await?;
+
+    // alter should fail when arrangement backfill is disabled
+    let err = session
+        .run("alter materialized view m set parallelism = 1;")
+        .await;
+    assert!(
+        err.is_err(),
+        "alter parallelism unexpectedly succeeded without arrangement backfill"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_background_arrangement_backfill_offline_scaling() -> Result<()> {
     let config = Configuration::for_background_ddl();
 

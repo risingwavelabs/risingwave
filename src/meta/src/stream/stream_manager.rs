@@ -18,6 +18,7 @@ use std::sync::Arc;
 use await_tree::span;
 use futures::future::join_all;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, SinkId};
@@ -657,6 +658,25 @@ impl GlobalStreamManager {
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
+        let background_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_jobs.is_empty() {
+            let unreschedulable = self
+                .metadata_manager
+                .collect_unreschedulable_backfill_jobs(&background_jobs)
+                .await?;
+
+            if unreschedulable.contains(&job_id) {
+                bail!(
+                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
+                    job_id,
+                );
+            }
+        }
 
         let worker_nodes = self
             .metadata_manager
