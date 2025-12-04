@@ -55,12 +55,11 @@ pub async fn handle_drop_index(
                 index.clone()
             }
             Err(err) => {
-                match err {
-                    CatalogError::NotFound("index", _) => {
-                        // index not found, try to find table below to give a better error message
-                    }
-                    _ => return Err(err.into()),
-                };
+                if err.is_not_found("index") {
+                    // index not found, try to find table below to give a better error message
+                } else {
+                    return Err(err.into());
+                }
                 return match reader.get_created_table_by_name(db_name, schema_path, &index_name) {
                     Ok((table, _)) => match table.table_type() {
                         TableType::Index => unreachable!(),
@@ -75,11 +74,10 @@ pub async fn handle_drop_index(
                                 ))
                                 .into())
                         } else {
-                            match e {
-                                CatalogError::NotFound("table", name) => {
-                                    Err(CatalogError::NotFound("index", name).into())
-                                }
-                                _ => Err(e.into()),
+                            if e.is_not_found("table") {
+                                Err(CatalogError::NotFound("index", index_name).into())
+                            } else {
+                                Err(e.into())
                             }
                         }
                     }

@@ -105,27 +105,73 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
 pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
 
 // TODO(error-handling): provide more concrete error code for different object types.
-#[derive(Error, Debug)]
-pub enum CatalogError {
-    #[provide(PostgresErrorCode => PostgresErrorCode::UndefinedObject)]
-    #[error("{0} not found: {1}")]
-    NotFound(&'static str, String),
+#[derive(Error, Debug, thiserror_ext::Box)]
+#[thiserror_ext(newtype(name = CatalogError, extra_provide = Self::provide_postgres_error_code))]
+pub enum CatalogErrorInner {
+    #[error("{object_type} not found: {name}")]
+    NotFound {
+        object_type: &'static str,
+        name: String,
+    },
 
-    #[provide(PostgresErrorCode => PostgresErrorCode::DuplicateObject)]
     #[error(
-        "{0} with name {1} exists{under_creation}", under_creation = (.2).then_some(" but under creation").unwrap_or("")
+        "{object_type} with name {name} exists{under_creation}",
+        under_creation = (.under_creation).then_some(" but under creation").unwrap_or("")
     )]
-    Duplicated(
-        &'static str,
-        String,
-        // whether the object is under creation (only used for StreamingJob type and Subscription for now)
-        bool,
-    ),
+    Duplicated {
+        object_type: &'static str,
+        name: String,
+        under_creation: bool, // only used for StreamingJob type and Subscription for now
+    },
 }
 
 impl CatalogError {
+    /// Provide the Postgres error code for the error.
+    fn provide_postgres_error_code(&self, request: &mut std::error::Request<'_>) {
+        match self.inner() {
+            CatalogErrorInner::NotFound { .. } => {
+                request.provide_value(PostgresErrorCode::UndefinedObject);
+            }
+            CatalogErrorInner::Duplicated { .. } => {
+                request.provide_value(PostgresErrorCode::DuplicateObject);
+            }
+        };
+    }
+
+    pub fn NotFound(object_type: &'static str, name: String) -> Self {
+        CatalogErrorInner::NotFound { object_type, name }.into()
+    }
+
     pub fn duplicated(object_type: &'static str, name: String) -> Self {
-        Self::Duplicated(object_type, name, false)
+        CatalogErrorInner::Duplicated {
+            object_type,
+            name,
+            under_creation: false,
+        }
+        .into()
+    }
+
+    pub fn Duplicated(object_type: &'static str, name: String, under_creation: bool) -> Self {
+        CatalogErrorInner::Duplicated {
+            object_type,
+            name,
+            under_creation,
+        }
+        .into()
+    }
+
+    pub fn is_duplicated(&self, object_type: &'static str) -> bool {
+        matches!(
+            self.inner(),
+            CatalogErrorInner::Duplicated { object_type: t, .. } if *t == object_type
+        )
+    }
+
+    pub fn is_not_found(&self, object_type: &'static str) -> bool {
+        matches!(
+            self.inner(),
+            CatalogErrorInner::NotFound { object_type: t, .. } if *t == object_type
+        )
     }
 }
 
