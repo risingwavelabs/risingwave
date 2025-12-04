@@ -556,8 +556,8 @@ mod tests {
         assert!(is_mutable("PAUSE_ON_NEXT_BOOTSTRAP").is_ok());
         assert!(is_mutable("Pause_On_Next_Bootstrap").is_ok());
         // Verify the result is correct
-        assert!(is_mutable("state_store").unwrap() == false);
-        assert!(is_mutable("STATE_STORE").unwrap() == false);
+        assert!(!is_mutable("state_store").unwrap());
+        assert!(!is_mutable("STATE_STORE").unwrap());
     }
 
     #[test]
