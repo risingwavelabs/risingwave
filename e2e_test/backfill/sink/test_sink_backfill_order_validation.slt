@@ -28,61 +28,47 @@ create table t(a int, b int, c int);
 
 # Test 1: Should fail because 't' is specified in backfill_order but not used in the sink query
 statement error Table or source 't' specified in backfill_order is not used in the query
-create sink s1
-    with (
-        connector='blackhole',
-        backfill_order = FIXED(car_regions -> car_sales, t -> car_sales)
-    )
-    as
-      with price_ranges as (
-        select
-          car_info.name as name,
-          car_sales.price as price,
-          round(log10(1 + car_sales.price)::numeric, 1) as price_range
-        from car_sales join car_info
-          on car_sales.car_id = car_info.id
-          join car_regions
-            on car_sales.region_id = car_regions.id
-      )
-      select
-        name,
-        price_range,
-        count(*) as sales_count,
-        sum(price) as sales_volume,
-        avg(price) as sales_avg,
-        min(price) as sales_min,
-        max(price) as sales_max
-      FROM
-        price_ranges
-      GROUP BY name, price_range;
+create sink s1 as
+  select
+    car_info.name as name,
+    car_sales.price as price,
+    count(*) as sales_count
+  from car_sales join car_info
+    on car_sales.car_id = car_info.id
+    join car_regions
+      on car_sales.region_id = car_regions.id
+  group by car_info.name, car_sales.price
+with (
+    connector='blackhole',
+    backfill_order = FIXED(car_regions -> car_sales, t -> car_sales)
+);
 
 # Test 2: Should fail with cycle detection
 statement error Backfill order strategy has a cycle
-create sink s2
-    with (
-        connector='blackhole',
-        backfill_order = FIXED(car_sales -> car_sales)
-    )
-    as select count(*) from car_sales join car_info
-      on car_sales.car_id = car_info.id
-      join car_regions
-        on car_sales.region_id = car_regions.id;
+create sink s2 as
+  select count(*) from car_sales join car_info
+    on car_sales.car_id = car_info.id
+    join car_regions
+      on car_sales.region_id = car_regions.id
+with (
+    connector='blackhole',
+    backfill_order = FIXED(car_sales -> car_sales)
+);
 
 # Test 3: Should succeed when only actual tables from the query are specified
 statement ok
-create sink s3
-    with (
-        connector='blackhole',
-        backfill_order = FIXED(car_regions -> car_sales, car_info -> car_sales)
-    )
-    as
-      select
-        car_info.name as name,
-        car_sales.price as price
-      from car_sales join car_info
-        on car_sales.car_id = car_info.id
-        join car_regions
-          on car_sales.region_id = car_regions.id;
+create sink s3 as
+  select
+    car_info.name as name,
+    car_sales.price as price
+  from car_sales join car_info
+    on car_sales.car_id = car_info.id
+    join car_regions
+      on car_sales.region_id = car_regions.id
+with (
+    connector='blackhole',
+    backfill_order = FIXED(car_regions -> car_sales, car_info -> car_sales)
+);
 
 # Cleanup
 statement ok
