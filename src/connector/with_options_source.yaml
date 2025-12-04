@@ -1,6 +1,66 @@
 # THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 # UPDATE WITH: ./risedev generate-with-options
 
+AdbcSnowflakeProperties:
+  fields:
+  - name: adbc_snowflake.account
+    field_type: String
+    comments: The Snowflake account identifier (e.g., "myaccount" or "myaccount.us-east-1").
+    required: true
+  - name: adbc_snowflake.username
+    field_type: String
+    comments: The username for authentication.
+    required: true
+  - name: adbc_snowflake.password
+    field_type: String
+    comments: The password for authentication.
+    required: true
+  - name: adbc_snowflake.database
+    field_type: String
+    comments: The name of the database to use.
+    required: true
+  - name: adbc_snowflake.schema
+    field_type: String
+    comments: The name of the schema to use.
+    required: true
+  - name: adbc_snowflake.warehouse
+    field_type: String
+    comments: The name of the warehouse to use.
+    required: true
+  - name: adbc_snowflake.query
+    field_type: String
+    comments: The SQL query to execute.
+    required: true
+  - name: adbc_snowflake.role
+    field_type: String
+    comments: The role to use (optional).
+    required: false
+  - name: adbc_snowflake.host
+    field_type: String
+    comments: The host to connect to (optional, defaults to Snowflake cloud).
+    required: false
+  - name: adbc_snowflake.port
+    field_type: u16
+    comments: The port to connect to (optional).
+    required: false
+  - name: adbc_snowflake.protocol
+    field_type: String
+    comments: The protocol to use (optional, defaults to "https").
+    required: false
+  - name: adbc_snowflake.auth_type
+    field_type: String
+    comments: |-
+      The authentication type (optional, defaults to "`auth_snowflake`").
+      Possible values: `auth_snowflake`, `auth_oauth`, `auth_ext_browser`, `auth_okta`, `auth_jwt`, `auth_mfa`, `auth_pat`, `auth_wif`
+    required: false
+  - name: adbc_snowflake.auth_token
+    field_type: String
+    comments: '`OAuth` token for authentication (when using `auth_oauth`).'
+    required: false
+  - name: adbc_snowflake.jwt_private_key
+    field_type: String
+    comments: JWT private key file path (when using `auth_jwt`).
+    required: false
 AzblobProperties:
   fields:
   - name: azblob.container_name

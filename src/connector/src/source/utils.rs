@@ -45,8 +45,6 @@ macro_rules! feature_gated_source_mod {
                 BoxSourceChunkStream, Column, SourceContextRef, SourceEnumeratorContextRef,
                 SourceProperties, SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
             };
-            use crate::with_options::WithOptions;
-
             pub const [<$source_name:upper _CONNECTOR>]: &'static str = $source_name;
 
             fn err_feature_not_enabled() -> ConnectorError {
@@ -58,7 +56,7 @@ macro_rules! feature_gated_source_mod {
             }
 
             #[doc = "A dummy source properties that always returns an error, as the feature `source-" $source_name "` is currently not enabled."]
-            #[derive(Clone, Debug, Deserialize, WithOptions)]
+            #[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
             pub struct [<$struct_prefix:camel Properties>] {
                 #[serde(flatten)]
                 pub unknown_fields: HashMap<String, String>,
