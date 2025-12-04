@@ -131,7 +131,7 @@ aws-sdk-kinesis = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
 ] }
-aws-sdk-s3 = { version = "1", default-features = false, features = [
+aws-sdk-s3 = { version = "1.17", default-features = false, features = [
     "rt-tokio",
     "rustls",
 ] }
@@ -172,14 +172,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8343ce5ea3c0c01edc34047f7bf5bc71f95af318", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8343ce5ea3c0c01edc34047f7bf5bc71f95af318" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8343ce5ea3c0c01edc34047f7bf5bc71f95af318" }
 
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
@@ -261,12 +261,12 @@ risingwave_variables = { path = "./src/utils/variables" }
 rw_futures_util = { path = "src/utils/futures_util" }
 rw_iter_util = { path = "src/utils/iter_util" }
 rw_resource_util = { path = "src/utils/resource_util" }
-sea-orm = { version = "~1.1", features = [
+sea-orm = { version = "1.1.19", features = [
     "sqlx-all",
     "runtime-tokio-native-tls",
     "with-uuid",
 ] }
-sea-orm-migration = "~1.1"
+sea-orm-migration = "1.1.19"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1.15"
 sqlx = { version = "0.8.2", default-features = false, features = [
