@@ -647,7 +647,7 @@ impl Catalog {
         source_id: SourceId,
     ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_source_by_id(source_id))
@@ -663,7 +663,7 @@ impl Catalog {
         bind_creating: bool,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_table_by_name(table_name, bind_creating))
@@ -774,7 +774,7 @@ impl Catalog {
         source_name: &str,
     ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_source_by_name(source_name))
@@ -790,7 +790,7 @@ impl Catalog {
         bind_creating: bool,
     ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_sink_by_name(sink_name, bind_creating))
@@ -823,7 +823,7 @@ impl Catalog {
         subscription_name: &str,
     ) -> CatalogResult<(&Arc<SubscriptionCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_subscription_by_name(subscription_name))
@@ -838,7 +838,7 @@ impl Catalog {
         index_name: &str,
     ) -> CatalogResult<(&Arc<IndexCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_created_index_by_name(index_name))
@@ -853,7 +853,7 @@ impl Catalog {
         index_name: &str,
     ) -> CatalogResult<(&Arc<IndexCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_any_index_by_name(index_name))
@@ -882,7 +882,7 @@ impl Catalog {
         view_name: &str,
     ) -> CatalogResult<(&Arc<ViewCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_view_by_name(view_name))
@@ -906,7 +906,7 @@ impl Catalog {
         secret_name: &str,
     ) -> CatalogResult<(&Arc<SecretCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_secret_by_name(secret_name))
@@ -937,7 +937,7 @@ impl Catalog {
         connection_name: &str,
     ) -> CatalogResult<(&Arc<ConnectionCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_connection_by_name(connection_name))
@@ -953,7 +953,7 @@ impl Catalog {
         inputs: &mut [ExprImpl],
     ) -> CatalogResult<(&Arc<FunctionCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_function_by_name_inputs(function_name, inputs))
@@ -981,7 +981,7 @@ impl Catalog {
         args: &[DataType],
     ) -> CatalogResult<(&Arc<FunctionCatalog>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_function_by_name_args(function_name, args))
@@ -1006,7 +1006,7 @@ impl Catalog {
         function_name: &str,
     ) -> CatalogResult<(Vec<&Arc<FunctionCatalog>>, &'a str)> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 Ok(self
                     .get_schema_by_name(db_name, schema_name)?
                     .get_functions_by_name(function_name))
@@ -1151,7 +1151,7 @@ impl Catalog {
         class_name: &str,
     ) -> CatalogResult<ObjectId> {
         schema_path
-            .try_find(|schema_name| {
+            .try_find(|schema_name| -> CatalogResult<_> {
                 let schema = self.get_schema_by_name(db_name, schema_name)?;
                 #[allow(clippy::manual_map)]
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
