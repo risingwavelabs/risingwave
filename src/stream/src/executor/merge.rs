@@ -105,7 +105,8 @@ impl Stream for MergeExecutorInput {
 mod upstream {
     use super::*;
 
-    /// Trait unifying operations on [`SingletonUpstream`] and [`MergeUpstream`].
+    /// Trait unifying operations on [`MergeUpstream`] and [`SingletonUpstream`], so that we can
+    /// reuse code between [`MergeExecutor`] and [`ReceiverExecutor`].
     pub trait Upstream:
         Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin + Send + 'static
     {
