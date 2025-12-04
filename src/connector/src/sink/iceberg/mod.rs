@@ -2413,7 +2413,7 @@ pub fn parse_partition_by_exprs(
     }
     let caps = re.captures_iter(&expr);
 
-    let mut partition_columns: Vec<(String, Transform)> = Vec::new();
+    let mut partition_columns = vec![];
 
     for mat in caps {
         let (column, transform) = if mat.name("n").is_none() && mat.name("field").is_none() {
