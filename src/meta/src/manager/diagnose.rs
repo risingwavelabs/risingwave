@@ -26,6 +26,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_license::LicenseManager;
+use risingwave_meta_model::{JobStatus, StreamingParallelism};
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
@@ -711,6 +712,47 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|v| (v.id.into(), (v.name, v.schema_id, v.sql, None)))
             .collect::<BTreeMap<_, _>>();
+        let mut streaming_jobs = self
+            .metadata_manager
+            .catalog_controller
+            .list_streaming_job_infos()
+            .await?;
+        streaming_jobs.sort_by_key(|info| (info.obj_type as usize, info.job_id));
+        {
+            use comfy_table::{Row, Table};
+            let mut table = Table::new();
+            table.set_header({
+                let mut row = Row::new();
+                row.add_cell("job_id".into());
+                row.add_cell("name".into());
+                row.add_cell("obj_type".into());
+                row.add_cell("state".into());
+                row.add_cell("parallelism".into());
+                row.add_cell("max_parallelism".into());
+                row.add_cell("resource_group".into());
+                row.add_cell("database_id".into());
+                row.add_cell("schema_id".into());
+                row.add_cell("config_override".into());
+                row
+            });
+            for job in streaming_jobs {
+                let mut row = Row::new();
+                row.add_cell(job.job_id.into());
+                row.add_cell(job.name.into());
+                row.add_cell(job.obj_type.as_str().into());
+                row.add_cell(format_job_status(job.job_status).into());
+                row.add_cell(format_streaming_parallelism(&job.parallelism).into());
+                row.add_cell(job.max_parallelism.into());
+                row.add_cell(job.resource_group.into());
+                row.add_cell(job.database_id.into());
+                row.add_cell(job.schema_id.into());
+                row.add_cell(job.config_override.into());
+                table.add_row(row);
+            }
+            let _ = writeln!(s);
+            let _ = writeln!(s, "STREAMING JOB");
+            let _ = writeln!(s, "{table}");
+        }
         let catalogs = [
             ("SOURCE", sources),
             ("TABLE", user_tables),
@@ -931,4 +973,20 @@ fn format_features(features: &[&'static str]) -> String {
         .map(|chunk| format!("  {}", chunk.join(", ")))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn format_job_status(status: JobStatus) -> &'static str {
+    match status {
+        JobStatus::Initial => "initial",
+        JobStatus::Creating => "creating",
+        JobStatus::Created => "created",
+    }
+}
+
+fn format_streaming_parallelism(parallelism: &StreamingParallelism) -> String {
+    match parallelism {
+        StreamingParallelism::Adaptive => "adaptive".into(),
+        StreamingParallelism::Fixed(n) => format!("fixed({n})"),
+        StreamingParallelism::Custom => "custom".into(),
+    }
 }
