@@ -31,7 +31,7 @@ use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use google_cloud_bigquery::grpc::apiv1::conn_pool::ConnectionManager;
 use google_cloud_gax::conn::{ConnectionOptions, Environment};
-use google_cloud_gax::grpc::Request;
+use google_cloud_gax::grpc::{Request, Response, Status};
 use google_cloud_googleapis::cloud::bigquery::storage::v1::append_rows_request::{
     MissingValueInterpretation, ProtoData, Rows as AppendRowsRequestRows,
 };
@@ -46,6 +46,8 @@ use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
     field_descriptor_proto,
 };
+use prost_types014::DescriptorProto as DescriptorProto014;
+use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -53,7 +55,7 @@ use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use tokio::sync::mpsc;
-use tonic::{Response, Status, async_trait};
+use async_trait::async_trait;
 use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;
@@ -683,7 +685,7 @@ impl BigQuerySinkWriter {
                 message_descriptor,
                 proto_field,
                 writer_pb_schema: ProtoSchema {
-                    proto_descriptor: Some(descriptor_proto),
+                    proto_descriptor: Some(to_gcloud_descriptor(&descriptor_proto)?),
                 },
             },
             resp_stream,
@@ -896,6 +898,12 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflec
     })
     .context("failed to build descriptor pool")
     .map_err(SinkError::BigQuery)
+}
+
+fn to_gcloud_descriptor(desc: &DescriptorProto) -> Result<DescriptorProto014> {
+    let bytes = Message::encode_to_vec(desc);
+    DescriptorProto014::decode(bytes.as_slice())
+        .map_err(|e| SinkError::BigQuery(anyhow!(e).context("failed to convert descriptor proto")))
 }
 
 fn build_protobuf_schema<'a>(

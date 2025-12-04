@@ -317,7 +317,9 @@ macro_rules! impl_slice_row {
 
         #[inline]
         fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
-            AsRef::<[D]>::as_ref(self).iter().map(ToDatumRef::to_datum_ref)
+            AsRef::<[D]>::as_ref(self)
+                .iter()
+                .map(ToDatumRef::to_datum_ref)
         }
     };
 }
