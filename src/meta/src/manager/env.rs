@@ -293,6 +293,7 @@ pub struct MetaOpts {
     pub cdc_table_split_init_insert_batch_size: u64,
 
     pub enable_legacy_table_migration: bool,
+    pub pause_on_next_bootstrap_offline: bool,
 }
 
 impl MetaOpts {
@@ -387,6 +388,7 @@ impl MetaOpts {
             cdc_table_split_init_insert_batch_size: 1000,
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
+            pause_on_next_bootstrap_offline: false,
         }
     }
 }
