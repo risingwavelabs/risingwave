@@ -32,6 +32,11 @@ pub use reexport::*;
 /// For other RisingWave crates, they can directly use arrow re-exported here, without adding
 /// `arrow` dependencies in their `Cargo.toml`. And they don't need to care about the version.
 mod reexport {
+    pub use super::arrow_55::{
+        FromArrow as Arrow55FromArrow, ToArrow as Arrow55ToArrow, arrow_array as arrow_array_55,
+        arrow_buffer as arrow_buffer_55, arrow_cast as arrow_cast_55,
+        arrow_schema as arrow_schema_55,
+    };
     pub use super::arrow_deltalake::{
         FromArrow as DeltaLakeFromArrow, ToArrow as DeltaLakeToArrow,
         arrow_array as arrow_array_deltalake, arrow_buffer as arrow_buffer_deltalake,

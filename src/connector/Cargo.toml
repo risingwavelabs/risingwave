@@ -21,7 +21,7 @@ all-sinks = [
     "sink-starrocks",
 ]
 all-sources = ["source-adbc_snowflake"]
-source-adbc_snowflake = ["dep:adbc_core"]
+source-adbc_snowflake = ["dep:adbc_core", "dep:adbc_snowflake"]
 sink-bigquery = [
     "dep:gcp-bigquery-client",
     "dep:google-cloud-bigquery",
@@ -39,7 +39,9 @@ sink-doris = []
 sink-starrocks = []
 
 [dependencies]
-adbc_core = { version = "0.17", optional = true }
+# rust adbc 0.21 maps to lib 0.19
+adbc_core = { version = "0.21", optional = true }
+adbc_snowflake = { version = "0.21", optional = true, default-features = false }
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
