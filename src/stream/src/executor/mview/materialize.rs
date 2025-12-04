@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common::util::rw_iter_util::ZipEqFast;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
