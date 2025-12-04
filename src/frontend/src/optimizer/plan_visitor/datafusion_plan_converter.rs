@@ -68,8 +68,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
                 .or_insert(0);
             *count += 1;
             if *count > 1 {
-                let take_expr =
-                    std::mem::replace(expr, DFExpr::Literal(ScalarValue::Null, None));
+                let take_expr = std::mem::replace(expr, DFExpr::Literal(ScalarValue::Null, None));
                 *expr = take_expr.alias_qualified(relation, format!("{}@{}", field.name(), count));
             }
         }

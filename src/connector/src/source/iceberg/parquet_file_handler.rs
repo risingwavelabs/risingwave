@@ -71,9 +71,7 @@ impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
         async move {
             let reader = ParquetMetaDataReader::new();
             let size = self.meta.size as u64;
-            let meta = reader
-                .load_and_finish(self, size)
-                .await?;
+            let meta = reader.load_and_finish(self, size).await?;
 
             Ok(Arc::new(meta))
         }
@@ -251,8 +249,10 @@ pub fn get_project_mask(
                                 .field_with_name(&column.name)
                                 .ok()?
                                 .data_type();
-                            let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
-                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
+                            let rw_data_type: &risingwave_common::types::DataType =
+                                &column.data_type;
+                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type)
+                            {
                                 Some(pos)
                             } else {
                                 None

@@ -23,10 +23,13 @@ use std::time::Duration;
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use await_tree::InstrumentAwait;
-use iceberg::arrow::{arrow_schema_to_schema, schema_to_arrow_schema, RecordBatchPartitionSplitter};
+use iceberg::arrow::{
+    RecordBatchPartitionSplitter, arrow_schema_to_schema, schema_to_arrow_schema,
+};
 use iceberg::spec::{
-    DataFile, MAIN_BRANCH, Operation, PartitionKey, PartitionSpecRef, SchemaRef as IcebergSchemaRef,
-    SerializedDataFile, Transform, UnboundPartitionField, UnboundPartitionSpec, FormatVersion,
+    DataFile, MAIN_BRANCH, Operation, PartitionKey, PartitionSpecRef,
+    SchemaRef as IcebergSchemaRef, SerializedDataFile, Transform, UnboundPartitionField,
+    UnboundPartitionSpec,
 };
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
@@ -34,8 +37,9 @@ use iceberg::writer::base_writer::data_file_writer::DataFileWriterBuilder;
 use iceberg::writer::base_writer::equality_delete_writer::{
     EqualityDeleteFileWriterBuilder, EqualityDeleteWriterConfig,
 };
-use iceberg::writer::base_writer::position_delete_file_writer::PositionDeleteFileWriterBuilder;
-use iceberg::writer::base_writer::position_delete_file_writer::POSITION_DELETE_SCHEMA;
+use iceberg::writer::base_writer::position_delete_file_writer::{
+    POSITION_DELETE_SCHEMA, PositionDeleteFileWriterBuilder,
+};
 use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
@@ -891,11 +895,8 @@ enum ProjectIdxVec {
     Done(Vec<usize>),
 }
 
-type DataFileWriterBuilderType = DataFileWriterBuilder<
-    ParquetWriterBuilder,
-    DefaultLocationGenerator,
-    DefaultFileNameGenerator,
->;
+type DataFileWriterBuilderType =
+    DataFileWriterBuilder<ParquetWriterBuilder, DefaultLocationGenerator, DefaultFileNameGenerator>;
 type PositionDeleteFileWriterBuilderType = PositionDeleteFileWriterBuilder<
     ParquetWriterBuilder,
     DefaultLocationGenerator,
@@ -1973,10 +1974,12 @@ impl IcebergSinkCommitter {
                 tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })?;
-            tx.commit(self.catalog.as_ref()).await.map_err(|err: iceberg::Error| {
-                tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-                SinkError::Iceberg(anyhow!(err))
-            })
+            tx.commit(self.catalog.as_ref())
+                .await
+                .map_err(|err: iceberg::Error| {
+                    tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+                    SinkError::Iceberg(anyhow!(err))
+                })
         })
         .await?;
         self.table = table;

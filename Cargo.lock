@@ -10716,16 +10716,6 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.11.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b82eaa1d779e9a4bc1c3217db8ffbeabaae1dca241bf70183242128d48681cd"
-dependencies = [
- "bytes",
- "prost-derive 0.11.9",
-]
-
-[[package]]
-name = "prost"
 version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
@@ -10760,19 +10750,6 @@ dependencies = [
  "regex",
  "syn 2.0.111",
  "tempfile",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.11.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
-dependencies = [
- "anyhow",
- "itertools 0.10.5",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -12351,7 +12328,6 @@ dependencies = [
  "pretty_assertions",
  "proc-macro2",
  "prometheus",
- "prost 0.11.9",
  "prost 0.13.4",
  "prost 0.14.1",
  "prost-reflect",
@@ -14255,6 +14231,8 @@ dependencies = [
  "dotenvy",
  "glob",
  "regex",
+ "sea-schema",
+ "sqlx",
  "tracing",
  "tracing-subscriber",
  "url",

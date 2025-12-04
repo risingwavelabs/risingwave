@@ -24,7 +24,7 @@ use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use iceberg::Catalog;
 use iceberg::expr::Predicate as IcebergPredicate;
-use iceberg::scan::{ArrowRecordBatchStream, FileScanTask};
+use iceberg::scan::FileScanTask;
 use iceberg::spec::DataContentType;
 use iceberg::table::Table;
 use itertools::Itertools;
@@ -545,7 +545,8 @@ impl IcebergSplitEnumerator {
                 }
             }
         }
-        let delete_columns = equality_ids.unwrap_or_default()
+        let delete_columns = equality_ids
+            .unwrap_or_default()
             .into_iter()
             .map(|id| match schema.name_by_field_id(id) {
                 Some(name) => Ok::<std::string::String, ConnectorError>(name.to_owned()),
@@ -874,7 +875,7 @@ pub async fn scan_task_to_chunk_with_deletes(
     let reader = table.reader_builder().with_batch_size(chunk_size).build();
     let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
-    let mut record_batch_stream: iceberg::scan::ArrowRecordBatchStream =
+    let record_batch_stream: iceberg::scan::ArrowRecordBatchStream =
         reader.read(Box::pin(file_scan_stream))?;
     let mut record_batch_stream = record_batch_stream.enumerate();
 

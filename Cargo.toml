@@ -266,7 +266,11 @@ sea-orm = { version = "1.1.19", features = [
     "runtime-tokio-native-tls",
     "with-uuid",
 ] }
-sea-orm-migration = "1.1.19"
+sea-orm-migration = { version = "1.1.19", features = [
+    "sqlx-postgres",
+    "sqlx-mysql",
+    "sqlx-sqlite",
+] }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1.15"
 sqlx = { version = "0.8.2", default-features = false, features = [
