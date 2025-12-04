@@ -154,12 +154,13 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
 
     async fn new_log_sinker(
         &self,
-        _writer_param: crate::sink::SinkWriterParam,
+        writer_param: crate::sink::SinkWriterParam,
     ) -> Result<Self::LogSinker> {
         let writer = OpenDalSinkWriter::new(
             self.op.clone(),
             &self.path,
             self.schema.clone(),
+            writer_param.executor_id,
             &self.format_desc,
             self.engine_type.clone(),
             self.batching_strategy.clone(),
@@ -206,6 +207,7 @@ pub struct OpenDalSinkWriter {
     operator: Operator,
     sink_writer: Option<FileWriterEnum>,
     write_path: String,
+    executor_id: u64,
     unique_writer_id: Uuid,
     encode_type: SinkEncode,
     row_encoder: JsonEncoder,
@@ -251,8 +253,13 @@ impl OpenDalSinkWriter {
                     if w.bytes_written() > 0 {
                         let metadata = w.close().await?;
                         tracing::info!(
-                            "writer {} finish write file, metadata: {:?}",
+                            "writer {} (executor_id: {}, created_time: {}) finish write file, metadata: {:?}",
                             self.unique_writer_id,
+                            self.executor_id,
+                            self.created_time
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs(),
                             metadata
                         );
                     }
@@ -353,6 +360,7 @@ impl OpenDalSinkWriter {
         operator: Operator,
         write_path: &str,
         rw_schema: Schema,
+        executor_id: u64,
         format_desc: &SinkFormatDesc,
         engine_type: EngineType,
         batching_strategy: BatchingStrategy,
@@ -373,6 +381,7 @@ impl OpenDalSinkWriter {
             write_path: write_path.to_owned(),
             operator,
             sink_writer: None,
+            executor_id,
             unique_writer_id: Uuid::now_v7(),
             encode_type: format_desc.encode.clone(),
             row_encoder,
