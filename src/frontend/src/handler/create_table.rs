@@ -2465,8 +2465,7 @@ fn get_source_and_resolved_table_name(
     table_name: ObjectName,
 ) -> Result<(Arc<SourceCatalog>, String)> {
     let db_name = &session.database();
-    let (_, resolved_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, &table_name)?;
+    let (_, resolved_table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
 
     let (source_schema, source_name) =
         Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;
