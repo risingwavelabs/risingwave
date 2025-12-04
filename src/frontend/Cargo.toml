@@ -111,6 +111,7 @@ tower-http = { version = "0.6", features = [
 tracing = "0.1"
 url = "2.5.0"
 uuid = "1"
+scopeguard = "1.2.0"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
