@@ -88,10 +88,10 @@ pub async fn handle_swap_rename(
                 .into());
             }
             if stmt_type == StatementType::ALTER_TABLE && !src_table.is_user_table() {
-                return Err(CatalogError::NotFound("table", src_obj_name.clone()).into());
+                return Err(CatalogError::not_found("table", src_obj_name.clone()).into());
             } else if stmt_type == StatementType::ALTER_MATERIALIZED_VIEW && !src_table.is_mview() {
                 return Err(
-                    CatalogError::NotFound("materialized view", src_obj_name.clone()).into(),
+                    CatalogError::not_found("materialized view", src_obj_name.clone()).into(),
                 );
             }
 

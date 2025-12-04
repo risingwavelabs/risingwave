@@ -138,23 +138,26 @@ impl CatalogError {
         };
     }
 
-    pub fn NotFound(object_type: &'static str, name: String) -> Self {
-        CatalogErrorInner::NotFound { object_type, name }.into()
-    }
-
-    pub fn duplicated(object_type: &'static str, name: String) -> Self {
-        CatalogErrorInner::Duplicated {
+    pub fn not_found(object_type: &'static str, name: impl Into<String>) -> Self {
+        CatalogErrorInner::NotFound {
             object_type,
-            name,
-            under_creation: false,
+            name: name.into(),
         }
         .into()
     }
 
-    pub fn Duplicated(object_type: &'static str, name: String, under_creation: bool) -> Self {
+    pub fn duplicated(object_type: &'static str, name: impl Into<String>) -> Self {
+        Self::duplicated_with_creation(object_type, name, false)
+    }
+
+    pub fn duplicated_with_creation(
+        object_type: &'static str,
+        name: impl Into<String>,
+        under_creation: bool,
+    ) -> Self {
         CatalogErrorInner::Duplicated {
             object_type,
-            name,
+            name: name.into(),
             under_creation,
         }
         .into()

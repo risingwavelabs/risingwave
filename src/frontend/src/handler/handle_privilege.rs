@@ -127,7 +127,7 @@ fn make_prost_privilege(
                     Err(CatalogError::NotFound("table", _)) => {
                         let (view, _) = reader
                             .get_view_by_name(db_name, schema_path, &table_name)
-                            .map_err(|_| CatalogError::NotFound("table", table_name))?;
+                            .map_err(|_| CatalogError::not_found("table", table_name))?;
                         grant_objs.push(view.id.into());
                     }
                     Err(e) => {
