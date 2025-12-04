@@ -59,8 +59,7 @@ use tokio::time::{Duration, Instant};
 
 use crate::error::StreamResult;
 use crate::executor::exchange::input::{
-    BoxedActorInput, BoxedInput, apply_dispatcher_barrier, assert_equal_dispatcher_barrier,
-    new_input,
+    BoxedActorInput, BoxedInput, assert_equal_dispatcher_barrier, new_input,
 };
 use crate::executor::monitor::ActorInputMetrics;
 use crate::executor::prelude::StreamingMetrics;
@@ -396,9 +395,6 @@ pub struct BarrierInner<M> {
 
     /// Tracing context for the **current** epoch of this barrier.
     pub tracing_context: TracingContext,
-
-    /// The actors that this barrier has passed locally. Used for debugging only.
-    pub passed_actors: Vec<ActorId>,
 }
 
 pub type BarrierMutationType = Option<Arc<Mutation>>;
@@ -413,7 +409,6 @@ impl<M: Default> BarrierInner<M> {
             kind: BarrierKind::Checkpoint,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
-            passed_actors: Default::default(),
         }
     }
 
@@ -423,7 +418,6 @@ impl<M: Default> BarrierInner<M> {
             kind: BarrierKind::Checkpoint,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
-            passed_actors: Default::default(),
         }
     }
 }
@@ -435,7 +429,6 @@ impl Barrier {
             mutation: (),
             kind: self.kind,
             tracing_context: self.tracing_context,
-            passed_actors: self.passed_actors,
         }
     }
 
@@ -1114,7 +1107,6 @@ impl<M> BarrierInner<M> {
             epoch,
             mutation,
             kind,
-            passed_actors,
             tracing_context,
             ..
         } = self;
@@ -1124,12 +1116,11 @@ impl<M> BarrierInner<M> {
                 curr: epoch.curr,
                 prev: epoch.prev,
             }),
-            mutation: Some(PbBarrierMutation {
-                mutation: barrier_fn(mutation),
+            mutation: barrier_fn(mutation).map(|mutation| PbBarrierMutation {
+                mutation: Some(mutation),
             }),
             tracing_context: tracing_context.to_protobuf(),
             kind: *kind as _,
-            passed_actors: passed_actors.clone(),
         }
     }
 
@@ -1143,12 +1134,8 @@ impl<M> BarrierInner<M> {
             kind: prost.kind(),
             epoch: EpochPair::new(epoch.curr, epoch.prev),
             mutation: mutation_from_pb(
-                prost
-                    .mutation
-                    .as_ref()
-                    .and_then(|mutation| mutation.mutation.as_ref()),
+                (prost.mutation.as_ref()).and_then(|mutation| mutation.mutation.as_ref()),
             )?,
-            passed_actors: prost.get_passed_actors().clone(),
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
         })
     }
@@ -1159,7 +1146,6 @@ impl<M> BarrierInner<M> {
             mutation: f(self.mutation),
             kind: self.kind,
             tracing_context: self.tracing_context,
-            passed_actors: self.passed_actors,
         }
     }
 }
@@ -1776,8 +1762,8 @@ impl DispatchBarrierBuffer {
         while self.buffer.is_empty() {
             self.try_fetch_barrier_rx(false).await?;
         }
-        let (mut recv_barrier, inputs) = self.buffer.pop_front().unwrap();
-        apply_dispatcher_barrier(&mut recv_barrier, barrier);
+        let (recv_barrier, inputs) = self.buffer.pop_front().unwrap();
+        assert_equal_dispatcher_barrier(&recv_barrier, &barrier);
 
         Ok((recv_barrier, inputs))
     }

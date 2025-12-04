@@ -257,15 +257,8 @@ impl MergeExecutor {
                     Message::Chunk(chunk)
                 }
                 DispatcherMessage::Barrier(barrier) => {
-                    tracing::debug!(
-                        target: "events::stream::barrier::path",
-                        actor_id = %actor_id,
-                        "receiver receives barrier from path: {:?}",
-                        barrier.passed_actors
-                    );
-                    let (mut barrier, new_inputs) =
+                    let (barrier, new_inputs) =
                         barrier_buffer.pop_barrier_with_inputs(barrier).await?;
-                    barrier.passed_actors.push(actor_id);
 
                     if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
                         barrier.mutation.as_deref()

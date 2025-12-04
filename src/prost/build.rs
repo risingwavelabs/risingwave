@@ -582,9 +582,6 @@ for_all_wrapped_id_fields! (
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
         }
-        Barrier {
-            passed_actors: ActorId,
-        }
         CdcFilterNode {
             upstream_source_id: SourceId,
         }
