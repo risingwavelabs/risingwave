@@ -789,7 +789,7 @@ impl DiagnoseCommand {
                         t.id.into(),
                         (
                             t.name,
-                            t..database_id,
+                            t.database_id,
                             t.schema_id,
                             t.definition,
                             t.created_at_epoch,
@@ -832,7 +832,12 @@ impl DiagnoseCommand {
             .list_views()
             .await?
             .into_iter()
-            .map(|v| (v.id.into(), (v.name, v.schema_id, v.sql, None)))
+            .map(|v| {
+                (
+                    v.id.into(),
+                    (v.name, v.database_id, v.schema_id, v.sql, None),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         let mut streaming_jobs = self
             .metadata_manager
@@ -1099,11 +1104,6 @@ impl DiagnoseCommand {
                 .to_string()
                 .into(),
         );
-        table.add_row(row);
-
-        let mut row = Row::new();
-        row.add_cell("license_key".into());
-        row.add_cell(params.license_key().to_string().into());
         table.add_row(row);
 
         let mut row = Row::new();
