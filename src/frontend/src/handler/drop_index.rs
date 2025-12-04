@@ -73,12 +73,10 @@ pub async fn handle_drop_index(
                                     index_name
                                 ))
                                 .into())
+                        } else if e.is_not_found("table") {
+                            Err(CatalogError::not_found("index", index_name).into())
                         } else {
-                            if e.is_not_found("table") {
-                                Err(CatalogError::not_found("index", index_name).into())
-                            } else {
-                                Err(e.into())
-                            }
+                            Err(e.into())
                         }
                     }
                 };

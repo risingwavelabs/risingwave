@@ -18,9 +18,9 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::RwPgResponse;
 use super::util::execute_with_long_running_notification;
 use crate::binder::Binder;
-use crate::catalog::{CatalogError, CatalogErrorInner};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::{CatalogError, CatalogErrorInner};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 
@@ -40,31 +40,28 @@ pub async fn handle_drop_mv(
 
     let table_id = {
         let reader = session.env().catalog_reader().read_guard();
-        let (table, schema_name) = match reader.get_any_table_by_name(
-            &session.database(),
-            schema_path,
-            &table_name,
-        ) {
-            Ok((t, s)) => (t, s),
-            Err(e) => {
-                return if if_exists {
-                    Ok(RwPgResponse::builder(StatementType::DROP_MATERIALIZED_VIEW)
-                        .notice(format!(
-                            "materialized view \"{}\" does not exist, skipping",
-                            table_name
-                        ))
-                        .into())
-                } else if let CatalogErrorInner::NotFound {
-                    object_type: "table",
-                    name,
-                } = e.inner()
-                {
-                    Err(CatalogError::not_found("materialized view", name.clone()).into())
-                } else {
-                    Err(e.into())
-                };
-            }
-        };
+        let (table, schema_name) =
+            match reader.get_any_table_by_name(&session.database(), schema_path, &table_name) {
+                Ok((t, s)) => (t, s),
+                Err(e) => {
+                    return if if_exists {
+                        Ok(RwPgResponse::builder(StatementType::DROP_MATERIALIZED_VIEW)
+                            .notice(format!(
+                                "materialized view \"{}\" does not exist, skipping",
+                                table_name
+                            ))
+                            .into())
+                    } else if let CatalogErrorInner::NotFound {
+                        object_type: "table",
+                        name,
+                    } = e.inner()
+                    {
+                        Err(CatalogError::not_found("materialized view", name.clone()).into())
+                    } else {
+                        Err(e.into())
+                    };
+                }
+            };
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
