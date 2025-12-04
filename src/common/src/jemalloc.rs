@@ -16,8 +16,44 @@
 #[macro_export]
 macro_rules! enable_jemalloc {
     () => {
+        static JEMALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
         #[cfg(unix)]
         #[global_allocator]
-        static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+        static DEBUG_JEMALLOC: DebugJemallocAllocator = DebugJemallocAllocator;
+
+        pub struct DebugJemallocAllocator;
+
+        unsafe impl std::alloc::GlobalAlloc for DebugJemallocAllocator {
+            unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+                if layout.size() >= 2 * 1024 * 1024 * 1024 {
+                    let backtrace = std::backtrace::Backtrace::capture();
+                    tracing::info!(
+                        backtrace = format!("{backtrace}"),
+                        size = layout.size(),
+                        "allocating a large memory block",
+                    );
+                }
+
+                unsafe { JEMALLOC.alloc(layout) }
+            }
+
+            unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+                unsafe { JEMALLOC.dealloc(ptr, layout) }
+            }
+
+            unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+                unsafe { JEMALLOC.alloc_zeroed(layout) }
+            }
+
+            unsafe fn realloc(
+                &self,
+                ptr: *mut u8,
+                layout: std::alloc::Layout,
+                new_size: usize,
+            ) -> *mut u8 {
+                unsafe { JEMALLOC.realloc(ptr, layout, new_size) }
+            }
+        }
     };
 }
