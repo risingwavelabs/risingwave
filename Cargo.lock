@@ -12212,6 +12212,7 @@ dependencies = [
  "risingwave_storage",
  "risingwave_variables",
  "rw_futures_util",
+ "scopeguard",
  "serde",
  "serde_json",
  "serde_yaml",
