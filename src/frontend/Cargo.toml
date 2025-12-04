@@ -79,6 +79,7 @@ risingwave_sqlparser = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_variables = { workspace = true }
 rw_futures_util = { workspace = true }
+scopeguard = "1.2.0"
 serde = { workspace = true }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -111,7 +112,6 @@ tower-http = { version = "0.6", features = [
 tracing = "0.1"
 url = "2.5.0"
 uuid = "1"
-scopeguard = "1.2.0"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
