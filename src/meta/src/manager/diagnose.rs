@@ -1088,12 +1088,12 @@ impl DiagnoseCommand {
 
         let mut row = Row::new();
         row.add_cell("state_store".into());
-        row.add_cell(params.state_store().to_string().into());
+        row.add_cell(params.state_store().to_owned().into());
         table.add_row(row);
 
         let mut row = Row::new();
         row.add_cell("data_directory".into());
-        row.add_cell(params.data_directory().to_string().into());
+        row.add_cell(params.data_directory().to_owned().into());
         table.add_row(row);
 
         let mut row = Row::new();
