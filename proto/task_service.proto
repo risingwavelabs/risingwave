@@ -140,6 +140,32 @@ message GetStreamRequest {
   }
 }
 
+message GetNewStreamRequest {
+  message Init {
+    uint32 up_fragment_id = 1;
+    uint32 down_fragment_id = 2;
+    uint32 database_id = 3;
+    string term_id = 4;
+  }
+
+  message Get {
+    uint32 up_actor_id = 1;
+    uint32 down_actor_id = 2;
+  }
+
+  message AddPermits {
+    uint32 up_actor_id = 1;
+    uint32 down_actor_id = 2;
+    Permits permits = 3;
+  }
+
+  oneof value {
+    Init init = 1;
+    Get get = 2;
+    AddPermits add_permits = 3;
+  }
+}
+
 message GetStreamResponse {
   stream_plan.StreamMessageBatch message = 1;
   // The number of permits acquired for this message, which should be sent back to the upstream with `add_permits`.
@@ -148,7 +174,21 @@ message GetStreamResponse {
   Permits permits = 2;
 }
 
+message GetNewStreamResponse {
+  // message UpActorIds {
+  //   repeated uint32 up_actor_id = 1;
+  // }
+
+  stream_plan.StreamMessageBatch message = 1;
+  Permits permits = 2;
+  uint32 up_actor_id = 3;
+  uint32 down_actor_id = 4;
+
+  // map<uint32, UpActorIds> down_up_actor_ids = 3;
+}
+
 service ExchangeService {
   rpc GetData(GetDataRequest) returns (stream GetDataResponse);
   rpc GetStream(stream GetStreamRequest) returns (stream GetStreamResponse);
+  rpc GetNewStream(stream GetNewStreamRequest) returns (stream GetNewStreamResponse);
 }
