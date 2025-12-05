@@ -576,6 +576,13 @@ impl InflightDatabaseInfo {
             }
         }
         if let Some(Command::RescheduleFragment { reschedules, .. }) = command {
+            // During reschedule we expect fragments to be rebuilt with new actors and no vnode bitmap update.
+            debug_assert!(
+                reschedules
+                    .values()
+                    .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty())
+            );
+
             let touched_jobs = reschedules
                 .keys()
                 .filter_map(|fragment_id| self.fragment_location.get(fragment_id))
