@@ -580,20 +580,10 @@ impl CreateMviewProgressTracker {
         let mut new_states = HashMap::new();
         let mut new_backfill_types = HashMap::new();
         for (actor_id, upstream_type) in new_tracking_actors {
-            let state = progress
-                .states
-                .get(&actor_id)
-                .cloned()
-                .unwrap_or(BackfillState::Init);
-            new_states.insert(actor_id, state);
+            new_states.insert(actor_id, BackfillState::Init);
             new_backfill_types.insert(actor_id, upstream_type);
         }
 
-        let done_actors: HashSet<_> = new_states
-            .iter()
-            .filter(|(_, state)| matches!(state, BackfillState::Done(..)))
-            .map(|(actor_id, _)| *actor_id)
-            .collect();
         let fragment_actors: HashMap<_, _> = fragment_infos
             .iter()
             .map(|(fragment_id, info)| (*fragment_id, info.actors.keys().copied().collect()))
@@ -601,11 +591,11 @@ impl CreateMviewProgressTracker {
 
         let newly_scheduled = progress
             .backfill_order_state
-            .refresh_actors(&fragment_actors, &done_actors);
+            .refresh_actors(&fragment_actors, &HashSet::new());
 
         progress.backfill_upstream_types = new_backfill_types;
         progress.states = new_states;
-        progress.done_count = done_actors.len();
+        progress.done_count = 0;
 
         progress.upstream_mv_count = StreamJobFragments::upstream_table_counts_impl(
             fragment_infos.values().map(|fragment| &fragment.nodes),
@@ -616,26 +606,6 @@ impl CreateMviewProgressTracker {
         progress.mv_backfill_consumed_rows = 0;
         progress.source_backfill_consumed_rows = 0;
         progress.mv_backfill_buffered_rows = 0;
-        for (actor_id, state) in &progress.states {
-            let (consumed_rows, buffered_rows) = match state {
-                BackfillState::Init => (0, 0),
-                BackfillState::ConsumingUpstream(_, consumed, buffered) => (*consumed, *buffered),
-                BackfillState::Done(consumed, buffered) => (*consumed, *buffered),
-            };
-            match progress.backfill_upstream_types.get(actor_id) {
-                Some(BackfillUpstreamType::MView) => {
-                    progress.mv_backfill_consumed_rows += consumed_rows;
-                }
-                Some(BackfillUpstreamType::Source) => {
-                    progress.source_backfill_consumed_rows += consumed_rows;
-                }
-                Some(BackfillUpstreamType::LocalityProvider) => {
-                    progress.mv_backfill_consumed_rows += consumed_rows;
-                    progress.mv_backfill_buffered_rows += buffered_rows;
-                }
-                Some(BackfillUpstreamType::Values) | None => {}
-            }
-        }
 
         let mut pending = progress
             .backfill_order_state
