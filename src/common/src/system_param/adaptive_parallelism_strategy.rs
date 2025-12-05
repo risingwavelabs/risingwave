@@ -103,7 +103,7 @@ impl LinearCurvePoint {
     }
 }
 
-/// A simple piecewise-linear curve defined on available parallelism (integer) -> target ratio [0,1].
+/// A simple piecewise-linear curve defined on available parallelism (integer) -> target ratio \[0,1\].
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LinearCurve {
     pub points: SmallVec<[LinearCurvePoint; 8]>,
