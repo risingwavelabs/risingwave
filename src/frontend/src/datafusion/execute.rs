@@ -14,21 +14,26 @@
 
 use std::sync::Arc;
 
+use datafusion::physical_plan::execute_stream;
+use datafusion::prelude::SessionContext;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_common::array::DataChunk;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::BoxedError;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
+use tokio::sync::mpsc;
 
 use crate::PgResponseStream;
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::RwPgResponse;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
+use crate::scheduler::SchedulerError;
 use crate::session::SessionImpl;
 
 pub struct DfBatchQueryPlanResult {
@@ -42,15 +47,6 @@ pub async fn execute_datafusion_plan(
     plan: DfBatchQueryPlanResult,
     formats: Vec<Format>,
 ) -> RwResult<RwPgResponse> {
-    use datafusion::physical_plan::execute_stream;
-    use datafusion::prelude::*;
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::array::arrow::IcebergArrowConvert;
-    use risingwave_common::error::BoxedError;
-    use tokio::sync::mpsc;
-
-    use crate::scheduler::SchedulerError;
-
     let ctx = SessionContext::new();
     let state = ctx.state();
 

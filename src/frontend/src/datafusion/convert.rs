@@ -84,8 +84,10 @@ pub fn convert_join_type(join_type: RwJoinType) -> RwResult<DFJoinType> {
     }
 }
 
-#[allow(clippy::len_without_is_empty)]
 pub trait ColumnTrait {
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     fn len(&self) -> usize;
     fn column(&self, index: usize) -> Column;
 }
@@ -102,7 +104,7 @@ impl ColumnTrait for DFSchema {
 
 impl ColumnTrait for Vec<Column> {
     fn len(&self) -> usize {
-        self.len()
+        Vec::len(self)
     }
 
     fn column(&self, index: usize) -> Column {

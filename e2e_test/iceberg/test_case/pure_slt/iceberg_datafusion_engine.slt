@@ -181,7 +181,8 @@ INSERT INTO price (id, price, date) VALUES
 statement ok
 FLUSH;
 
-# sleep 5s
+sleep 5s
+
 # query ??? rowsort
 # SELECT id, price, date FROM price WHERE date <= DATE '2025-02-10' - interval '5' day;
 # ----
