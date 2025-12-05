@@ -65,9 +65,8 @@ impl TableProvider for IcebergTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(IcebergScan::new(
-            self, projection, filters, limit,
-        )?))
+        let scan = IcebergScan::new(self, projection, filters, limit).await?;
+        Ok(Arc::new(scan))
     }
 
     fn supports_filters_pushdown(
@@ -97,7 +96,6 @@ impl IcebergTableProvider {
             .core
             .column_catalog
             .iter()
-            .filter(|column| !column.is_hidden())
             .map(|column| {
                 let column_desc = &column.column_desc;
                 let field = IcebergArrowConvert
