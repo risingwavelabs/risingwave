@@ -70,12 +70,15 @@ impl MergeExecutorBuilder {
         let upstreams = if always_single_input {
             MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
         } else {
-            MergeExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
+            MergeExecutorUpstream::Merge(MergeExecutor::new_merge_upstream(
                 inputs,
                 &executor_stats,
                 &actor_context,
+                chunk_size,
+                info.schema.clone(),
             ))
         };
+
         Ok(MergeExecutorInput::new(
             upstreams,
             actor_context,
@@ -83,7 +86,6 @@ impl MergeExecutorBuilder {
             local_barrier_manager,
             executor_stats,
             info,
-            chunk_size,
         ))
     }
 }
