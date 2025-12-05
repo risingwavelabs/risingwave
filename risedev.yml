@@ -80,6 +80,15 @@ profile:
       - use: frontend
       - use: compactor
 
+  # Using RustFS as S3-compatible object store
+  with-rustfs:
+    steps:
+      - use: rustfs
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
   # `dev-compute-node` have the same settings as default except the compute node will be started by user.
   dev-compute-node:
     steps:
@@ -1116,6 +1125,31 @@ template:
     # Empty string means this env var will use the default of minio.
     api-requests-deadline: ""
 
+  rustfs:
+    # Advertise address of RustFS s3 endpoint
+    address: "127.0.0.1"
+
+    # Advertise port of RustFS s3 endpoint
+    port: 9302
+
+    # Listen address of RustFS endpoint
+    listen-address: ${address}
+
+    # Root username
+    root-user: hummockadmin
+
+    # Root password
+    root-password: hummockadmin
+
+    # Bucket name to store hummock information
+    hummock-bucket: hummock001
+
+    # Id of this instance
+    id: rustfs
+
+    # Prometheus nodes used by this RustFS
+    provide-prometheus: "prometheus*"
+
   sqlite:
     # Id of this instance
     id: sqlite
@@ -1148,6 +1182,9 @@ template:
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
+
+    # RustFS instances used by this compute node
+    provide-rustfs: "rustfs*"
 
     # OpenDAL storage backend used by this compute node
     provide-opendal: "opendal*"
@@ -1223,6 +1260,9 @@ template:
 
     # Minio instances used by the cluster
     provide-minio: "minio*"
+
+    # RustFS instances used by the cluster
+    provide-rustfs: "rustfs*"
 
     # OpenDAL storage backend used by the cluster
     provide-opendal: "opendal*"
@@ -1325,6 +1365,9 @@ template:
 
     # Minio instances used by this compactor
     provide-minio: "minio*"
+
+    # RustFS instances used by this compactor
+    provide-rustfs: "rustfs*"
 
     # Meta-nodes used by this compactor
     provide-meta-node: "meta-node*"
