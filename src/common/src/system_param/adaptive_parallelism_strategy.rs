@@ -93,7 +93,7 @@ pub struct LinearCurvePoint {
 
 impl LinearCurvePoint {
     fn new(available_parallelism: usize, target_ratio: f32) -> Result<Self, String> {
-        if target_ratio < 0.0 || target_ratio > 1.0 {
+        if !(0.0..=1.0).contains(&target_ratio) {
             return Err(format!("target ratio out of range [0,1]: {}", target_ratio));
         }
         Ok(Self {
@@ -116,10 +116,10 @@ impl LinearCurve {
         if available_parallelism <= points[0].available_parallelism {
             return points[0].target_ratio;
         }
-        if let Some(last) = points.last() {
-            if available_parallelism >= last.available_parallelism {
-                return last.target_ratio;
-            }
+        if let Some(last) = points.last()
+            && available_parallelism >= last.available_parallelism
+        {
+            return last.target_ratio;
         }
 
         // Find segment.
@@ -269,7 +269,7 @@ fn parse_linear_curve(body: &str) -> Result<LinearCurve, String> {
     for pair in body.split(',') {
         let trimmed = pair.trim();
         if trimmed.is_empty() {
-            return Err("empty pair".to_string());
+            return Err("empty pair".to_owned());
         }
         let (a_str, b_str) = trimmed
             .split_once(':')
@@ -284,7 +284,7 @@ fn parse_linear_curve(body: &str) -> Result<LinearCurve, String> {
     }
 
     if points.len() < 2 {
-        return Err("requires at least two points".to_string());
+        return Err("requires at least two points".to_owned());
     }
 
     // Sort and dedup check.
@@ -301,10 +301,10 @@ fn parse_linear_curve(body: &str) -> Result<LinearCurve, String> {
     }
 
     // Auto pad with 0 if needed.
-    if let Some(first) = points.first().copied() {
-        if first.available_parallelism > 0 {
-            points.insert(0, LinearCurvePoint::new(0, first.target_ratio)?);
-        }
+    if let Some(first) = points.first().copied()
+        && first.available_parallelism > 0
+    {
+        points.insert(0, LinearCurvePoint::new(0, first.target_ratio)?);
     }
 
     // Auto pad with 1 if missing.
@@ -319,24 +319,28 @@ fn parse_linear_curve(body: &str) -> Result<LinearCurve, String> {
 
     // Final validation len>=2 and monotonic increasing already guaranteed.
     if points.len() < 2 {
-        return Err("requires at least two points".to_string());
+        return Err("requires at least two points".to_owned());
     }
 
     Ok(LinearCurve { points })
 }
 
 fn interpolate_for_padding(points: &[LinearCurvePoint], target_available: usize) -> f32 {
-    // points assumed sorted, len >=1.
+    // points assumed sorted, len >=1. Used only for auto-padding missing anchors (e.g., insert 1).
+    // Behavior:
+    // - If target is before the first point: clamp to first.
+    // - If after the last point: clamp to last.
+    // - Otherwise: linear interpolate within the containing segment.
     if points.is_empty() {
         return 0.0;
     }
     if target_available <= points[0].available_parallelism {
         return points[0].target_ratio;
     }
-    if let Some(last) = points.last() {
-        if target_available >= last.available_parallelism {
-            return last.target_ratio;
-        }
+    if let Some(last) = points.last()
+        && target_available >= last.available_parallelism
+    {
+        return last.target_ratio;
     }
     for w in points.windows(2) {
         let left = w[0];
@@ -354,10 +358,9 @@ fn interpolate_for_padding(points: &[LinearCurvePoint], target_available: usize)
 }
 
 fn find_insert_pos(points: &[LinearCurvePoint], available: usize) -> usize {
-    match points.binary_search_by_key(&available, |p| p.available_parallelism) {
-        Ok(pos) => pos,
-        Err(pos) => pos,
-    }
+    points
+        .binary_search_by_key(&available, |p| p.available_parallelism)
+        .unwrap_or_else(|pos| pos)
 }
 
 impl FromStr for AdaptiveParallelismStrategy {
@@ -521,8 +524,7 @@ mod tests {
                 assert!((ratio - 0.65).abs() < 1e-6);
                 // compute target with current_parallelism=15, ratio=0.65 => 9.75 -> 9 after floor, min 1
                 assert_eq!(
-                    AdaptiveParallelismStrategy::LinearCurve(curve.clone())
-                        .compute_target_parallelism(15),
+                    AdaptiveParallelismStrategy::LinearCurve(curve).compute_target_parallelism(15),
                     9
                 );
             }
@@ -567,6 +569,50 @@ mod tests {
             parse_strategy("linear_curve(1:0.2)"),
             Err(ParallelismStrategyParseError::InvalidLinearCurveValue(_))
         ));
+    }
+
+    #[test]
+    fn test_interpolate_for_padding_clamp_and_linear() {
+        // points sorted, len>=1 guaranteed
+        let points = vec![
+            LinearCurvePoint::new(0, 0.2).unwrap(),
+            LinearCurvePoint::new(4, 0.6).unwrap(),
+            LinearCurvePoint::new(10, 1.0).unwrap(),
+        ];
+
+        // Before first point: clamp to first
+        assert!((interpolate_for_padding(&points, 0) - 0.2).abs() < 1e-6);
+
+        // Middle segment: between 0 and 4, expect linear interpolation
+        // t = (2-0)/(4-0)=0.5, ratio = 0.2 + 0.5*(0.6-0.2)=0.4
+        assert!((interpolate_for_padding(&points, 2) - 0.4).abs() < 1e-6);
+
+        // Exact boundary should return right point
+        assert!((interpolate_for_padding(&points, 4) - 0.6).abs() < 1e-6);
+
+        // After last point: clamp to last
+        assert!((interpolate_for_padding(&points, 20) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_linear_curve_interpolation_ratios() {
+        let strategy = parse_strategy("linear_curve(0:0,5:0.5,10:1.0)").unwrap();
+        let curve = match strategy {
+            AdaptiveParallelismStrategy::LinearCurve(curve) => curve,
+            _ => panic!("expected linear curve"),
+        };
+
+        // Exact points
+        assert!((curve.interpolate(0) - 0.0).abs() < 1e-6);
+        assert!((curve.interpolate(5) - 0.5).abs() < 1e-6);
+        assert!((curve.interpolate(10) - 1.0).abs() < 1e-6);
+
+        // Mid segments
+        assert!((curve.interpolate(2) - 0.2).abs() < 1e-6); // (0->5): 2/5 * 0.5
+        assert!((curve.interpolate(7) - 0.7).abs() < 1e-6); // (5->10): 2/5 * (1-0.5) + 0.5
+
+        // Clamp beyond last
+        assert!((curve.interpolate(20) - 1.0).abs() < 1e-6);
     }
 
     /// Test serde serialization/deserialization uses string format,
