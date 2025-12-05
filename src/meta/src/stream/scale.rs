@@ -146,6 +146,10 @@ impl ScaleController {
         let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
         let added_actor_ids: HashSet<_> = &curr_ids - &prev_ids;
         let kept_ids: HashSet<_> = prev_ids.intersection(&curr_ids).cloned().collect();
+        debug_assert!(
+            kept_ids.is_empty(),
+            "kept actors found in scale; expected full rebuild, prev={prev_ids:?}, curr={curr_ids:?}, kept={kept_ids:?}"
+        );
 
         let mut added_actors = HashMap::new();
         for &actor_id in &added_actor_ids {
@@ -759,7 +763,8 @@ impl ScaleController {
                 debug_assert!(
                     reschedules
                         .values()
-                        .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty())
+                        .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
+                    "RescheduleFragment command carries vnode_bitmap_updates, expected full rebuild"
                 );
             }
 

@@ -919,5 +919,7 @@ mod tests {
         assert!(progress.states.contains_key(&actor_new));
         assert!(!progress.states.contains_key(&actor_old));
         assert_eq!(progress.done_count, 0);
+        assert_eq!(progress.mv_backfill_consumed_rows, 0);
+        assert_eq!(progress.source_backfill_consumed_rows, 0);
     }
 }
