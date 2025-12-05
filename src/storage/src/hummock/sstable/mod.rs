@@ -549,12 +549,17 @@ mod tests {
         )
         .await;
 
-        let buffer = bincode::serialize(&meta).unwrap();
+        let sstable = Sstable::new(42, meta);
 
-        let m: SstableMeta = bincode::deserialize(&buffer).unwrap();
+        let buffer = bincode::serialize(&sstable).unwrap();
 
-        assert_eq!(meta, m);
+        let s: Sstable = bincode::deserialize(&buffer).unwrap();
 
-        println!("{} vs {}", buffer.len(), meta.encoded_size());
+        assert_eq!(s.table_id, sstable.table_id);
+        assert_eq!(s.meta, sstable.meta);
+        assert_eq!(
+            s.filter_reader.encode_to_bytes(),
+            sstable.filter_reader.encode_to_bytes()
+        );
     }
 }
