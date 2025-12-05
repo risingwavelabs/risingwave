@@ -142,15 +142,16 @@ pub async fn handle_create_as(
     );
 
     let catalog_writer = session.catalog_writer()?;
-    execute_with_long_running_notification(catalog_writer.create_table(
+    execute_with_long_running_notification(
+        catalog_writer.create_table(
             source,
             table.to_prost(),
             graph,
             TableJobType::Unspecified,
             if_not_exists,
             HashSet::default(),
-        ), 
-        &session, 
+        ),
+        &session,
         "CREATE TABLE AS",
     )
     .await?;

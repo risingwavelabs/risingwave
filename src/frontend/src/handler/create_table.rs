@@ -1473,15 +1473,19 @@ pub async fn handle_create_table(
     match engine {
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
-            execute_with_long_running_notification(catalog_writer.create_table(
-                source.map(|s| s.to_prost()),
-            hummock_table.to_prost(),
+            execute_with_long_running_notification(
+                catalog_writer.create_table(
+                    source.map(|s| s.to_prost()),
+                    hummock_table.to_prost(),
                     graph,
                     job_type,
                     if_not_exists,
                     dependencies,
-                ), &session, "CREATE HUMMOCK TABLE",)
-                .await?;
+                ),
+                &session,
+                "CREATE HUMMOCK TABLE",
+            )
+            .await?;
         }
         Engine::Iceberg => {
             let hummock_table_name = hummock_table.name.clone();
