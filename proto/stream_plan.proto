@@ -1267,6 +1267,8 @@ message StreamFragmentGraph {
   StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
+  // Parallelism to use during backfill. Falls back to `parallelism` if unset.
+  Parallelism backfill_parallelism = 9;
 
   // Specified max parallelism, i.e., expected vnode count for the graph.
   //

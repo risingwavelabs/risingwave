@@ -1063,11 +1063,65 @@ impl GlobalStreamManager {
                             }
                         }
 
+                        LocalNotification::StreamingJobBackfillFinished(job_id) => {
+                            tracing::info!(job_id = %job_id, "received backfill finished notification");
+                            if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
+                                tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
+                            }
+                        }
+
                         _ => {}
                     }
                 }
             }
         }
+    }
+
+    async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
+        let fragments = match self.metadata_manager.get_job_fragments_by_id(job_id).await {
+            Ok(fragments) => fragments,
+            Err(e) => {
+                tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to fetch fragments when applying post-backfill parallelism");
+                return Ok(());
+            }
+        };
+
+        // Derive current job-level parallelism from fragment actor counts to reflect backfill settings.
+        let actor_parallelisms = fragments
+            .fragments()
+            .map(|f| f.actors.len())
+            .collect::<std::collections::HashSet<_>>();
+        let current = match actor_parallelisms.len() {
+            0 => {
+                tracing::warn!(job_id = %job_id, "no fragments found when applying post-backfill parallelism");
+                return Ok(());
+            }
+            1 => StreamingParallelism::Fixed(*actor_parallelisms.iter().next().unwrap()),
+            _ => StreamingParallelism::Custom,
+        };
+
+        let target = self
+            .metadata_manager
+            .catalog_controller
+            .get_job_streaming_parallelisms(job_id)
+            .await?;
+
+        tracing::info!(
+            job_id = %job_id,
+            ?current,
+            ?target,
+            "restoring parallelism after backfill via reschedule"
+        );
+        let policy = ReschedulePolicy::Parallelism(ParallelismPolicy {
+            parallelism: target,
+        });
+        if let Err(e) = self.reschedule_streaming_job(job_id, policy, false).await {
+            tracing::warn!(job_id = %job_id, error = %e.as_report(), "reschedule after backfill failed");
+            return Err(e);
+        }
+
+        tracing::info!(job_id = %job_id, "parallelism reschedule after backfill submitted");
+        Ok(())
     }
 
     pub fn start_auto_parallelism_monitor(

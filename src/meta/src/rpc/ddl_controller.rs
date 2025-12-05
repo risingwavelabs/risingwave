@@ -1670,6 +1670,7 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
+        let specified_backfill_parallelism = fragment_graph.specified_backfill_parallelism();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
         // 1. Fragment Level ordering graph
@@ -1759,8 +1760,9 @@ impl DdlController {
         // 3. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
+        let initial_parallelism = specified_backfill_parallelism.or(specified_parallelism);
         let parallelism = self.resolve_stream_parallelism(
-            specified_parallelism,
+            initial_parallelism,
             max_parallelism,
             &cluster_info,
             resource_group.clone(),
@@ -1799,7 +1801,7 @@ impl DdlController {
 
         // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
         // Otherwise, it defaults to FIXED based on deduction.
-        let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
+        let table_parallelism = match (initial_parallelism, &self.env.opts.default_parallelism) {
             (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
             _ => TableParallelism::Fixed(parallelism.get()),
         };
