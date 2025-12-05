@@ -1076,6 +1076,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.UdfExprVersion", "#[derive(prost_helpers::Version)]")
         .type_attribute("meta.Object.object_info", "#[derive(strum::Display)]")
         .type_attribute("meta.SubscribeResponse.info", "#[derive(strum::Display)]")
+        .type_attribute("task_service.GetNewStreamRequest.Init", "#[derive(Hash, Eq)]")
         // end
         ;
 

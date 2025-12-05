@@ -12,20 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use either::Either;
+use futures::stream::BoxStream;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
+use risingwave_pb::task_service::get_new_stream_request::{AddPermits, Value};
+use risingwave_pb::task_service::{
+    GetNewStreamRequest, GetNewStreamResponse, GetStreamResponse, get_new_stream_request, permits,
+};
+use risingwave_rpc_client::ComputeClient;
+use risingwave_rpc_client::error::RpcError;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
-    BarrierInner, DispatcherMessage, DispatcherMessageBatch, DispatcherMessageStreamItem,
+    BarrierInner, DispatcherMessage, DispatcherMessageBatch, DispatcherMessageStream,
+    DispatcherMessageStreamItem,
 };
-use crate::task::{FragmentId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
+use crate::task::{
+    FragmentId, LocalBarrierManager, StreamEnvironment, UpDownActorIds, UpDownFragmentIds,
+};
 
 /// `Input` is a more abstract upstream input type, used for `DynamicReceivers` type
 /// handling of multiple upstream inputs
@@ -144,13 +159,143 @@ impl Input for LocalInput {
 #[pin_project]
 pub struct RemoteInput {
     #[pin]
-    inner: RemoteInputStreamInner,
+    // inner: RemoteInputStreamInner,
+    inner: BoxStream<'static, DispatcherMessageStreamItem>,
 
     actor_id: ActorId,
 }
 
 use remote_input::RemoteInputStreamInner;
 use risingwave_pb::common::ActorInfo;
+
+struct RegisterReq {
+    get: get_new_stream_request::Get,
+    msg_tx: mpsc::UnboundedSender<DispatcherMessage>,
+}
+
+#[derive(Clone)]
+struct Worker {
+    register_tx: mpsc::UnboundedSender<RegisterReq>,
+    join_handle: Arc<JoinHandle<Result<(), StreamExecutorError>>>,
+}
+
+impl Worker {
+    async fn new(
+        client: ComputeClient,
+        init: get_new_stream_request::Init,
+    ) -> Result<Self, RpcError> {
+        let (stream, req_tx) = client.get_new_stream(init).await?;
+
+        let (register_tx, register_rx) = mpsc::unbounded_channel();
+
+        let task = async move {
+            enum Event {
+                Register(RegisterReq),
+                Response(Result<GetNewStreamResponse, tonic::Status>),
+            }
+
+            let mut stream = futures::stream_select!(
+                tokio_stream::wrappers::UnboundedReceiverStream::new(register_rx)
+                    .map(Event::Register),
+                stream.map(Event::Response),
+            );
+
+            let mut msg_txs = HashMap::new();
+
+            while let Some(event) = stream.next().await {
+                match event {
+                    Event::Register(RegisterReq { get, msg_tx }) => {
+                        req_tx
+                            .send(GetNewStreamRequest {
+                                value: Some(Value::Get(get)),
+                            })
+                            .unwrap();
+
+                        msg_txs.insert((get.up_actor_id, get.down_actor_id), msg_tx);
+                    }
+                    Event::Response(res) => {
+                        let GetNewStreamResponse {
+                            message,
+                            permits,
+                            up_actor_id,
+                            down_actor_id,
+                        } = res.expect("exchange closed");
+
+                        if let Some(msg_tx) = msg_txs.get(&(up_actor_id, down_actor_id)) {
+                            use crate::executor::DispatcherMessageBatch;
+                            let msg = message.unwrap();
+
+                            let msg_res = DispatcherMessageBatch::from_protobuf(&msg);
+
+                            // immediately put back permits
+                            req_tx
+                                .send(GetNewStreamRequest {
+                                    value: Some(Value::AddPermits(AddPermits {
+                                        up_actor_id,
+                                        down_actor_id,
+                                        permits,
+                                    })),
+                                })
+                                .unwrap();
+
+                            let msg = msg_res.context("RemoteInput decode message error")?;
+                            match msg.into_messages() {
+                                Either::Left(barriers) => {
+                                    for b in barriers {
+                                        msg_tx.send(b).unwrap();
+                                    }
+                                }
+                                Either::Right(m) => {
+                                    msg_tx.send(m).unwrap();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok::<_, StreamExecutorError>(())
+        };
+
+        // TODO: handler
+        let join_handle = tokio::spawn(task);
+
+        Ok(Self {
+            register_tx,
+            join_handle: Arc::new(join_handle),
+        })
+    }
+}
+
+struct Mux {
+    cache: moka::future::Cache<get_new_stream_request::Init, Worker>,
+}
+
+impl Mux {
+    pub fn new() -> Self {
+        Self {
+            cache: moka::future::Cache::new(u64::MAX),
+        }
+    }
+
+    async fn get(
+        &self,
+        init: get_new_stream_request::Init,
+        upstream_addr: HostAddr,
+        env: &StreamEnvironment,
+    ) -> Worker {
+        let worker = self
+            .cache
+            .try_get_with(init.clone(), async move {
+                let client = env.client_pool().get_by_addr(upstream_addr).await?;
+                Worker::new(client, init).await
+            })
+            .await
+            .expect("bad");
+
+        worker
+    }
+}
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
@@ -164,37 +309,70 @@ impl RemoteInput {
     ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
-        let client = local_barrier_manager
-            .env
-            .client_pool()
-            .get_by_addr(upstream_addr)
-            .await?;
-        let (stream, permits_tx) = client
-            .get_stream(
-                up_down_ids.0,
-                up_down_ids.1,
-                up_down_frag.0,
-                up_down_frag.1,
-                local_barrier_manager.database_id,
-                local_barrier_manager.term_id.clone(),
-            )
-            .await?;
+        static MUX: LazyLock<Mux> = LazyLock::new(Mux::new);
+
+        let init = get_new_stream_request::Init {
+            up_fragment_id: up_down_frag.0,
+            down_fragment_id: up_down_frag.1,
+            database_id: local_barrier_manager.database_id,
+            term_id: local_barrier_manager.term_id.clone(),
+        };
+
+        let worker = MUX
+            .get(init, upstream_addr, &local_barrier_manager.env)
+            .await;
+
+        let (msg_tx, msg_rx) = mpsc::unbounded_channel();
+        worker
+            .register_tx
+            .send(RegisterReq {
+                get: get_new_stream_request::Get {
+                    up_actor_id: up_down_ids.0,
+                    down_actor_id: up_down_ids.1,
+                },
+                msg_tx,
+            })
+            .unwrap();
 
         Ok(Self {
             actor_id,
-            inner: remote_input::run(
-                stream,
-                permits_tx,
-                up_down_ids,
-                up_down_frag,
-                metrics,
-                local_barrier_manager
-                    .env
-                    .global_config()
-                    .developer
-                    .exchange_batched_permits,
-            ),
+            inner: tokio_stream::wrappers::UnboundedReceiverStream::new(msg_rx)
+                .map(Ok)
+                .boxed(),
         })
+
+        // let client = local_barrier_manager
+        //     .env
+        //     .client_pool()
+        //     .get_by_addr(upstream_addr)
+        //     .await?;
+
+        // let (stream, permits_tx) = client
+        //     .get_stream(
+        //         up_down_ids.0,
+        //         up_down_ids.1,
+        //         up_down_frag.0,
+        //         up_down_frag.1,
+        //         local_barrier_manager.database_id,
+        //         local_barrier_manager.term_id.clone(),
+        //     )
+        //     .await?;
+
+        // Ok(Self {
+        //     actor_id,
+        //     inner: remote_input::run(
+        //         stream,
+        //         permits_tx,
+        //         up_down_ids,
+        //         up_down_frag,
+        //         metrics,
+        //         local_barrier_manager
+        //             .env
+        //             .global_config()
+        //             .developer
+        //             .exchange_batched_permits,
+        //     ),
+        // })
     }
 }
 
@@ -204,6 +382,7 @@ mod remote_input {
     use anyhow::Context;
     use await_tree::InstrumentAwait;
     use either::Either;
+    use futures::Stream;
     use risingwave_pb::task_service::{GetStreamResponse, permits};
     use tokio::sync::mpsc;
     use tonic::Streaming;
@@ -237,7 +416,7 @@ mod remote_input {
 
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
     async fn run_inner(
-        stream: Streaming<GetStreamResponse>,
+        stream: impl Stream<Item = Result<GetStreamResponse, tonic::Status>>,
         permits_tx: mpsc::UnboundedSender<permits::Value>,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
