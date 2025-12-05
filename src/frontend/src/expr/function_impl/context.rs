@@ -27,4 +27,5 @@ define_context! {
     pub(super) DB_NAME: String,
     pub(super) SEARCH_PATH: SearchPath,
     pub(super) META_CLIENT: Arc<dyn crate::meta_client::FrontendMetaClient>,
+    pub(super) SYSTEM_PARAMS_MANAGER: risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef,
 }

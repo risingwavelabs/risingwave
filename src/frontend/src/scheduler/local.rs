@@ -137,6 +137,7 @@ impl LocalQueryExecution {
         let strict_mode = self.session.config().batch_expr_strict_mode();
         let timeout = self.timeout;
         let meta_client = self.front_env.meta_client_ref();
+        let system_params_manager = self.session.env().system_params_manager().clone();
 
         let sender1 = sender.clone();
         let exec = async move {
@@ -158,7 +159,8 @@ impl LocalQueryExecution {
         use risingwave_expr::expr_context::*;
 
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, SYSTEM_PARAMS_MANAGER,
+            USER_INFO_READER,
         };
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
@@ -170,6 +172,8 @@ impl LocalQueryExecution {
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
         let exec = async move { STRICT_MODE::scope(strict_mode, exec).await }.boxed();
         let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
+        let exec =
+            async move { SYSTEM_PARAMS_MANAGER::scope(system_params_manager, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
             let exec = async move {

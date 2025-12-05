@@ -759,6 +759,7 @@ impl Binder {
                 ("rw_epoch_to_ts", raw_call(ExprType::RwEpochToTs)),
                 ("rw_fragment_vnodes", raw_call(ExprType::RwFragmentVnodes)),
                 ("rw_actor_vnodes", raw_call(ExprType::RwActorVnodes)),
+                ("rw_adaptive_parallelism", raw_call(ExprType::RwAdaptiveParallelism)),
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_license", raw_call(ExprType::License)),
