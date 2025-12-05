@@ -605,11 +605,7 @@ impl CreateMviewProgressTracker {
 
         progress.backfill_upstream_types = new_backfill_types;
         progress.states = new_states;
-        progress.done_count = progress
-            .states
-            .values()
-            .filter(|state| matches!(state, BackfillState::Done(..)))
-            .count();
+        progress.done_count = done_actors.len();
 
         progress.upstream_mv_count = StreamJobFragments::upstream_table_counts_impl(
             fragment_infos.values().map(|fragment| &fragment.nodes),
