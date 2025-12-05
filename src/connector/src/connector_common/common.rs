@@ -827,9 +827,13 @@ pub struct NatsConnectionProps {
     pub nkey: Option<String>,
 }
 
-/// Shared NATS client cache. The client is stored as `Weak` so it doesn't live forever.
-/// When all strong references are dropped, the client will be cleaned up.
-/// The cache doesn't manage lifecycle - it just stores weak references.
+/// Shared NATS client cache.
+/// Client connections are cached as `Weak` pointers in the cache.
+/// NATS Connector can access this cache to reuse existing client connections,
+/// and avoid exhausting host machine ports.
+/// When reading from the cache, the connector should `upgrade` the weak pointer to an `Arc` reference.
+/// After all strong (Arc) references are dropped, the client connection will be cleaned up.
+/// Cache eviction naturally takes care of the dangling weak pointers.
 pub static SHARED_NATS_CLIENT: LazyLock<MokaCache<NatsConnectionProps, Weak<async_nats::Client>>> =
     LazyLock::new(|| MokaCache::builder().build());
 
@@ -936,8 +940,7 @@ impl NatsCommon {
     }
 
     /// Build a NATS client, attempting to reuse an existing cached client if available.
-    /// The client is cached using `Weak` references, so it will be cleaned up when all
-    /// strong references are dropped.
+    /// See `SHARED_NATS_CLIENT` for more details.
     pub(crate) async fn build_client(&self) -> ConnectorResult<Arc<async_nats::Client>> {
         let connection_props = self.connection_props();
         let mut client: Option<Arc<async_nats::Client>> = None;
@@ -945,25 +948,28 @@ impl NatsCommon {
         SHARED_NATS_CLIENT
             .entry_by_ref(&connection_props)
             .and_try_compute_with::<_, _, crate::error::ConnectorError>(|maybe_entry| async {
-                if let Some(entry) = maybe_entry {
-                    let entry_value = entry.into_value();
-                    if let Some(existing_client) = entry_value.upgrade() {
-                        // Check if the connection is still healthy
-                        if existing_client.connection_state()
-                            == async_nats::connection::State::Connected
-                        {
+                if let Some(entry) = maybe_entry
+                    && let entry_value = entry.into_value()
+                    && let Some(existing_client) = entry_value.upgrade()
+                {
+                    match existing_client.connection_state() {
+                        async_nats::connection::State::Connected => {
                             tracing::info!("reuse existing nats client for {}", self.server_url);
                             client = Some(existing_client);
                             return Ok(Op::Nop);
                         }
-                        // Connection is not healthy, create a new one
-                        tracing::info!(
-                            "existing nats client for {} is not connected, creating new one",
-                            self.server_url
-                        );
+                        _ => {
+                            tracing::warn!(
+                                server_url = self.server_url,
+                                "existing nats client is not connected",
+                            );
+                        }
                     }
                 }
-                tracing::info!("build new nats client for {}", self.server_url);
+                tracing::info!(
+                    server_url = self.server_url,
+                    "no cached client, or client disconnected, building new nats client"
+                );
                 let new_client = Arc::new(self.build_client_inner().await?);
                 client = Some(new_client.clone());
                 Ok(Op::Put(Arc::downgrade(&new_client)))
