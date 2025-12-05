@@ -33,6 +33,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::permit::Receiver;
+use crate::executor::exchange::error::ExchangeChannelClosed;
 use crate::executor::prelude::*;
 use crate::executor::{
     BarrierInner, DispatcherMessage, DispatcherMessageBatch, DispatcherMessageStream,
@@ -179,6 +180,12 @@ struct Worker {
     join_handle: Arc<JoinHandle<Result<(), StreamExecutorError>>>,
 }
 
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct WorkerKey {
+    upstream_addr: HostAddr,
+    init: get_new_stream_request::Init,
+}
+
 impl Worker {
     async fn new(
         client: ComputeClient,
@@ -219,9 +226,13 @@ impl Worker {
                             permits,
                             up_actor_id,
                             down_actor_id,
-                        } = res.expect("exchange closed");
+                        } = res.map_err(|e| {
+                            ExchangeChannelClosed::remote_input(114514.into(), Some(e))
+                        })?;
 
-                        if let Some(msg_tx) = msg_txs.get(&(up_actor_id, down_actor_id)) {
+                        let actor_pair = (up_actor_id, down_actor_id);
+
+                        if let Some(msg_tx) = msg_txs.get(&actor_pair) {
                             use crate::executor::DispatcherMessageBatch;
                             let msg = message.unwrap();
 
@@ -239,15 +250,22 @@ impl Worker {
                                 .unwrap();
 
                             let msg = msg_res.context("RemoteInput decode message error")?;
-                            match msg.into_messages() {
-                                Either::Left(barriers) => {
-                                    for b in barriers {
-                                        msg_tx.send(b).unwrap();
+
+                            let send_result: Option<()> = try {
+                                match msg.into_messages() {
+                                    Either::Left(barriers) => {
+                                        for b in barriers {
+                                            msg_tx.send(b).ok()?;
+                                        }
+                                    }
+                                    Either::Right(m) => {
+                                        msg_tx.send(m).ok()?;
                                     }
                                 }
-                                Either::Right(m) => {
-                                    msg_tx.send(m).unwrap();
-                                }
+                            };
+
+                            if send_result.is_none() {
+                                msg_txs.remove(&actor_pair);
                             }
                         }
                     }
@@ -268,7 +286,7 @@ impl Worker {
 }
 
 struct Mux {
-    cache: moka::future::Cache<get_new_stream_request::Init, Worker>,
+    cache: moka::future::Cache<WorkerKey, Worker>,
 }
 
 impl Mux {
@@ -284,16 +302,19 @@ impl Mux {
         upstream_addr: HostAddr,
         env: &StreamEnvironment,
     ) -> Worker {
-        let worker = self
-            .cache
-            .try_get_with(init.clone(), async move {
-                let client = env.client_pool().get_by_addr(upstream_addr).await?;
-                Worker::new(client, init).await
-            })
+        self.cache
+            .try_get_with(
+                WorkerKey {
+                    upstream_addr: upstream_addr.clone(),
+                    init: init.clone(),
+                },
+                async move {
+                    let client = env.client_pool().get_by_addr(upstream_addr).await?;
+                    Worker::new(client, init).await
+                },
+            )
             .await
-            .expect("bad");
-
-        worker
+            .expect("bad")
     }
 }
 
