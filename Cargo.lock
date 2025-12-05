@@ -7975,9 +7975,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.5.1+0.12.0"
+version = "0.5.2+0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c668c82f0c2aca7ffed3235047f2539e6e41278c7c47a822999f3b7a067887"
+checksum = "e02d40eb86280014d85a9b4a6716a288482ae774c16b78c20725d4070f60bfa1"
 dependencies = [
  "async-stream",
  "chrono",
@@ -7991,9 +7991,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.5.0+0.12.0"
+version = "0.5.2+0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f271a476bbaa9d2139e1e1a5beb869c6119e805a0b67ad2b2857e4a8785b111a"
+checksum = "53a4efcc583df664ff4b152f9192814c75a6d43e1d889cb33758be304df43469"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
