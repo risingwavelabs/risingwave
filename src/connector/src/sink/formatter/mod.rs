@@ -93,8 +93,6 @@ pub enum SinkFormatterImpl {
     AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
     AppendOnlyBytesTemplate(AppendOnlyFormatter<BytesEncoder, TemplateEncoder>),
     AppendOnlyBytes(AppendOnlyFormatter<JsonEncoder, BytesEncoder>),
-    AppendOnlyTextBytes(AppendOnlyFormatter<TextEncoder, BytesEncoder>),
-    AppendOnlyBytesBytes(AppendOnlyFormatter<BytesEncoder, BytesEncoder>),
     // upsert
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
@@ -237,7 +235,7 @@ impl EncoderBuild for BytesEncoder {
                 // Ensure the schema has exactly one column and it's of type BYTEA
                 if params.schema.len() != 1 {
                     return Err(SinkError::Config(anyhow!(
-                        "BYTES format requires exactly one column, got {} columns",
+                        "ENCODE BYTES requires exactly one column, got {} columns",
                         params.schema.len()
                     )));
                 }
@@ -247,7 +245,7 @@ impl EncoderBuild for BytesEncoder {
                     Ok(BytesEncoder::new(params.schema, 0))
                 } else {
                     Err(SinkError::Config(anyhow!(
-                        "BYTES format requires the column to be of type BYTEA, but got type {}",
+                        "ENCODE BYTES requires the column to be of type BYTEA, but got type {}",
                         field.data_type
                     )))
                 }
@@ -552,12 +550,6 @@ impl SinkFormatterImpl {
                     Impl::AppendOnlyBytesTemplate(build(p).await?)
                 }
                 (F::AppendOnly, E::Template, None) => Impl::AppendOnlyTemplate(build(p).await?),
-                (F::AppendOnly, E::Bytes, Some(E::Text)) => {
-                    Impl::AppendOnlyTextBytes(build(p).await?)
-                }
-                (F::AppendOnly, E::Bytes, Some(E::Bytes)) => {
-                    Impl::AppendOnlyBytesBytes(build(p).await?)
-                }
                 (F::AppendOnly, E::Bytes, None) => Impl::AppendOnlyBytes(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Text)) => Impl::UpsertTextJson(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Bytes)) => {
@@ -593,6 +585,7 @@ impl SinkFormatterImpl {
                 | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text | E::Bytes, _)
                 | (_, E::Parquet, _)
                 | (_, _, Some(E::Parquet))
+                | (F::AppendOnly, E::Bytes, _)
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
                 => {
                     return Err(SinkError::Config(anyhow!(
@@ -642,8 +635,6 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::AppendOnlyBytesTemplate($name) => $body,
             SinkFormatterImpl::UpsertBytesTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyBytes($name) => $body,
-            SinkFormatterImpl::AppendOnlyTextBytes($name) => $body,
-            SinkFormatterImpl::AppendOnlyBytesBytes($name) => $body,
         }
     };
 }
@@ -686,8 +677,6 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
             SinkFormatterImpl::AppendOnlyBytesTemplate(_) => unreachable!(),
             SinkFormatterImpl::UpsertBytesTemplate(_) => unreachable!(),
             SinkFormatterImpl::AppendOnlyBytes($name) => $body,
-            SinkFormatterImpl::AppendOnlyTextBytes($name) => $body,
-            SinkFormatterImpl::AppendOnlyBytesBytes(_) => unreachable!(),
         }
     };
 }
