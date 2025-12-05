@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::compute::concat_batches;
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::catalog::TableProvider;
 use datafusion::error::Result as DFResult;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
@@ -27,6 +28,7 @@ use datafusion::physical_plan::{DisplayAs, ExecutionPlan, Partitioning, PlanProp
 use datafusion::prelude::Expr;
 use datafusion_common::DataFusionError;
 use futures_async_stream::try_stream;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::iceberg::IcebergProperties;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
@@ -46,6 +48,7 @@ struct IcebergScanInner {
     snapshot_id: Option<i64>,
     #[allow(dead_code)]
     iceberg_scan_type: IcebergScanType,
+    arrow_schema: SchemaRef,
     column_names: Option<Vec<String>>,
     #[allow(dead_code)]
     need_seq_num: bool,
@@ -131,7 +134,7 @@ impl IcebergScan {
             Boundedness::Bounded,
         );
         let column_names = provider
-            .schema()
+            .arrow_schema
             .fields()
             .iter()
             .map(|f| f.name().clone())
@@ -141,6 +144,7 @@ impl IcebergScan {
             iceberg_properties: provider.iceberg_properties.clone(),
             snapshot_id: provider.snapshot_id,
             iceberg_scan_type: provider.iceberg_scan_type,
+            arrow_schema: provider.arrow_schema.clone(),
             column_names: Some(column_names),
             need_seq_num: false,
             need_file_path_and_pos: false,
@@ -174,6 +178,7 @@ impl IcebergScanInner {
         #[for_await]
         for batch in stream {
             let batch = batch.map_err(to_datafusion_error)?;
+            let batch = cast_batch(self.arrow_schema.clone(), batch)?;
             if let Some(batch) = buffer.add(batch)? {
                 yield batch;
             }
@@ -228,7 +233,7 @@ impl RecordBatchBuffer {
             return Ok(None);
         }
         let schema_to_use = self.buffer[0].schema();
-        let batches_to_combine: Vec<_> = self.buffer.drain(..).collect();
+        let batches_to_combine: Vec<_> = std::mem::take(&mut self.buffer);
         let combined = concat_batches(&schema_to_use, &batches_to_combine)?;
         self.current_rows = 0;
         Ok(Some(combined))
@@ -237,4 +242,28 @@ impl RecordBatchBuffer {
     fn finish(mut self) -> Result<Option<RecordBatch>, DataFusionError> {
         self.finish_internal()
     }
+}
+
+fn cast_batch(
+    target_schema: SchemaRef,
+    batch: RecordBatch,
+) -> Result<RecordBatch, DataFusionError> {
+    if batch.num_columns() != target_schema.fields().len() {
+        return Err(DataFusionError::Internal(
+            "column count must match schema column count".to_owned(),
+        ));
+    }
+
+    let mut target_columns = Vec::with_capacity(batch.num_columns());
+    for (column, target_field) in batch.columns().iter().zip_eq_fast(target_schema.fields()) {
+        if column.data_type() == target_field.data_type() {
+            target_columns.push(column.clone());
+        } else {
+            let casted_column = datafusion::arrow::compute::cast(column, target_field.data_type())?;
+            target_columns.push(casted_column);
+        }
+    }
+
+    let res = RecordBatch::try_new(target_schema.clone(), target_columns)?;
+    Ok(res)
 }

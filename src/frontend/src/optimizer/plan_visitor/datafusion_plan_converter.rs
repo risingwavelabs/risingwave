@@ -18,19 +18,17 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{Field as ArrowField, Schema as ArrowSchema};
 use datafusion::datasource::provider_as_source;
 use datafusion::logical_expr::{
-    Expr as DFExpr, ExprSchemable, Join, JoinConstraint, JoinType as DFJoinType,
-    LogicalPlan as DFLogicalPlan, LogicalPlan, TableScan, Values, build_join_schema,
+    Expr as DFExpr, ExprSchemable, Join, JoinConstraint, LogicalPlan as DFLogicalPlan, LogicalPlan,
+    TableScan, Values, build_join_schema,
 };
-use datafusion_common::{Column, DFSchema, ScalarValue};
+use datafusion::prelude::lit;
+use datafusion_common::{DFSchema, ScalarValue};
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_pb::plan_common::JoinType;
 
-use crate::datafusion::IcebergTableProvider;
-use crate::error::Result as RwResult;
-use crate::expr::{Expr, ExprImpl};
+use crate::datafusion::{ColumnTrait, IcebergTableProvider, convert_expr, convert_join_type};
+use crate::error::{ErrorCode, Result as RwResult};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
@@ -45,6 +43,20 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValueBehavior
+    }
+
+    fn visit_logical_filter(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalFilter,
+    ) -> Self::Result {
+        let input = self.visit(plan.input())?;
+        let predicate = match plan.predicate().as_expr_unless_true() {
+            Some(expr) => convert_expr(&expr, input.schema().as_ref())?,
+            None => lit(true),
+        };
+
+        let filter = datafusion::logical_expr::Filter::try_new(predicate, input)?;
+        Ok(Arc::new(LogicalPlan::Filter(filter)))
     }
 
     fn visit_logical_project(
@@ -75,36 +87,6 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
 
         let projection = datafusion::logical_expr::Projection::try_new(df_exprs, input_plan)?;
         Ok(Arc::new(LogicalPlan::Projection(projection)))
-    }
-
-    fn visit_logical_values(
-        &mut self,
-        plan: &crate::optimizer::plan_node::LogicalValues,
-    ) -> Self::Result {
-        let rw_schema = plan.schema();
-
-        let arrow_fields = rw_schema
-            .fields()
-            .iter()
-            .map(|f| IcebergArrowConvert.to_arrow_field(&f.name, &f.data_type))
-            .collect::<Result<Vec<ArrowField>, _>>()?;
-
-        let arrow_schema = ArrowSchema::new(arrow_fields);
-        let df_schema = DFSchema::try_from(Arc::new(arrow_schema))?;
-
-        let mut df_rows: Vec<Vec<DFExpr>> = Vec::with_capacity(plan.rows().len());
-        for row in plan.rows() {
-            let mut df_row: Vec<DFExpr> = Vec::with_capacity(row.len());
-            for expr in row {
-                df_row.push(convert_expr(expr, &df_schema)?);
-            }
-            df_rows.push(df_row);
-        }
-
-        Ok(Arc::new(LogicalPlan::Values(Values {
-            schema: Arc::new(df_schema),
-            values: df_rows,
-        })))
     }
 
     fn visit_logical_join(
@@ -192,6 +174,60 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         Ok(Arc::new(LogicalPlan::Projection(projection)))
     }
 
+    fn visit_logical_values(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalValues,
+    ) -> Self::Result {
+        let rw_schema = plan.schema();
+
+        let arrow_fields = rw_schema
+            .fields()
+            .iter()
+            .map(|f| IcebergArrowConvert.to_arrow_field(&f.name, &f.data_type))
+            .collect::<Result<Vec<ArrowField>, _>>()?;
+
+        let arrow_schema = ArrowSchema::new(arrow_fields);
+        let df_schema = DFSchema::try_from(Arc::new(arrow_schema))?;
+
+        let mut df_rows: Vec<Vec<DFExpr>> = Vec::with_capacity(plan.rows().len());
+        for row in plan.rows() {
+            let mut df_row: Vec<DFExpr> = Vec::with_capacity(row.len());
+            for expr in row {
+                df_row.push(convert_expr(expr, &df_schema)?);
+            }
+            df_rows.push(df_row);
+        }
+
+        Ok(Arc::new(LogicalPlan::Values(Values {
+            schema: Arc::new(df_schema),
+            values: df_rows,
+        })))
+    }
+
+    fn visit_logical_limit(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalLimit,
+    ) -> Self::Result {
+        let input_plan = self.visit(plan.input())?;
+        let offset: i64 = plan.offset().try_into().map_err(|_| {
+            ErrorCode::InternalError(
+                format!("DataFusionPlanConverter: limit offset {} is too large to convert to i64. DataFusion limit offset can only support i64.", plan.offset()),
+            )
+        })?;
+        let limit: i64 = plan.limit().try_into().map_err(|_| {
+            ErrorCode::InternalError(
+                format!("DataFusionPlanConverter: limit {} is too large to convert to i64. DataFusion limit can only support i64.", plan.limit()),
+            )
+        })?;
+
+        let limit = datafusion::logical_expr::Limit {
+            skip: Some(Box::new(lit(offset))),
+            fetch: Some(Box::new(lit(limit))),
+            input: input_plan,
+        };
+        Ok(Arc::new(LogicalPlan::Limit(limit)))
+    }
+
     fn visit_logical_iceberg_scan(
         &mut self,
         plan: &crate::optimizer::plan_node::LogicalIcebergScan,
@@ -223,82 +259,5 @@ pub impl LogicalPlanRef {
     fn to_datafusion_logical_plan(&self) -> RwResult<Arc<DFLogicalPlan>> {
         let result = DataFusionPlanConverter.visit(self.clone())?;
         Ok(result)
-    }
-}
-
-fn convert_expr(expr: &ExprImpl, input_schema: &impl ColumnTrait) -> RwResult<DFExpr> {
-    match expr {
-        ExprImpl::Literal(lit) => {
-            let scalar = match lit.get_data() {
-                None => ScalarValue::Null,
-                Some(sv) => convert_scalar_value(sv, lit.return_type())?,
-            };
-            Ok(DFExpr::Literal(scalar))
-        }
-        ExprImpl::InputRef(input_ref) => Ok(DFExpr::Column(input_schema.column(input_ref.index()))),
-        // TODO: Handle other expression types as needed
-        _ => bail_not_implemented!("DataFusionPlanConverter: unsupported expression {:?}", expr),
-    }
-}
-
-fn convert_scalar_value(sv: &ScalarImpl, data_type: DataType) -> RwResult<ScalarValue> {
-    match (sv, &data_type) {
-        (ScalarImpl::Bool(v), DataType::Boolean) => Ok(ScalarValue::Boolean(Some(*v))),
-        (ScalarImpl::Int16(v), DataType::Int16) => Ok(ScalarValue::Int16(Some(*v))),
-        (ScalarImpl::Int32(v), DataType::Int32) => Ok(ScalarValue::Int32(Some(*v))),
-        (ScalarImpl::Int64(v), DataType::Int64) => Ok(ScalarValue::Int64(Some(*v))),
-        (ScalarImpl::Float32(v), DataType::Float32) => {
-            Ok(ScalarValue::Float32(Some(v.into_inner())))
-        }
-        (ScalarImpl::Float64(v), DataType::Float64) => {
-            Ok(ScalarValue::Float64(Some(v.into_inner())))
-        }
-        (ScalarImpl::Utf8(v), DataType::Varchar) => Ok(ScalarValue::Utf8(Some(v.to_string()))),
-        (ScalarImpl::Bytea(v), DataType::Bytea) => Ok(ScalarValue::Binary(Some(v.to_vec()))),
-        // For other types, use fallback conversion via IcebergArrowConvert to ensure consistency
-        _ => convert_scalar_value_fallback(sv, data_type),
-    }
-}
-
-fn convert_scalar_value_fallback(sv: &ScalarImpl, data_type: DataType) -> RwResult<ScalarValue> {
-    let mut array_builder = data_type.create_array_builder(1);
-    array_builder.append(Some(sv));
-    let array = array_builder.finish();
-    let arrow_field = IcebergArrowConvert.to_arrow_field("", &data_type)?;
-    let array = IcebergArrowConvert.to_arrow_array(arrow_field.data_type(), &array)?;
-    let scalar_value = ScalarValue::try_from_array(&array, 0)?;
-    Ok(scalar_value)
-}
-
-fn convert_join_type(join_type: JoinType) -> RwResult<DFJoinType> {
-    match join_type {
-        JoinType::Inner => Ok(DFJoinType::Inner),
-        JoinType::LeftOuter => Ok(DFJoinType::Left),
-        JoinType::RightOuter => Ok(DFJoinType::Right),
-        JoinType::FullOuter => Ok(DFJoinType::Full),
-        JoinType::LeftSemi => Ok(DFJoinType::LeftSemi),
-        JoinType::LeftAnti => Ok(DFJoinType::LeftAnti),
-        JoinType::RightSemi => Ok(DFJoinType::RightSemi),
-        JoinType::RightAnti => Ok(DFJoinType::RightAnti),
-        _ => bail_not_implemented!(
-            "DataFusionPlanConverter: unsupported join type {:?}",
-            join_type
-        ),
-    }
-}
-
-trait ColumnTrait {
-    fn column(&self, index: usize) -> Column;
-}
-
-impl ColumnTrait for DFSchema {
-    fn column(&self, index: usize) -> Column {
-        Column::from(self.qualified_field(index))
-    }
-}
-
-impl ColumnTrait for Vec<Column> {
-    fn column(&self, index: usize) -> Column {
-        self[index].clone()
     }
 }
