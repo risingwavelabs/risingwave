@@ -62,6 +62,7 @@ use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
+use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
     IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
     StreamProject, generic,
@@ -70,7 +71,7 @@ use crate::optimizer::{OptimizerContext, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
-use crate::stream_fragmenter::{GraphJobType, build_graph};
+use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
@@ -580,6 +581,8 @@ pub async fn handle_create_sink(
     }
 
     let (mut sink, graph, target_table_catalog, dependencies) = {
+        let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
+
         let SinkPlanContext {
             query,
             sink_plan: plan,
@@ -596,7 +599,11 @@ pub async fn handle_create_sink(
             );
         }
 
-        let graph = build_graph(plan, Some(GraphJobType::Sink))?;
+        let backfill_order =
+            plan_backfill_order(session.as_ref(), backfill_order_strategy, plan.clone())?;
+
+        let graph =
+            build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
         (sink, graph, target_table_catalog, dependencies)
     };
