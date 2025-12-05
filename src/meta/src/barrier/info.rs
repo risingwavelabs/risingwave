@@ -576,12 +576,11 @@ impl InflightDatabaseInfo {
             }
         }
         if let Some(Command::RescheduleFragment { reschedules, .. }) = command {
-            let mut touched_jobs = HashSet::new();
-            for fragment_id in reschedules.keys() {
-                if let Some(job_id) = self.fragment_location.get(fragment_id) {
-                    touched_jobs.insert(*job_id);
-                }
-            }
+            let touched_jobs = reschedules
+                .keys()
+                .filter_map(|fragment_id| self.fragment_location.get(fragment_id))
+                .cloned()
+                .collect::<HashSet<_>>();
             for job_id in touched_jobs {
                 if let Some(job) = self.jobs.get_mut(&job_id)
                     && let CreateStreamingJobStatus::Creating(tracker) = &mut job.status
