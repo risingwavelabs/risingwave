@@ -580,7 +580,8 @@ impl InflightDatabaseInfo {
             debug_assert!(
                 reschedules
                     .values()
-                    .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty())
+                    .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
+                "RescheduleFragment should not carry vnode bitmap updates when actors are rebuilt"
             );
 
             let touched_jobs = reschedules
