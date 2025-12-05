@@ -11852,6 +11852,7 @@ name = "risingwave_ctl"
 version = "2.6.1"
 dependencies = [
  "anyhow",
+ "bincode 1.3.3",
  "bytes",
  "chrono",
  "clap",

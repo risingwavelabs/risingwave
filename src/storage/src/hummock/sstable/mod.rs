@@ -148,8 +148,12 @@ impl Debug for Sstable {
 
 impl Sstable {
     pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
+        println!("Sstable::new bloom filter len {}", meta.bloom_filter.len());
         let filter_data = std::mem::take(&mut meta.bloom_filter);
+        println!("Sstable::new filter_data len {}", filter_data.len());
         let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
+        println!("Sstable::new filter_reader is empty {}", filter_reader.is_empty());
+
         Self {
             id,
             meta,
@@ -399,6 +403,7 @@ impl SstableMeta {
         }
 
         let bloom_filter = get_length_prefixed_slice(buf);
+        println!("decode bloom filter len {}", bloom_filter.len());
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);

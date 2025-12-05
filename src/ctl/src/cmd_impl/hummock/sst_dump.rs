@@ -231,6 +231,11 @@ pub async fn sst_dump_via_sstable_store(
         .sstable(&sstable_info, &mut StoreLocalStatistic::default())
         .await?;
     let sstable = sstable_cache.as_ref();
+    println!("before ser/deser sst filter reader has_bloom_filter: {}", sstable.has_bloom_filter());
+    use bincode;
+    let serialized_bytes: Vec<u8> = bincode::serialize(&sstable).expect("Failed to serialize");
+    let deserialized_sstable: Sstable = bincode::deserialize(&serialized_bytes).expect("Failed to deserialize");
+    println!("after ser/deser sst filter reader has_bloom_filter: {}", deserialized_sstable.has_bloom_filter());
     let sstable_meta = &sstable.meta;
     let smallest_key = FullKey::decode(&sstable_meta.smallest_key);
     let largest_key = FullKey::decode(&sstable_meta.largest_key);
@@ -238,6 +243,7 @@ pub async fn sst_dump_via_sstable_store(
     println!("SST object id: {}", object_id);
     println!("-------------------------------------");
     println!("File Size: {}", sstable.estimate_size());
+    return Ok(());
 
     println!("Key Range:");
     println!(

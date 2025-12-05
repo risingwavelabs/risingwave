@@ -12,6 +12,7 @@ test = false
 
 [dependencies]
 anyhow = "1"
+bincode = "1"
 bytes = "1"
 chrono = { workspace = true }
 clap = { workspace = true }
