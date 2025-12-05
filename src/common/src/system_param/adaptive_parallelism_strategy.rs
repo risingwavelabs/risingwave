@@ -20,11 +20,12 @@ use std::str::FromStr;
 use regex::Regex;
 use risingwave_common::system_param::ParamValue;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use thiserror::Error;
 
 /// Use `#[serde(try_from, into)]` to serialize/deserialize as string format (e.g., "Bounded(64)"),
 /// which is consistent with `ALTER SYSTEM SET` command.
-#[derive(PartialEq, Copy, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum AdaptiveParallelismStrategy {
     #[default]
@@ -32,6 +33,7 @@ pub enum AdaptiveParallelismStrategy {
     Full,
     Bounded(NonZeroUsize),
     Ratio(f32),
+    LinearCurve(LinearCurve),
 }
 
 impl TryFrom<String> for AdaptiveParallelismStrategy {
@@ -49,6 +51,9 @@ impl Display for AdaptiveParallelismStrategy {
             AdaptiveParallelismStrategy::Full => write!(f, "FULL"),
             AdaptiveParallelismStrategy::Bounded(n) => write!(f, "BOUNDED({})", n),
             AdaptiveParallelismStrategy::Ratio(r) => write!(f, "RATIO({})", r),
+            AdaptiveParallelismStrategy::LinearCurve(curve) => {
+                write!(f, "LINEAR_CURVE({})", curve)
+            }
         }
     }
 }
@@ -75,6 +80,103 @@ pub enum ParallelismStrategyParseError {
 
     #[error("Invalid value for Ratio strategy: must be between 0.0 and 1.0")]
     InvalidRatioValue,
+
+    #[error("Invalid value for LinearCurve strategy: {0}")]
+    InvalidLinearCurveValue(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearCurvePoint {
+    pub available_parallelism: usize,
+    pub target_ratio: f32,
+}
+
+impl LinearCurvePoint {
+    fn new(available_parallelism: usize, target_ratio: f32) -> Result<Self, String> {
+        if target_ratio < 0.0 || target_ratio > 1.0 {
+            return Err(format!("target ratio out of range [0,1]: {}", target_ratio));
+        }
+        Ok(Self {
+            available_parallelism,
+            target_ratio,
+        })
+    }
+}
+
+/// A simple piecewise-linear curve defined on available parallelism (integer) -> target ratio [0,1].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LinearCurve {
+    pub points: SmallVec<[LinearCurvePoint; 8]>,
+}
+
+impl LinearCurve {
+    fn interpolate(&self, available_parallelism: usize) -> f32 {
+        let points = &self.points;
+        // Guard: points len >= 2 ensured at construction.
+        if available_parallelism <= points[0].available_parallelism {
+            return points[0].target_ratio;
+        }
+        if let Some(last) = points.last() {
+            if available_parallelism >= last.available_parallelism {
+                return last.target_ratio;
+            }
+        }
+
+        // Find segment.
+        for window in points.windows(2) {
+            let left = window[0];
+            let right = window[1];
+            if (left.available_parallelism..=right.available_parallelism)
+                .contains(&available_parallelism)
+            {
+                if right.available_parallelism == left.available_parallelism {
+                    return left.target_ratio;
+                }
+                let span = (right.available_parallelism - left.available_parallelism) as f32;
+                let delta = (available_parallelism - left.available_parallelism) as f32;
+                let t = delta / span;
+                return left.target_ratio + t * (right.target_ratio - left.target_ratio);
+            }
+        }
+
+        // Should not reach here; return last safely.
+        points.last().map(|p| p.target_ratio).unwrap_or(1.0)
+    }
+}
+
+impl std::fmt::Display for LinearCurve {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut first = true;
+        for p in &self.points {
+            if !first {
+                write!(f, ",")?;
+            }
+            write!(
+                f,
+                "{}:{}",
+                p.available_parallelism,
+                trim_trailing_zero(p.target_ratio)
+            )?;
+            first = false;
+        }
+        Ok(())
+    }
+}
+
+fn trim_trailing_zero(value: f32) -> String {
+    let mut s = format!("{}", value);
+    if s.contains('.') {
+        while s.ends_with('0') {
+            s.pop();
+        }
+        if s.ends_with('.') {
+            s.pop();
+        }
+    }
+    if s.is_empty() {
+        s.push('0');
+    }
+    s
 }
 
 impl AdaptiveParallelismStrategy {
@@ -86,6 +188,11 @@ impl AdaptiveParallelismStrategy {
             AdaptiveParallelismStrategy::Bounded(n) => min(n.get(), current_parallelism),
             AdaptiveParallelismStrategy::Ratio(r) => {
                 max((current_parallelism as f32 * r).floor() as usize, 1)
+            }
+            AdaptiveParallelismStrategy::LinearCurve(curve) => {
+                let ratio = curve.interpolate(current_parallelism);
+                let target = (current_parallelism as f32 * ratio).floor() as usize;
+                max(target, 1)
             }
         }
     }
@@ -114,6 +221,11 @@ pub fn parse_strategy(
         RE.get_or_init(|| Regex::new(r"(?i)^ratio\((?<value>[+-]?\d+(?:\.\d+)?)\)$").unwrap())
     }
 
+    fn linear_curve_re() -> &'static Regex {
+        static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        RE.get_or_init(|| Regex::new(r"(?i)^linear_curve\((?<body>.+)\)$").unwrap())
+    }
+
     // Try to match Bounded pattern
     if let Some(caps) = bounded_re().captures(&lower_input) {
         let value_str = caps.name("value").unwrap().as_str();
@@ -137,10 +249,115 @@ pub fn parse_strategy(
         return Ok(AdaptiveParallelismStrategy::Ratio(value));
     }
 
+    // Try to match LinearCurve pattern
+    if let Some(caps) = linear_curve_re().captures(input) {
+        let body = caps.name("body").unwrap().as_str();
+        let curve = parse_linear_curve(body)
+            .map_err(ParallelismStrategyParseError::InvalidLinearCurveValue)?;
+        return Ok(AdaptiveParallelismStrategy::LinearCurve(curve));
+    }
+
     // If no patterns matched
     Err(ParallelismStrategyParseError::UnsupportedStrategy(
         input.to_owned(),
     ))
+}
+
+fn parse_linear_curve(body: &str) -> Result<LinearCurve, String> {
+    let mut points: SmallVec<[LinearCurvePoint; 8]> = SmallVec::new();
+
+    for pair in body.split(',') {
+        let trimmed = pair.trim();
+        if trimmed.is_empty() {
+            return Err("empty pair".to_string());
+        }
+        let (a_str, b_str) = trimmed
+            .split_once(':')
+            .ok_or_else(|| format!("invalid pair '{}', expected a:b", trimmed))?;
+        let available: usize = a_str
+            .parse()
+            .map_err(|e| format!("invalid available '{}': {e}", a_str))?;
+        let target: f32 = b_str
+            .parse()
+            .map_err(|e| format!("invalid target '{}': {e}", b_str))?;
+        points.push(LinearCurvePoint::new(available, target)?);
+    }
+
+    if points.len() < 2 {
+        return Err("requires at least two points".to_string());
+    }
+
+    // Sort and dedup check.
+    points.sort_by_key(|p| p.available_parallelism);
+
+    // Reject duplicate available.
+    for w in points.windows(2) {
+        if w[0].available_parallelism == w[1].available_parallelism {
+            return Err(format!(
+                "duplicate available parallelism {}",
+                w[0].available_parallelism
+            ));
+        }
+    }
+
+    // Auto pad with 0 if needed.
+    if let Some(first) = points.first().copied() {
+        if first.available_parallelism > 0 {
+            points.insert(0, LinearCurvePoint::new(0, first.target_ratio)?);
+        }
+    }
+
+    // Auto pad with 1 if missing.
+    let has_one = points.iter().any(|p| p.available_parallelism == 1usize);
+    if !has_one {
+        let ratio_at_one = interpolate_for_padding(&points, 1);
+        points.insert(
+            find_insert_pos(&points, 1),
+            LinearCurvePoint::new(1, ratio_at_one)?,
+        );
+    }
+
+    // Final validation len>=2 and monotonic increasing already guaranteed.
+    if points.len() < 2 {
+        return Err("requires at least two points".to_string());
+    }
+
+    Ok(LinearCurve { points })
+}
+
+fn interpolate_for_padding(points: &[LinearCurvePoint], target_available: usize) -> f32 {
+    // points assumed sorted, len >=1.
+    if points.is_empty() {
+        return 0.0;
+    }
+    if target_available <= points[0].available_parallelism {
+        return points[0].target_ratio;
+    }
+    if let Some(last) = points.last() {
+        if target_available >= last.available_parallelism {
+            return last.target_ratio;
+        }
+    }
+    for w in points.windows(2) {
+        let left = w[0];
+        let right = w[1];
+        if (left.available_parallelism..=right.available_parallelism).contains(&target_available) {
+            let span = (right.available_parallelism - left.available_parallelism) as f32;
+            if span == 0.0 {
+                return left.target_ratio;
+            }
+            let t = (target_available - left.available_parallelism) as f32 / span;
+            return left.target_ratio + t * (right.target_ratio - left.target_ratio);
+        }
+    }
+    points.last().map(|p| p.target_ratio).unwrap_or(0.0)
+}
+
+fn find_insert_pos(points: &[LinearCurvePoint], available: usize) -> usize {
+    match points.binary_search_by_key(&available, |p| p.available_parallelism) {
+        Ok(pos) => pos,
+        Err(pos) => pos,
+    }
 }
 
 impl FromStr for AdaptiveParallelismStrategy {
@@ -287,6 +504,69 @@ mod tests {
             max_parallelism.compute_target_parallelism(usize::MAX),
             usize::MAX
         );
+    }
+
+    #[test]
+    fn test_linear_curve_parse_and_compute() {
+        let curve = parse_strategy("linear_curve(0:0,10:0.5,20:0.8)").unwrap();
+        match curve {
+            AdaptiveParallelismStrategy::LinearCurve(curve) => {
+                // auto pad 1 with interpolation between 0 and 10 => 0.05
+                assert_eq!(curve.points[0].available_parallelism, 0);
+                assert_eq!(curve.points[1].available_parallelism, 1);
+                assert!((curve.points[1].target_ratio - 0.05).abs() < 1e-6);
+
+                // interpolate
+                let ratio = curve.interpolate(15);
+                assert!((ratio - 0.65).abs() < 1e-6);
+                // compute target with current_parallelism=15, ratio=0.65 => 9.75 -> 9 after floor, min 1
+                assert_eq!(
+                    AdaptiveParallelismStrategy::LinearCurve(curve.clone())
+                        .compute_target_parallelism(15),
+                    9
+                );
+            }
+            _ => panic!("expected linear curve"),
+        }
+    }
+
+    #[test]
+    fn test_linear_curve_auto_padding_and_ordering() {
+        // Missing 0 and 1, unordered input should be sorted.
+        let curve = parse_strategy("LINEAR_CURVE(5:0.2,3:0.1)").unwrap();
+        match curve {
+            AdaptiveParallelismStrategy::LinearCurve(curve) => {
+                assert_eq!(curve.points[0].available_parallelism, 0);
+                assert_eq!(curve.points[1].available_parallelism, 1);
+                // Sorted
+                assert_eq!(curve.points[2].available_parallelism, 3);
+                assert_eq!(curve.points[3].available_parallelism, 5);
+                // ratio at 1 between 0->0.1 over 3 => 0.1 (flat segment)
+                assert!((curve.points[1].target_ratio - 0.1).abs() < 1e-6);
+            }
+            _ => panic!("expected linear curve"),
+        }
+    }
+
+    #[test]
+    fn test_linear_curve_invalid_cases() {
+        // Duplicate available
+        assert!(matches!(
+            parse_strategy("linear_curve(1:0.1,1:0.2)"),
+            Err(ParallelismStrategyParseError::InvalidLinearCurveValue(_))
+        ));
+
+        // Target out of range
+        assert!(matches!(
+            parse_strategy("linear_curve(0:1.2,2:0.5)"),
+            Err(ParallelismStrategyParseError::InvalidLinearCurveValue(_))
+        ));
+
+        // Not enough points
+        assert!(matches!(
+            parse_strategy("linear_curve(1:0.2)"),
+            Err(ParallelismStrategyParseError::InvalidLinearCurveValue(_))
+        ));
     }
 
     /// Test serde serialization/deserialization uses string format,
