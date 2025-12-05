@@ -290,4 +290,7 @@ select count(*) from rw_catalog.iceberg_tables where catalog_name = 'dev';
 0
 
 statement ok
+DROP CONNECTION public.my_hosted_catalog_conn;
+
+statement ok
 DROP SECRET my_secret;
