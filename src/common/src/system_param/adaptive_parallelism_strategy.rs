@@ -275,12 +275,12 @@ fn parse_linear_curve(body: &str) -> Result<LinearCurve, String> {
         let (a_str, b_str) = trimmed
             .split_once(':')
             .ok_or_else(|| format!("invalid pair '{}', expected a:b", trimmed))?;
-        let available: usize = a_str
-            .parse()
-            .map_err(|e| format!("invalid available '{}': {}", a_str, e.as_report()))?;
-        let target: f32 = b_str
-            .parse()
-            .map_err(|e| format!("invalid target '{}': {}", b_str, e.as_report()))?;
+        let available: usize = a_str.parse().map_err(|e: std::num::ParseIntError| {
+            format!("invalid available '{}': {}", a_str, e.as_report())
+        })?;
+        let target: f32 = b_str.parse().map_err(|e: std::num::ParseFloatError| {
+            format!("invalid target '{}': {}", b_str, e.as_report())
+        })?;
         points.push(LinearCurvePoint::new(available, target)?);
     }
 
