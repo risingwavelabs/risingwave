@@ -22,6 +22,7 @@ use risingwave_common::system_param::ParamValue;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;
+use thiserror_ext::AsReport;
 
 /// Use `#[serde(try_from, into)]` to serialize/deserialize as string format (e.g., "Bounded(64)"),
 /// which is consistent with `ALTER SYSTEM SET` command.
@@ -276,10 +277,10 @@ fn parse_linear_curve(body: &str) -> Result<LinearCurve, String> {
             .ok_or_else(|| format!("invalid pair '{}', expected a:b", trimmed))?;
         let available: usize = a_str
             .parse()
-            .map_err(|e| format!("invalid available '{}': {e}", a_str))?;
+            .map_err(|e| format!("invalid available '{}': {}", a_str, e.as_report()))?;
         let target: f32 = b_str
             .parse()
-            .map_err(|e| format!("invalid target '{}': {e}", b_str))?;
+            .map_err(|e| format!("invalid target '{}': {}", b_str, e.as_report()))?;
         points.push(LinearCurvePoint::new(available, target)?);
     }
 
