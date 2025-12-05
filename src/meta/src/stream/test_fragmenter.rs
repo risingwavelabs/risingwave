@@ -417,6 +417,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
+        backfill_parallelism: None,
         max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
         backfill_order: Default::default(),
     }
