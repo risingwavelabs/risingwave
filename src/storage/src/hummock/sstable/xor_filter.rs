@@ -47,6 +47,16 @@ impl Xor8FilterBuilder {
         };
         Self { key_hash_entries }
     }
+
+    fn build_from_xor8(xor_filter: &Xor8) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
+        buf.put_u64_le(xor_filter.seed);
+        buf.put_u32_le(xor_filter.block_length as u32);
+        buf.put_slice(xor_filter.fingerprints.as_ref());
+        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
+        buf.put_u8(FOOTER_XOR8);
+        buf
+    }
 }
 
 impl Xor16FilterBuilder {
@@ -124,13 +134,8 @@ impl FilterBuilder for Xor8FilterBuilder {
         });
 
         let xor_filter = Xor8::from(&self.key_hash_entries);
-        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
-        buf.put_u64_le(xor_filter.seed);
-        buf.put_u32_le(xor_filter.block_length as u32);
-        buf.put_slice(xor_filter.fingerprints.as_ref());
-        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
-        buf.put_u8(FOOTER_XOR8);
-        buf
+        self.key_hash_entries.clear();
+        Self::build_from_xor8(&xor_filter)
     }
 
     fn approximate_len(&self) -> usize {
@@ -413,6 +418,25 @@ impl XorFilterReader {
 
     pub fn is_block_based_filter(&self) -> bool {
         matches!(self.filter, XorFilter::BlockXor16(_))
+    }
+
+    pub fn encode_to_bytes(&self) -> Vec<u8> {
+        match &self.filter {
+            XorFilter::Xor8(filter) => Xor8FilterBuilder::build_from_xor8(filter),
+            XorFilter::Xor16(filter) => Xor16FilterBuilder::build_from_xor16(filter),
+            XorFilter::BlockXor16(reader) => {
+                let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
+                for (_, filter) in &reader.filters {
+                    let block = Xor16FilterBuilder::build_from_xor16(filter);
+                    data.put_u32_le(block.len() as u32);
+                    data.extend(block);
+                }
+                // Add footer to tell which kind of filter. 253 indicates a blocked xor16 filter.
+                data.put_u32_le(reader.filters.len() as u32);
+                data.put_u8(FOOTER_BLOCKED_XOR16);
+                data
+            }
+        }
     }
 }
 
