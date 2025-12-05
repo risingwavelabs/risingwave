@@ -477,7 +477,8 @@ mod tests {
         ExchangeService, ExchangeServiceServer,
     };
     use risingwave_pb::task_service::{
-        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
+        GetDataRequest, GetDataResponse, GetNewStreamRequest, GetNewStreamResponse,
+        GetStreamRequest, GetStreamResponse, PbPermits,
     };
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
@@ -860,6 +861,7 @@ mod tests {
     #[async_trait::async_trait]
     impl ExchangeService for FakeExchangeService {
         type GetDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+        type GetNewStreamStream = ReceiverStream<std::result::Result<GetNewStreamResponse, Status>>;
         type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
         async fn get_data(
@@ -906,6 +908,13 @@ mod tests {
             .await
             .unwrap();
             Ok(Response::new(ReceiverStream::new(rx)))
+        }
+
+        async fn get_new_stream(
+            &self,
+            _request: Request<Streaming<GetNewStreamRequest>>,
+        ) -> std::result::Result<Response<Self::GetNewStreamStream>, Status> {
+            unimplemented!()
         }
     }
 

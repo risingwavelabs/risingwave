@@ -205,6 +205,13 @@ impl Receiver {
     pub fn permits(&self) -> Arc<Permits> {
         self.permits.clone()
     }
+
+    #[futures_async_stream::stream(item = MessageWithPermits)]
+    pub async fn into_raw_stream(mut self) {
+        while let Some(message) = self.recv_raw().await {
+            yield message;
+        }
+    }
 }
 
 impl Drop for Receiver {

@@ -12,17 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use either::Either;
+use futures::stream::SelectAll;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
-    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits, permits,
+    GetDataRequest, GetDataResponse, GetNewStreamRequest, GetNewStreamResponse, GetStreamRequest,
+    GetStreamResponse, PbPermits, get_new_stream_request, permits,
 };
 use risingwave_stream::executor::DispatcherMessageBatch;
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
@@ -42,10 +45,13 @@ pub struct ExchangeServiceImpl {
 
 pub type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
 pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
+pub type NewStreamDataStream =
+    impl Stream<Item = std::result::Result<GetNewStreamResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = BatchDataStream;
+    type GetNewStreamStream = NewStreamDataStream;
     type GetStreamStream = StreamDataStream;
 
     async fn get_data(
@@ -123,6 +129,132 @@ impl ExchangeService for ExchangeServiceImpl {
             add_permits_stream,
             (up_fragment_id, down_fragment_id),
         )))
+    }
+
+    #[define_opaque(NewStreamDataStream)]
+    async fn get_new_stream(
+        &self,
+        request: Request<Streaming<GetNewStreamRequest>>,
+    ) -> std::result::Result<Response<Self::GetNewStreamStream>, Status> {
+        let request_stream = request.into_inner();
+
+        Ok(Response::new(Self::get_new_stream_impl(
+            self.stream_mgr.clone(),
+            request_stream,
+        )))
+    }
+}
+
+impl ExchangeServiceImpl {
+    #[try_stream(ok = GetNewStreamResponse, error = Status)]
+    async fn get_new_stream_impl(
+        stream_mgr: LocalStreamManager,
+        mut request_stream: Streaming<GetNewStreamRequest>,
+    ) {
+        use risingwave_pb::task_service::get_new_stream_request::*;
+
+        // Extract the first `Init` request from the stream.
+        let Init {
+            up_fragment_id: _,
+            down_fragment_id: _,
+            database_id,
+            term_id,
+        } = {
+            let req = request_stream
+                .next()
+                .await
+                .ok_or_else(|| Status::invalid_argument("get_new_stream request is empty"))??;
+            match req.value.unwrap() {
+                Value::Init(init) => init,
+                Value::Get(_) | Value::AddPermits(_) => {
+                    unreachable!("the first message must be `Init`")
+                }
+            }
+        };
+
+        enum Req {
+            Request(Result<GetNewStreamRequest, Status>),
+            Message {
+                up_actor_id: ActorId,
+                down_actor_id: ActorId,
+                message: MessageWithPermits,
+            },
+        }
+
+        let mut select_all = SelectAll::new();
+        select_all.push(request_stream.map(Req::Request).boxed());
+
+        let mut all_permits = HashMap::new();
+
+        while let Some(r) = select_all.next().await {
+            match r {
+                Req::Request(req) => match req?.value.unwrap() {
+                    Value::Init(_) => unreachable!("the stream has already been initialized"),
+                    Value::Get(Get {
+                        up_actor_id,
+                        down_actor_id,
+                    }) => {
+                        let receiver = stream_mgr
+                            .take_receiver(
+                                database_id,
+                                term_id.clone(),
+                                (up_actor_id, down_actor_id),
+                            )
+                            .await?;
+                        let permits = Arc::downgrade(&receiver.permits());
+                        all_permits.insert((up_actor_id, down_actor_id), permits);
+                        select_all.push(
+                            receiver
+                                .into_raw_stream()
+                                .map(move |message| Req::Message {
+                                    up_actor_id,
+                                    down_actor_id,
+                                    message,
+                                })
+                                .boxed(),
+                        );
+                    }
+                    Value::AddPermits(AddPermits {
+                        up_actor_id,
+                        down_actor_id,
+                        permits,
+                    }) => {
+                        let to_add = permits.unwrap().value.unwrap();
+
+                        if let Some(permits) = all_permits
+                            .get(&(up_actor_id, down_actor_id))
+                            .and_then(|p| p.upgrade())
+                        {
+                            permits.add_permits(to_add);
+                        }
+                    }
+                },
+
+                Req::Message {
+                    up_actor_id,
+                    down_actor_id,
+                    message: MessageWithPermits { message, permits },
+                } => {
+                    let message = match message {
+                        DispatcherMessageBatch::Chunk(chunk) => {
+                            DispatcherMessageBatch::Chunk(chunk.compact_vis())
+                        }
+                        msg @ (DispatcherMessageBatch::Watermark(_)
+                        | DispatcherMessageBatch::BarrierBatch(_)) => msg,
+                    };
+                    let proto = message.to_protobuf();
+                    // forward the acquired permit to the downstream
+                    let response = GetNewStreamResponse {
+                        message: Some(proto),
+                        permits: Some(PbPermits { value: permits }),
+                        up_actor_id,
+                        down_actor_id,
+                    };
+
+                    yield response;
+                }
+            }
+        }
     }
 }
 

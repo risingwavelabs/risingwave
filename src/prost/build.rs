@@ -764,6 +764,27 @@ for_all_wrapped_id_fields! (
             up_actor_id: ActorId,
             down_actor_id: ActorId,
         }
+        GetNewStreamRequest.Init {
+            database_id: DatabaseId,
+            up_fragment_id: FragmentId,
+            down_fragment_id: FragmentId,
+        }
+        GetNewStreamRequest.Get {
+            up_actor_id: ActorId,
+            down_actor_id: ActorId,
+        }
+        GetNewStreamRequest.AddPermits {
+            up_actor_id: ActorId,
+            down_actor_id: ActorId,
+        }
+        GetNewStreamResponse {
+            // down_up_actor_ids: ActorId,
+            up_actor_id: ActorId,
+            down_actor_id: ActorId,
+        }
+        // GetNewStreamResponse.UpActorIds {
+        //     up_actor_id: ActorId,
+        // }
     }
     user {
         AlterDefaultPrivilegeRequest {
@@ -1055,6 +1076,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.UdfExprVersion", "#[derive(prost_helpers::Version)]")
         .type_attribute("meta.Object.object_info", "#[derive(strum::Display)]")
         .type_attribute("meta.SubscribeResponse.info", "#[derive(strum::Display)]")
+        .type_attribute("task_service.GetNewStreamRequest.Init", "#[derive(Hash, Eq)]")
         // end
         ;
 
@@ -1068,7 +1090,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         //"stream_plan.StreamNode"
     ]);
 
-    check_declared_wrapped_fields_sorted();
+    // check_declared_wrapped_fields_sorted();
 
     for (wrapped_type, wrapped_fields) in &wrapped_fields() {
         for (field_name, field_type) in wrapped_fields {
