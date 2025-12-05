@@ -104,7 +104,8 @@ impl IcebergTableProvider {
                     .to_arrow_field(&column_desc.name, &column_desc.data_type)?;
                 Ok(field.with_nullable(column_desc.nullable))
             })
-            .collect::<Result<_, ArrayError>>()?;
+            .collect::<Result<Vec<_>, ArrayError>>()?
+            .into();
         let arrow_schema = Arc::new(ArrowSchema::new(arrow_fields));
 
         Ok(Self {

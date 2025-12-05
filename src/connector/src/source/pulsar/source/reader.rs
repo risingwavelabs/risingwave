@@ -21,10 +21,10 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use moka::future::Cache as MokaCache;
-use pulsar::consumer::{InitialPosition, Message};
+use prost::Message as ProstMessage;
+use pulsar::consumer::{InitialPosition, Message as PulsarMessage};
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use pulsar_prost::Message as PulsarProstMessage;
 use risingwave_common::{bail, ensure};
 use thiserror_ext::AsReport;
 
@@ -274,7 +274,7 @@ impl PulsarBrokerReader {
         for msgs in self.into_stream().await.ready_chunks(max_chunk_size) {
             let msgs = msgs
                 .into_iter()
-                .collect::<Result<Vec<Message<Vec<u8>>>, _>>()?;
+                .collect::<Result<Vec<PulsarMessage<Vec<u8>>>, _>>()?;
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
                 if let Some(PulsarFilterOffset {
@@ -376,7 +376,7 @@ impl PulsarConsumeStream {
 }
 
 impl futures::Stream for PulsarConsumeStream {
-    type Item = Result<pulsar::consumer::Message<Vec<u8>>, pulsar::error::Error>;
+    type Item = Result<PulsarMessage<Vec<u8>>, pulsar::error::Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,

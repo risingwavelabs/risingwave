@@ -20,7 +20,7 @@ use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode};
 use sea_orm::entity::prelude::*;
-use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult, Value};
+use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Serialize};
 
 pub mod prelude;
@@ -193,12 +193,6 @@ macro_rules! derive_from_blob {
             }
         }
 
-        impl sea_orm::sea_query::Nullable for $struct_name {
-            fn null() -> Value {
-                Value::Bytes(None)
-            }
-        }
-
         impl From<&$field_type> for $struct_name {
             fn from(value: &$field_type) -> Self {
                 Self::from_protobuf(value)
@@ -262,12 +256,6 @@ macro_rules! derive_array_from_blob {
                 Self(vec![])
             }
         }
-
-        impl sea_orm::sea_query::Nullable for $struct_name {
-            fn null() -> Value {
-                Value::Bytes(None)
-            }
-        }
     };
 }
 
@@ -309,12 +297,6 @@ macro_rules! derive_btreemap_from_blob {
         impl Default for $struct_name {
             fn default() -> Self {
                 Self(vec![])
-            }
-        }
-
-        impl sea_orm::sea_query::Nullable for $struct_name {
-            fn null() -> Value {
-                Value::Bytes(None)
             }
         }
     };

@@ -121,6 +121,8 @@ prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { version = "0.15", features = ["serde"] }
 prost-types = "0.13"
+prost-types014 = { package = "prost-types", version = "0.14" }
+prost014 = { package = "prost", version = "0.14" }
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
@@ -128,8 +130,6 @@ pulsar = { version = "6.3", default-features = false, features = [
     "lz4",
     "zstd",
 ] }
-# should align with pulsar's prost version
-pulsar-prost = { package = "prost", version = "0.11.9" }
 rdkafka = { workspace = true, features = [
     "cmake-build",
     "ssl",

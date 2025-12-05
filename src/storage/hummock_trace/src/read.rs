@@ -45,7 +45,7 @@ pub struct BincodeDeserializer;
 
 impl<R: Read> Deserializer<R> for BincodeDeserializer {
     fn deserialize(&self, reader: &mut R) -> Result<Record> {
-        let record = decode_from_std_read(reader, config::standard())?;
+        let record: Record = decode_from_std_read(reader, config::standard())?;
         Ok(record)
     }
 }

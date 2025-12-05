@@ -37,7 +37,7 @@ fn hmac_sha256(secret: &str, payload: &[u8]) -> Box<[u8]> {
     mac.update(payload);
 
     let code_bytes = mac.finalize().into_bytes();
-    code_bytes.as_slice().into()
+    Box::<[u8]>::from(code_bytes.as_ref())
 }
 
 fn hmac_sha1(secret: &str, payload: &[u8]) -> Box<[u8]> {
@@ -46,7 +46,7 @@ fn hmac_sha1(secret: &str, payload: &[u8]) -> Box<[u8]> {
     mac.update(payload);
 
     let code_bytes = mac.finalize().into_bytes();
-    code_bytes.as_slice().into()
+    Box::<[u8]>::from(code_bytes.as_ref())
 }
 
 #[cfg(test)]

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use arrow_array::ArrayRef;
 use num_traits::abs;
 
-pub use super::arrow_54::{
+pub use super::arrow_56::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
     is_parquet_schema_match_source_schema,
 };
