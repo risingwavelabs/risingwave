@@ -56,7 +56,7 @@ pub async fn handle_drop_mv(
                         name,
                     } = e.inner()
                     {
-                        Err(CatalogError::not_found("materialized view", name.clone()).into())
+                        Err(CatalogError::not_found("materialized view", name).into())
                     } else {
                         Err(e.into())
                     };

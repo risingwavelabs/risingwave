@@ -399,7 +399,7 @@ mod common {
                 if let Some((relation_id, _schema_name)) = result? {
                     return Ok(relation_id);
                 }
-                Err(CatalogError::not_found("table", rel_name.clone()).into())
+                Err(CatalogError::not_found("table", &rel_name).into())
             }
         }
     }
@@ -410,7 +410,7 @@ mod common {
         } else if let Some(source) = schema_catalog.get_source_by_name(name) {
             Ok(source.id.as_raw_id())
         } else {
-            Err(CatalogError::not_found("table or source", name.to_owned()).into())
+            Err(CatalogError::not_found("table or source", name).into())
         }
     }
 }

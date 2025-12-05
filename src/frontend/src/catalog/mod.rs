@@ -115,8 +115,8 @@ pub enum CatalogErrorInner {
     },
 
     #[error(
-        "{object_type} with name {name} exists{under_creation}",
-        under_creation = (.under_creation).then_some(" but under creation").unwrap_or("")
+        "{object_type} with name {name} exists{}",
+        if *.under_creation { " but under creation" } else { "" },
     )]
     Duplicated {
         object_type: &'static str,
@@ -138,6 +138,7 @@ impl CatalogError {
         };
     }
 
+    /// Construct a `not found` error.
     pub fn not_found(object_type: &'static str, name: impl Into<String>) -> Self {
         CatalogErrorInner::NotFound {
             object_type,
@@ -146,11 +147,13 @@ impl CatalogError {
         .into()
     }
 
+    /// Construct a `duplicated` error.
     pub fn duplicated(object_type: &'static str, name: impl Into<String>) -> Self {
-        Self::duplicated_with_creation(object_type, name, false)
+        Self::duplicated_under_creation(object_type, name, false)
     }
 
-    pub fn duplicated_with_creation(
+    /// Construct a `duplicated` error with `under_creation` flag.
+    pub fn duplicated_under_creation(
         object_type: &'static str,
         name: impl Into<String>,
         under_creation: bool,
@@ -163,6 +166,7 @@ impl CatalogError {
         .into()
     }
 
+    /// Whether the error is a `duplicated` error for the given object type.
     pub fn is_duplicated(&self, object_type: &'static str) -> bool {
         matches!(
             self.inner(),
@@ -170,6 +174,7 @@ impl CatalogError {
         )
     }
 
+    /// Whether the error is a `not found` error for the given object type.
     pub fn is_not_found(&self, object_type: &'static str) -> bool {
         matches!(
             self.inner(),

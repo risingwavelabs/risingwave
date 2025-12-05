@@ -51,7 +51,7 @@ pub(super) fn resolve_streaming_job_id_for_alter(
             match (table.table_type(), alter_stmt_type) {
                 (TableType::Internal, _) => {
                     // we treat internal table as NOT FOUND
-                    return Err(CatalogError::not_found("table", table.name().to_owned()).into());
+                    return Err(CatalogError::not_found("table", table.name()).into());
                 }
                 (TableType::Table, StatementType::ALTER_TABLE)
                 | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
