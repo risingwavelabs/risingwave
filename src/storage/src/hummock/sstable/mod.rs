@@ -549,13 +549,13 @@ mod tests {
         )
         .await;
 
-        let sstable = Sstable::new(42, meta);
+        let sstable = Sstable::new(42.into(), meta);
 
         let buffer = bincode::serialize(&sstable).unwrap();
 
         let s: Sstable = bincode::deserialize(&buffer).unwrap();
 
-        assert_eq!(s.table_id, sstable.table_id);
+        assert_eq!(s.id, sstable.id);
         assert_eq!(s.meta, sstable.meta);
         assert_eq!(
             s.filter_reader.encode_to_bytes(),
