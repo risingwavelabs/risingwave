@@ -21,8 +21,8 @@ mod common;
 pub use common::{
     AwsAuthProps, AwsPrivateLinkItem, DISABLE_DEFAULT_CREDENTIAL, KafkaCommon,
     KafkaConnectionProps, KafkaPrivateLinkCommon, KinesisCommon, MongodbCommon, NatsCommon,
-    PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY, PulsarCommon, PulsarOauthCommon,
-    RdKafkaPropertiesCommon,
+    NatsConnectionProps, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+    PulsarCommon, PulsarOauthCommon, RdKafkaPropertiesCommon, SHARED_NATS_CLIENT,
 };
 mod connection;
 pub use connection::{
