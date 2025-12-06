@@ -48,11 +48,19 @@ use risingwave_expr::function;
 /// select null @> array[3,4];
 /// ----
 /// NULL
+///
+/// query I
+/// select array[1,null,2] @> array[1,null,2];
+/// ----
+/// f
 /// ```
 #[function("array_contains(anyarray, anyarray) -> boolean")]
 fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
     let flatten = left.flatten();
     let set: HashSet<_> = flatten.iter().collect();
+    if set.contains(&None) {
+        return false;
+    }
     right.flatten().iter().all(|item| set.contains(&item))
 }
 
