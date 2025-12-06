@@ -482,6 +482,7 @@ impl CommandContext {
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::StartFragmentBackfill { .. } => {}
             Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
+            Command::ResetSource { .. } => {}
         }
 
         Ok(())

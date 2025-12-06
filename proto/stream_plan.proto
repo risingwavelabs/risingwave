@@ -157,6 +157,11 @@ message LoadFinishMutation {
   uint32 associated_source_id = 1;
 }
 
+message ResetSourceMutation {
+  // Source ID to reset
+  uint32 source_id = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -190,6 +195,8 @@ message BarrierMutation {
     LoadFinishMutation load_finish = 16;
     // List finish signal for refreshing tables
     ListFinishMutation list_finish = 17;
+    // Reset CDC source offset to latest
+    ResetSourceMutation reset_source = 18;
   }
 }
 
