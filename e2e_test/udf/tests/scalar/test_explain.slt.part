@@ -1,4 +1,7 @@
 statement ok
+set enable_locality_backfill = false;
+
+statement ok
 create table t (a int, b real, c decimal, d varchar, e jsonb);
 
 
