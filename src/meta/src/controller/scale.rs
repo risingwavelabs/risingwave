@@ -1267,6 +1267,7 @@ mod tests {
             timezone: None,
             config_override: None,
             parallelism: StreamingParallelism::Fixed(1),
+            backfill_parallelism: None,
             max_parallelism: 1,
             specific_resource_group: None,
         };
@@ -1360,6 +1361,7 @@ mod tests {
             timezone: None,
             config_override: None,
             parallelism: StreamingParallelism::Fixed(2),
+            backfill_parallelism: None,
             max_parallelism: 2,
             specific_resource_group: None,
         };
@@ -1481,6 +1483,7 @@ mod tests {
             timezone: None,
             config_override: None,
             parallelism: StreamingParallelism::Fixed(2),
+            backfill_parallelism: None,
             max_parallelism: 2,
             specific_resource_group: None,
         };

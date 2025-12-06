@@ -32,6 +32,7 @@ pub struct Model {
     // Here `NULL` is equivalent to an empty config override string.
     pub config_override: Option<String>,
     pub parallelism: StreamingParallelism,
+    pub backfill_parallelism: Option<StreamingParallelism>,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
 }

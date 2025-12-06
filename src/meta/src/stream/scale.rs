@@ -1100,11 +1100,23 @@ impl GlobalStreamManager {
             _ => StreamingParallelism::Custom,
         };
 
-        let target = self
+        let (target, backfill_parallelism) = self
             .metadata_manager
             .catalog_controller
-            .get_job_streaming_parallelisms(job_id)
+            .get_job_parallelisms(job_id)
             .await?;
+
+        if let Some(backfill_parallelism) = backfill_parallelism
+            && backfill_parallelism == target
+        {
+            tracing::info!(
+                job_id = %job_id,
+                ?backfill_parallelism,
+                ?target,
+                "backfill parallelism equals job parallelism, skip reschedule"
+            );
+            return Ok(());
+        }
 
         tracing::info!(
             job_id = %job_id,

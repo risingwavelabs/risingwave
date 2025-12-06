@@ -930,6 +930,7 @@ impl DdlController {
                 fragment_graph.max_parallelism as _,
                 dependencies,
                 specific_resource_group.clone(),
+                &fragment_graph.backfill_parallelism,
             )
             .await;
         if let Err(meta_err) = check_ret {
