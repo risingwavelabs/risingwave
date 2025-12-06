@@ -3345,14 +3345,14 @@ impl Parser<'_> {
         })
     }
 
-    /// BACKFILL_RATE_LIMIT = default | NUMBER
-    /// BACKFILL_RATE_LIMIT TO default | NUMBER
+    /// BACKFILL_RATE_LIMIT { TO | = } { default | rate_limit_number };
     pub fn parse_alter_backfill_rate_limit(&mut self) -> ModalResult<Option<i32>> {
         if !self.parse_word("BACKFILL_RATE_LIMIT") {
             return Ok(None);
         }
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+            return self
+                .expected("TO or = after ALTER { TABLE | MV | SINK } SET BACKFILL_RATE_LIMIT");
         }
         let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
             -1
@@ -3624,6 +3624,10 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
+            } else if let Some(backfill_rate_limit) = self.parse_alter_backfill_rate_limit()? {
+                AlterSinkOperation::SetBackfillRateLimit {
+                    backfill_rate_limit,
+                }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSinkOperation::SetConfig { entries }

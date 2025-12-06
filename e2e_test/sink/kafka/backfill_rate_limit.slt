@@ -1,0 +1,23 @@
+statement ok
+set rw_implicit_flush=true;
+
+statement ok
+set sink_decouple = false;
+
+statement ok
+create table IF NOT EXISTS t1 (
+    v1 int
+);
+
+statement ok
+create sink kafka_sink 
+as
+select * from t1
+with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-sink-backfill_rate_limit',
+    backfill_rate_limit = 0
+)FORMAT PLAIN ENCODE JSON (
+  force_append_only='true'
+) KEY ENCODE TEXT;
