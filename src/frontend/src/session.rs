@@ -100,7 +100,8 @@ use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId, check_schema_writable,
+    CatalogError, CatalogErrorInner, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
+    check_schema_writable,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::describe::infer_describe;
@@ -1032,30 +1033,39 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
-                // If relation is created, return directly.
-                // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, We can't
-                // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
-                // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
-                if !is_creating {
-                    Ok(Either::Right(
-                        PgResponse::builder(stmt_type)
-                            .notice(format!("relation \"{}\" already exists, skipping", name))
-                            .into(),
-                    ))
-                } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
-                    // For now, when a Subscription is creating, we return directly with an additional message.
-                    // TODO: Subscription should also be processed in the same way as StreamingJob.
-                    Ok(Either::Right(
-                        PgResponse::builder(stmt_type)
-                            .notice(format!(
-                                "relation \"{}\" already exists but still creating, skipping",
-                                name
-                            ))
-                            .into(),
-                    ))
+            Err(e) if if_not_exists => {
+                if let CatalogErrorInner::Duplicated {
+                    name,
+                    under_creation,
+                    ..
+                } = e.inner()
+                {
+                    // If relation is created, return directly.
+                    // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, we can't
+                    // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
+                    // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
+                    if !*under_creation {
+                        Ok(Either::Right(
+                            PgResponse::builder(stmt_type)
+                                .notice(format!("relation \"{}\" already exists, skipping", name))
+                                .into(),
+                        ))
+                    } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
+                        // For now, when a Subscription is creating, we return directly with an additional message.
+                        // TODO: Subscription should also be processed in the same way as StreamingJob.
+                        Ok(Either::Right(
+                            PgResponse::builder(stmt_type)
+                                .notice(format!(
+                                    "relation \"{}\" already exists but still creating, skipping",
+                                    name
+                                ))
+                                .into(),
+                        ))
+                    } else {
+                        Ok(Either::Left(()))
+                    }
                 } else {
-                    Ok(Either::Left(()))
+                    Err(e.into())
                 }
             }
             Err(e) => Err(e.into()),

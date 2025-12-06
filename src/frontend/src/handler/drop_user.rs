@@ -83,7 +83,7 @@ pub async fn handle_drop_user(
                     .notice(format!("user \"{}\" does not exist, skipping", user_name))
                     .into())
             } else {
-                Err(CatalogError::NotFound("user", user_name).into())
+                Err(CatalogError::not_found("user", user_name).into())
             };
         }
     }

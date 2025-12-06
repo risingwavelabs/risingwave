@@ -37,7 +37,10 @@ pub type MetaResult<T> = std::result::Result<T, MetaError>;
     thiserror_ext::Construct,
     thiserror_ext::Macro,
 )]
-#[thiserror_ext(newtype(name = MetaError, backtrace), macro(path = "crate::error"))]
+#[thiserror_ext(
+    newtype(name = MetaError, backtrace, extra_provide = Self::provide_postgres_error_code),
+    macro(path = "crate::error")
+)]
 pub enum MetaErrorInner {
     #[error("MetadataModel error: {0}")]
     MetadataModelError(
@@ -70,7 +73,6 @@ pub enum MetaErrorInner {
     InvalidParameter(#[message] String),
 
     // Used for catalog errors.
-    #[provide(PostgresErrorCode => PostgresErrorCode::UndefinedObject)]
     #[error("{0} id not found: {1}")]
     #[construct(skip)]
     CatalogIdNotFound(&'static str, String),
@@ -78,7 +80,6 @@ pub enum MetaErrorInner {
     #[error("table_fragment not exist: id={0}")]
     FragmentNotFound(FragmentId),
 
-    #[provide(PostgresErrorCode => PostgresErrorCode::DuplicateObject)]
     #[error("{0} with name {1} exists{under_creation}", under_creation = (.2).map(|_| " but under creation").unwrap_or(""))]
     Duplicated(
         &'static str,
@@ -146,6 +147,21 @@ pub enum MetaErrorInner {
         #[backtrace]
         SecretError,
     ),
+}
+
+impl MetaError {
+    /// Provide the Postgres error code for the error.
+    fn provide_postgres_error_code(&self, request: &mut std::error::Request<'_>) {
+        match self.inner() {
+            MetaErrorInner::CatalogIdNotFound { .. } => {
+                request.provide_value(PostgresErrorCode::UndefinedObject);
+            }
+            MetaErrorInner::Duplicated { .. } => {
+                request.provide_value(PostgresErrorCode::DuplicateObject);
+            }
+            _ => {}
+        };
+    }
 }
 
 impl MetaError {

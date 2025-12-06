@@ -62,7 +62,7 @@ pub fn get_columns_from_table(
         Relation::BaseTable(t) => t.table_catalog.columns.clone(),
         Relation::SystemTable(t) => t.sys_table_catalog.columns.clone(),
         _ => {
-            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+            return Err(CatalogError::not_found("table or source", table_name.to_string()).into());
         }
     };
 
@@ -106,7 +106,7 @@ pub fn get_indexes_from_table(
     let indexes = match relation {
         Relation::BaseTable(t) => t.table_indexes,
         _ => {
-            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+            return Err(CatalogError::not_found("table or source", table_name.to_string()).into());
         }
     };
 
@@ -614,7 +614,7 @@ pub async fn handle_show_object(
                 .or(get_columns_from_sink(&session, table.clone()))
                 .or(get_columns_from_view(&session, table.clone()))
             else {
-                return Err(CatalogError::NotFound(
+                return Err(CatalogError::not_found(
                     "table, source, sink or view",
                     table.to_string(),
                 )
@@ -866,14 +866,14 @@ pub fn handle_show_create_object(
                             }),
                     )
                 })?
-                .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
+                .ok_or_else(|| CatalogError::not_found("materialized view", name.to_string()))?;
             (mv.create_sql(), schema)
         }
         ShowCreateType::View => {
             let (view, schema) =
                 catalog_reader.get_view_by_name(&database, schema_path, &object_name)?;
             if !view.is_system_view() && !has_access_to_object(current_user, view.id, view.owner) {
-                return Err(CatalogError::NotFound("view", name.to_string()).into());
+                return Err(CatalogError::not_found("view", name.to_string()).into());
             }
             (view.create_sql(schema.to_owned()), schema)
         }
@@ -890,7 +890,7 @@ pub fn handle_show_create_object(
                             }),
                     )
                 })?
-                .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
+                .ok_or_else(|| CatalogError::not_found("table", name.to_string()))?;
 
             (table.create_sql_purified(), schema)
         }
@@ -898,7 +898,7 @@ pub fn handle_show_create_object(
             let (sink, schema) =
                 catalog_reader.get_any_sink_by_name(&database, schema_path, &object_name)?;
             if !has_access_to_object(current_user, sink.id, sink.owner.user_id) {
-                return Err(CatalogError::NotFound("sink", name.to_string()).into());
+                return Err(CatalogError::not_found("sink", name.to_string()).into());
             }
             (sink.create_sql(), schema)
         }
@@ -915,7 +915,7 @@ pub fn handle_show_create_object(
                             }),
                     )
                 })?
-                .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
+                .ok_or_else(|| CatalogError::not_found("source", name.to_string()))?;
             (source.create_sql_purified(), schema)
         }
         ShowCreateType::Index => {
@@ -930,7 +930,7 @@ pub fn handle_show_create_object(
                             }),
                     )
                 })?
-                .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
+                .ok_or_else(|| CatalogError::not_found("index", name.to_string()))?;
             (index.create_sql(), schema)
         }
         ShowCreateType::Function => {
@@ -940,7 +940,7 @@ pub fn handle_show_create_object(
             let (subscription, schema) =
                 catalog_reader.get_subscription_by_name(&database, schema_path, &object_name)?;
             if !has_access_to_object(current_user, subscription.id, subscription.owner.user_id) {
-                return Err(CatalogError::NotFound("subscription", name.to_string()).into());
+                return Err(CatalogError::not_found("subscription", name.to_string()).into());
             }
             (subscription.create_sql(), schema)
         }
