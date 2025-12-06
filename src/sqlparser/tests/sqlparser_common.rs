@@ -4198,3 +4198,74 @@ fn parse_alter_fragment_set_parallelism() {
         _ => panic!("unexpected statement kind"),
     }
 }
+
+#[test]
+fn parse_alter_fragment_set_rate_limits() {
+    // Test BACKFILL_RATE_LIMIT
+    match verified_stmt("ALTER FRAGMENT 1 SET BACKFILL_RATE_LIMIT TO 100") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![1]);
+            match operation {
+                AlterFragmentOperation::SetBackfillRateLimit { rate_limit } => {
+                    assert_eq!(rate_limit, 100);
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    // Test SOURCE_RATE_LIMIT
+    match verified_stmt("ALTER FRAGMENT 2 SET SOURCE_RATE_LIMIT TO 200") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![2]);
+            match operation {
+                AlterFragmentOperation::SetSourceRateLimit { rate_limit } => {
+                    assert_eq!(rate_limit, 200);
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    // Test DML_RATE_LIMIT
+    match verified_stmt("ALTER FRAGMENT 3 SET DML_RATE_LIMIT TO 300") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![3]);
+            match operation {
+                AlterFragmentOperation::SetDmlRateLimit { rate_limit } => {
+                    assert_eq!(rate_limit, 300);
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    // Test SINK_RATE_LIMIT
+    match verified_stmt("ALTER FRAGMENT 4 SET SINK_RATE_LIMIT TO 400") {
+        Statement::AlterFragment {
+            fragment_ids,
+            operation,
+        } => {
+            assert_eq!(fragment_ids, vec![4]);
+            match operation {
+                AlterFragmentOperation::SetSinkRateLimit { rate_limit } => {
+                    assert_eq!(rate_limit, 400);
+                }
+                _ => panic!("unexpected alter fragment operation"),
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+}
