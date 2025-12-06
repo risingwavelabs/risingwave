@@ -262,9 +262,6 @@ pub struct StreamJobFragments {
     /// The streaming context associated with this stream plan and its fragments
     pub ctx: StreamContext,
 
-    /// The parallelism assigned to this table fragments
-    pub assigned_parallelism: TableParallelism,
-
     /// The max parallelism specified when the streaming job was created, i.e., expected vnode count.
     ///
     /// The reason for persisting this value is mainly to check if a parallelism change (via `ALTER
@@ -330,6 +327,7 @@ impl StreamJobFragments {
         &self,
         fragment_upstreams: &HashMap<FragmentId, HashSet<FragmentId>>,
         fragment_dispatchers: &FragmentActorDispatchers,
+        parallelism: TableParallelism,
     ) -> PbTableFragments {
         PbTableFragments {
             table_id: self.stream_job_id,
@@ -353,7 +351,7 @@ impl StreamJobFragments {
                 .map(|(actor_id, status)| (*actor_id, *status))
                 .collect(),
             ctx: Some(self.ctx.to_protobuf()),
-            parallelism: Some(self.assigned_parallelism.into()),
+            parallelism: Some(parallelism.into()),
             node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(self.max_parallelism as _),
@@ -381,7 +379,6 @@ impl StreamJobFragments {
             fragments,
             &BTreeMap::new(),
             StreamContext::default(),
-            TableParallelism::Adaptive,
             VirtualNode::COUNT_FOR_TEST,
         )
     }
@@ -393,7 +390,6 @@ impl StreamJobFragments {
         fragments: BTreeMap<FragmentId, Fragment>,
         actor_locations: &BTreeMap<ActorId, ActorAlignmentId>,
         ctx: StreamContext,
-        table_parallelism: TableParallelism,
         max_parallelism: usize,
     ) -> Self {
         let actor_status = actor_locations
@@ -414,7 +410,6 @@ impl StreamJobFragments {
             fragments,
             actor_status,
             ctx,
-            assigned_parallelism: table_parallelism,
             max_parallelism,
         }
     }

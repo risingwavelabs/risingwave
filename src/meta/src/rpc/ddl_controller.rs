@@ -82,7 +82,6 @@ use crate::manager::{
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentDownstreamRelation,
     FragmentId as CatalogFragmentId, StreamContext, StreamJobFragments, StreamJobFragmentsToCreate,
-    TableParallelism,
 };
 use crate::stream::cdc::{
     is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
@@ -1796,19 +1795,11 @@ impl DdlController {
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
-        // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
-        // Otherwise, it defaults to FIXED based on deduction.
-        let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
-            (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
-            _ => TableParallelism::Fixed(parallelism.get()),
-        };
-
         let stream_job_fragments = StreamJobFragments::new(
             id,
             graph,
             &building_locations.actor_locations,
             stream_ctx.clone(),
-            table_parallelism,
             max_parallelism.get(),
         );
 
@@ -2068,7 +2059,6 @@ impl DdlController {
             graph,
             &building_locations.actor_locations,
             stream_ctx,
-            old_fragments.assigned_parallelism,
             old_fragments.max_parallelism,
         );
 

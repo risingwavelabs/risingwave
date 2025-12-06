@@ -84,6 +84,7 @@ pub(super) mod handlers {
 
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
+    use crate::model::TableParallelism;
     use crate::rpc::await_tree::{dump_cluster_await_tree, dump_worker_node_await_tree};
 
     #[derive(Serialize)]
@@ -388,9 +389,18 @@ pub(super) mod handlers {
             )
             .await
             .map_err(err)?;
-        Ok(Json(
-            table_fragments.to_protobuf(&upstream_fragments, &dispatchers),
-        ))
+        let parallelism = srv
+            .metadata_manager
+            .catalog_controller
+            .get_job_streaming_parallelisms(job_id)
+            .await
+            .map(TableParallelism::from)
+            .unwrap_or(TableParallelism::Adaptive);
+        Ok(Json(table_fragments.to_protobuf(
+            &upstream_fragments,
+            &dispatchers,
+            parallelism,
+        )))
     }
 
     pub async fn list_users(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbUserInfo>>> {
