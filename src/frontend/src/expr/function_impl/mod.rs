@@ -24,6 +24,7 @@ mod pg_indexes_size;
 mod pg_relation_size;
 mod pg_table_is_visible;
 mod rw_actor_vnodes;
+mod rw_adaptive_parallelism;
 mod rw_cluster_id;
 mod rw_epoch_to_ts;
 mod rw_fragment_vnodes;
