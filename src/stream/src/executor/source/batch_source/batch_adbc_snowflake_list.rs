@@ -221,8 +221,13 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         snowflake_properties: AdbcSnowflakeProperties,
         is_list_finished: Arc<RwLock<bool>>,
     ) {
+        // Create a single connection for all metadata queries
+        let database = snowflake_properties.create_database()?;
+        let mut connection = snowflake_properties.create_connection(&database)?;
+
         // Get snapshot timestamp for consistent reads
-        let snapshot_timestamp = Self::get_snapshot_timestamp(&snowflake_properties).await?;
+        let snapshot_timestamp =
+            Self::get_snapshot_timestamp(&snowflake_properties, &mut connection)?;
 
         tracing::info!(
             snapshot_timestamp = ?snapshot_timestamp,
@@ -234,14 +239,14 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
 
         // Try to get primary key information and row count from the table
         let (pk_columns, estimated_row_count) =
-            Self::get_table_metadata(&snowflake_properties).await?;
+            Self::get_table_metadata(&snowflake_properties, &mut connection)?;
 
         if pk_columns.is_empty() {
             // If no primary key is found or metadata query fails,
             // fall back to a single split with the entire query
             tracing::info!("no primary key found, using single split");
             yield AdbcSnowflakeSplit {
-                split_id: "0".to_string(),
+                split_id: "0".to_owned(),
                 base_query: base_query.clone(),
                 where_clause: None,
                 snapshot_timestamp: snapshot_timestamp.clone(),
@@ -267,10 +272,10 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             // Get min and max values of the primary key
             let (min_val, max_val) = Self::get_pk_range(
                 &snowflake_properties,
+                &mut connection,
                 pk_column,
                 snapshot_timestamp.as_deref(),
-            )
-            .await?;
+            )?;
 
             // Generate splits based on the range
             for i in 0..num_splits {
@@ -291,35 +296,35 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
     }
 
     /// Get the current snapshot timestamp from Snowflake
-    async fn get_snapshot_timestamp(
+    fn get_snapshot_timestamp(
         properties: &AdbcSnowflakeProperties,
+        connection: &mut risingwave_connector::source::adbc_snowflake::Connection,
     ) -> StreamExecutorResult<Option<String>> {
         use risingwave_common::array::arrow::arrow_array_55;
 
         // Get current timestamp from Snowflake to use as snapshot reference
         let query = "SELECT CURRENT_TIMESTAMP()::STRING";
-        let batches = properties.execute_query(query)?;
+        let batches = properties.execute_query_with_connection(connection, query)?;
 
         // Read the timestamp from the result
-        if let Some(batch) = batches.first() {
-            if batch.num_rows() > 0 {
-                if let Some(array) = batch
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<arrow_array_55::StringArray>()
-                {
-                    let timestamp: String = array.value(0).into();
-                    return Ok(Some(timestamp));
-                }
-            }
+        if let Some(batch) = batches.first()
+            && batch.num_rows() > 0
+            && let Some(array) = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow_array_55::StringArray>()
+        {
+            let timestamp: String = array.value(0).into();
+            return Ok(Some(timestamp));
         }
 
         Ok(None)
     }
 
     /// Get table metadata including primary key columns and estimated row count
-    async fn get_table_metadata(
+    fn get_table_metadata(
         properties: &AdbcSnowflakeProperties,
+        connection: &mut risingwave_connector::source::adbc_snowflake::Connection,
     ) -> StreamExecutorResult<(Vec<String>, i64)> {
         use risingwave_common::array::arrow::arrow_array_55;
 
@@ -339,7 +344,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         );
 
         let mut pk_columns = Vec::new();
-        let pk_batches = properties.execute_query(&pk_query)?;
+        let pk_batches = properties.execute_query_with_connection(connection, &pk_query)?;
 
         for batch in pk_batches {
             if let Some(array) = batch
@@ -362,19 +367,17 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             properties.database, properties.schema, table_name
         );
 
-        let count_batches = properties.execute_query(&count_query)?;
+        let count_batches = properties.execute_query_with_connection(connection, &count_query)?;
 
         let mut estimated_count: i64 = 0;
-        if let Some(batch) = count_batches.first() {
-            if batch.num_rows() > 0 {
-                if let Some(array) = batch
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<arrow_array_55::Int64Array>()
-                {
-                    estimated_count = array.value(0);
-                }
-            }
+        if let Some(batch) = count_batches.first()
+            && batch.num_rows() > 0
+            && let Some(array) = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow_array_55::Int64Array>()
+        {
+            estimated_count = array.value(0);
         }
 
         Ok((pk_columns, estimated_count))
@@ -398,14 +401,15 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             .trim_end_matches(';');
 
         // If schema.table format, take just the table name
-        let table_name = table_part.split('.').last().unwrap_or(table_part);
+        let table_name = table_part.split('.').next_back().unwrap_or(table_part);
 
         Ok(table_name.to_uppercase())
     }
 
     /// Get the min and max values of the primary key column
-    async fn get_pk_range(
+    fn get_pk_range(
         properties: &AdbcSnowflakeProperties,
+        connection: &mut risingwave_connector::source::adbc_snowflake::Connection,
         pk_column: &str,
         snapshot_timestamp: Option<&str>,
     ) -> StreamExecutorResult<(String, String)> {
@@ -421,26 +425,22 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             range_query = format!("{} AT(TIMESTAMP => '{}')", range_query, ts);
         }
 
-        let batches = properties.execute_query(&range_query)?;
+        let batches = properties.execute_query_with_connection(connection, &range_query)?;
 
-        if let Some(batch) = batches.first() {
-            if batch.num_rows() > 0 {
-                if let Some(min_array) = batch
-                    .column(0)
-                    .as_any()
-                    .downcast_ref::<arrow_array_55::StringArray>()
-                {
-                    if let Some(max_array) = batch
-                        .column(1)
-                        .as_any()
-                        .downcast_ref::<arrow_array_55::StringArray>()
-                    {
-                        let min_val: String = min_array.value(0).into();
-                        let max_val: String = max_array.value(0).into();
-                        return Ok((min_val, max_val));
-                    }
-                }
-            }
+        if let Some(batch) = batches.first()
+            && batch.num_rows() > 0
+            && let Some(min_array) = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow_array_55::StringArray>()
+            && let Some(max_array) = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<arrow_array_55::StringArray>()
+        {
+            let min_val: String = min_array.value(0).into();
+            let max_val: String = max_array.value(0).into();
+            return Ok((min_val, max_val));
         }
 
         Err(anyhow!("Failed to get PK range").into())
