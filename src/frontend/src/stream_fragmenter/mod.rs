@@ -212,7 +212,7 @@ pub fn build_graph_with_strategy(
         );
         let backfill_parallelism = if state.has_any_backfill {
             match config.streaming_parallelism_for_backfill() {
-                ConfigParallelism::Default => normal_parallelism,
+                ConfigParallelism::Default => None,
                 override_parallelism => {
                     derive_parallelism(Some(override_parallelism), streaming_parallelism)
                         .or(normal_parallelism)
