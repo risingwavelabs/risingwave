@@ -564,4 +564,63 @@ mod tests {
             panic!();
         }
     }
+
+
+    // Test to make sure filter key builder finish produce the same result as the filter reader encode_to_bytes
+    #[tokio::test]
+    async fn test_xor_filter_builder_and_reader() {
+        // Test Xor8 filter
+        let mut xor8_builder = Xor8FilterBuilder::new(100);
+        for i in 0..100 {
+            xor8_builder.add_key(&test_user_key_of(i).encode(), 0);
+        }
+        let xor8_bytes = xor8_builder.finish(None);
+        let xor8_reader = XorFilterReader::new(&xor8_bytes, &[]);
+        let xor8_encoded = xor8_reader.encode_to_bytes();
+        assert_eq!(xor8_bytes, xor8_encoded, "Xor8 builder and reader should produce identical bytes");
+
+        // Test Xor16 filter
+        let mut xor16_builder = Xor16FilterBuilder::new(100);
+        for i in 0..100 {
+            xor16_builder.add_key(&test_user_key_of(i).encode(), 0);
+        }
+        let xor16_bytes = xor16_builder.finish(None);
+        let xor16_reader = XorFilterReader::new(&xor16_bytes, &[]);
+        let xor16_encoded = xor16_reader.encode_to_bytes();
+        assert_eq!(xor16_bytes, xor16_encoded, "Xor16 builder and reader should produce identical bytes");
+
+        // Test BlockedXor16 filter
+        let mut blocked_builder = BlockedXor16FilterBuilder::new(1024);
+        let mut block_metas = Vec::new();
+        
+        // Create multiple blocks
+        for block_idx in 0..3 {
+            for i in 0..50 {
+                let key_idx = block_idx * 50 + i;
+                blocked_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
+            }
+            
+            // Create a block meta for this block
+            let smallest_key = FullKey {
+                user_key: test_user_key_of(block_idx * 50),
+                epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+            };
+            
+            block_metas.push(BlockMeta {
+                smallest_key: smallest_key.encode(),
+                len: 0,
+                offset: 0,
+                uncompressed_size: 0,
+                total_key_count: 50,
+                stale_key_count: 0,
+            });
+            
+            blocked_builder.switch_block(None);
+        }
+        
+        let blocked_bytes = blocked_builder.finish(None);
+        let blocked_reader = XorFilterReader::new(&blocked_bytes, &block_metas);
+        let blocked_encoded = blocked_reader.encode_to_bytes();
+        assert_eq!(blocked_bytes, blocked_encoded, "BlockedXor16 builder and reader should produce identical bytes");
+    }
 }
