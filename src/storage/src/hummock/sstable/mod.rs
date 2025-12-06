@@ -128,13 +128,27 @@ impl From<SerdeSstable> for Sstable {
 }
 
 /// [`Sstable`] is a handle for accessing SST.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(from = "SerdeSstable")]
 pub struct Sstable {
     pub id: HummockSstableObjectId,
     pub meta: SstableMeta,
     #[serde(skip)]
     pub filter_reader: XorFilterReader,
+}
+
+impl Serialize for Sstable {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut serde_sstable = SerdeSstable {
+            id: self.id,
+            meta: self.meta.clone(),
+        };
+        serde_sstable.meta.bloom_filter = self.filter_reader.encode_to_bytes();
+        serde_sstable.serialize(serializer)
+    }
 }
 
 impl Debug for Sstable {
@@ -535,12 +549,17 @@ mod tests {
         )
         .await;
 
-        let buffer = bincode::serialize(&meta).unwrap();
+        let sstable = Sstable::new(42.into(), meta);
 
-        let m: SstableMeta = bincode::deserialize(&buffer).unwrap();
+        let buffer = bincode::serialize(&sstable).unwrap();
 
-        assert_eq!(meta, m);
+        let s: Sstable = bincode::deserialize(&buffer).unwrap();
 
-        println!("{} vs {}", buffer.len(), meta.encoded_size());
+        assert_eq!(s.id, sstable.id);
+        assert_eq!(s.meta, sstable.meta);
+        assert_eq!(
+            s.filter_reader.encode_to_bytes(),
+            sstable.filter_reader.encode_to_bytes()
+        );
     }
 }
