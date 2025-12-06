@@ -505,6 +505,27 @@ impl CatalogController {
         Ok(job_parallelism)
     }
 
+    pub async fn get_job_parallelisms(
+        &self,
+        streaming_job_id: JobId,
+    ) -> MetaResult<(StreamingParallelism, Option<StreamingParallelism>)> {
+        let inner = self.inner.read().await;
+
+        let (job_parallelism, backfill_parallelism): (
+            StreamingParallelism,
+            Option<StreamingParallelism>,
+        ) = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::Parallelism)
+            .column(streaming_job::Column::BackfillParallelism)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+
+        Ok((job_parallelism, backfill_parallelism))
+    }
+
     pub async fn get_fragment_streaming_job_id(
         &self,
         fragment_id: FragmentId,
