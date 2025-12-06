@@ -2122,6 +2122,7 @@ async fn test_non_pk_prefix_watermark_read() {
     let watermark_col_idx = 1;
     table.watermark_indices = vec![watermark_col_idx];
     table.clean_watermark_index_in_pk = Some(1);
+    table.clean_watermark_indices = vec![watermark_col_idx]; // Column index, not PK index
     let test_env = prepare_hummock_test_env().await;
     test_env.register_table(table.clone()).await;
 
