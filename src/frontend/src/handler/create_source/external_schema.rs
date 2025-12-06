@@ -14,12 +14,16 @@
 
 //! bind columns from external schema
 
+use risingwave_connector::source::ADBC_SNOWFLAKE_CONNECTOR;
+
 use super::*;
 
 mod json;
 use json::*;
 mod avro;
 use avro::extract_avro_table_schema;
+pub mod adbc_snowflake;
+use adbc_snowflake::extract_adbc_snowflake_columns;
 pub mod debezium;
 pub mod iceberg;
 use iceberg::extract_iceberg_columns;
@@ -278,6 +282,15 @@ async fn bind_columns_from_source_for_non_cdc(
             if options_with_secret.is_iceberg_connector() {
                 Some(
                     extract_iceberg_columns(&options_with_secret)
+                        .await
+                        .map_err(|err| ProtocolError(err.to_report_string()))?,
+                )
+            } else if options_with_secret
+                .get(UPSTREAM_SOURCE_KEY)
+                .is_some_and(|s| s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR))
+            {
+                Some(
+                    extract_adbc_snowflake_columns(&options_with_secret)
                         .await
                         .map_err(|err| ProtocolError(err.to_report_string()))?,
                 )

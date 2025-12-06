@@ -20,3 +20,7 @@ mod batch_iceberg_list;
 pub use batch_iceberg_list::*;
 mod batch_iceberg_fetch;
 pub use batch_iceberg_fetch::*;
+mod batch_adbc_snowflake_list;
+pub use batch_adbc_snowflake_list::*;
+mod batch_adbc_snowflake_fetch;
+pub use batch_adbc_snowflake_fetch::*;
