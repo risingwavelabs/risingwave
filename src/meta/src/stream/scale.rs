@@ -1106,16 +1106,37 @@ impl GlobalStreamManager {
             .get_job_parallelisms(job_id)
             .await?;
 
-        if let Some(backfill_parallelism) = backfill_parallelism
-            && backfill_parallelism == target
-        {
+        if current == target {
             tracing::info!(
                 job_id = %job_id,
-                ?backfill_parallelism,
+                ?current,
                 ?target,
-                "backfill parallelism equals job parallelism, skip reschedule"
+                "current parallelism already matches target, skip reschedule"
             );
             return Ok(());
+        }
+
+        match backfill_parallelism {
+            Some(backfill_parallelism) if backfill_parallelism == target => {
+                tracing::info!(
+                    job_id = %job_id,
+                    ?backfill_parallelism,
+                    ?target,
+                    "backfill parallelism equals job parallelism, skip reschedule"
+                );
+                return Ok(());
+            }
+            Some(_) => {
+                // proceed to restore to target parallelism
+            }
+            None => {
+                tracing::info!(
+                    job_id = %job_id,
+                    ?target,
+                    "no backfill parallelism configured, skip post-backfill reschedule"
+                );
+                return Ok(());
+            }
         }
 
         tracing::info!(

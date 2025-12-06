@@ -88,3 +88,53 @@ async fn test_backfill_parallelism_switches_to_normal_after_completion() -> Resu
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_backfill_parallelism_optional_and_adaptive() -> Result<()> {
+    let config = Configuration::for_background_ddl();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    // Adaptive (no streaming_parallelism) with a custom backfill override.
+    session
+        .run("set streaming_parallelism_for_backfill=2;")
+        .await?;
+    session.run("create table t(v int);").await?;
+    session
+        .run("insert into t select * from generate_series(1, 12);")
+        .await?;
+    session.run("set backfill_rate_limit=1;").await?;
+    session.run("set background_ddl=true;").await?;
+    session
+        .run("create materialized view m as select * from t;")
+        .await?;
+
+    // backfill uses override
+    wait_parallelism(&mut session, "m", "2").await?;
+    wait_jobs_finished(&mut session).await?;
+
+    // final should be adaptive (full cluster), expect fallback to >2; we just assert it is not 2.
+    let res = session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'm' order by parallelism;")
+        .await?;
+    if res.trim() == "2" {
+        bail!("adaptive + backfill override did not restore to adaptive parallelism");
+    }
+
+    // Now create another MV without setting backfill override; it should not lower to 2.
+    session
+        .run("set streaming_parallelism_for_backfill=default;")
+        .await?;
+    session
+        .run("create materialized view m2 as select * from t;")
+        .await?;
+    wait_jobs_finished(&mut session).await?;
+    let res = session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'm2' order by parallelism;")
+        .await?;
+    if res.trim() == "2" {
+        bail!("default backfill parallelism should not force parallelism to 2");
+    }
+
+    Ok(())
+}
