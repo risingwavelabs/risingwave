@@ -404,19 +404,18 @@ impl IcebergCompactionManager {
         let trigger_snapshot_count = iceberg_config.trigger_snapshot_count();
 
         // For `copy-on-write` mode, always use Full compaction regardless of config
-        let task_type = if should_enable_iceberg_cow(
-            iceberg_config.r#type.as_str(),
-            iceberg_config.write_mode.as_str(),
-        ) {
-            TaskType::Full
-        } else {
-            // For `merge-on-read` mode, use configured compaction_type
-            match iceberg_config.compaction_type() {
-                CompactionType::Full => TaskType::Full,
-                CompactionType::SmallFiles => TaskType::SmallFiles,
-                CompactionType::FilesWithDelete => TaskType::FilesWithDelete,
-            }
-        };
+        let task_type =
+            if should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
+            {
+                TaskType::Full
+            } else {
+                // For `merge-on-read` mode, use configured compaction_type
+                match iceberg_config.compaction_type() {
+                    CompactionType::Full => TaskType::Full,
+                    CompactionType::SmallFiles => TaskType::SmallFiles,
+                    CompactionType::FilesWithDelete => TaskType::FilesWithDelete,
+                }
+            };
 
         Ok(CompactionTrack {
             task_type,
@@ -667,10 +666,8 @@ impl IcebergCompactionManager {
         let mut elapsed_time = 0;
         let mut current_interval_secs = INITIAL_POLL_INTERVAL_SECS;
 
-        let cow = should_enable_iceberg_cow(
-            iceberg_config.r#type.as_str(),
-            iceberg_config.write_mode.as_str(),
-        );
+        let cow =
+            should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
         while elapsed_time < MAX_WAIT_TIME_SECS {
             let poll_interval = std::time::Duration::from_secs(current_interval_secs);

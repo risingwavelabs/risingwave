@@ -38,7 +38,7 @@ use risingwave_common::config::storage::default::storage::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::{
-    IcebergConfig, commit_branch, should_enable_iceberg_cow,
+    IcebergConfig, IcebergWriteMode, commit_branch, should_enable_iceberg_cow,
 };
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
@@ -308,15 +308,10 @@ impl IcebergCompactionPlanRunner {
             .unwrap();
 
         if let Some(committed_table) = table
-            && should_enable_iceberg_cow(
-                iceberg_config.r#type.as_str(),
-                iceberg_config.write_mode.as_str(),
-            )
+            && should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
         {
-            let ingestion_branch = commit_branch(
-                iceberg_config.r#type.as_str(),
-                iceberg_config.write_mode.as_str(),
-            );
+            let ingestion_branch =
+                commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
             // Overwrite Main branch
             let consistency_params = CommitConsistencyParams {
@@ -444,9 +439,9 @@ pub async fn create_plan_runners(
         .full_table_name()
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-    let grouping_strategy = match iceberg_config.write_mode.as_str() {
-        "copy_on_write" => iceberg_compaction_core::config::GroupingStrategy::Single,
-        _ => match config.target_binpack_group_size_mb {
+    let grouping_strategy = match iceberg_config.write_mode {
+        IcebergWriteMode::CopyOnWrite => iceberg_compaction_core::config::GroupingStrategy::Single,
+        IcebergWriteMode::MergeOnRead => match config.target_binpack_group_size_mb {
             Some(target_binpack_group_size_mb) => {
                 iceberg_compaction_core::config::GroupingStrategy::BinPack(
                     iceberg_compaction_core::config::BinPackConfig::new(
@@ -531,10 +526,7 @@ pub async fn create_plan_runners(
         }
     };
 
-    let branch = commit_branch(
-        iceberg_config.r#type.as_str(),
-        iceberg_config.write_mode.as_str(),
-    );
+    let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
     let planner = CompactionPlanner::new(planning_config.clone());
 
