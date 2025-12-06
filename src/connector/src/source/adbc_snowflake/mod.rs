@@ -16,13 +16,13 @@ use std::collections::HashMap;
 
 use adbc_core::{Connection as _, Database as _, Statement as _};
 use adbc_snowflake::database::Builder as DatabaseBuilder;
-use adbc_snowflake::{Connection, Database, Driver, Statement};
+pub use adbc_snowflake::{Connection, Database, Driver, Statement};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::array::arrow::{Arrow55FromArrow, arrow_array_55};
+use risingwave_common::array::arrow::{Arrow55FromArrow, arrow_array_55, arrow_schema_55};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +34,8 @@ use crate::source::{
 };
 
 pub const ADBC_SNOWFLAKE_CONNECTOR: &str = "adbc_snowflake";
+
+mod schema;
 
 /// Converter for Arrow 55 record batches to RisingWave `DataChunks`.
 /// This is similar to `IcebergArrowConvert` but uses Arrow 55 (used by `adbc_snowflake`).
@@ -48,6 +50,14 @@ impl AdbcSnowflakeArrowConvert {
         batch: &arrow_array_55::RecordBatch,
     ) -> Result<risingwave_common::array::DataChunk, risingwave_common::array::ArrayError> {
         Arrow55FromArrow::from_record_batch(self, batch)
+    }
+
+    /// Convert Arrow 55 field to RisingWave `DataType`
+    pub fn type_from_field(
+        &self,
+        field: &arrow_schema_55::Field,
+    ) -> Result<risingwave_common::types::DataType, risingwave_common::array::ArrayError> {
+        Arrow55FromArrow::from_field(self, field)
     }
 }
 
@@ -216,11 +226,13 @@ impl AdbcSnowflakeProperties {
         Ok(statement)
     }
 
-    /// Execute a custom query and return the results as a vector of Arrow record batches.
-    /// This is useful for metadata queries needed for split generation.
-    pub fn execute_query(&self, query: &str) -> ConnectorResult<Vec<arrow_array_55::RecordBatch>> {
-        let database = self.create_database()?;
-        let mut connection = self.create_connection(&database)?;
+    /// Execute a custom query using a provided connection.
+    /// This is useful for metadata queries needed for split generation while reusing connections.
+    pub fn execute_query_with_connection(
+        &self,
+        connection: &mut Connection,
+        query: &str,
+    ) -> ConnectorResult<Vec<arrow_array_55::RecordBatch>> {
         let mut statement = connection
             .new_statement()
             .map_err(|e| anyhow!("Failed to create statement: {}", e))?;
@@ -238,6 +250,15 @@ impl AdbcSnowflakeProperties {
             batches.push(batch);
         }
         Ok(batches)
+    }
+
+    /// Execute a custom query and return the results as a vector of Arrow record batches.
+    /// This is useful for metadata queries needed for split generation.
+    /// Creates a new connection for each query - use `execute_query_with_connection` for better performance.
+    pub fn execute_query(&self, query: &str) -> ConnectorResult<Vec<arrow_array_55::RecordBatch>> {
+        let database = self.create_database()?;
+        let mut connection = self.create_connection(&database)?;
+        self.execute_query_with_connection(&mut connection, query)
     }
 }
 

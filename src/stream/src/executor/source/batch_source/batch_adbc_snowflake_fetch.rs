@@ -247,7 +247,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
             _ => unreachable!(),
         };
 
-        let chunks = Self::read_split(properties, split).await?;
+        let chunks = Self::read_split(properties, split)?;
         for chunk in chunks {
             yield chunk;
         }
@@ -256,7 +256,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
     }
 
     /// Read data from a single split
-    async fn read_split(
+    fn read_split(
         properties: Box<AdbcSnowflakeProperties>,
         split: AdbcSnowflakeSplit,
     ) -> StreamExecutorResult<Vec<StreamChunk>> {
@@ -284,6 +284,8 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
 
         for batch in batches {
             // Convert Arrow RecordBatch to RisingWave DataChunk
+            // The column order in the RecordBatch matches the Snowflake query result,
+            // which is consistent with the schema inferred by get_arrow_schema() in the connector.
             let data_chunk = converter.chunk_from_record_batch(&batch)?;
 
             // Convert DataChunk to StreamChunk (all inserts)
