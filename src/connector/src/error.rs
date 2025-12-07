@@ -86,6 +86,7 @@ def_anyhow_newtype! {
     EnforceSecretError => transparent,
 
     // ADBC errors
+    #[cfg(feature = "source-adbc_snowflake")]
     adbc_core::error::Error => "ADBC error",
 }
 

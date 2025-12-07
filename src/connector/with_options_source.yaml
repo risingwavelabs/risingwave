@@ -27,9 +27,9 @@ AdbcSnowflakeProperties:
     field_type: String
     comments: The name of the warehouse to use.
     required: true
-  - name: adbc_snowflake.query
+  - name: adbc_snowflake.table
     field_type: String
-    comments: The SQL query to execute.
+    comments: The table name to load (full table).
     required: true
   - name: adbc_snowflake.role
     field_type: String

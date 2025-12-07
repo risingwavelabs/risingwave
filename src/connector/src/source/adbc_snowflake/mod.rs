@@ -88,9 +88,9 @@ pub struct AdbcSnowflakeProperties {
     #[serde(rename = "adbc_snowflake.warehouse")]
     pub warehouse: String,
 
-    /// The SQL query to execute.
-    #[serde(rename = "adbc_snowflake.query")]
-    pub query: String,
+    /// The table name to load (full table).
+    #[serde(rename = "adbc_snowflake.table")]
+    pub table: String,
 
     /// The role to use (optional).
     #[serde(rename = "adbc_snowflake.role")]
@@ -149,6 +149,16 @@ impl SourceProperties for AdbcSnowflakeProperties {
 }
 
 impl AdbcSnowflakeProperties {
+    /// Qualified table reference used in all generated queries.
+    pub fn table_ref(&self) -> String {
+        format!(r#""{}"."{}"."{}""#, self.database, self.schema, self.table)
+    }
+
+    /// Default full-table select.
+    pub fn build_select_all_query(&self) -> String {
+        format!("SELECT * FROM {}", self.table_ref())
+    }
+
     /// Build a database builder from properties.
     fn build_database_builder(&self) -> ConnectorResult<DatabaseBuilder> {
         let mut builder = DatabaseBuilder::default()
@@ -216,12 +226,16 @@ impl AdbcSnowflakeProperties {
     }
 
     /// Create a statement from the connection and set the SQL query.
-    pub fn create_statement(&self, connection: &mut Connection) -> ConnectorResult<Statement> {
+    pub fn create_statement(
+        &self,
+        connection: &mut Connection,
+        query: &str,
+    ) -> ConnectorResult<Statement> {
         let mut statement = connection
             .new_statement()
             .map_err(|e| anyhow!("Failed to create statement: {}", e))?;
         statement
-            .set_sql_query(&self.query)
+            .set_sql_query(query)
             .map_err(|e| anyhow!("Failed to set SQL query: {}", e))?;
         Ok(statement)
     }
@@ -335,7 +349,7 @@ impl SplitEnumerator for AdbcSnowflakeSplitEnumerator {
         // Connection and query are valid, return the split
         let split = AdbcSnowflakeSplit {
             split_id: "0".to_owned(),
-            query: self.properties.query.clone(),
+            query: self.properties.build_select_all_query(),
         };
         Ok(vec![split])
     }
@@ -383,7 +397,8 @@ impl AdbcSnowflakeSplitReader {
         // Execute the query and read the results as Arrow record batches
         let database = self.properties.create_database()?;
         let mut connection = self.properties.create_connection(&database)?;
-        let mut statement = self.properties.create_statement(&mut connection)?;
+        let query = self.properties.build_select_all_query();
+        let mut statement = self.properties.create_statement(&mut connection, &query)?;
 
         // Execute the query and get a record batch reader
         let reader = statement

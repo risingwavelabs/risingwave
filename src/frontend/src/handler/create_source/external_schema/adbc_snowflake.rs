@@ -49,8 +49,9 @@ pub async fn extract_adbc_snowflake_columns(
             .collect();
 
         tracing::info!(
-            "ADBC Snowflake inferred {} columns from query",
-            columns.len()
+            "ADBC Snowflake inferred {} columns from table {}",
+            columns.len(),
+            properties.table
         );
 
         Ok(columns)
