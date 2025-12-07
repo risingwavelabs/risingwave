@@ -226,7 +226,9 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
             *read_finished.write() = false;
 
             let split = AdbcSnowflakeSplit::decode(split_json)?;
-            let reader = Self::build_split_reader(source_desc, split, read_finished);
+            let column_names: Vec<String> =
+                source_desc.columns.iter().map(|c| c.name.clone()).collect();
+            let reader = Self::build_split_reader(source_desc, column_names, split, read_finished);
             stream.replace_data_stream(reader.boxed());
         } else {
             stream.replace_data_stream(stream::pending().boxed());
@@ -238,6 +240,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn build_split_reader(
         source_desc: SourceDesc,
+        column_names: Vec<String>,
         split: AdbcSnowflakeSplit,
         read_finished: Arc<RwLock<bool>>,
     ) {
@@ -247,7 +250,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
             _ => unreachable!(),
         };
 
-        let chunks = Self::read_split(properties, split)?;
+        let chunks = Self::read_split(properties, column_names, split)?;
         for chunk in chunks {
             yield chunk;
         }
@@ -258,17 +261,26 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
     /// Read data from a single split
     fn read_split(
         properties: Box<AdbcSnowflakeProperties>,
+        column_names: Vec<String>,
         split: AdbcSnowflakeSplit,
     ) -> StreamExecutorResult<Vec<StreamChunk>> {
-        // Override the query with the split's query (which includes WHERE clause)
-        let query = split.get_query();
-
-        // If snapshot timestamp is available, append AT clause
-        let final_query = if let Some(ref ts) = split.snapshot_timestamp {
-            format!("{} AT(TIMESTAMP => '{}')", query, ts)
+        let table_expr = if let Some(ref ts) = split.snapshot_timestamp {
+            format!("{} AT(TIMESTAMP => '{}')", split.table_ref, ts)
         } else {
-            query
+            split.table_ref.clone()
         };
+
+        let select_list = column_names
+            .iter()
+            .map(|c| format!(r#""{}""#, c))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        // Build query with table_expr and optional WHERE
+        let mut final_query = format!("SELECT {select_list} FROM {}", table_expr);
+        if let Some(ref where_clause) = split.where_clause {
+            final_query = format!("{final_query} WHERE {where_clause}");
+        }
 
         tracing::debug!(
             split_id = %split.split_id,

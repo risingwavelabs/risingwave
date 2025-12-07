@@ -32,37 +32,11 @@ impl AdbcSnowflakeProperties {
         let database = self.create_database()?;
         let connection = self.create_connection(&database)?;
 
-        // Parse table name from query to call get_table_schema
-        let table_name = self.extract_table_name_from_query()?;
-
         // Use ADBC's get_table_schema API to get the schema
         let schema = connection
-            .get_table_schema(Some(&self.database), Some(&self.schema), &table_name)
+            .get_table_schema(Some(&self.database), Some(&self.schema), &self.table)
             .map_err(|e| anyhow!("Failed to get table schema: {}", e))?;
 
         Ok(schema)
-    }
-
-    /// Extract table name from the query.
-    /// Simplified parser for SELECT queries.
-    fn extract_table_name_from_query(&self) -> ConnectorResult<String> {
-        let query_lower = self.query.to_lowercase();
-        let from_idx = query_lower
-            .find(" from ")
-            .ok_or_else(|| anyhow!("Could not find FROM clause in query"))?;
-
-        let after_from = &self.query[from_idx + 6..].trim();
-
-        // Find the table name (stop at whitespace, semicolon, or end of string)
-        let table_part = after_from
-            .split_whitespace()
-            .next()
-            .ok_or_else(|| anyhow!("Could not extract table name from query"))?
-            .trim_end_matches(';');
-
-        // If schema.table format, take just the table name
-        let table_name = table_part.split('.').next_back().unwrap_or(table_part);
-
-        Ok(table_name.to_uppercase())
     }
 }

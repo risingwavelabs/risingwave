@@ -37,8 +37,10 @@ use crate::task::LocalBarrierManager;
 pub struct AdbcSnowflakeSplit {
     /// Unique identifier for this split
     pub split_id: String,
-    /// The base query (without WHERE clause)
-    pub base_query: String,
+    /// Fully qualified table reference
+    pub table_ref: String,
+    /// Column names in order
+    pub column_names: Vec<String>,
     /// The WHERE clause for this split (e.g., "pk >= 0 AND pk < 1000")
     pub where_clause: Option<String>,
     /// Snapshot timestamp to ensure consistent reads across all fetch executors
@@ -54,15 +56,6 @@ impl AdbcSnowflakeSplit {
         let split: Self = serde_json::from_value(jsonb_val.take())
             .context("failed to decode AdbcSnowflakeSplit")?;
         Ok(split)
-    }
-
-    /// Get the full query with WHERE clause applied
-    pub fn get_query(&self) -> String {
-        if let Some(ref where_clause) = self.where_clause {
-            format!("{} WHERE {}", self.base_query, where_clause)
-        } else {
-            self.base_query.clone()
-        }
     }
 }
 
@@ -117,6 +110,11 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         // Build source description from the builder.
         let source_desc_builder: SourceDescBuilder =
             self.stream_source_core.source_desc_builder.take().unwrap();
+        let column_names: Vec<String> = source_desc_builder
+            .column_catalogs_to_source_column_descs()
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
 
         let properties = source_desc_builder.with_properties();
         let config = ConnectorProperties::extract(properties, false)?;
@@ -167,6 +165,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
                                         // Generate splits for snowflake table
                                         let split_stream = Self::generate_splits(
                                             *snowflake_properties.clone(),
+                                            column_names.clone(),
                                             is_list_finished.clone(),
                                         )
                                         .boxed();
@@ -219,6 +218,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
     #[try_stream(ok = AdbcSnowflakeSplit, error = StreamExecutorError)]
     async fn generate_splits(
         snowflake_properties: AdbcSnowflakeProperties,
+        column_names: Vec<String>,
         is_list_finished: Arc<RwLock<bool>>,
     ) {
         // Create a single connection for all metadata queries
@@ -234,8 +234,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             "obtained snapshot timestamp for batch adbc snowflake"
         );
 
-        // Parse the base query to extract table information and generate splits
-        let base_query = snowflake_properties.query.clone();
+        let table_ref = snowflake_properties.table_ref();
 
         // Try to get primary key information and row count from the table
         let (pk_columns, estimated_row_count) =
@@ -247,7 +246,8 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             tracing::info!("no primary key found, using single split");
             yield AdbcSnowflakeSplit {
                 split_id: "0".to_owned(),
-                base_query: base_query.clone(),
+                table_ref: table_ref.clone(),
+                column_names: column_names.clone(),
                 where_clause: None,
                 snapshot_timestamp: snapshot_timestamp.clone(),
             };
@@ -285,7 +285,8 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
 
                 yield AdbcSnowflakeSplit {
                     split_id,
-                    base_query: base_query.clone(),
+                    table_ref: table_ref.clone(),
+                    column_names: column_names.clone(),
                     where_clause: Some(where_clause),
                     snapshot_timestamp: snapshot_timestamp.clone(),
                 };
@@ -328,9 +329,6 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
     ) -> StreamExecutorResult<(Vec<String>, i64)> {
         use risingwave_common::array::arrow::arrow_array_55;
 
-        // Parse table name from the query (simplified - assumes SELECT * FROM table_name)
-        let table_name = Self::extract_table_name(&properties.query)?;
-
         // Get primary key information
         let pk_query = format!(
             "SELECT COLUMN_NAME FROM {}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc \
@@ -340,7 +338,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
              AND tc.TABLE_SCHEMA = '{}' \
              AND tc.TABLE_NAME = '{}' \
              ORDER BY kcu.ORDINAL_POSITION",
-            properties.database, properties.database, properties.schema, table_name
+            properties.database, properties.database, properties.schema, properties.table
         );
 
         let mut pk_columns = Vec::new();
@@ -364,7 +362,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         let count_query = format!(
             "SELECT ROW_COUNT FROM {}.INFORMATION_SCHEMA.TABLES \
              WHERE TABLE_SCHEMA = '{}' AND TABLE_NAME = '{}'",
-            properties.database, properties.schema, table_name
+            properties.database, properties.schema, properties.table
         );
 
         let count_batches = properties.execute_query_with_connection(connection, &count_query)?;
@@ -383,29 +381,6 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         Ok((pk_columns, estimated_count))
     }
 
-    /// Extract table name from a simple SELECT query
-    fn extract_table_name(query: &str) -> StreamExecutorResult<String> {
-        // Simplified parser - expects format like "SELECT ... FROM table_name" or "SELECT ... FROM schema.table_name"
-        let query_lower = query.to_lowercase();
-        let from_idx = query_lower
-            .find(" from ")
-            .ok_or_else(|| anyhow!("Could not find FROM clause in query"))?;
-
-        let after_from = &query[from_idx + 6..].trim();
-
-        // Find the table name (stop at whitespace, semicolon, or end of string)
-        let table_part = after_from
-            .split_whitespace()
-            .next()
-            .ok_or_else(|| anyhow!("Could not extract table name from query"))?
-            .trim_end_matches(';');
-
-        // If schema.table format, take just the table name
-        let table_name = table_part.split('.').next_back().unwrap_or(table_part);
-
-        Ok(table_name.to_uppercase())
-    }
-
     /// Get the min and max values of the primary key column
     fn get_pk_range(
         properties: &AdbcSnowflakeProperties,
@@ -416,14 +391,15 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         use risingwave_common::array::arrow::arrow_array_55;
 
         // Build query with snapshot if available
-        let mut range_query = format!(
-            "SELECT MIN({})::STRING, MAX({})::STRING FROM ({})",
-            pk_column, pk_column, properties.query
+        let table_expr = if let Some(ts) = snapshot_timestamp {
+            format!("{} AT(TIMESTAMP => '{}')", properties.table_ref(), ts)
+        } else {
+            properties.table_ref()
+        };
+        let range_query = format!(
+            "SELECT MIN({})::STRING, MAX({})::STRING FROM {}",
+            pk_column, pk_column, table_expr
         );
-
-        if let Some(ts) = snapshot_timestamp {
-            range_query = format!("{} AT(TIMESTAMP => '{}')", range_query, ts);
-        }
 
         let batches = properties.execute_query_with_connection(connection, &range_query)?;
 
