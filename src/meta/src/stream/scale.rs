@@ -1034,7 +1034,7 @@ impl GlobalStreamManager {
                                     tracing::info!(worker = %worker.id, "worker parallelism changed");
                                     should_trigger = true;
                                 }
-                                Some(prev_worker) if  prev_worker.resource_group() != worker.resource_group()  => {
+                                Some(prev_worker) if prev_worker.resource_group() != worker.resource_group()  => {
                                     tracing::info!(worker = %worker.id, "worker label changed");
                                     should_trigger = true;
                                 }
@@ -1107,7 +1107,7 @@ impl GlobalStreamManager {
             .await?;
 
         if current == target {
-            tracing::info!(
+            tracing::debug!(
                 job_id = %job_id,
                 ?current,
                 ?target,
@@ -1118,7 +1118,7 @@ impl GlobalStreamManager {
 
         match backfill_parallelism {
             Some(backfill_parallelism) if backfill_parallelism == target => {
-                tracing::info!(
+                tracing::debug!(
                     job_id = %job_id,
                     ?backfill_parallelism,
                     ?target,
@@ -1130,7 +1130,7 @@ impl GlobalStreamManager {
                 // proceed to restore to target parallelism
             }
             None => {
-                tracing::info!(
+                tracing::debug!(
                     job_id = %job_id,
                     ?target,
                     "no backfill parallelism configured, skip post-backfill reschedule"
