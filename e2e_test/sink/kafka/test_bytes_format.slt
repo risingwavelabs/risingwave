@@ -35,10 +35,10 @@ create sink sink_bytes_format_error from t_multi_columns with (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-    1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
-    2: failed to validate sink
-    3: config error
-    4: ENCODE BYTES requires exactly one column, got 2 columns
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
+  2: failed to validate sink
+  3: config error
+  4: ENCODE BYTES requires exactly one column, got 2 columns
 
 
 # Test that bytes format fails with non-bytea column
