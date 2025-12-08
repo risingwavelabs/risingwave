@@ -303,6 +303,7 @@ impl SstableStore {
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             recent_filter: Arc::new(NoneRecentFilter::default().into()),
             use_new_object_prefix_strategy,
+            skip_bloom_filter_in_serde: false,
 
             meta_cache,
             block_cache,
