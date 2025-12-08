@@ -736,10 +736,11 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
                 drop = true;
             }
 
-            if !drop && self.watermark_should_delete(&iter.key()) {
-                drop = true;
-                self.last_key_is_delete = true;
-            }
+            // TODO: resume
+            // if !drop && self.watermark_should_delete(&iter.key()) {
+            //     drop = true;
+            //     self.last_key_is_delete = true;
+            // }
 
             if self.last_table_id != Some(self.last_key.user_key.table_id) {
                 if let Some(last_table_id) = self.last_table_id.take() {
@@ -782,9 +783,10 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             return false;
         }
 
-        if self.watermark_should_delete(smallest_key) {
-            return false;
-        }
+        // TODO: resume
+        // if self.watermark_should_delete(smallest_key) {
+        //     return false;
+        // }
 
         // Check compaction filter
         if self.compaction_filter.should_delete(*smallest_key) {
@@ -794,9 +796,10 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         true
     }
 
-    fn watermark_should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
-        (self.skip_watermark_state.has_watermark() && self.skip_watermark_state.should_delete(key))
-            || (self.non_pk_prefix_skip_watermark_state.has_watermark()
-                && self.non_pk_prefix_skip_watermark_state.should_delete(key))
-    }
+    // TODO: resume
+    // fn watermark_should_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
+    //     (self.skip_watermark_state.has_watermark() && self.skip_watermark_state.should_delete(key))
+    //         || (self.non_pk_prefix_skip_watermark_state.has_watermark()
+    //             && self.non_pk_prefix_skip_watermark_state.should_delete(key))
+    // }
 }

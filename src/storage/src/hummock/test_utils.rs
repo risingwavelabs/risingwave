@@ -267,6 +267,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
             .into_iter()
             .map(|(table_id, v)| (table_id.into(), v))
             .collect(),
+        HashMap::default(),
     ));
 
     let mut b = SstableBuilder::<_, F>::new(

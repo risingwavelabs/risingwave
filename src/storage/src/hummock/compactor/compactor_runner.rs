@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, add_table_stats_map};
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{
     HummockSstableObjectId, KeyComparator, can_concat, compact_task_output_to_string,
     full_key_can_concat,
@@ -54,9 +55,7 @@ use crate::hummock::compactor::{
     fast_compactor_runner,
 };
 use crate::hummock::iterator::{
-    Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
-    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
-    ValueMeta,
+    Forward, HummockIterator, MergeIterator, SkipWatermarkIterV2, SkipWatermarkStateV2, ValueMeta,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -242,27 +241,20 @@ impl CompactorRunner {
             }
         }
 
-        // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
-        // in https://github.com/risingwavelabs/risingwave/issues/13148
-        let combine_iter = {
-            let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
-                MonitoredCompactorIterator::new(
-                    MergeIterator::for_compactor(table_iters),
-                    task_progress,
-                ),
-                PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
-                    self.compact_task.pk_prefix_table_watermarks.clone(),
-                ),
-            );
-
-            NonPkPrefixSkipWatermarkIterator::new(
-                skip_watermark_iter,
-                NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
-                    self.compact_task.non_pk_prefix_table_watermarks.clone(),
-                    compaction_catalog_agent_ref,
-                ),
-            )
-        };
+        // // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // // in https://github.com/risingwavelabs/risingwave/issues/13148
+        // TODO: get this table_watermarks from compaction task
+        let table_watermarks: BTreeMap<TableId, TableWatermarks> = BTreeMap::default();
+        let combine_iter = SkipWatermarkIterV2::new(
+            MonitoredCompactorIterator::new(
+                MergeIterator::for_compactor(table_iters),
+                task_progress,
+            ),
+            SkipWatermarkStateV2::from_safe_epoch_watermarks(
+                table_watermarks,
+                compaction_catalog_agent_ref,
+            ),
+        );
 
         Ok(combine_iter)
     }

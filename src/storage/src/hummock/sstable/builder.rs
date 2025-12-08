@@ -152,6 +152,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
                 .into_iter()
                 .map(|(table_id, v)| (table_id.into(), v))
                 .collect(),
+            HashMap::default(),
         ));
 
         Self::new(
