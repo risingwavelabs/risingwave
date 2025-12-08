@@ -49,7 +49,7 @@ statement ok
 REVOKE SELECT ON TABLE t FROM user1;
 
 # check privilege for user1
-query I
+query III
 SELECT has_table_privilege('user1', 't', 'SELECT'),
     has_table_privilege('user1', '__iceberg_source_t', 'SELECT'),
     has_table_privilege('user1', '__iceberg_sink_t', 'SELECT');
@@ -65,7 +65,7 @@ create table t2(id int primary key, name varchar) APPEND ONLY
 with(commit_checkpoint_interval = 1) engine = iceberg;
 
 # check privilege for user1
-query I
+query III
 SELECT has_table_privilege('user1', 't2', 'SELECT'),
     has_table_privilege('user1', '__iceberg_source_t2', 'SELECT'),
     has_table_privilege('user1', '__iceberg_sink_t2', 'SELECT');
