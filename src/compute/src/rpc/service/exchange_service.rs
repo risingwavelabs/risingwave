@@ -219,11 +219,10 @@ impl ExchangeServiceImpl {
                         down_actor_id,
                         permits,
                     }) => {
-                        let to_add = permits.unwrap().value.unwrap();
-
-                        if let Some(permits) = all_permits
-                            .get(&(up_actor_id, down_actor_id))
-                            .and_then(|p| p.upgrade())
+                        if let Some(to_add) = permits.unwrap().value
+                            && let Some(permits) = all_permits
+                                .get(&(up_actor_id, down_actor_id))
+                                .and_then(|p| p.upgrade())
                         {
                             permits.add_permits(to_add);
                         }
