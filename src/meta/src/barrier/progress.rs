@@ -325,6 +325,10 @@ impl TrackingJob {
         }
     }
 
+    pub(crate) fn job_id(&self) -> JobId {
+        self.job_id
+    }
+
     /// Notify the metadata manager that the job is finished.
     pub(crate) async fn finish(
         self,

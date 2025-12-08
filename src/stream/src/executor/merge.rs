@@ -27,9 +27,12 @@ use crate::task::LocalBarrierManager;
 
 pub type SelectReceivers = DynamicReceivers<ActorId, ()>;
 
+pub type MergeUpstream = BufferChunks<SelectReceivers>;
+pub type SingletonUpstream = BoxedActorInput;
+
 pub(crate) enum MergeExecutorUpstream {
-    Singleton(BoxedActorInput),
-    Merge(SelectReceivers),
+    Singleton(SingletonUpstream),
+    Merge(MergeUpstream),
 }
 
 pub(crate) struct MergeExecutorInput {
@@ -39,7 +42,6 @@ pub(crate) struct MergeExecutorInput {
     local_barrier_manager: LocalBarrierManager,
     executor_stats: Arc<StreamingMetrics>,
     pub(crate) info: ExecutorInfo,
-    chunk_size: usize,
 }
 
 impl MergeExecutorInput {
@@ -50,7 +52,6 @@ impl MergeExecutorInput {
         local_barrier_manager: LocalBarrierManager,
         executor_stats: Arc<StreamingMetrics>,
         info: ExecutorInfo,
-        chunk_size: usize,
     ) -> Self {
         Self {
             upstream,
@@ -59,7 +60,6 @@ impl MergeExecutorInput {
             local_barrier_manager,
             executor_stats,
             info,
-            chunk_size,
         }
     }
 
@@ -84,8 +84,6 @@ impl MergeExecutorInput {
                 self.local_barrier_manager,
                 self.executor_stats,
                 barrier_rx,
-                self.chunk_size,
-                self.info.schema.clone(),
             )
             .boxed(),
         };
@@ -104,14 +102,71 @@ impl Stream for MergeExecutorInput {
     }
 }
 
-/// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
-/// will be stopped on barrier.
-pub struct MergeExecutor {
+mod upstream {
+    use super::*;
+
+    /// Trait unifying operations on [`MergeUpstream`] and [`SingletonUpstream`], so that we can
+    /// reuse code between [`MergeExecutor`] and [`ReceiverExecutor`].
+    pub trait Upstream:
+        Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin + Send + 'static
+    {
+        fn upstream_input_ids(&self) -> impl Iterator<Item = ActorId> + '_;
+        fn flush_buffered_watermarks(&mut self);
+        fn update(&mut self, to_add: Vec<BoxedActorInput>, to_remove: &HashSet<ActorId>);
+    }
+
+    impl Upstream for MergeUpstream {
+        fn upstream_input_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
+            self.inner.upstream_input_ids()
+        }
+
+        fn flush_buffered_watermarks(&mut self) {
+            self.inner.flush_buffered_watermarks();
+        }
+
+        fn update(&mut self, to_add: Vec<BoxedActorInput>, to_remove: &HashSet<ActorId>) {
+            if !to_add.is_empty() {
+                self.inner.add_upstreams_from(to_add);
+            }
+            if !to_remove.is_empty() {
+                self.inner.remove_upstreams(to_remove);
+            }
+        }
+    }
+
+    impl Upstream for SingletonUpstream {
+        fn upstream_input_ids(&self) -> impl Iterator<Item = ActorId> + '_ {
+            std::iter::once(self.id())
+        }
+
+        fn flush_buffered_watermarks(&mut self) {
+            // For single input, we won't buffer watermarks so there's nothing to do.
+        }
+
+        fn update(&mut self, to_add: Vec<BoxedActorInput>, to_remove: &HashSet<ActorId>) {
+            assert_eq!(
+                to_remove,
+                &HashSet::from_iter([self.id()]),
+                "the removed upstream actor should be the same as the current input"
+            );
+
+            // Replace the single input.
+            *self = to_add
+                .into_iter()
+                .exactly_one()
+                .expect("receiver should have exactly one new upstream");
+        }
+    }
+}
+use upstream::Upstream;
+
+/// The core of `MergeExecutor` and `ReceiverExecutor`.
+pub struct MergeExecutorInner<U> {
     /// The context of the actor.
     actor_context: ActorContextRef,
 
     /// Upstream channels.
-    upstreams: SelectReceivers,
+    upstream: U,
 
     /// Belonged fragment id.
     fragment_id: FragmentId,
@@ -125,40 +180,34 @@ pub struct MergeExecutor {
     metrics: Arc<StreamingMetrics>,
 
     barrier_rx: mpsc::UnboundedReceiver<Barrier>,
-
-    /// Chunk size for the `StreamChunkBuilder`
-    chunk_size: usize,
-
-    /// Data types for the `StreamChunkBuilder`
-    schema: Schema,
 }
 
-impl MergeExecutor {
-    #[allow(clippy::too_many_arguments)]
+impl<U> MergeExecutorInner<U> {
     pub fn new(
         ctx: ActorContextRef,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
-        upstreams: SelectReceivers,
+        upstream: U,
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         barrier_rx: mpsc::UnboundedReceiver<Barrier>,
-        chunk_size: usize,
-        schema: Schema,
     ) -> Self {
         Self {
             actor_context: ctx,
-            upstreams,
+            upstream,
             fragment_id,
             upstream_fragment_id,
             local_barrier_manager,
             metrics,
             barrier_rx,
-            chunk_size,
-            schema,
         }
     }
+}
 
+/// `MergeExecutor` merges data from multiple upstream actors and aligns them with barriers.
+pub type MergeExecutor = MergeExecutorInner<MergeUpstream>;
+
+impl MergeExecutor {
     #[cfg(test)]
     pub fn for_test(
         actor_id: impl Into<ActorId>,
@@ -177,7 +226,7 @@ impl MergeExecutor {
 
         let metrics = StreamingMetrics::unused();
         let actor_ctx = ActorContext::for_test(actor_id);
-        let upstream = Self::new_select_receiver(
+        let upstream = Self::new_merge_upstream(
             inputs
                 .into_iter()
                 .enumerate()
@@ -185,6 +234,8 @@ impl MergeExecutor {
                 .collect(),
             &metrics,
             &actor_ctx,
+            chunk_size,
+            schema,
         );
 
         Self::new(
@@ -195,16 +246,16 @@ impl MergeExecutor {
             local_barrier_manager,
             metrics.into(),
             barrier_rx,
-            chunk_size,
-            schema,
         )
     }
 
-    pub(crate) fn new_select_receiver(
+    pub(crate) fn new_merge_upstream(
         upstreams: Vec<BoxedActorInput>,
         metrics: &StreamingMetrics,
         actor_context: &ActorContext,
-    ) -> SelectReceivers {
+        chunk_size: usize,
+        schema: Schema,
+    ) -> MergeUpstream {
         let merge_barrier_align_duration = if metrics.level >= MetricLevel::Debug {
             Some(
                 metrics
@@ -218,14 +269,22 @@ impl MergeExecutor {
             None
         };
 
-        // Futures of all active upstreams.
-        SelectReceivers::new(upstreams, None, merge_barrier_align_duration)
+        BufferChunks::new(
+            // Futures of all active upstreams.
+            SelectReceivers::new(upstreams, None, merge_barrier_align_duration),
+            chunk_size,
+            schema,
+        )
     }
+}
 
+impl<U> MergeExecutorInner<U>
+where
+    U: Upstream,
+{
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub(crate) async fn execute_inner(mut self: Box<Self>) {
-        let select_all = self.upstreams;
-        let select_all = BufferChunks::new(select_all, self.chunk_size, self.schema);
+        let mut upstream = self.upstream;
         let actor_id = self.actor_context.id;
 
         let mut metrics = self.metrics.new_actor_input_metrics(
@@ -233,9 +292,6 @@ impl MergeExecutor {
             self.fragment_id,
             self.upstream_fragment_id,
         );
-
-        // Channels that're blocked by the barrier to align.
-        pin_mut!(select_all);
 
         let mut barrier_buffer = DispatchBarrierBuffer::new(
             self.barrier_rx,
@@ -248,7 +304,7 @@ impl MergeExecutor {
 
         loop {
             let msg = barrier_buffer
-                .await_next_message(&mut select_all, &metrics)
+                .await_next_message(&mut upstream, &metrics)
                 .await?;
             let msg = match msg {
                 DispatcherMessage::Watermark(watermark) => Message::Watermark(watermark),
@@ -262,12 +318,12 @@ impl MergeExecutor {
 
                     if let Some(Mutation::Update(UpdateMutation { dispatchers, .. })) =
                         barrier.mutation.as_deref()
-                        && select_all
+                        && upstream
                             .upstream_input_ids()
                             .any(|actor_id| dispatchers.contains_key(&actor_id))
                     {
                         // `Watermark` of upstream may become stale after downstream scaling.
-                        select_all.flush_buffered_watermarks();
+                        upstream.flush_buffered_watermarks();
                     }
 
                     if let Some(update) =
@@ -278,23 +334,16 @@ impl MergeExecutor {
                             .unwrap_or(self.upstream_fragment_id);
                         let removed_upstream_actor_id: HashSet<_> =
                             if update.new_upstream_fragment_id.is_some() {
-                                select_all.upstream_input_ids().collect()
+                                upstream.upstream_input_ids().collect()
                             } else {
                                 update.removed_upstream_actor_id.iter().copied().collect()
                             };
 
                         // `Watermark` of upstream may become stale after upstream scaling.
-                        select_all.flush_buffered_watermarks();
+                        upstream.flush_buffered_watermarks();
 
-                        if let Some(new_upstreams) = new_inputs {
-                            // Add the new upstreams to select.
-                            select_all.add_upstreams_from(new_upstreams);
-                        }
-
-                        if !removed_upstream_actor_id.is_empty() {
-                            // Remove upstreams.
-                            select_all.remove_upstreams(&removed_upstream_actor_id);
-                        }
+                        // Add and remove upstreams.
+                        upstream.update(new_inputs.unwrap_or_default(), &removed_upstream_actor_id);
 
                         self.upstream_fragment_id = new_upstream_fragment_id;
                         metrics = self.metrics.new_actor_input_metrics(
@@ -320,7 +369,10 @@ impl MergeExecutor {
     }
 }
 
-impl Execute for MergeExecutor {
+impl<U> Execute for MergeExecutorInner<U>
+where
+    U: Upstream,
+{
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -329,7 +381,7 @@ impl Execute for MergeExecutor {
 /// A wrapper that buffers the `StreamChunk`s from upstream until no more ready items are available.
 /// Besides, any message other than `StreamChunk` will trigger the buffered `StreamChunk`s
 /// to be emitted immediately along with the message itself.
-struct BufferChunks<S: Stream> {
+pub struct BufferChunks<S: Stream> {
     inner: S,
     chunk_builder: StreamChunkBuilder,
 
@@ -704,7 +756,13 @@ mod tests {
             .local_barrier_manager
             .subscribe_barrier(actor_id);
         let actor_ctx = ActorContext::for_test(actor_id);
-        let upstream = MergeExecutor::new_select_receiver(inputs, &metrics, &actor_ctx);
+        let upstream = MergeExecutor::new_merge_upstream(
+            inputs,
+            &metrics,
+            &actor_ctx,
+            100,
+            Schema::empty().clone(),
+        );
 
         let mut merge = MergeExecutor::new(
             actor_ctx,
@@ -714,8 +772,6 @@ mod tests {
             barrier_test_env.local_barrier_manager.clone(),
             metrics.clone(),
             barrier_rx,
-            100,
-            Schema::new(vec![]),
         )
         .boxed()
         .execute();
