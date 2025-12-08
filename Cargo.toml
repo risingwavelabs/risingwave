@@ -156,7 +156,7 @@ criterion = { version = "0.7", features = ["async_futures"] }
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 # TODO(MrCroxx): Switch to a release version.
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "66056d08a50cce0ba92b815dee1b82be0dab26ef", features = ["serde", "tracing", "nightly"] }
+foyer = { git = "https://github.com/foyer-rs/foyer", rev = "061ac7c66b5bb130eee8879b1f85578bd5ac1df8", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.16", features = [
@@ -282,7 +282,7 @@ sqlx = { version = "0.8.2", default-features = false, features = [
     "uuid",
 ] }
 thiserror = { git = "https://github.com/BugenZhao/thiserror.git", tag = "bz-provide-3" }
-thiserror-ext = { version = "0.3", features = ["backtrace"] }
+thiserror-ext = { version = "0.3.1-alpha.2", features = ["provide"] }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",

@@ -28,6 +28,7 @@ pub struct Model {
     pub is_unschedulable: bool,
     pub internal_rpc_host_addr: Option<String>,
     pub resource_group: Option<String>,
+    pub is_iceberg_compactor: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

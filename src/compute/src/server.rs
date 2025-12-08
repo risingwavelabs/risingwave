@@ -130,6 +130,7 @@ pub async fn compute_node_serve(
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_owned(),
             resource_group: Some(opts.resource_group.clone()),
+            is_iceberg_compactor: false,
         },
         Arc::new(config.meta.clone()),
     )
