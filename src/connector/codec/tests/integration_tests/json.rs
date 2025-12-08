@@ -106,105 +106,105 @@ async fn test_json_schema_parse() {
     expect![[r#"
         {
           "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
           "definitions": {
-            "marketArray": {
-              "additionalProperties": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "type": "object"
+            "stringType": {
+              "type": "string"
             },
             "marketObj": {
+              "type": "object",
               "additionalProperties": {
                 "type": "string"
-              },
-              "type": "object"
+              }
+            },
+            "marketArray": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
             },
             "recurrentType": {
+              "type": "object",
               "properties": {
                 "id": {
                   "type": "string"
                 },
                 "next": {
+                  "type": "object",
                   "properties": {
                     "id": {
                       "type": "string"
                     },
                     "next": {}
-                  },
-                  "type": "object"
+                  }
                 }
-              },
-              "type": "object"
-            },
-            "stringType": {
-              "type": "string"
+              }
             }
           },
           "properties": {
-            "cats": {
-              "additionalProperties": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "type": "object"
-            },
             "id": {
               "type": "string"
             },
-            "meta": {
-              "properties": {
-                "active": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                },
-                "tags": {
-                  "additionalProperties": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "type": "object"
-                }
-              },
-              "type": "object"
-            },
             "name": {
+              "type": "object",
               "additionalProperties": {
                 "type": "string"
-              },
-              "type": "object"
+              }
+            },
+            "cats": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "active": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "tags": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
             },
             "recurrent": {
+              "type": "object",
               "properties": {
                 "id": {
                   "type": "string"
                 },
                 "next": {
+                  "type": "object",
                   "properties": {
                     "id": {
                       "type": "string"
                     },
                     "next": {}
-                  },
-                  "type": "object"
+                  }
                 }
-              },
-              "type": "object"
+              }
             }
           },
           "required": [
             "id",
             "name"
-          ],
-          "type": "object"
+          ]
         }"#]]
     .assert_eq(&serde_json::to_string_pretty(&json_schema.0).unwrap());
 
