@@ -122,15 +122,8 @@ mod local_input {
     async fn run_inner(mut channel: Receiver, upstream_actor_id: ActorId) {
         let span = await_tree::span!("LocalInput (actor {upstream_actor_id})").verbose();
         while let Some(msg) = channel.recv().instrument_await(span.clone()).await {
-            match msg.into_messages() {
-                Either::Left(barriers) => {
-                    for b in barriers {
-                        yield b;
-                    }
-                }
-                Either::Right(m) => {
-                    yield m;
-                }
+            for msg in msg.into_messages() {
+                yield msg;
             }
         }
         // Always emit an error outside the loop. This is because we use barrier as the control
@@ -171,13 +164,13 @@ use risingwave_pb::common::ActorInfo;
 
 struct RegisterReq {
     get: get_new_stream_request::Get,
-    msg_tx: mpsc::UnboundedSender<DispatcherMessage>,
+    msg_tx: mpsc::UnboundedSender<StreamExecutorResult<DispatcherMessage>>,
 }
 
 #[derive(Clone)]
 struct Worker {
     register_tx: mpsc::UnboundedSender<RegisterReq>,
-    join_handle: Arc<JoinHandle<Result<(), StreamExecutorError>>>,
+    join_handle: Arc<JoinHandle<StreamExecutorResult<()>>>,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -249,22 +242,20 @@ impl Worker {
                                 })
                                 .unwrap();
 
-                            let msg = msg_res.context("RemoteInput decode message error")?;
-
-                            let send_result: Option<()> = try {
-                                match msg.into_messages() {
-                                    Either::Left(barriers) => {
-                                        for b in barriers {
-                                            msg_tx.send(b).ok()?;
+                            let send_result: Result<(), ()> = try {
+                                match msg_res {
+                                    Ok(msg) => {
+                                        for msg in msg.into_messages() {
+                                            msg_tx.send(Ok(msg)).map_err(|_| ())?;
                                         }
                                     }
-                                    Either::Right(m) => {
-                                        msg_tx.send(m).ok()?;
+                                    Err(e) => {
+                                        msg_tx.send(Err(e)).map_err(|_| ())?;
                                     }
                                 }
                             };
 
-                            if send_result.is_none() {
+                            if send_result.is_err() {
                                 msg_txs.remove(&actor_pair);
                             }
                         }
@@ -286,7 +277,7 @@ impl Worker {
 }
 
 struct Mux {
-    cache: moka::future::Cache<WorkerKey, Worker>,
+    cache: moka::future::Cache<WorkerKey, Result<Worker, Arc<RpcError>>>,
 }
 
 impl Mux {
@@ -301,20 +292,27 @@ impl Mux {
         init: get_new_stream_request::Init,
         upstream_addr: HostAddr,
         env: &StreamEnvironment,
-    ) -> Worker {
+    ) -> StreamExecutorResult<Worker> {
         self.cache
-            .try_get_with(
-                WorkerKey {
-                    upstream_addr: upstream_addr.clone(),
-                    init: init.clone(),
-                },
+            .entry(WorkerKey {
+                upstream_addr: upstream_addr.clone(),
+                init: init.clone(),
+            })
+            .or_insert_with_if(
                 async move {
                     let client = env.client_pool().get_by_addr(upstream_addr).await?;
-                    Worker::new(client, init).await
+                    let worker = Worker::new(client, init).await?;
+                    Ok(worker)
+                },
+                |w| match w {
+                    Ok(w) => w.join_handle.is_finished(),
+                    Err(_) => true,
                 },
             )
             .await
-            .expect("bad")
+            .into_value()
+            .context("failed to connect to upstream")
+            .map_err(Into::into)
     }
 }
 
@@ -341,7 +339,7 @@ impl RemoteInput {
 
         let worker = MUX
             .get(init, upstream_addr, &local_barrier_manager.env)
-            .await;
+            .await?;
 
         let (msg_tx, msg_rx) = mpsc::unbounded_channel();
         worker
@@ -353,12 +351,17 @@ impl RemoteInput {
                 },
                 msg_tx,
             })
-            .unwrap();
+            .ok()
+            .context("failed to connect to upstream")?;
 
         Ok(Self {
             actor_id,
             inner: tokio_stream::wrappers::UnboundedReceiverStream::new(msg_rx)
-                .map(Ok)
+                .chain(futures::stream::once(async {
+                    // Always emit an error outside the loop. This is because we use barrier as the control
+                    // message to stop the stream. Reaching here means the channel is closed unexpectedly.
+                    Err(ExchangeChannelClosed::remote_input(1919810.into(), None).into())
+                }))
                 .boxed(),
         })
 
@@ -488,15 +491,8 @@ mod remote_input {
                     }
 
                     let msg = msg_res.context("RemoteInput decode message error")?;
-                    match msg.into_messages() {
-                        Either::Left(barriers) => {
-                            for b in barriers {
-                                yield b;
-                            }
-                        }
-                        Either::Right(m) => {
-                            yield m;
-                        }
+                    for msg in msg.into_messages() {
+                        yield msg;
                     }
                 }
 
@@ -563,13 +559,17 @@ pub(crate) async fn new_input(
 }
 
 impl DispatcherMessageBatch {
-    fn into_messages(self) -> Either<impl Iterator<Item = DispatcherMessage>, DispatcherMessage> {
+    fn into_messages(self) -> impl ExactSizeIterator<Item = DispatcherMessage> {
         match self {
             DispatcherMessageBatch::BarrierBatch(barriers) => {
                 Either::Left(barriers.into_iter().map(DispatcherMessage::Barrier))
             }
-            DispatcherMessageBatch::Chunk(c) => Either::Right(DispatcherMessage::Chunk(c)),
-            DispatcherMessageBatch::Watermark(w) => Either::Right(DispatcherMessage::Watermark(w)),
+            DispatcherMessageBatch::Chunk(c) => {
+                Either::Right(std::iter::once(DispatcherMessage::Chunk(c)))
+            }
+            DispatcherMessageBatch::Watermark(w) => {
+                Either::Right(std::iter::once(DispatcherMessage::Watermark(w)))
+            }
         }
     }
 }

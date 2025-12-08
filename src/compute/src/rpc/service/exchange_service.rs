@@ -25,7 +25,7 @@ use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetNewStreamRequest, GetNewStreamResponse, GetStreamRequest,
-    GetStreamResponse, PbPermits, get_new_stream_request, permits,
+    GetStreamResponse, PbPermits, permits,
 };
 use risingwave_stream::executor::DispatcherMessageBatch;
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
