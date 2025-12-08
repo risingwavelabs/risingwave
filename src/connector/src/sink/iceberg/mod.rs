@@ -65,6 +65,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::IcebergError;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -2031,16 +2032,16 @@ impl IcebergSinkCommitter {
                 ))
                 .add_data_files(data_files.clone());
 
-            let tx = append_action.apply(txn).map_err(|err: iceberg::Error| {
+            let tx = append_action.apply(txn).map_err(|err| {
+                let err: IcebergError = err.into();
                 tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
                 SinkError::Iceberg(anyhow!(err))
             })?;
-            tx.commit(self.catalog.as_ref())
-                .await
-                .map_err(|err: iceberg::Error| {
-                    tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-                    SinkError::Iceberg(anyhow!(err))
-                })
+            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
+                let err: IcebergError = err.into();
+                tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+                SinkError::Iceberg(anyhow!(err))
+            })
         })
         .await?;
         self.table = table;

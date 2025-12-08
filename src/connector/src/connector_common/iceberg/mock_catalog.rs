@@ -246,6 +246,10 @@ impl CatalogV2 for MockCatalog {
         todo!()
     }
 
+    #[expect(
+        clippy::disallowed_types,
+        reason = "iceberg catalog trait requires returning iceberg::Error"
+    )]
     async fn register_table(
         &self,
         _table_ident: &TableIdent,

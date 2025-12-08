@@ -89,11 +89,12 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
 
-        let topic_partitions = self
-            .client
-            .lookup_partitioned_topic_number(&self.topic.to_string())
-            .await
-            .map_err(|e| anyhow!(e))?;
+        let topic_partitions = Box::pin(
+            self.client
+                .lookup_partitioned_topic_number(&self.topic.to_string()),
+        )
+        .await
+        .map_err(|e| anyhow!(e))?;
 
         let splits = if topic_partitions > 0 {
             // partitioned topic

@@ -286,7 +286,7 @@ fn create_wasm_runtime(binary: &[u8]) -> Result<Runtime> {
 
     use md5::Digest as _;
     let md5 = md5::Md5::digest(binary);
-    if let Some(runtime) = RUNTIMES.get(md5.as_slice()) {
+    if let Some(runtime) = RUNTIMES.get(md5.as_ref()) {
         return Ok(runtime);
     }
 

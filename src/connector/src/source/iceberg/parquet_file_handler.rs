@@ -70,7 +70,7 @@ impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
     ) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
         async move {
             let reader = ParquetMetaDataReader::new();
-            let size = self.meta.size as u64;
+            let size = self.meta.size;
             let meta = reader.load_and_finish(self, size).await?;
 
             Ok(Arc::new(meta))

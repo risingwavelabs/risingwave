@@ -33,6 +33,7 @@ use iceberg::io::{
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
 use risingwave_common::bail;
+use risingwave_common::error::IcebergError;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
@@ -682,7 +683,7 @@ impl IcebergCommon {
                 let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
                     .load("rest", iceberg_configs)
                     .await
-                    .map_err(|e: iceberg::Error| anyhow!(e))?;
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
                 Ok(Arc::new(catalog))
             }
             "glue_rust" => {
@@ -734,7 +735,7 @@ impl IcebergCommon {
                 let catalog = iceberg_catalog_glue::GlueCatalogBuilder::default()
                     .load("glue", iceberg_configs)
                     .await
-                    .map_err(|e: iceberg::Error| anyhow!(e))?;
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
                 Ok(Arc::new(catalog))
             }
             catalog_type

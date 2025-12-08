@@ -1060,7 +1060,7 @@ mod tests {
             predicate: None,
             deletes: vec![],
             sequence_number: 0,
-            equality_ids: vec![],
+            equality_ids: None,
             file_size_in_bytes: 0,
         }
     }
