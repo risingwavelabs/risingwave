@@ -292,8 +292,10 @@ impl ScalarUDFImpl for RwScalarFunction {
         let chunk = IcebergArrowConvert
             .chunk_from_record_batch(&record_batch)
             .map_err(boxed)?;
-        // TODO: better way to run async eval in sync context
-        let value = futures::executor::block_on(self.expr.eval_v2(&chunk)).map_err(boxed)?;
+        let value = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.expr.eval_v2(&chunk))
+        })
+        .map_err(boxed)?;
         let res = match value {
             ValueImpl::Array(array_impl) => {
                 let array = IcebergArrowConvert
