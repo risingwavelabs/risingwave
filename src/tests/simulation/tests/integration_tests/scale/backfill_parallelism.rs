@@ -20,6 +20,7 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE;
+use crate::utils::kill_cn_and_meta_and_wait_recover;
 
 async fn wait_parallelism(
     session: &mut risingwave_simulation::cluster::Session,
@@ -135,6 +136,43 @@ async fn test_backfill_parallelism_optional_and_adaptive() -> Result<()> {
     if res.trim() == "2" {
         bail!("default backfill parallelism should not force parallelism to 2");
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
+    let config = Configuration::for_background_ddl();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism=4;").await?;
+    session
+        .run("set streaming_parallelism_for_backfill=2;")
+        .await?;
+    session.run("set backfill_rate_limit=1;").await?;
+    session.run("set background_ddl=true;").await?;
+
+    session.run("create table t(v int);").await?;
+    session
+        .run("insert into t select * from generate_series(1, 100);")
+        .await?;
+    session
+        .run("create materialized view m as select * from t;")
+        .await?;
+
+    // Ensure backfill starts with the configured backfill parallelism.
+    wait_parallelism(&mut session, "m", "2").await?;
+
+    // Trigger recovery while backfill is in progress.
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
+
+    // After recovery, the job should continue using backfill parallelism.
+    wait_parallelism(&mut session, "m", "2").await?;
+
+    // Eventually backfill finishes and parallelism restores to the normal value.
+    wait_jobs_finished(&mut session).await?;
+    wait_parallelism(&mut session, "m", "4").await?;
 
     Ok(())
 }

@@ -29,8 +29,9 @@ use risingwave_meta_model::prelude::{
     Database, Fragment, FragmentRelation, FragmentSplits, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    DatabaseId, DispatcherType, FragmentId, SourceId, StreamingParallelism, WorkerId, database,
-    fragment, fragment_relation, fragment_splits, object, sink, source, streaming_job, table,
+    CreateType, DatabaseId, DispatcherType, FragmentId, JobStatus, SourceId, StreamingParallelism,
+    WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink, source,
+    streaming_job, table,
 };
 use risingwave_meta_model_migration::Condition;
 use sea_orm::{
@@ -408,32 +409,43 @@ pub(crate) fn render_actor_assignments(
     worker_map: &BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     loaded: &LoadedFragmentContext,
-) -> MetaResult<RenderedGraph> {
-    if loaded.is_empty() {
-        return Ok(RenderedGraph::empty());
-    }
+    ) -> MetaResult<RenderedGraph> {
+        if loaded.is_empty() {
+            return Ok(RenderedGraph::empty());
+        }
 
-    let render_context = RenderActorsContext {
-        fragment_source_ids: &loaded.fragment_source_ids,
-        fragment_splits: &loaded.fragment_splits,
-        streaming_job_databases: &loaded.streaming_job_databases,
-        database_map: &loaded.database_map,
-    };
+        let backfill_jobs: HashSet<JobId> = loaded
+            .job_map
+            .iter()
+            .filter(|(_, job)| {
+                job.create_type == CreateType::Background
+                    && job.job_status == JobStatus::Creating
+            })
+            .map(|(id, _)| *id)
+            .collect();
 
-    let fragments = render_actors(
-        actor_id_counter,
-        &loaded.ensembles,
-        &loaded.fragment_map,
-        &loaded.job_map,
-        worker_map,
-        adaptive_parallelism_strategy,
-        render_context,
-    )?;
+        let render_context = RenderActorsContext {
+            fragment_source_ids: &loaded.fragment_source_ids,
+            fragment_splits: &loaded.fragment_splits,
+            streaming_job_databases: &loaded.streaming_job_databases,
+            database_map: &loaded.database_map,
+            backfill_jobs: &backfill_jobs,
+        };
 
-    Ok(RenderedGraph {
-        fragments,
-        ensembles: loaded.ensembles.clone(),
-    })
+        let fragments = render_actors(
+            actor_id_counter,
+            &loaded.ensembles,
+            &loaded.fragment_map,
+            &loaded.job_map,
+            worker_map,
+            adaptive_parallelism_strategy,
+            render_context,
+        )?;
+
+        Ok(RenderedGraph {
+            fragments,
+            ensembles: loaded.ensembles.clone(),
+        })
 }
 
 async fn build_loaded_context<C>(
@@ -500,6 +512,7 @@ struct RenderActorsContext<'a> {
     fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
     streaming_job_databases: &'a HashMap<JobId, DatabaseId>,
     database_map: &'a HashMap<DatabaseId, database::Model>,
+    backfill_jobs: &'a HashSet<JobId>,
 }
 
 fn render_actors(
@@ -516,6 +529,7 @@ fn render_actors(
         fragment_splits: fragment_splits_map,
         streaming_job_databases,
         database_map,
+        backfill_jobs,
     } = context;
 
     let mut all_fragments: FragmentRenderMap = HashMap::new();
@@ -584,9 +598,17 @@ fn render_actors(
 
         let total_parallelism = available_workers.values().map(|w| w.get()).sum::<usize>();
 
+        let effective_job_parallelism = if backfill_jobs.contains(&job_id) {
+            job.backfill_parallelism
+                .as_ref()
+                .unwrap_or(&job.parallelism)
+        } else {
+            &job.parallelism
+        };
+
         let actual_parallelism = match entry_fragment_parallelism
             .as_ref()
-            .unwrap_or(&job.parallelism)
+            .unwrap_or(effective_job_parallelism)
         {
             StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
                 adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
@@ -1300,12 +1322,14 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
@@ -1406,12 +1430,14 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
@@ -1543,12 +1569,14 @@ mod tests {
             HashMap::from([(entry_fragment_id, vec![split_a.clone(), split_b.clone()])]);
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
