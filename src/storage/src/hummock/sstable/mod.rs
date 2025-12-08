@@ -135,6 +135,8 @@ pub struct Sstable {
     pub meta: SstableMeta,
     #[serde(skip)]
     pub filter_reader: XorFilterReader,
+    #[serde(skip)]
+    skip_bloom_filter_in_serde: bool,
 }
 
 impl Serialize for Sstable {
@@ -146,7 +148,9 @@ impl Serialize for Sstable {
             id: self.id,
             meta: self.meta.clone(),
         };
-        serde_sstable.meta.bloom_filter = self.filter_reader.encode_to_bytes();
+        if !self.skip_bloom_filter_in_serde {
+            serde_sstable.meta.bloom_filter = self.filter_reader.encode_to_bytes();
+        }
         serde_sstable.serialize(serializer)
     }
 }

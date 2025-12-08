@@ -197,6 +197,7 @@ pub struct SstableStoreConfig {
     pub recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub use_new_object_prefix_strategy: bool,
+    pub skip_bloom_filter_in_serde: bool,
 
     pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
     pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
@@ -230,6 +231,11 @@ pub struct SstableStore {
     /// For an old cluster, `use_new_object_prefix_strategy` is set to False.
     /// The final decision of whether to divide prefixes is based on this field and the specific object store type, this approach is implemented to ensure backward compatibility.
     use_new_object_prefix_strategy: bool,
+
+    /// sst serde happens when a sst meta is written to meta disk cache.
+    /// excluding bloom filter from serde can reduce the meta disk cache entry size
+    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    skip_bloom_filter_in_serde: bool,
 }
 
 impl SstableStore {
@@ -251,6 +257,7 @@ impl SstableStore {
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
             use_new_object_prefix_strategy: config.use_new_object_prefix_strategy,
+            skip_bloom_filter_in_serde: config.skip_bloom_filter_in_serde,
         }
     }
 
