@@ -1003,7 +1003,8 @@ where
     Ok(index_table_ids)
 }
 
-pub async fn get_iceberg_related_privilege_object_ids<C>(
+/// `get_iceberg_related_object_ids` returns the related object ids of the iceberg source, sink and internal tables.
+pub async fn get_iceberg_related_object_ids<C>(
     object_id: ObjectId,
     db: &C,
 ) -> MetaResult<Vec<ObjectId>>
@@ -1055,7 +1056,7 @@ where
         );
     } else {
         warn!(
-            "iceberg table {} missing sink {} when collecting privilege objects",
+            "iceberg table {} missing sink {}",
             table.name, iceberg_sink_name
         );
     }
@@ -1078,7 +1079,7 @@ where
         related_objects.push(source_id.as_object_id());
     } else {
         warn!(
-            "iceberg table {} missing source {} when collecting privilege objects",
+            "iceberg table {} missing source {}",
             table.name, iceberg_source_name
         );
     }
@@ -1278,7 +1279,7 @@ where
 
             // Additionally, grant SELECT privilege for iceberg related objects if the action is SELECT.
             let iceberg_privilege_object_ids =
-                get_iceberg_related_privilege_object_ids(object_id, db).await?;
+                get_iceberg_related_object_ids(object_id, db).await?;
             if !iceberg_privilege_object_ids.is_empty() {
                 for iceberg_object_id in &iceberg_privilege_object_ids {
                     UserPrivilege::insert(user_privilege::ActiveModel {

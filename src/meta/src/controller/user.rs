@@ -40,9 +40,8 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
     PartialUserPrivilege, check_user_name_duplicate, ensure_object_id,
     ensure_privileges_not_referred, ensure_user_id, extract_grant_obj_id,
-    get_iceberg_related_privilege_object_ids, get_index_state_tables_by_table_id,
-    get_internal_tables_by_id, get_object_owner, get_referring_privileges_cascade,
-    get_user_privilege, list_user_info_by_ids,
+    get_iceberg_related_object_ids, get_index_state_tables_by_table_id, get_internal_tables_by_id,
+    get_object_owner, get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
 };
 use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationVersion};
 use crate::{MetaError, MetaResult};
@@ -263,7 +262,7 @@ impl CatalogController {
                             }),
                     );
                     let iceberg_privilege_object_ids =
-                        get_iceberg_related_privilege_object_ids(id, &txn).await?;
+                        get_iceberg_related_object_ids(id, &txn).await?;
                     privileges.extend(iceberg_privilege_object_ids.iter().map(
                         |&iceberg_object_id| user_privilege::ActiveModel {
                             oid: Set(iceberg_object_id),
@@ -409,7 +408,7 @@ impl CatalogController {
                     action
                 })
                 .collect_vec();
-            revoke_items.insert(obj, actions.clone());
+            revoke_items.insert(obj, actions);
             if include_select {
                 revoke_items.extend(
                     internal_table_ids
@@ -418,7 +417,7 @@ impl CatalogController {
                         .map(|&tid| (tid.as_object_id(), vec![Action::Select])),
                 );
                 let iceberg_privilege_object_ids =
-                    get_iceberg_related_privilege_object_ids(obj, &txn).await?;
+                    get_iceberg_related_object_ids(obj, &txn).await?;
                 if !iceberg_privilege_object_ids.is_empty() {
                     revoke_items.extend(
                         iceberg_privilege_object_ids
