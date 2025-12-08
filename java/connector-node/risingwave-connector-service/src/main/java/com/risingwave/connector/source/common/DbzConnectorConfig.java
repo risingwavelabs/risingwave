@@ -332,6 +332,8 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
+        dbzProps.setProperty("max.queue.size.in.bytes", String.valueOf(268435456L));
+
         LOG.info("Final Debezium properties: {}", dbzProps);
 
         this.sourceId = sourceId;
