@@ -41,6 +41,15 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 
 ENV PATH=/root/.cargo/bin/:$PATH
 
+# Install newer zstd (Ubuntu 24.04 ships 1.5.5 without ZSTD_c_targetCBlockSize)
+RUN curl -L "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz" \
+    | tar -xz && \
+    cd zstd-1.5.7 && \
+    make -j"$(nproc)" && \
+    make install && \
+    ldconfig && \
+    cd / && rm -rf /zstd-1.5.7
+
 RUN rustup toolchain install --profile minimal && \
     rustup show && \
     rustup default `rustup show active-toolchain | awk '{print $1}'` && \
@@ -80,8 +89,6 @@ RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cac
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db" \
     && cargo uninstall cargo-cache
-# Prefer bundled zstd to avoid mismatched system headers in CI
-ENV ZSTD_SYS_USE_PKG_CONFIG=0
 RUN cargo install cargo-dylint@4.1.0 dylint-link@4.1.0
 
 # install risedev
