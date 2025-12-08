@@ -2024,7 +2024,6 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
-        println!("这里direct commit的时候，add_columns: {:?}", add_columns);
         // Commit data if present
         let (write_results, snapshot_id) =
             match self.pre_commit_inner(epoch, metadata, add_columns.clone())? {
@@ -2072,7 +2071,6 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<Vec<u8>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
-        println!("这里pre_commit的时候，add_columns: {:?}", add_columns);
         tracing::info!(
             "add_columns in pre_commit: {:?}",
             add_columns
@@ -2162,7 +2160,6 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         } else {
             None
         };
-        println!("这里提交iceberg的时候，add_columns: {:?}", add_columns);
         tracing::info!(
             "Commit metadata has_schema_change: {}, add_columns: {:?}",
             has_schema_change,
@@ -2173,7 +2170,6 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
 
         // Check if we have data to commit (snapshot_id exists)
         let has_data = !write_results_bytes.is_empty();
-        println!("这里提交iceberg的时候，has_data: {:?}", has_data);
         if !has_data && !has_schema_change {
             tracing::debug!(?epoch, "no data and no schema change to commit");
             return Ok(());
