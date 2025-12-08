@@ -209,7 +209,9 @@ impl Worker {
                             .send(GetNewStreamRequest {
                                 value: Some(Value::Get(get)),
                             })
-                            .unwrap();
+                            .map_err(|_| {
+                                ExchangeChannelClosed::remote_input(114514.into(), None)
+                            })?;
 
                         msg_txs.insert((get.up_actor_id, get.down_actor_id), msg_tx);
                     }
@@ -231,18 +233,18 @@ impl Worker {
 
                             let msg_res = DispatcherMessageBatch::from_protobuf(&msg);
 
-                            // immediately put back permits
-                            req_tx
-                                .send(GetNewStreamRequest {
-                                    value: Some(Value::AddPermits(AddPermits {
-                                        up_actor_id,
-                                        down_actor_id,
-                                        permits,
-                                    })),
-                                })
-                                .unwrap();
-
                             let send_result: Result<(), ()> = try {
+                                // immediately put back permits
+                                req_tx
+                                    .send(GetNewStreamRequest {
+                                        value: Some(Value::AddPermits(AddPermits {
+                                            up_actor_id,
+                                            down_actor_id,
+                                            permits,
+                                        })),
+                                    })
+                                    .map_err(|_| ())?;
+
                                 match msg_res {
                                     Ok(msg) => {
                                         for msg in msg.into_messages() {
