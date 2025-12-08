@@ -1,0 +1,88 @@
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+# connection (storage info + catalog info)
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+create table t(id int primary key, name varchar) APPEND ONLY
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+# Create a user
+statement ok
+CREATE USER user1
+
+# grant privilege on iceberg table.
+statement ok
+GRANT ALL PRIVILEGES ON TABLE t TO user1;
+
+# check privilege for user1
+query III
+SELECT has_table_privilege('user1', 't', 'SELECT'),
+    has_table_privilege('user1', '__iceberg_source_t', 'SELECT'),
+    has_table_privilege('user1', '__iceberg_sink_t', 'SELECT');
+----
+t t t
+
+query I
+SELECT has_table_privilege('user1', '__iceberg_source_t', 'INSERT');
+----
+f
+
+# revoke privilege on iceberg table.
+statement ok
+REVOKE SELECT ON TABLE t FROM user1;
+
+# check privilege for user1
+query I
+SELECT has_table_privilege('user1', 't', 'SELECT'),
+    has_table_privilege('user1', '__iceberg_source_t', 'SELECT'),
+    has_table_privilege('user1', '__iceberg_sink_t', 'SELECT');
+----
+f f f
+
+statement ok
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO user1;
+
+# create another iceberg table
+statement ok
+create table t2(id int primary key, name varchar) APPEND ONLY
+with(commit_checkpoint_interval = 1) engine = iceberg;
+
+# check privilege for user1
+query I
+SELECT has_table_privilege('user1', 't2', 'SELECT'),
+    has_table_privilege('user1', '__iceberg_source_t2', 'SELECT'),
+    has_table_privilege('user1', '__iceberg_sink_t2', 'SELECT');
+----
+t t t
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP TABLE t;
+
+statement ok
+DROP USER user1;
+
+statement ok
+DROP CONNECTION public.my_conn;
+
+statement ok
+DROP SECRET my_secret;

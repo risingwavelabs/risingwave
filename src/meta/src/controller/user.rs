@@ -40,8 +40,9 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
     PartialUserPrivilege, check_user_name_duplicate, ensure_object_id,
     ensure_privileges_not_referred, ensure_user_id, extract_grant_obj_id,
-    get_index_state_tables_by_table_id, get_internal_tables_by_id, get_object_owner,
-    get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
+    get_iceberg_related_privilege_object_ids, get_index_state_tables_by_table_id,
+    get_internal_tables_by_id, get_object_owner, get_referring_privileges_cascade,
+    get_user_privilege, list_user_info_by_ids,
 };
 use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationVersion};
 use crate::{MetaError, MetaResult};
@@ -261,6 +262,17 @@ impl CatalogController {
                                 ..Default::default()
                             }),
                     );
+                    let iceberg_privilege_object_ids =
+                        get_iceberg_related_privilege_object_ids(id, &txn).await?;
+                    privileges.extend(iceberg_privilege_object_ids.iter().map(
+                        |&iceberg_object_id| user_privilege::ActiveModel {
+                            oid: Set(iceberg_object_id),
+                            granted_by: Set(grantor),
+                            action: Set(action),
+                            with_grant_option: Set(with_grant_option),
+                            ..Default::default()
+                        },
+                    ));
                 }
             }
         }
@@ -397,7 +409,7 @@ impl CatalogController {
                     action
                 })
                 .collect_vec();
-            revoke_items.insert(obj, actions);
+            revoke_items.insert(obj, actions.clone());
             if include_select {
                 revoke_items.extend(
                     internal_table_ids
@@ -405,6 +417,15 @@ impl CatalogController {
                         .chain(index_state_table_ids.iter())
                         .map(|&tid| (tid.as_object_id(), vec![Action::Select])),
                 );
+                let iceberg_privilege_object_ids =
+                    get_iceberg_related_privilege_object_ids(obj, &txn).await?;
+                if !iceberg_privilege_object_ids.is_empty() {
+                    revoke_items.extend(
+                        iceberg_privilege_object_ids
+                            .into_iter()
+                            .map(|iceberg_object_id| (iceberg_object_id, vec![Action::Select])),
+                    );
+                }
             }
         }
 

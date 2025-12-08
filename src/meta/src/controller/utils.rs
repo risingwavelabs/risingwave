@@ -18,7 +18,9 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
+use risingwave_common::catalog::{
+    FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX,
+};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::{JobId, SubscriptionId};
 use risingwave_common::types::{DataType, Datum};
@@ -64,6 +66,7 @@ use sea_orm::{
     RelationTrait, Set, Statement,
 };
 use thiserror_ext::AsReport;
+use tracing::warn;
 
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
@@ -1000,6 +1003,89 @@ where
     Ok(index_table_ids)
 }
 
+pub async fn get_iceberg_related_privilege_object_ids<C>(
+    object_id: ObjectId,
+    db: &C,
+) -> MetaResult<Vec<ObjectId>>
+where
+    C: ConnectionTrait,
+{
+    let object = Object::find_by_id(object_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+    if object.obj_type != ObjectType::Table {
+        return Ok(vec![]);
+    }
+
+    let table = Table::find_by_id(object_id.as_table_id())
+        .one(db)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+    if !matches!(table.engine, Some(table::Engine::Iceberg)) {
+        return Ok(vec![]);
+    }
+
+    let database_id = object.database_id.unwrap();
+    let schema_id = object.schema_id.unwrap();
+
+    let mut related_objects = vec![];
+
+    let iceberg_sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table.name);
+    let iceberg_sink_id = Sink::find()
+        .inner_join(Object)
+        .select_only()
+        .column(sink::Column::SinkId)
+        .filter(
+            object::Column::DatabaseId
+                .eq(database_id)
+                .and(object::Column::SchemaId.eq(schema_id))
+                .and(sink::Column::Name.eq(&iceberg_sink_name)),
+        )
+        .into_tuple::<SinkId>()
+        .one(db)
+        .await?;
+    if let Some(sink_id) = iceberg_sink_id {
+        related_objects.push(sink_id.as_object_id());
+        let sink_internal_tables = get_internal_tables_by_id(sink_id.as_job_id(), db).await?;
+        related_objects.extend(
+            sink_internal_tables
+                .into_iter()
+                .map(|tid| tid.as_object_id()),
+        );
+    } else {
+        warn!(
+            "iceberg table {} missing sink {} when collecting privilege objects",
+            table.name, iceberg_sink_name
+        );
+    }
+
+    let iceberg_source_name = format!("{}{}", ICEBERG_SOURCE_PREFIX, table.name);
+    let iceberg_source_id = Source::find()
+        .inner_join(Object)
+        .select_only()
+        .column(source::Column::SourceId)
+        .filter(
+            object::Column::DatabaseId
+                .eq(database_id)
+                .and(object::Column::SchemaId.eq(schema_id))
+                .and(source::Column::Name.eq(&iceberg_source_name)),
+        )
+        .into_tuple::<SourceId>()
+        .one(db)
+        .await?;
+    if let Some(source_id) = iceberg_source_id {
+        related_objects.push(source_id.as_object_id());
+    } else {
+        warn!(
+            "iceberg table {} missing source {} when collecting privilege objects",
+            table.name, iceberg_source_name
+        );
+    }
+
+    Ok(related_objects)
+}
+
 #[derive(Clone, DerivePartialModel, FromQueryResult)]
 #[sea_orm(entity = "UserPrivilege")]
 pub struct PartialUserPrivilege {
@@ -1161,8 +1247,6 @@ where
         .map(|(grantee, _, _, _)| *grantee)
         .collect::<HashSet<_>>();
 
-    let internal_table_ids = get_internal_tables_by_id(object_id.as_job_id(), db).await?;
-
     for (grantee, granted_by, action, with_grant_option) in default_privileges {
         UserPrivilege::insert(user_privilege::ActiveModel {
             user_id: Set(grantee),
@@ -1174,19 +1258,40 @@ where
         })
         .exec(db)
         .await?;
-        if action == Action::Select && !internal_table_ids.is_empty() {
+        if action == Action::Select {
             // Grant SELECT privilege for internal tables if the action is SELECT.
-            for internal_table_id in &internal_table_ids {
-                UserPrivilege::insert(user_privilege::ActiveModel {
-                    user_id: Set(grantee),
-                    oid: Set(internal_table_id.as_object_id()),
-                    granted_by: Set(granted_by),
-                    action: Set(Action::Select),
-                    with_grant_option: Set(with_grant_option),
-                    ..Default::default()
-                })
-                .exec(db)
-                .await?;
+            let internal_table_ids = get_internal_tables_by_id(object_id.as_job_id(), db).await?;
+            if !internal_table_ids.is_empty() {
+                for internal_table_id in &internal_table_ids {
+                    UserPrivilege::insert(user_privilege::ActiveModel {
+                        user_id: Set(grantee),
+                        oid: Set(internal_table_id.as_object_id()),
+                        granted_by: Set(granted_by),
+                        action: Set(Action::Select),
+                        with_grant_option: Set(with_grant_option),
+                        ..Default::default()
+                    })
+                    .exec(db)
+                    .await?;
+                }
+            }
+
+            // Additionally, grant SELECT privilege for iceberg related objects if the action is SELECT.
+            let iceberg_privilege_object_ids =
+                get_iceberg_related_privilege_object_ids(object_id, db).await?;
+            if !iceberg_privilege_object_ids.is_empty() {
+                for iceberg_object_id in &iceberg_privilege_object_ids {
+                    UserPrivilege::insert(user_privilege::ActiveModel {
+                        user_id: Set(grantee),
+                        oid: Set(*iceberg_object_id),
+                        granted_by: Set(granted_by),
+                        action: Set(action),
+                        with_grant_option: Set(with_grant_option),
+                        ..Default::default()
+                    })
+                    .exec(db)
+                    .await?;
+                }
             }
         }
     }
