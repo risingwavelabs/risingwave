@@ -198,6 +198,7 @@ macro_rules! feature_gated_source_mod {
                 FeatureNotEnabledSourceMarker, FeatureNotEnabledProperties,
                 FeatureNotEnabledSplit, FeatureNotEnabledSplitEnumerator, FeatureNotEnabledSplitReader,
             };
+            #[derive(Debug, Clone)]
             pub struct [<$struct_prefix:camel NotEnabled>];
             pub const [<$source_name:upper _CONNECTOR>]: &'static str = $source_name;
             impl FeatureNotEnabledSourceMarker for [<$struct_prefix:camel NotEnabled>] {
