@@ -232,7 +232,7 @@ Enable DataFusion as the optional query engine for Iceberg tables."
             Self::Adbc => {
                 "
 Enable ADBC (Arrow Database Connectivity) Snowflake driver support.
-Required if you want to use ADBC Snowflake sink.
+Required if you want to use ADBC Snowflake source.
 This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             }
         }
