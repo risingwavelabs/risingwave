@@ -24,7 +24,7 @@ use risingwave_batch::task::BatchManager;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
-    GetDataRequest, GetDataResponse, GetNewStreamRequest, GetNewStreamResponse, GetStreamRequest,
+    GetDataRequest, GetDataResponse, GetMuxStreamRequest, GetMuxStreamResponse, GetStreamRequest,
     GetStreamResponse, PbPermits, permits,
 };
 use risingwave_stream::executor::DispatcherMessageBatch;
@@ -46,12 +46,12 @@ pub struct ExchangeServiceImpl {
 pub type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
 pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
 pub type NewStreamDataStream =
-    impl Stream<Item = std::result::Result<GetNewStreamResponse, Status>>;
+    impl Stream<Item = std::result::Result<GetMuxStreamResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = BatchDataStream;
-    type GetNewStreamStream = NewStreamDataStream;
+    type GetMuxStreamStream = NewStreamDataStream;
     type GetStreamStream = StreamDataStream;
 
     async fn get_data(
@@ -132,13 +132,13 @@ impl ExchangeService for ExchangeServiceImpl {
     }
 
     #[define_opaque(NewStreamDataStream)]
-    async fn get_new_stream(
+    async fn get_mux_stream(
         &self,
-        request: Request<Streaming<GetNewStreamRequest>>,
-    ) -> std::result::Result<Response<Self::GetNewStreamStream>, Status> {
+        request: Request<Streaming<GetMuxStreamRequest>>,
+    ) -> std::result::Result<Response<Self::GetMuxStreamStream>, Status> {
         let request_stream = request.into_inner();
 
-        Ok(Response::new(Self::get_new_stream_impl(
+        Ok(Response::new(Self::get_mux_stream_impl(
             self.stream_mgr.clone(),
             request_stream,
         )))
@@ -146,12 +146,12 @@ impl ExchangeService for ExchangeServiceImpl {
 }
 
 impl ExchangeServiceImpl {
-    #[try_stream(ok = GetNewStreamResponse, error = Status)]
-    async fn get_new_stream_impl(
+    #[try_stream(ok = GetMuxStreamResponse, error = Status)]
+    async fn get_mux_stream_impl(
         stream_mgr: LocalStreamManager,
-        mut request_stream: Streaming<GetNewStreamRequest>,
+        mut request_stream: Streaming<GetMuxStreamRequest>,
     ) {
-        use risingwave_pb::task_service::get_new_stream_request::*;
+        use risingwave_pb::task_service::get_mux_stream_request::*;
 
         // Extract the first `Init` request from the stream.
         let Init {
@@ -163,7 +163,7 @@ impl ExchangeServiceImpl {
             let req = request_stream
                 .next()
                 .await
-                .ok_or_else(|| Status::invalid_argument("get_new_stream request is empty"))??;
+                .ok_or_else(|| Status::invalid_argument("get_mux_stream request is empty"))??;
             match req.value.unwrap() {
                 Value::Init(init) => init,
                 Value::Get(_) | Value::AddPermits(_) => {
@@ -173,7 +173,7 @@ impl ExchangeServiceImpl {
         };
 
         enum Req {
-            Request(Result<GetNewStreamRequest, Status>),
+            Request(Result<GetMuxStreamRequest, Status>),
             Message {
                 up_actor_id: ActorId,
                 down_actor_id: ActorId,
@@ -243,7 +243,7 @@ impl ExchangeServiceImpl {
                     };
                     let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
-                    let response = GetNewStreamResponse {
+                    let response = GetMuxStreamResponse {
                         message: Some(proto),
                         permits: Some(PbPermits { value: permits }),
                         up_actor_id,

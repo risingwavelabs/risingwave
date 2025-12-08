@@ -140,7 +140,7 @@ message GetStreamRequest {
   }
 }
 
-message GetNewStreamRequest {
+message GetMuxStreamRequest {
   message Init {
     uint32 up_fragment_id = 1;
     uint32 down_fragment_id = 2;
@@ -174,21 +174,16 @@ message GetStreamResponse {
   Permits permits = 2;
 }
 
-message GetNewStreamResponse {
-  // message UpActorIds {
-  //   repeated uint32 up_actor_id = 1;
-  // }
-
+message GetMuxStreamResponse {
+  // TODO: batch the same message (typically barrier) for different actor pairs.
   stream_plan.StreamMessageBatch message = 1;
   Permits permits = 2;
   uint32 up_actor_id = 3;
   uint32 down_actor_id = 4;
-
-  // map<uint32, UpActorIds> down_up_actor_ids = 3;
 }
 
 service ExchangeService {
   rpc GetData(GetDataRequest) returns (stream GetDataResponse);
   rpc GetStream(stream GetStreamRequest) returns (stream GetStreamResponse);
-  rpc GetNewStream(stream GetNewStreamRequest) returns (stream GetNewStreamResponse);
+  rpc GetMuxStream(stream GetMuxStreamRequest) returns (stream GetMuxStreamResponse);
 }

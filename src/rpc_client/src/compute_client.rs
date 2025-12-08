@@ -40,8 +40,8 @@ use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
-    FastInsertResponse, GetDataRequest, GetDataResponse, GetNewStreamRequest, GetNewStreamResponse,
-    GetStreamRequest, GetStreamResponse, PbPermits, TaskInfoResponse, get_new_stream_request,
+    FastInsertResponse, GetDataRequest, GetDataResponse, GetMuxStreamRequest, GetMuxStreamResponse,
+    GetStreamRequest, GetStreamResponse, PbPermits, TaskInfoResponse, get_mux_stream_request,
     permits,
 };
 use tokio::sync::mpsc;
@@ -113,18 +113,18 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn get_new_stream(
+    pub async fn get_mux_stream(
         &self,
-        init: get_new_stream_request::Init,
+        init: get_mux_stream_request::Init,
     ) -> Result<(
-        Streaming<GetNewStreamResponse>,
-        mpsc::UnboundedSender<GetNewStreamRequest>,
+        Streaming<GetMuxStreamResponse>,
+        mpsc::UnboundedSender<GetMuxStreamRequest>,
     )> {
-        use risingwave_pb::task_service::get_new_stream_request::*;
+        use risingwave_pb::task_service::get_mux_stream_request::*;
 
         let (request_sender, request_receiver) = mpsc::unbounded_channel();
         request_sender
-            .send(GetNewStreamRequest {
+            .send(GetMuxStreamRequest {
                 value: Some(Value::Init(init)),
             })
             .unwrap();
@@ -132,7 +132,7 @@ impl ComputeClient {
         let response_stream = self
             .exchange_client
             .clone()
-            .get_new_stream(UnboundedReceiverStream::new(request_receiver))
+            .get_mux_stream(UnboundedReceiverStream::new(request_receiver))
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner();

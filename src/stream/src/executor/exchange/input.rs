@@ -23,9 +23,9 @@ use futures::stream::BoxStream;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
-use risingwave_pb::task_service::get_new_stream_request::{AddPermits, Value};
+use risingwave_pb::task_service::get_mux_stream_request::{AddPermits, Value};
 use risingwave_pb::task_service::{
-    GetNewStreamRequest, GetNewStreamResponse, GetStreamResponse, get_new_stream_request, permits,
+    GetMuxStreamRequest, GetMuxStreamResponse, GetStreamResponse, get_mux_stream_request, permits,
 };
 use risingwave_rpc_client::ComputeClient;
 use risingwave_rpc_client::error::RpcError;
@@ -103,7 +103,6 @@ impl LocalInput {
 
 mod local_input {
     use await_tree::InstrumentAwait;
-    use either::Either;
 
     use crate::executor::exchange::error::ExchangeChannelClosed;
     use crate::executor::exchange::permit::Receiver;
@@ -163,7 +162,7 @@ use remote_input::RemoteInputStreamInner;
 use risingwave_pb::common::ActorInfo;
 
 struct RegisterReq {
-    get: get_new_stream_request::Get,
+    get: get_mux_stream_request::Get,
     msg_tx: mpsc::UnboundedSender<StreamExecutorResult<DispatcherMessage>>,
 }
 
@@ -176,22 +175,22 @@ struct Worker {
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct WorkerKey {
     upstream_addr: HostAddr,
-    init: get_new_stream_request::Init,
+    init: get_mux_stream_request::Init,
 }
 
 impl Worker {
     async fn new(
         client: ComputeClient,
-        init: get_new_stream_request::Init,
+        init: get_mux_stream_request::Init,
     ) -> Result<Self, RpcError> {
-        let (stream, req_tx) = client.get_new_stream(init).await?;
+        let (stream, req_tx) = client.get_mux_stream(init).await?;
 
         let (register_tx, register_rx) = mpsc::unbounded_channel();
 
         let task = async move {
             enum Event {
                 Register(RegisterReq),
-                Response(Result<GetNewStreamResponse, tonic::Status>),
+                Response(Result<GetMuxStreamResponse, tonic::Status>),
             }
 
             let mut stream = futures::stream_select!(
@@ -206,7 +205,7 @@ impl Worker {
                 match event {
                     Event::Register(RegisterReq { get, msg_tx }) => {
                         req_tx
-                            .send(GetNewStreamRequest {
+                            .send(GetMuxStreamRequest {
                                 value: Some(Value::Get(get)),
                             })
                             .map_err(|_| {
@@ -216,7 +215,7 @@ impl Worker {
                         msg_txs.insert((get.up_actor_id, get.down_actor_id), msg_tx);
                     }
                     Event::Response(res) => {
-                        let GetNewStreamResponse {
+                        let GetMuxStreamResponse {
                             message,
                             permits,
                             up_actor_id,
@@ -236,7 +235,7 @@ impl Worker {
                             let send_result: Result<(), ()> = try {
                                 // immediately put back permits
                                 req_tx
-                                    .send(GetNewStreamRequest {
+                                    .send(GetMuxStreamRequest {
                                         value: Some(Value::AddPermits(AddPermits {
                                             up_actor_id,
                                             down_actor_id,
@@ -291,7 +290,7 @@ impl Mux {
 
     async fn get(
         &self,
-        init: get_new_stream_request::Init,
+        init: get_mux_stream_request::Init,
         upstream_addr: HostAddr,
         env: &StreamEnvironment,
     ) -> StreamExecutorResult<Worker> {
@@ -332,7 +331,7 @@ impl RemoteInput {
 
         static MUX: LazyLock<Mux> = LazyLock::new(Mux::new);
 
-        let init = get_new_stream_request::Init {
+        let init = get_mux_stream_request::Init {
             up_fragment_id: up_down_frag.0,
             down_fragment_id: up_down_frag.1,
             database_id: local_barrier_manager.database_id,
@@ -347,7 +346,7 @@ impl RemoteInput {
         worker
             .register_tx
             .send(RegisterReq {
-                get: get_new_stream_request::Get {
+                get: get_mux_stream_request::Get {
                     up_actor_id: up_down_ids.0,
                     down_actor_id: up_down_ids.1,
                 },
