@@ -734,7 +734,9 @@ impl StateStoreImpl {
                         ))]);
                     builder = builder
                         .with_engine_config(engine_builder)
-                        .with_recover_mode(opts.meta_file_cache_recover_mode);
+                        .with_recover_mode(opts.meta_file_cache_recover_mode)
+                        .with_compression(opts.meta_file_cache_compression)
+                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone());
                 }
             }
 
@@ -782,7 +784,9 @@ impl StateStoreImpl {
                         ))]);
                     builder = builder
                         .with_engine_config(engine_builder)
-                        .with_recover_mode(opts.data_file_cache_recover_mode);
+                        .with_recover_mode(opts.data_file_cache_recover_mode)
+                        .with_compression(opts.data_file_cache_compression)
+                        .with_runtime_options(opts.data_file_cache_runtime_config.clone());
                 }
             }
 
