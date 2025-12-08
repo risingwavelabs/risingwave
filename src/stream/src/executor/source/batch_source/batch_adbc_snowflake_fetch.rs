@@ -259,6 +259,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
     /// Build and execute a data reader for a single split.
     /// The reader yields chunks from the split until all data is exhausted,
     /// then sets the `read_finished` flag.
+    /// Chunks are split to respect the configured `chunk_size` for rate limiting.
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn build_split_reader(
         source_desc: SourceDesc,
@@ -272,9 +273,17 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
             _ => unreachable!(),
         };
 
+        let max_chunk_size = crate::config::chunk_size();
         let chunks = Self::read_split(properties, split, &column_names)?;
         for chunk in chunks {
-            yield chunk;
+            // Split large chunks to respect the configured chunk_size for rate limiting
+            if chunk.capacity() > max_chunk_size {
+                for small_chunk in chunk.split(max_chunk_size) {
+                    yield small_chunk;
+                }
+            } else {
+                yield chunk;
+            }
         }
 
         *read_finished.write() = true;
