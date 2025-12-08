@@ -36,8 +36,8 @@ public class DbzConnectorConfig {
             "cdc.source.wait.streaming.start.timeout";
 
     private static final String QUEUE_MAX_MEMORY_RATIO = "queue.memory.ratio";
-    private static final double MIN_QUEUE_MAX_MEMORY_RATIO = 0.01;
-    private static final double MAX_QUEUE_MAX_MEMORY_RATIO = 0.8;
+    public static final double MIN_QUEUE_MAX_MEMORY_RATIO = 0.01;
+    public static final double MAX_QUEUE_MAX_MEMORY_RATIO = 0.8;
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -399,24 +399,9 @@ public class DbzConnectorConfig {
             return;
         }
 
-        double queueMemoryRatio;
-        try {
-            queueMemoryRatio = Double.parseDouble(ratioStr);
-            // Validate ratio is in reasonable range (1% - 80%)
-            if (queueMemoryRatio < MIN_QUEUE_MAX_MEMORY_RATIO
-                    || queueMemoryRatio > MAX_QUEUE_MAX_MEMORY_RATIO) {
-                LOG.warn(
-                        "Invalid {}: {}, must be between {} and {}, ignoring",
-                        QUEUE_MAX_MEMORY_RATIO,
-                        queueMemoryRatio,
-                        MIN_QUEUE_MAX_MEMORY_RATIO,
-                        MAX_QUEUE_MAX_MEMORY_RATIO);
-                return;
-            }
-        } catch (NumberFormatException e) {
-            LOG.warn("Invalid {} format: {}, ignoring", QUEUE_MAX_MEMORY_RATIO, ratioStr);
-            return;
-        }
+        // Validation is already done in SourceValidateHandler during CREATE/ALTER SOURCE
+        // At this point, ratioStr is guaranteed to be valid (0.01-0.8)
+        double queueMemoryRatio = Double.parseDouble(ratioStr);
 
         // Get JVM max heap size from Runtime
         // This reflects the -Xmx value set by Rust during JVM initialization

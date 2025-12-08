@@ -89,6 +89,38 @@ public class SourceValidateHandler {
         }
     }
 
+    /**
+     * Validate queue.memory.ratio if specified. The ratio must be a valid number between
+     * MIN_QUEUE_MAX_MEMORY_RATIO and MAX_QUEUE_MAX_MEMORY_RATIO.
+     */
+    private static void validateQueueMemoryRatio(Map<String, String> props) {
+        String ratioStr = props.get("debezium.queue.memory.ratio");
+        if (ratioStr == null) {
+            return; // Not specified, use default
+        }
+
+        double ratio;
+        try {
+            ratio = Double.parseDouble(ratioStr);
+        } catch (NumberFormatException e) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'debezium.queue.memory.ratio' must be a valid number, got: '%s'",
+                            ratioStr));
+        }
+
+        // Validate ratio is in reasonable range (1% - 80%)
+        if (ratio < DbzConnectorConfig.MIN_QUEUE_MAX_MEMORY_RATIO
+                || ratio > DbzConnectorConfig.MAX_QUEUE_MAX_MEMORY_RATIO) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'debezium.queue.memory.ratio' must be between %s and %s, got: %s",
+                            DbzConnectorConfig.MIN_QUEUE_MAX_MEMORY_RATIO,
+                            DbzConnectorConfig.MAX_QUEUE_MAX_MEMORY_RATIO,
+                            ratio));
+        }
+    }
+
     public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
             throws Exception {
         var props = request.getPropertiesMap();
@@ -109,6 +141,7 @@ public class SourceValidateHandler {
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SLOT_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_CREATE);
+                validateQueueMemoryRatio(props);
                 try (var validator = new PostgresValidator(props, tableSchema, isCdcSourceJob)) {
                     validator.validateAll();
                 }
@@ -118,6 +151,7 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
+                validateQueueMemoryRatio(props);
                 try (var coordinatorValidator = new CitusValidator(props, tableSchema)) {
                     coordinatorValidator.validateDistributedTable();
                     coordinatorValidator.validateTable();
@@ -146,6 +180,7 @@ public class SourceValidateHandler {
             case MYSQL:
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
+                validateQueueMemoryRatio(props);
                 try (var validator =
                         new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
                     validator.validateAll();
@@ -154,12 +189,14 @@ public class SourceValidateHandler {
             case MONGODB:
                 ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_URL);
                 ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_COLLECTION_NAME);
+                validateQueueMemoryRatio(props);
                 var validator = new MongoDbValidator(props);
                 validator.validateDbConfig();
                 break;
             case SQL_SERVER:
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.SQL_SERVER_SCHEMA_NAME);
+                validateQueueMemoryRatio(props);
                 try (var sqlServerValidator =
                         new SqlServerValidator(props, tableSchema, isCdcSourceJob)) {
                     sqlServerValidator.validateAll();
