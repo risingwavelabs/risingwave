@@ -92,7 +92,7 @@ pub enum SinkFormatterImpl {
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
     AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
     AppendOnlyBytesTemplate(AppendOnlyFormatter<BytesEncoder, TemplateEncoder>),
-    AppendOnlyBytesBytes(AppendOnlyFormatter<BytesEncoder, BytesEncoder>),
+    AppendOnlyBytes(AppendOnlyFormatter<BytesEncoder, BytesEncoder>),
     // upsert
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
@@ -550,7 +550,7 @@ impl SinkFormatterImpl {
                     Impl::AppendOnlyBytesTemplate(build(p).await?)
                 }
                 (F::AppendOnly, E::Template, None) => Impl::AppendOnlyTemplate(build(p).await?),
-                (F::AppendOnly, E::Bytes, None) => Impl::AppendOnlyBytesBytes(build(p).await?),
+                (F::AppendOnly, E::Bytes, None) => Impl::AppendOnlyBytes(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Text)) => Impl::UpsertTextJson(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Bytes)) => {
                     Impl::UpsertBytesJson(build(p).await?)
@@ -634,7 +634,7 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::UpsertTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyBytesTemplate($name) => $body,
             SinkFormatterImpl::UpsertBytesTemplate($name) => $body,
-            SinkFormatterImpl::AppendOnlyBytesBytes($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytes($name) => $body,
         }
     };
 }
@@ -676,7 +676,7 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
             SinkFormatterImpl::UpsertTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyBytesTemplate(_) => unreachable!(),
             SinkFormatterImpl::UpsertBytesTemplate(_) => unreachable!(),
-            SinkFormatterImpl::AppendOnlyBytesBytes(_) => unreachable!(),
+            SinkFormatterImpl::AppendOnlyBytes(_) => unreachable!(),
         }
     };
 }
