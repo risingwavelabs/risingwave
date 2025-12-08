@@ -2024,18 +2024,33 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
-
+        println!("这里direct commit的时候，add_columns: {:?}", add_columns);
+        // Commit data if present
         let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns)? {
+            match self.pre_commit_inner(epoch, metadata, add_columns.clone())? {
                 Some((write_results, snapshot_id)) => (write_results, snapshot_id),
                 None => {
-                    tracing::debug!(?epoch, "no data to commit");
+                    // No data to commit, but may have schema change
+                    if let Some(add_columns) = add_columns {
+                        tracing::info!(?epoch, "No data to commit, but committing schema change");
+                        self.commit_schema_change(add_columns).await?;
+                    } else {
+                        tracing::debug!(?epoch, "no data to commit");
+                    }
                     return Ok(());
                 }
             };
 
         self.commit_iceberg_inner(epoch, write_results, snapshot_id)
-            .await
+            .await?;
+
+        // Commit schema change if present
+        if let Some(add_columns) = add_columns {
+            tracing::info!(?epoch, "Committing schema change after data commit");
+            self.commit_schema_change(add_columns).await?;
+        }
+
+        Ok(())
     }
 }
 
