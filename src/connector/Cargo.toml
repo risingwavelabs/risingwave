@@ -21,13 +21,13 @@ all-sources = []
 sink-bigquery = [
     "dep:gcp-bigquery-client",
     "dep:google-cloud-bigquery",
-    "dep:google-cloud-gax",
+    #    "dep:google-cloud-gax",
     "dep:google-cloud-googleapis",
 ]
 sink-deltalake = ["dep:deltalake"]
 sink-google_pubsub = [
     # "dep:google-cloud-pubsub",
-    "dep:google-cloud-gax",
+    #    "dep:google-cloud-gax",
     "dep:google-cloud-googleapis",
 ]
 sink-clickhouse = ["dep:clickhouse"]
@@ -79,7 +79,7 @@ glob = "0.3"
 google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", features = [
     "auth",
 ], optional = true }
-google-cloud-gax = { package = "gcloud-gax", version = "1", optional = true }
+google-cloud-gax = { package = "gcloud-gax", version = "1" }
 google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", features = [
     "pubsub",
     "bigquery",
