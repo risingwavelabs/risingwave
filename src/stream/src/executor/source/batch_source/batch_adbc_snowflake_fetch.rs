@@ -20,7 +20,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
 use risingwave_common::id::TableId;
-use risingwave_common::types::{JsonbVal, ScalarRef};
+use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::adbc_snowflake::{
     AdbcSnowflakeArrowConvert, AdbcSnowflakeProperties,
@@ -86,6 +86,17 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
+
+        // Get column names from the source schema, filtering out additional columns and hidden columns.
+        // These columns are derived from the fetch executor's schema and represent the actual
+        // Snowflake table columns that should be queried.
+        let column_names: Vec<String> = source_desc
+            .columns
+            .iter()
+            .filter(|c| c.is_visible() && c.additional_column.column_type.is_none())
+            .map(|c| c.name.clone())
+            .collect();
+        tracing::debug!("[adbc snowflake fetch] column_names: {:?}", column_names);
 
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
@@ -182,6 +193,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
                                     &mut stream,
                                     &mut splits_on_fetch,
                                     source_desc.clone(),
+                                    &column_names,
                                     is_load_finished.clone(),
                                 )?;
                             }
@@ -202,7 +214,14 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
                         Message::Watermark(_) => unreachable!(),
                     },
                     Either::Right(chunk) => {
-                        splits_on_fetch -= 1;
+                        // Check if the reader is finished after yielding
+                        if *is_load_finished.read() {
+                            splits_on_fetch -= 1;
+                            tracing::debug!(
+                                "split read finished, remaining splits_on_fetch: {}",
+                                splits_on_fetch
+                            );
+                        }
                         yield Message::Chunk(chunk);
                     }
                 },
@@ -215,6 +234,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         splits_on_fetch: &mut usize,
         source_desc: SourceDesc,
+        column_names: &[String],
         read_finished: Arc<RwLock<bool>>,
     ) -> StreamExecutorResult<()> {
         // For ADBC Snowflake, we process one split at a time to manage connection resources
@@ -225,10 +245,9 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
             *splits_on_fetch = 1;
             *read_finished.write() = false;
 
-            let split = AdbcSnowflakeSplit::decode(split_json)?;
-            let column_names: Vec<String> =
-                source_desc.columns.iter().map(|c| c.name.clone()).collect();
-            let reader = Self::build_split_reader(source_desc, column_names, split, read_finished);
+            let split = AdbcSnowflakeSplit::decode(split_json.as_scalar_ref())?;
+            let reader =
+                Self::build_split_reader(source_desc, split, column_names.to_vec(), read_finished);
             stream.replace_data_stream(reader.boxed());
         } else {
             stream.replace_data_stream(stream::pending().boxed());
@@ -237,11 +256,14 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
         Ok(())
     }
 
+    /// Build and execute a data reader for a single split.
+    /// The reader yields chunks from the split until all data is exhausted,
+    /// then sets the `read_finished` flag.
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn build_split_reader(
         source_desc: SourceDesc,
-        column_names: Vec<String>,
         split: AdbcSnowflakeSplit,
+        column_names: Vec<String>,
         read_finished: Arc<RwLock<bool>>,
     ) {
         let properties = source_desc.source.config.clone();
@@ -250,7 +272,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
             _ => unreachable!(),
         };
 
-        let chunks = Self::read_split(properties, column_names, split)?;
+        let chunks = Self::read_split(properties, split, &column_names)?;
         for chunk in chunks {
             yield chunk;
         }
@@ -258,26 +280,54 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
         *read_finished.write() = true;
     }
 
-    /// Read data from a single split
+    /// Read data from a single split by executing the Snowflake query.
+    /// Returns all chunks for the split. The query is built from the source schema,
+    /// `table_ref`, optional snapshot timestamp (AT clause), and optional WHERE clause.
+    /// Column names are derived from the fetch executor's schema, filtering out additional
+    /// columns and hidden columns.
+    /// If time travel query fails, falls back to querying without snapshot.
     fn read_split(
         properties: Box<AdbcSnowflakeProperties>,
-        column_names: Vec<String>,
         split: AdbcSnowflakeSplit,
+        column_names: &[String],
     ) -> StreamExecutorResult<Vec<StreamChunk>> {
-        let table_expr = if let Some(ref ts) = split.snapshot_timestamp {
-            format!("{} AT(TIMESTAMP => '{}')", split.table_ref, ts)
-        } else {
-            split.table_ref.clone()
-        };
-
         let select_list = column_names
             .iter()
             .map(|c| format!(r#""{}""#, c))
             .collect::<Vec<_>>()
             .join(", ");
 
-        // Build query with table_expr and optional WHERE
-        let mut final_query = format!("SELECT {select_list} FROM {}", table_expr);
+        // Try with snapshot first if available
+        if let Some(ref ts) = split.snapshot_timestamp {
+            let table_expr_with_snapshot = format!("{} AT(TIMESTAMP => '{}')", split.table_ref, ts);
+            let mut final_query = format!("SELECT {select_list} FROM {}", table_expr_with_snapshot);
+            if let Some(ref where_clause) = split.where_clause {
+                final_query = format!("{final_query} WHERE {where_clause}");
+            }
+
+            tracing::debug!(
+                split_id = %split.split_id,
+                query = %final_query,
+                "executing query for split with time travel"
+            );
+
+            match properties.execute_query(&final_query) {
+                Ok(batches) => {
+                    return Self::convert_batches_to_chunks(&split.split_id, batches);
+                }
+                Err(e) => {
+                    // Time travel may have failed, log and fall back to current data
+                    tracing::warn!(
+                        split_id = %split.split_id,
+                        error = %e.as_report(),
+                        "Time travel query failed, falling back to current data"
+                    );
+                }
+            }
+        }
+
+        // Fall back to querying without snapshot
+        let mut final_query = format!("SELECT {select_list} FROM {}", split.table_ref);
         if let Some(ref where_clause) = split.where_clause {
             final_query = format!("{final_query} WHERE {where_clause}");
         }
@@ -285,12 +335,18 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
         tracing::debug!(
             split_id = %split.split_id,
             query = %final_query,
-            "executing query for split"
+            "executing query for split without time travel"
         );
 
-        // Execute the query and read results using the new query
         let batches = properties.execute_query(&final_query)?;
+        Self::convert_batches_to_chunks(&split.split_id, batches)
+    }
 
+    /// Convert Arrow `RecordBatch`es to `StreamChunk`s
+    fn convert_batches_to_chunks(
+        split_id: &str,
+        batches: Vec<risingwave_common::array::arrow::arrow_array_55::RecordBatch>,
+    ) -> StreamExecutorResult<Vec<StreamChunk>> {
         let converter = AdbcSnowflakeArrowConvert;
         let mut chunks = Vec::new();
 
@@ -310,7 +366,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
         }
 
         tracing::debug!(
-            split_id = %split.split_id,
+            split_id = %split_id,
             num_chunks = chunks.len(),
             "finished reading split"
         );
