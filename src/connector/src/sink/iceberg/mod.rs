@@ -524,162 +524,170 @@ impl Debug for IcebergSink {
     }
 }
 
-impl IcebergSink {
-    pub async fn create_and_validate_table(&self) -> Result<Table> {
-        if self.config.create_table_if_not_exists {
-            self.create_table_if_not_exists().await?;
-        }
-
-        let table = self
-            .config
-            .load_table()
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-
-        let sink_schema = self.param.schema();
-        let iceberg_arrow_schema = schema_to_arrow_schema(table.metadata().current_schema())
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-
-        try_matches_arrow_schema(&sink_schema, &iceberg_arrow_schema)
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-
-        Ok(table)
+async fn create_and_validate_table_impl(
+    config: &IcebergConfig,
+    param: &SinkParam,
+) -> Result<Table> {
+    if config.create_table_if_not_exists {
+        create_table_if_not_exists_impl(config, param).await?;
     }
 
-    pub async fn create_table_if_not_exists(&self) -> Result<()> {
-        let catalog = self.config.create_catalog().await?;
-        let namespace = if let Some(database_name) = self.config.table.database_name() {
-            let namespace = NamespaceIdent::new(database_name.to_owned());
-            if !catalog
-                .namespace_exists(&namespace)
-                .await
-                .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
-            {
-                catalog
-                    .create_namespace(&namespace, HashMap::default())
-                    .await
-                    .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                    .context("failed to create iceberg namespace")?;
-            }
-            namespace
-        } else {
-            bail!("database name must be set if you want to create table")
-        };
+    let table = config
+        .load_table()
+        .await
+        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
-        let table_id = self
-            .config
-            .full_table_name()
-            .context("Unable to parse table name")?;
+    let sink_schema = param.schema();
+    let iceberg_arrow_schema = schema_to_arrow_schema(table.metadata().current_schema())
+        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+    try_matches_arrow_schema(&sink_schema, &iceberg_arrow_schema)
+        .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+    Ok(table)
+}
+
+async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkParam) -> Result<()> {
+    let catalog = config.create_catalog().await?;
+    let namespace = if let Some(database_name) = config.table.database_name() {
+        let namespace = NamespaceIdent::new(database_name.to_owned());
         if !catalog
-            .table_exists(&table_id)
+            .namespace_exists(&namespace)
             .await
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
         {
-            let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
-            // convert risingwave schema -> arrow schema -> iceberg schema
-            let arrow_fields = self
-                .param
-                .columns
-                .iter()
-                .map(|column| {
-                    Ok(iceberg_create_table_arrow_convert
-                        .to_arrow_field(&column.name, &column.data_type)
-                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                        .context(format!(
-                            "failed to convert {}: {} to arrow type",
-                            &column.name, &column.data_type
-                        ))?)
-                })
-                .collect::<Result<Vec<ArrowField>>>()?;
-            let arrow_schema = arrow_schema_iceberg::Schema::new(arrow_fields);
-            let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
-                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                .context("failed to convert arrow schema to iceberg schema")?;
-
-            let location = {
-                let mut names = namespace.clone().inner();
-                names.push(self.config.table.table_name().to_owned());
-                match &self.config.common.warehouse_path {
-                    Some(warehouse_path) => {
-                        let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
-                        let url = Url::parse(warehouse_path);
-                        if url.is_err() || is_s3_tables {
-                            // For rest catalog, the warehouse_path could be a warehouse name.
-                            // In this case, we should specify the location when creating a table.
-                            if self.config.common.catalog_type() == "rest"
-                                || self.config.common.catalog_type() == "rest_rust"
-                            {
-                                None
-                            } else {
-                                bail!(format!("Invalid warehouse path: {}", warehouse_path))
-                            }
-                        } else if warehouse_path.ends_with('/') {
-                            Some(format!("{}{}", warehouse_path, names.join("/")))
-                        } else {
-                            Some(format!("{}/{}", warehouse_path, names.join("/")))
-                        }
-                    }
-                    None => None,
-                }
-            };
-
-            let partition_spec = match &self.config.partition_by {
-                Some(partition_by) => {
-                    let mut partition_fields = Vec::<UnboundPartitionField>::new();
-                    for (i, (column, transform)) in parse_partition_by_exprs(partition_by.clone())?
-                        .into_iter()
-                        .enumerate()
-                    {
-                        match iceberg_schema.field_id_by_name(&column) {
-                            Some(id) => partition_fields.push(
-                                UnboundPartitionField::builder()
-                                    .source_id(id)
-                                    .transform(transform)
-                                    .name(format!("_p_{}", column))
-                                    .field_id(i as i32)
-                                    .build(),
-                            ),
-                            None => bail!(format!(
-                                "Partition source column does not exist in schema: {}",
-                                column
-                            )),
-                        };
-                    }
-                    Some(
-                        UnboundPartitionSpec::builder()
-                            .with_spec_id(0)
-                            .add_partition_fields(partition_fields)
-                            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                            .context("failed to add partition columns")?
-                            .build(),
-                    )
-                }
-                None => None,
-            };
-
-            let table_creation_builder = TableCreation::builder()
-                .name(self.config.table.table_name().to_owned())
-                .schema(iceberg_schema);
-
-            let table_creation = match (location, partition_spec) {
-                (Some(location), Some(partition_spec)) => table_creation_builder
-                    .location(location)
-                    .partition_spec(partition_spec)
-                    .build(),
-                (Some(location), None) => table_creation_builder.location(location).build(),
-                (None, Some(partition_spec)) => table_creation_builder
-                    .partition_spec(partition_spec)
-                    .build(),
-                (None, None) => table_creation_builder.build(),
-            };
-
             catalog
-                .create_table(&namespace, table_creation)
+                .create_namespace(&namespace, HashMap::default())
                 .await
                 .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                .context("failed to create iceberg table")?;
+                .context("failed to create iceberg namespace")?;
         }
-        Ok(())
+        namespace
+    } else {
+        bail!("database name must be set if you want to create table")
+    };
+
+    let table_id = config
+        .full_table_name()
+        .context("Unable to parse table name")?;
+    if !catalog
+        .table_exists(&table_id)
+        .await
+        .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+    {
+        let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+        // convert risingwave schema -> arrow schema -> iceberg schema
+        let arrow_fields = param
+            .columns
+            .iter()
+            .map(|column| {
+                Ok(iceberg_create_table_arrow_convert
+                    .to_arrow_field(&column.name, &column.data_type)
+                    .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                    .context(format!(
+                        "failed to convert {}: {} to arrow type",
+                        &column.name, &column.data_type
+                    ))?)
+            })
+            .collect::<Result<Vec<ArrowField>>>()?;
+        let arrow_schema = arrow_schema_iceberg::Schema::new(arrow_fields);
+        let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+            .context("failed to convert arrow schema to iceberg schema")?;
+
+        let location = {
+            let mut names = namespace.clone().inner();
+            names.push(config.table.table_name().to_owned());
+            match &config.common.warehouse_path {
+                Some(warehouse_path) => {
+                    let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
+                    let url = Url::parse(warehouse_path);
+                    if url.is_err() || is_s3_tables {
+                        // For rest catalog, the warehouse_path could be a warehouse name.
+                        // In this case, we should specify the location when creating a table.
+                        if config.common.catalog_type() == "rest"
+                            || config.common.catalog_type() == "rest_rust"
+                        {
+                            None
+                        } else {
+                            bail!(format!("Invalid warehouse path: {}", warehouse_path))
+                        }
+                    } else if warehouse_path.ends_with('/') {
+                        Some(format!("{}{}", warehouse_path, names.join("/")))
+                    } else {
+                        Some(format!("{}/{}", warehouse_path, names.join("/")))
+                    }
+                }
+                None => None,
+            }
+        };
+
+        let partition_spec = match &config.partition_by {
+            Some(partition_by) => {
+                let mut partition_fields = Vec::<UnboundPartitionField>::new();
+                for (i, (column, transform)) in parse_partition_by_exprs(partition_by.clone())?
+                    .into_iter()
+                    .enumerate()
+                {
+                    match iceberg_schema.field_id_by_name(&column) {
+                        Some(id) => partition_fields.push(
+                            UnboundPartitionField::builder()
+                                .source_id(id)
+                                .transform(transform)
+                                .name(format!("_p_{}", column))
+                                .field_id(i as i32)
+                                .build(),
+                        ),
+                        None => bail!(format!(
+                            "Partition source column does not exist in schema: {}",
+                            column
+                        )),
+                    };
+                }
+                Some(
+                    UnboundPartitionSpec::builder()
+                        .with_spec_id(0)
+                        .add_partition_fields(partition_fields)
+                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                        .context("failed to add partition columns")?
+                        .build(),
+                )
+            }
+            None => None,
+        };
+
+        let table_creation_builder = TableCreation::builder()
+            .name(config.table.table_name().to_owned())
+            .schema(iceberg_schema);
+
+        let table_creation = match (location, partition_spec) {
+            (Some(location), Some(partition_spec)) => table_creation_builder
+                .location(location)
+                .partition_spec(partition_spec)
+                .build(),
+            (Some(location), None) => table_creation_builder.location(location).build(),
+            (None, Some(partition_spec)) => table_creation_builder
+                .partition_spec(partition_spec)
+                .build(),
+            (None, None) => table_creation_builder.build(),
+        };
+
+        catalog
+            .create_table(&namespace, table_creation)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+            .context("failed to create iceberg table")?;
+    }
+    Ok(())
+}
+
+impl IcebergSink {
+    pub async fn create_and_validate_table(&self) -> Result<Table> {
+        create_and_validate_table_impl(&self.config, &self.param).await
+    }
+
+    pub async fn create_table_if_not_exists(&self) -> Result<()> {
+        create_table_if_not_exists_impl(&self.config, &self.param).await
     }
 
     pub fn new(config: IcebergConfig, param: SinkParam) -> Result<Self> {
@@ -830,26 +838,26 @@ impl Sink for IcebergSink {
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let table = self.create_and_validate_table().await?;
-        let inner = if let Some(unique_column_ids) = &self.unique_column_ids {
-            IcebergSinkWriter::new_upsert(table, unique_column_ids.clone(), &writer_param).await?
-        } else {
-            IcebergSinkWriter::new_append_only(table, &writer_param).await?
-        };
+        let writer = IcebergSinkWriter::new(
+            self.config.clone(),
+            self.param.clone(),
+            writer_param.clone(),
+            self.unique_column_ids.clone(),
+        );
 
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
-        let writer = CoordinatedLogSinker::new(
+        let log_sinker = CoordinatedLogSinker::new(
             &writer_param,
             self.param.clone(),
-            inner,
+            writer,
             commit_checkpoint_interval,
         )
         .await?;
 
-        Ok(writer)
+        Ok(log_sinker)
     }
 
     fn is_coordinated_sink(&self) -> bool {
@@ -892,7 +900,19 @@ enum ProjectIdxVec {
     Done(Vec<usize>),
 }
 
-pub struct IcebergSinkWriter {
+pub enum IcebergSinkWriter {
+    Created(IcebergSinkWriterArgs),
+    Initialized(IcebergSinkWriterInner),
+}
+
+pub struct IcebergSinkWriterArgs {
+    config: IcebergConfig,
+    sink_param: SinkParam,
+    writer_param: SinkWriterParam,
+    unique_column_ids: Option<Vec<usize>>,
+}
+
+pub struct IcebergSinkWriterInner {
     writer: IcebergWriterDispatch,
     arrow_schema: SchemaRef,
     // See comments below
@@ -984,7 +1004,23 @@ pub struct IcebergWriterMetrics {
 }
 
 impl IcebergSinkWriter {
-    pub async fn new_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
+    pub fn new(
+        config: IcebergConfig,
+        sink_param: SinkParam,
+        writer_param: SinkWriterParam,
+        unique_column_ids: Option<Vec<usize>>,
+    ) -> Self {
+        Self::Created(IcebergSinkWriterArgs {
+            config,
+            sink_param,
+            writer_param,
+            unique_column_ids,
+        })
+    }
+}
+
+impl IcebergSinkWriterInner {
+    async fn build_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let SinkWriterParam {
             extra_partition_col_idx,
             actor_id,
@@ -1123,7 +1159,7 @@ impl IcebergSinkWriter {
         }
     }
 
-    pub async fn new_upsert(
+    async fn build_upsert(
         table: Table,
         unique_column_ids: Vec<usize>,
         writer_param: &SinkWriterParam,
@@ -1359,14 +1395,35 @@ impl SinkWriter for IcebergSinkWriter {
 
     /// Begin a new epoch
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        // Just skip it.
+        let Self::Created(args) = self else {
+            return Ok(());
+        };
+
+        let table = create_and_validate_table_impl(&args.config, &args.sink_param).await?;
+        let inner = match &args.unique_column_ids {
+            Some(unique_column_ids) => {
+                IcebergSinkWriterInner::build_upsert(
+                    table,
+                    unique_column_ids.clone(),
+                    &args.writer_param,
+                )
+                .await?
+            }
+            None => IcebergSinkWriterInner::build_append_only(table, &args.writer_param).await?,
+        };
+
+        *self = IcebergSinkWriter::Initialized(inner);
         Ok(())
     }
 
     /// Write a stream chunk to sink
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        let Self::Initialized(inner) = self else {
+            unreachable!("IcebergSinkWriter should be initialized before barrier");
+        };
+
         // Try to build writer if it's None.
-        match &mut self.writer {
+        match &mut inner.writer {
             IcebergWriterDispatch::PartitionAppendOnly {
                 writer,
                 writer_builder,
@@ -1429,7 +1486,7 @@ impl SinkWriter for IcebergSinkWriter {
 
         // Process the chunk.
         let (mut chunk, ops) = chunk.compact_vis().into_parts();
-        match &self.project_idx_vec {
+        match &mut inner.project_idx_vec {
             ProjectIdxVec::None => {}
             ProjectIdxVec::Prepare(idx) => {
                 if *idx >= chunk.columns().len() {
@@ -1442,7 +1499,7 @@ impl SinkWriter for IcebergSinkWriter {
                     .chain(*idx + 1..chunk.columns().len())
                     .collect_vec();
                 chunk = chunk.project(&project_idx_vec);
-                self.project_idx_vec = ProjectIdxVec::Done(project_idx_vec);
+                inner.project_idx_vec = ProjectIdxVec::Done(project_idx_vec);
             }
             ProjectIdxVec::Done(idx_vec) => {
                 chunk = chunk.project(idx_vec);
@@ -1452,7 +1509,7 @@ impl SinkWriter for IcebergSinkWriter {
             return Ok(());
         }
         let write_batch_size = chunk.estimated_heap_size();
-        let batch = match &self.writer {
+        let batch = match &inner.writer {
             IcebergWriterDispatch::PartitionAppendOnly { .. }
             | IcebergWriterDispatch::NonPartitionAppendOnly { .. } => {
                 // separate out insert chunk
@@ -1460,7 +1517,7 @@ impl SinkWriter for IcebergSinkWriter {
                     chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
                 chunk.set_visibility(filters);
                 IcebergArrowConvert
-                    .to_record_batch(self.arrow_schema.clone(), &chunk.compact_vis())
+                    .to_record_batch(inner.arrow_schema.clone(), &chunk.compact_vis())
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
             }
             IcebergWriterDispatch::PartitionUpsert {
@@ -1472,7 +1529,7 @@ impl SinkWriter for IcebergSinkWriter {
                 ..
             } => {
                 let chunk = IcebergArrowConvert
-                    .to_record_batch(self.arrow_schema.clone(), &chunk)
+                    .to_record_batch(inner.arrow_schema.clone(), &chunk)
                     .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
                 let ops = Arc::new(Int32Array::from(
                     ops.iter()
@@ -1489,25 +1546,29 @@ impl SinkWriter for IcebergSinkWriter {
             }
         };
 
-        let writer = self.writer.get_writer().unwrap();
+        let writer = inner.writer.get_writer().unwrap();
         writer
             .write(batch)
             .instrument_await("iceberg_write")
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        self.metrics.write_bytes.inc_by(write_batch_size as _);
+        inner.metrics.write_bytes.inc_by(write_batch_size as _);
         Ok(())
     }
 
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
     /// writer should commit the current epoch.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
+        let Self::Initialized(inner) = self else {
+            unreachable!("IcebergSinkWriter should be initialized before barrier");
+        };
+
         // Skip it if not checkpoint
         if !is_checkpoint {
             return Ok(None);
         }
 
-        let close_result = match &mut self.writer {
+        let close_result = match &mut inner.writer {
             IcebergWriterDispatch::PartitionAppendOnly {
                 writer,
                 writer_builder,
@@ -1602,8 +1663,8 @@ impl SinkWriter for IcebergSinkWriter {
 
         match close_result {
             Some(Ok(result)) => {
-                let version = self.table.metadata().format_version() as u8;
-                let partition_type = self.table.metadata().default_partition_type();
+                let version = inner.table.metadata().format_version() as u8;
+                let partition_type = inner.table.metadata().default_partition_type();
                 let data_files = result
                     .into_iter()
                     .map(|f| {
@@ -1613,8 +1674,8 @@ impl SinkWriter for IcebergSinkWriter {
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Some(SinkMetadata::try_from(&IcebergCommitResult {
                     data_files,
-                    schema_id: self.table.metadata().current_schema_id(),
-                    partition_spec_id: self.table.metadata().default_partition_spec_id(),
+                    schema_id: inner.table.metadata().current_schema_id(),
+                    partition_spec_id: inner.table.metadata().default_partition_spec_id(),
                 })?))
             }
             Some(Err(err)) => Err(SinkError::Iceberg(anyhow!(err))),

@@ -514,8 +514,13 @@ impl UpstreamSinkBarrierManager {
             .try_insert(upstream_fragment_id, barrier_tx)
             .expect("non-duplicate");
 
-        let upstreams =
-            MergeExecutor::new_select_receiver(inputs, &ctx.executor_stats, &ctx.actor_context);
+        let upstreams = MergeExecutor::new_merge_upstream(
+            inputs,
+            &ctx.executor_stats,
+            &ctx.actor_context,
+            ctx.chunk_size,
+            schema,
+        );
 
         Ok(MergeExecutor::new(
             ctx.actor_context.clone(),
@@ -525,8 +530,6 @@ impl UpstreamSinkBarrierManager {
             ctx.local_barrier_manager.clone(),
             ctx.executor_stats.clone(),
             barrier_rx,
-            ctx.chunk_size,
-            schema,
         ))
     }
 }
