@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
@@ -50,6 +51,7 @@ pub enum LocalNotification {
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
     SourceDropped(ObjectId),
+    StreamingJobBackfillFinished(JobId),
 }
 
 #[derive(Debug)]
@@ -384,6 +386,7 @@ impl NotificationManagerCore {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::id::JobId;
     use risingwave_pb::common::HostAddress;
 
     use super::*;
@@ -420,5 +423,22 @@ mod tests {
         assert!(rx1.try_recv().is_err());
         assert!(rx2.recv().await.is_some());
         assert!(rx3.recv().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_local_notification_backfill_finished() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        mgr.insert_local_sender(tx);
+
+        let job_id = JobId::new(42);
+        mgr.notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+
+        match rx.recv().await.expect("should receive notification") {
+            LocalNotification::StreamingJobBackfillFinished(received) => {
+                assert_eq!(received, job_id);
+            }
+            other => panic!("unexpected notification: {other:?}"),
+        }
     }
 }
