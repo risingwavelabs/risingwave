@@ -727,6 +727,7 @@ impl SstableStore {
                 let now = Instant::now();
                 let buf = store
                     .read(&meta_path, range)
+                    .instrument_await("get_meta_response".verbose())
                     .await
                     .map_err(foyer::Error::other)?;
                 let meta = SstableMeta::decode(&buf[..]).map_err(foyer::Error::other)?;
@@ -744,7 +745,12 @@ impl SstableStore {
 
         stats.cache_meta_block_total += 1;
 
-        async move { entry.await.map_err(HummockError::foyer_error) }
+        async move {
+            entry
+                .instrument_await("fetch_meta".verbose())
+                .await
+                .map_err(HummockError::foyer_error)
+        }
     }
 
     pub async fn list_sst_object_metadata_from_object_store(
