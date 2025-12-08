@@ -676,7 +676,7 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
             SinkFormatterImpl::UpsertTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyBytesTemplate(_) => unreachable!(),
             SinkFormatterImpl::UpsertBytesTemplate(_) => unreachable!(),
-            SinkFormatterImpl::AppendOnlyBytesBytes($name) => unreachable!(),
+            SinkFormatterImpl::AppendOnlyBytesBytes(_) => unreachable!(),
         }
     };
 }
