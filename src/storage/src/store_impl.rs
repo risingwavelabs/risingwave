@@ -732,7 +732,9 @@ impl StateStoreImpl {
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.meta_file_cache_fifo_probation_ratio,
                         ))]);
-                    builder = builder.with_engine_config(engine_builder);
+                    builder = builder
+                        .with_engine_config(engine_builder)
+                        .with_compression(opts.meta_file_cache_compression);
                 }
             }
 
@@ -778,7 +780,9 @@ impl StateStoreImpl {
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.data_file_cache_fifo_probation_ratio,
                         ))]);
-                    builder = builder.with_engine_config(engine_builder);
+                    builder = builder
+                        .with_engine_config(engine_builder)
+                        .with_compression(opts.data_file_cache_compression);
                 }
             }
 
