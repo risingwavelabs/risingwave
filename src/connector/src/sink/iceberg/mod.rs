@@ -2170,10 +2170,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
 
                 self.commit_schema_change(add_columns).await?;
 
-                tracing::info!(
-                    "Successfully committed schema change in epoch {}",
-                    epoch
-                );
+                tracing::info!("Successfully committed schema change in epoch {}", epoch);
             }
         }
 
@@ -2411,30 +2408,102 @@ impl IcebergSinkCommitter {
     }
 
     /// Commit schema changes (e.g., add columns) to the iceberg table.
-    /// This function reloads the catalog and applies schema updates.
-    ///
-    /// Note: This is a placeholder implementation. The actual schema evolution
-    /// in iceberg-rust requires using catalog.update_table() API which may not
-    /// be fully exposed yet. For now, we'll implement a simpler version that
-    /// demonstrates the intended logic.
-    async fn commit_schema_change(&mut self, _add_columns: Vec<Field>) -> Result<()> {
-        // TODO: Implement actual schema evolution using iceberg-rust APIs
-        // This requires:
-        // 1. Convert RisingWave Fields to Iceberg NestedFields
-        // 2. Build new schema with added columns
-        // 3. Use catalog.update_table() with TableUpdate::AddSchema
-        // 4. Apply with optimistic locking (TableRequirement)
-
-        // For now, reload the table to get the latest schema
-        // In a real implementation, this would:
-        // - Create a new schema with the added columns
-        // - Commit the schema change using catalog API
-        // - Handle optimistic locking for concurrent modifications
-
-        self.table = self.config.load_table().await?;
+    /// This function uses catalog.update_table() API to atomically update the table schema
+    /// with optimistic locking to prevent concurrent conflicts.
+    async fn commit_schema_change(&mut self, add_columns: Vec<Field>) -> Result<()> {
+        use iceberg::spec::NestedField;
+        use iceberg::{TableCommit, TableRequirement, TableUpdate};
 
         tracing::info!(
-            "Schema change placeholder called - actual implementation pending iceberg-rust API availability"
+            "Starting to commit schema change with {} columns",
+            add_columns.len()
+        );
+
+        // Step 1: Get current table metadata
+        let metadata = self.table.metadata();
+        let current_schema = metadata.current_schema().as_ref().clone();
+        let mut next_field_id = metadata.last_column_id + 1;
+
+        // Step 2: Build new schema with added columns
+        let mut builder = current_schema.into_builder();
+        let iceberg_arrow_convert = IcebergArrowConvert;
+
+        for field in &add_columns {
+            // Convert RisingWave Field to Arrow Field
+            let arrow_field = iceberg_arrow_convert
+                .to_arrow_field(&field.name, &field.data_type)
+                .map_err(|e| {
+                    SinkError::Iceberg(anyhow!("Failed to convert field to arrow: {}", e))
+                })?;
+
+            // Convert Arrow Field to Iceberg Schema to get the Iceberg type
+            let temp_schema = arrow_schema_to_schema(&arrow_schema_iceberg::Schema::new(vec![
+                arrow_field.clone(),
+            ]))
+            .map_err(|e| {
+                SinkError::Iceberg(anyhow!("Failed to convert arrow schema to iceberg: {}", e))
+            })?;
+
+            // Get the first (and only) field from the temporary schema by ID 0
+            let iceberg_field = temp_schema.field_by_id(0).ok_or_else(|| {
+                SinkError::Iceberg(anyhow!("Failed to get field from temporary schema"))
+            })?;
+
+            // Create NestedField with the next available field ID
+            let nested_field = Arc::new(NestedField::optional(
+                next_field_id,
+                &field.name,
+                (*iceberg_field.field_type).clone(),
+            ));
+
+            builder = builder.with_fields(vec![nested_field]);
+            next_field_id += 1;
+
+            tracing::info!("Added field '{}' with ID {}", field.name, next_field_id - 1);
+        }
+
+        let new_schema = builder
+            .build()
+            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to build new schema: {}", e)))?;
+
+        // Step 3: Create TableCommit with optimistic locking
+        let updates = vec![
+            TableUpdate::AddSchema { schema: new_schema },
+            TableUpdate::SetCurrentSchema { schema_id: -1 }, // -1 means use the last added schema
+        ];
+
+        let requirements = vec![
+            TableRequirement::LastAssignedFieldIdMatch {
+                last_assigned_field_id: metadata.last_column_id,
+            },
+            TableRequirement::CurrentSchemaIdMatch {
+                current_schema_id: metadata.current_schema_id(),
+            },
+        ];
+
+        let commit = TableCommit::builder()
+            .ident(self.table.identifier().clone())
+            .updates(updates)
+            .requirements(requirements)
+            .build();
+
+        // Step 4: Commit to catalog
+        tracing::info!(
+            "Committing schema change to catalog for table {}",
+            self.table.identifier()
+        );
+
+        let updated_table = self
+            .catalog
+            .update_table(commit)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to update table schema: {}", e)))?;
+
+        self.table = updated_table;
+
+        tracing::info!(
+            "Successfully committed schema change, added {} columns to iceberg table",
+            add_columns.len()
         );
 
         Ok(())
