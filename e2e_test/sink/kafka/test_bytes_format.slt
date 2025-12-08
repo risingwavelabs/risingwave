@@ -31,7 +31,7 @@ create sink sink_bytes_format_error from t_multi_columns with (
     properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-bytes-format-error',
 ) format plain encode bytes (force_append_only = 'true');
----
+----
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
