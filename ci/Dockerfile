@@ -80,6 +80,8 @@ RUN cargo binstall -y --locked cargo-llvm-cov cargo-nextest cargo-sort cargo-cac
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db" \
     && cargo uninstall cargo-cache
+# Prefer bundled zstd to avoid mismatched system headers in CI
+ENV ZSTD_SYS_USE_PKG_CONFIG=0
 RUN cargo install cargo-dylint@4.1.0 dylint-link@4.1.0
 
 # install risedev
