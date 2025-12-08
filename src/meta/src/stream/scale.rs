@@ -470,6 +470,7 @@ impl ScaleController {
             ensembles,
             workers,
             adaptive_parallelism_strategy,
+            &HashSet::new(),
         )
         .await?;
 
@@ -487,12 +488,14 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let empty_backfill_jobs = HashSet::new();
         let RenderedGraph { fragments, .. } = render_jobs(
             txn,
             self.env.actor_id_generator(),
             jobs,
             workers,
             adaptive_parallelism_strategy,
+            &empty_backfill_jobs,
         )
         .await?;
 
