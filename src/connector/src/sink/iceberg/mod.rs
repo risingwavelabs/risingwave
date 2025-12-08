@@ -2070,25 +2070,112 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
             tracing::info!("Detected schema change with {} columns to add", cols.len());
         }
 
-        if self
+        // Check if snapshot is already committed in iceberg
+        let snapshot_committed = self
             .is_snapshot_id_in_iceberg(&self.config, snapshot_id)
-            .await?
-        {
-            tracing::info!(
-                "Snapshot id {} already committed in iceberg table, skip committing again.",
-                snapshot_id
-            );
+            .await?;
+
+        // If no schema change, use the original logic (backward compatible)
+        if add_columns.is_none() {
+            if snapshot_committed {
+                tracing::info!(
+                    "Snapshot id {} already committed in iceberg table, skip committing again.",
+                    snapshot_id
+                );
+                return Ok(());
+            }
+
+            // Commit data as usual
+            let mut write_results = vec![];
+            for each in write_results_bytes {
+                let write_result = IcebergCommitResult::try_from_serialized_bytes(each)?;
+                write_results.push(write_result);
+            }
+
+            self.commit_iceberg_inner(epoch, write_results, snapshot_id)
+                .await?;
+
             return Ok(());
         }
 
-        let mut write_results = vec![];
-        for each in write_results_bytes {
-            let write_result = IcebergCommitResult::try_from_serialized_bytes(each)?;
-            write_results.push(write_result);
+        // Has schema change - need to check if schema is already updated
+        let add_columns = add_columns.unwrap(); // Safe to unwrap since we checked is_some()
+
+        // Build expected schema by adding new columns to current schema
+        let mut expected_schema = self.param.schema().clone();
+        for col in &add_columns {
+            expected_schema.fields.push(col.clone());
         }
 
-        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
-            .await?;
+        // Check if the iceberg table already has the expected schema
+        let schema_updated = self.check_schema_matches(&expected_schema)?;
+
+        // Handle 4 recovery scenarios based on (snapshot_committed, schema_updated)
+        match (snapshot_committed, schema_updated) {
+            // Case 1: Both data and schema are already committed - skip everything
+            (true, true) => {
+                tracing::info!(
+                    "Snapshot {} and schema change already committed in epoch {}, skip",
+                    snapshot_id,
+                    epoch
+                );
+                return Ok(());
+            }
+
+            // Case 4: Schema updated but data not committed - this should never happen
+            // because we always commit data before schema
+            (false, true) => {
+                return Err(SinkError::Iceberg(anyhow!(
+                    "Invalid state in epoch {}: schema updated but snapshot {} not committed. \
+                     This violates the principle of committing data before metadata.",
+                    epoch,
+                    snapshot_id
+                )));
+            }
+
+            // Case 2: Neither data nor schema committed - commit both
+            (false, false) => {
+                tracing::info!(
+                    "Snapshot {} and schema not committed in epoch {}, committing both",
+                    snapshot_id,
+                    epoch
+                );
+
+                // First, commit data
+                let mut write_results = vec![];
+                for each in write_results_bytes {
+                    let write_result = IcebergCommitResult::try_from_serialized_bytes(each)?;
+                    write_results.push(write_result);
+                }
+                self.commit_iceberg_inner(epoch, write_results, snapshot_id)
+                    .await?;
+
+                // Then, commit schema change
+                self.commit_schema_change(add_columns).await?;
+
+                tracing::info!(
+                    "Successfully committed both data and schema change in epoch {}",
+                    epoch
+                );
+            }
+
+            // Case 3: Data committed but schema not - only commit schema
+            (true, false) => {
+                tracing::info!(
+                    "Snapshot {} already committed but schema not updated in epoch {}, \
+                     committing schema change only",
+                    snapshot_id,
+                    epoch
+                );
+
+                self.commit_schema_change(add_columns).await?;
+
+                tracing::info!(
+                    "Successfully committed schema change in epoch {}",
+                    epoch
+                );
+            }
+        }
 
         Ok(())
     }
