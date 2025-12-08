@@ -107,6 +107,14 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
     pub exchange_concurrent_dispatchers: usize,
 
+    /// Force all exchanges to be remote exchanges, i.e., use gRPC. This is for debugging only.
+    #[serde(default = "default::developer::stream_exchange_force_remote")]
+    pub exchange_force_remote: bool,
+
+    /// Use new experimental multiplexing implementation for remote exchange.
+    #[serde(default = "default::developer::stream_exchange_remote_use_multiplexing")]
+    pub exchange_remote_use_multiplexing: bool,
+
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]

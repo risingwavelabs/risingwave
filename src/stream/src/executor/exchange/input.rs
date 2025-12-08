@@ -20,7 +20,7 @@ use std::task::{Context, Poll};
 use futures::future::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
-use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_pb::common::ActorInfo;
 
 use super::permit::Receiver;
@@ -156,6 +156,22 @@ impl RemoteInput {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
     ) -> StreamExecutorResult<Self> {
+        if local_barrier_manager
+            .env
+            .global_config()
+            .developer
+            .exchange_remote_use_multiplexing
+        {
+            return RemoteInput::new_mux(
+                local_barrier_manager,
+                upstream_addr,
+                up_down_ids,
+                up_down_frag,
+                metrics,
+            )
+            .await;
+        }
+
         let actor_id = up_down_ids.0;
 
         let client = local_barrier_manager
@@ -324,19 +340,25 @@ pub(crate) async fn new_input(
     upstream_actor_info: &ActorInfo,
     upstream_fragment_id: FragmentId,
 ) -> StreamExecutorResult<BoxedActorInput> {
+    let force_remote = local_barrier_manager
+        .env
+        .global_config()
+        .developer
+        .exchange_force_remote;
+
     let upstream_actor_id = upstream_actor_info.actor_id;
     let upstream_addr = upstream_actor_info.get_host()?.into();
 
-    let input =
-    // if is_local_address(local_barrier_manager.env.server_address(), &upstream_addr) {
-    //     LocalInput::new(
-    //         local_barrier_manager.register_local_upstream_output(actor_id, upstream_actor_id),
-    //         upstream_actor_id,
-    //     )
-    //     .boxed_input()
-    // } else 
+    let input = if !force_remote
+        && is_local_address(local_barrier_manager.env.server_address(), &upstream_addr)
     {
-        RemoteInput::new_mux(
+        LocalInput::new(
+            local_barrier_manager.register_local_upstream_output(actor_id, upstream_actor_id),
+            upstream_actor_id,
+        )
+        .boxed_input()
+    } else {
+        RemoteInput::new(
             local_barrier_manager,
             upstream_addr,
             (upstream_actor_id, actor_id),

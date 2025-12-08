@@ -148,7 +148,7 @@ message GetMuxStreamRequest {
     string term_id = 4;
   }
 
-  message Get {
+  message Register {
     uint32 up_actor_id = 1;
     uint32 down_actor_id = 2;
   }
@@ -160,8 +160,11 @@ message GetMuxStreamRequest {
   }
 
   oneof value {
+    // The first message, which tells the upstream which fragment pair this exchange stream is for.
     Init init = 1;
-    Get get = 2;
+    // The following messages, which registers a new actor pair to this multiplexed stream.
+    Register register = 2;
+    // The following messages, which adds the permits back to the upstream to achieve back-pressure.
     AddPermits add_permits = 3;
   }
 }
@@ -175,7 +178,7 @@ message GetStreamResponse {
 }
 
 message GetMuxStreamResponse {
-  // TODO: batch the same message (typically barrier) for different actor pairs.
+  // TODO(mux): batch the same message (typically barrier) for different actor pairs.
   stream_plan.StreamMessageBatch message = 1;
   Permits permits = 2;
   uint32 up_actor_id = 3;

@@ -761,14 +761,14 @@ for_all_wrapped_id_fields! (
             up_actor_id: ActorId,
             down_actor_id: ActorId,
         }
-        GetMuxStreamRequest.Get {
-            up_actor_id: ActorId,
-            down_actor_id: ActorId,
-        }
         GetMuxStreamRequest.Init {
             database_id: DatabaseId,
             up_fragment_id: FragmentId,
             down_fragment_id: FragmentId,
+        }
+        GetMuxStreamRequest.Register {
+            up_actor_id: ActorId,
+            down_actor_id: ActorId,
         }
         GetMuxStreamResponse {
             up_actor_id: ActorId,

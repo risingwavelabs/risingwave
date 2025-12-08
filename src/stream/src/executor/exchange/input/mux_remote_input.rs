@@ -33,7 +33,7 @@ use crate::executor::{DispatcherMessage, StreamExecutorError, StreamExecutorResu
 use crate::task::{LocalBarrierManager, StreamEnvironment, UpDownActorIds, UpDownFragmentIds};
 
 struct RegisterReq {
-    get: get_mux_stream_request::Get,
+    register: get_mux_stream_request::Register,
     msg_tx: mpsc::UnboundedSender<StreamExecutorResult<DispatcherMessage>>,
 }
 
@@ -74,16 +74,16 @@ impl Worker {
 
             while let Some(event) = stream.next().await {
                 match event {
-                    Event::Register(RegisterReq { get, msg_tx }) => {
+                    Event::Register(RegisterReq { register, msg_tx }) => {
                         req_tx
                             .send(GetMuxStreamRequest {
-                                value: Some(Value::Get(get)),
+                                value: Some(Value::Register(register)),
                             })
                             .map_err(|_| {
                                 ExchangeChannelClosed::remote_input(114514.into(), None)
                             })?;
 
-                        msg_txs.insert((get.up_actor_id, get.down_actor_id), msg_tx);
+                        msg_txs.insert((register.up_actor_id, register.down_actor_id), msg_tx);
                     }
                     Event::Response(res) => {
                         let GetMuxStreamResponse {
@@ -104,7 +104,7 @@ impl Worker {
                             let msg_res = DispatcherMessageBatch::from_protobuf(&msg);
 
                             let send_result: Result<(), ()> = try {
-                                // immediately put back permits
+                                // TODO(mux): batch putting back permits
                                 req_tx
                                     .send(GetMuxStreamRequest {
                                         value: Some(Value::AddPermits(AddPermits {
@@ -138,7 +138,6 @@ impl Worker {
             Ok::<_, StreamExecutorError>(())
         };
 
-        // TODO: handler
         let join_handle = tokio::spawn(task);
 
         Ok(Self {
@@ -189,9 +188,8 @@ impl Mux {
 }
 
 impl RemoteInput {
-    /// Create a remote input from compute client and related info. Should provide the corresponding
-    /// compute client of where the actor is placed.
-    pub async fn new_mux(
+    /// Create a remote input with the experimental multiplexing implementation.
+    pub(super) async fn new_mux(
         local_barrier_manager: &LocalBarrierManager,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
@@ -217,7 +215,7 @@ impl RemoteInput {
         worker
             .register_tx
             .send(RegisterReq {
-                get: get_mux_stream_request::Get {
+                register: get_mux_stream_request::Register {
                     up_actor_id: up_down_ids.0,
                     down_actor_id: up_down_ids.1,
                 },

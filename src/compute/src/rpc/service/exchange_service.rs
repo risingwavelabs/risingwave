@@ -166,7 +166,7 @@ impl ExchangeServiceImpl {
                 .ok_or_else(|| Status::invalid_argument("get_mux_stream request is empty"))??;
             match req.value.unwrap() {
                 Value::Init(init) => init,
-                Value::Get(_) | Value::AddPermits(_) => {
+                Value::Register(_) | Value::AddPermits(_) => {
                     unreachable!("the first message must be `Init`")
                 }
             }
@@ -190,7 +190,7 @@ impl ExchangeServiceImpl {
             match r {
                 Req::Request(req) => match req?.value.unwrap() {
                     Value::Init(_) => unreachable!("the stream has already been initialized"),
-                    Value::Get(Get {
+                    Value::Register(Register {
                         up_actor_id,
                         down_actor_id,
                     }) => {
