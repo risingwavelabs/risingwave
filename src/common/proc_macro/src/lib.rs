@@ -20,11 +20,12 @@ use estimate_size::{
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 use quote::quote;
-use syn::parse_macro_input;
+use syn::{AttributeArgs, DeriveInput, parse_macro_input};
 
 mod config;
 mod config_doc;
 mod estimate_size;
+mod serde_prefix_all;
 mod session_config;
 
 /// Sections in the configuration file can use `#[derive(OverrideConfig)]` to generate the
@@ -305,4 +306,22 @@ pub fn config_doc(input: TokenStream) -> TokenStream {
     let r#gen = config_doc::generate_config_doc_fn(input);
 
     r#gen.into()
+}
+
+/// Add `#[serde(rename = "prefix_field_name")]` or `#[serde(alias = "prefix_field_name")]` to all fields/variants
+/// of a struct or enum.
+///
+/// Use `mode = "rename"` (default) to emit `#[serde(rename = "...")]` or `mode = "alias"` to emit
+/// `#[serde(alias = "...")]`.
+///
+/// Individual fields/variants can opt-out with `#[serde_prefix_all(skip)]`.
+#[proc_macro_attribute]
+pub fn serde_prefix_all(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    let args = parse_macro_input!(attrs as AttributeArgs);
+
+    match serde_prefix_all::try_prefix_all(args, input) {
+        Ok(token_stream) => token_stream,
+        Err(err) => err.into_compile_error().into(),
+    }
 }

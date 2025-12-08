@@ -284,16 +284,15 @@ create table orders_no_backfill (
   snapshot = 'false'
 ) from mysql_mytest table 'mytest.orders';
 
-sleep 5s
 
 # table without backfill should not contain historical records
-query I
+query I retry 6 backoff 1s
 select count(*) from orders_no_backfill
 ----
 0
 
 
-query IT
+query IT retry 6 backoff 1s
 select * from kt1 order by id;
 ----
 1 aaa
@@ -303,24 +302,24 @@ select * from kt1 order by id;
 
 
 # check ingestion results
-query I
+query I retry 6 backoff 1s
 SELECT * from products_test_cnt
 ----
 11
 
-query I
+query I retry 6 backoff 1s
 SELECT * from orders_test_cnt
 ----
 4
 
-query ITT
+query ITT retry 6 backoff 1s
 SELECT id,name,description FROM rw.products_test order by id limit 3
 ----
 101 scooter Small 2-wheel scooter
 102 car battery 12V car battery
 103 12-pack drill bits 12-pack of drill bits with sizes ranging from #40 to #3
 
-query TT
+query TT retry 6 backoff 1s
 select database_name, table_name from rw.products_test limit 3;
 ----
 mytest products
@@ -329,26 +328,26 @@ mytest products
 
 
 # commit_ts of historical records should be '1970-01-01 00:00:00+00:00'
-query I
+query I retry 6 backoff 1s
 SELECT count(*) as cnt from rw.products_test where commit_ts = '1970-01-01 00:00:00+00:00'
 ----
 9
 
 # commit_ts of new records should greater than '1970-01-01 00:00:00+00:00'
-query TTT
+query TTT retry 6 backoff 1s
 SELECT name,description FROM rw.products_test where commit_ts > '1970-01-01 00:00:00+00:00' order by id
 ----
 Milk Milk is a white liquid food
 Juice 100ml Juice
 
-query ITTT
+query ITTT retry 6 backoff 1s
 SELECT order_id,order_date,customer_name,product_id,next_order_id FROM orders_test order by order_id limit 3
 ----
 10001 2020-07-30 10:08:22 Jark 102 10002
 10002 2020-07-30 10:11:09 Sally 105 10003
 10003 2020-07-30 12:00:30 Edward 106 10004
 
-query IIIIITTTTTTTTT
+query IIIIITTTTTTTTT retry 6 backoff 1s
 SELECT c_boolean, c_bit, c_tinyint, c_smallint, c_mediumint, c_integer, c_bigint, c_decimal, c_float, c_double, c_char_255, c_varchar_10000, c_date, c_time, c_datetime, c_timestamp FROM mysql_all_types order by c_bigint;
 ----
 t t -128 -32767 -8388608 -2147483647 -9223372036854775807 -10 -10000 -10000 a b 1001-01-01 00:00:00 1998-01-01 00:00:00 1970-01-01 00:00:01+00:00
@@ -410,14 +409,13 @@ WITH (
 )
 FROM pg_source TABLE 'parallelized_cdc.parallelized_cdc_backfill_test';
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 12
 
-query II
+query II retry 6 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 ----
 12
@@ -427,14 +425,13 @@ psql -c "
 insert into parallelized_cdc.parallelized_cdc_backfill_test values (20,22),(30,33),(40,44),(50,55),(60,66),(70,77),(80,88),(90,99),(100,1010),(110,1111),(120,1212);
 "
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 23
 
-query II
+query II retry 6 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 ----
 23
@@ -529,9 +526,8 @@ CREATE TABLE partitioned_timestamp_table_2023_shared(
 statement ok
 CREATE MATERIALIZED VIEW person_new_cnt AS SELECT COUNT(*) AS cnt FROM person_new;
 
-sleep 3s
 
-query TTTTTTT
+query TTTTTTT retry 4 backoff 1s
 SELECT c_boolean,c_date,c_time,c_timestamp,c_jsonb,c_smallint_array,c_timestamp_array,c_uuid FROM postgres_all_types where c_bigint=-9223372036854775807
 ----
 f 0001-01-01 00:00:00 2001-01-01 00:00:00 {} {-32767} {"2001-01-01 00:00:00"} bb488f9b-330d-4012-b849-12adeb49e57e
@@ -545,15 +541,14 @@ INSERT INTO person VALUES (1101, 'white', 'myc@xpmpe.com', '8157 6974', 'se');
 INSERT INTO person VALUES (1102, 'spencer', 'wip@dkaap.com', '9481 6270', 'angeles');
 "
 
-sleep 3s
 
 # 3 history, 3 new rows
-query I
+query I retry 4 backoff 1s
 SELECT * from person_new_cnt
 ----
 6
 
-query TTT
+query TTT retry 4 backoff 1s
 SELECT database_name,schema_name,table_name from person_new limit 3;
 ----
 cdc_test public person
@@ -561,7 +556,7 @@ cdc_test public person
 cdc_test public person
 
 
-query ITTTT
+query ITTTT retry 4 backoff 1s
 SELECT id,name,email_address,credit_card,city,next_id from person_new order by id;
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne 1001
@@ -572,7 +567,7 @@ SELECT id,name,email_address,credit_card,city,next_id from person_new order by i
 1102 spencer wip@dkaap.com 9481 6270 angeles 1103
 
 # historical data
-query ITTTT
+query ITTTT retry 4 backoff 1s
 SELECT id,name,email_address,credit_card,city,next_id from person_new where commit_ts = '1970-01-01 00:00:00+00:00' order by id;
 ----
 1000 vicky noris yplkvgz@qbxfg.com 7878 5821 1864 2539 cheyenne 1001
@@ -580,7 +575,7 @@ SELECT id,name,email_address,credit_card,city,next_id from person_new where comm
 1002 sarah spencer wipvdbm@dkaap.com 3453 4987 9481 6270 los angeles 1003
 
 # incremental data
-query ITTTT
+query ITTTT retry 4 backoff 1s
 SELECT id,name,email_address,credit_card,city from person_new where commit_ts > '1970-01-01 00:00:00+00:00' order by id;
 ----
 1100 noris ypl@qbxfg.com 1864 2539 enne
@@ -675,9 +670,8 @@ insert into numeric_list values(3, '{3.14, 6, 5789604461865809771178549250434395
 INSERT INTO numeric_list values(4, '{nan, infinity, 524596}');
 "
 
-sleep 3s
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_to_varchar_shared order by id;
 ----
 1   3.14
@@ -695,7 +689,7 @@ select * from numeric_to_varchar_shared order by id;
 107 POSITIVE_INFINITY
 
 # The invalid data for rw_int256 is converted to NULL
-query II
+query II retry 4 backoff 1s
 select * from numeric_to_rw_int256_shared order by id;
 ----
 1   NULL
@@ -712,7 +706,7 @@ select * from numeric_to_rw_int256_shared order by id;
 106 NULL
 107 NULL
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_to_numeric_shared order by id;
 ----
 1   3.14
@@ -734,7 +728,7 @@ psql -c "
 DELETE FROM numeric_table WHERE id IN (102, 103, 104, 105, 106, 107);
 "
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_list_to_varchar_list_shared order by id;
 ----
 1 {3.14,6,57896044618658097711785492504343953926634992332820282019728792003956564819967,57896044618658097711785492504343953926634992332820282019728792003956564819968,115792089237316195423570985008687907853269984665640564039457584007913129639936.555555}
@@ -742,7 +736,7 @@ select * from numeric_list_to_varchar_list_shared order by id;
 3 {3.14,6,57896044618658097711785492504343953926634992332820282019728792003956564819967,57896044618658097711785492504343953926634992332820282019728792003956564819968,115792089237316195423570985008687907853269984665640564039457584007913129639936.555555}
 4 NULL
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_list_to_rw_int256_list_shared order by id;
 ----
 1 NULL
@@ -750,7 +744,7 @@ select * from numeric_list_to_rw_int256_list_shared order by id;
 3 NULL
 4 NULL
 
-query II
+query II retry 4 backoff 1s
 select * from numeric_list_to_numeric_list_shared order by id;
 ----
 1 NULL
@@ -758,18 +752,18 @@ select * from numeric_list_to_numeric_list_shared order by id;
 3 NULL
 4 NULL
 
-query II
+query II retry 4 backoff 1s
 select * from enum_to_varchar_shared order by id;
 ----
 1 happy
 2 ok
 
-query II
+query II retry 4 backoff 1s
 select * from upper_orders_shared order by id;
 ----
 1 happy
 
-query II
+query II retry 4 backoff 1s
 select * from json_table_shared order by id;
 ----
 1  {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
@@ -798,7 +792,7 @@ SET RW_IMPLICIT_FLUSH=true;
 statement ok
 INSERT INTO test_pg_default_value VALUES (2, 'jack');
 
-query II
+query II retry 4 backoff 1s
 select * from test_pg_default_value order by id asc;
 ----
 1 bugen Shanghai
@@ -807,7 +801,7 @@ select * from test_pg_default_value order by id asc;
 statement ok
 INSERT INTO test_pg_default_value_disorderd (id) VALUES (2);
 
-query II
+query II retry 4 backoff 1s
 select * from test_pg_default_value_disorderd order by id asc;
 ----
 Shanghai 1

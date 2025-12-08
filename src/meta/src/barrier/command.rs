@@ -945,7 +945,7 @@ impl Command {
                             .upstream_mv_table_id_to_backfill_epoch
                             .keys()
                             .map(|table_id| SubscriptionUpstreamInfo {
-                                subscriber_id: table_fragments.stream_job_id().as_raw_id(),
+                                subscriber_id: table_fragments.stream_job_id().as_subscriber_id(),
                                 upstream_mv_table_id: *table_id,
                             })
                             .collect()
@@ -1022,10 +1022,10 @@ impl Command {
                 Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
                     info: jobs_to_merge
                         .iter()
-                        .flat_map(|(table_id, upstream_tables)| {
+                        .flat_map(|(job_id, upstream_tables)| {
                             upstream_tables.iter().map(move |upstream_table_id| {
                                 SubscriptionUpstreamInfo {
-                                    subscriber_id: table_id.as_raw_id(),
+                                    subscriber_id: job_id.as_subscriber_id(),
                                     upstream_mv_table_id: *upstream_table_id,
                                 }
                             })
@@ -1285,7 +1285,7 @@ impl Command {
                 pause: false,
                 subscriptions_to_add: vec![SubscriptionUpstreamInfo {
                     upstream_mv_table_id: *upstream_mv_table_id,
-                    subscriber_id: subscription_id.as_raw_id(),
+                    subscriber_id: subscription_id.as_subscriber_id(),
                 }],
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: Default::default(),
@@ -1296,7 +1296,7 @@ impl Command {
                 subscription_id,
             } => Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
                 info: vec![SubscriptionUpstreamInfo {
-                    subscriber_id: subscription_id.as_raw_id(),
+                    subscriber_id: subscription_id.as_subscriber_id(),
                     upstream_mv_table_id: *upstream_mv_table_id,
                 }],
             })),

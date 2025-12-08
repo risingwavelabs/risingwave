@@ -42,6 +42,7 @@
 #![feature(iter_array_chunks)]
 #![feature(exact_size_is_empty)]
 #![feature(debug_closure_helpers)]
+#![feature(iter_from_coroutine)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]

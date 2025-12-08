@@ -761,18 +761,20 @@
     └─StreamExchange { dist: HashShard(id, name, $expr1, $expr2) }
       └─StreamHashJoin [append_only] { type: Inner, predicate: id = seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: all }
         ├─StreamExchange { dist: HashShard(id, $expr1, $expr2) }
-        │ └─StreamAppendOnlyDedup { dedup_cols: [id, name, $expr1, $expr2] }
-        │   └─StreamExchange { dist: HashShard(id, name, $expr1, $expr2) }
-        │     └─StreamProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
-        │       └─StreamProject { exprs: [id, name, email_address, credit_card, city, state, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr1] }
-        │         └─StreamRowIdGen { row_id_index: 11 }
-        │           └─StreamSourceScan { columns: [id, name, email_address, credit_card, city, state, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
-        └─StreamAppendOnlyDedup { dedup_cols: [seller, $expr3, $expr4] }
-          └─StreamExchange { dist: HashShard(seller, $expr3, $expr4) }
-            └─StreamProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
-              └─StreamProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr3] }
-                └─StreamRowIdGen { row_id_index: 13 }
-                  └─StreamSourceScan { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+        │ └─StreamProject { exprs: [id, name, $expr1, $expr2] }
+        │   └─StreamAppendOnlyDedup { dedup_cols: [id, name, $expr1, $expr2] }
+        │     └─StreamExchange { dist: HashShard(id, name, $expr1, $expr2) }
+        │       └─StreamProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2, _row_id] }
+        │         └─StreamProject { exprs: [id, name, email_address, credit_card, city, state, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr1] }
+        │           └─StreamRowIdGen { row_id_index: 11 }
+        │             └─StreamSourceScan { columns: [id, name, email_address, credit_card, city, state, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+        └─StreamProject { exprs: [seller, $expr3, $expr4] }
+          └─StreamAppendOnlyDedup { dedup_cols: [seller, $expr3, $expr4] }
+            └─StreamExchange { dist: HashShard(seller, $expr3, $expr4) }
+              └─StreamProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4, _row_id] }
+                └─StreamProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr3] }
+                  └─StreamRowIdGen { row_id_index: 13 }
+                    └─StreamSourceScan { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), seller(hidden), $expr3(hidden), $expr4(hidden)], stream_key: [id, name, starttime, $expr2], pk_columns: [id, name, starttime, $expr2], pk_conflict: NoCheck }
@@ -781,22 +783,24 @@
     Fragment 1
     StreamHashJoin [append_only] { type: Inner, predicate: id = seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: all } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
     ├── StreamExchange Hash([0, 2, 3]) from 2
-    └── StreamAppendOnlyDedup { dedup_cols: [seller, $expr3, $expr4] } { tables: [ AppendOnlyDedup: 6 ] }
-        └── StreamExchange Hash([0, 1, 2]) from 4
+    └── StreamProject { exprs: [seller, $expr3, $expr4] }
+        └── StreamAppendOnlyDedup { dedup_cols: [seller, $expr3, $expr4] } { tables: [ AppendOnlyDedup: 6 ] }
+            └── StreamExchange Hash([0, 1, 2]) from 4
 
     Fragment 2
-    StreamAppendOnlyDedup { dedup_cols: [id, name, $expr1, $expr2] } { tables: [ AppendOnlyDedup: 4 ] }
-    └── StreamExchange Hash([0, 1, 2, 3]) from 3
+    StreamProject { exprs: [id, name, $expr1, $expr2] }
+    └── StreamAppendOnlyDedup { dedup_cols: [id, name, $expr1, $expr2] } { tables: [ AppendOnlyDedup: 4 ] }
+        └── StreamExchange Hash([0, 1, 2, 3]) from 3
 
     Fragment 3
-    StreamProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
+    StreamProject { exprs: [id, name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2, _row_id] }
     └── StreamProject { exprs: [id, name, email_address, credit_card, city, state, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr1] }
         └── StreamRowIdGen { row_id_index: 11 }
             └── StreamSourceScan { columns: [id, name, email_address, credit_card, city, state, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] } { tables: [ SourceBackfill: 5 ] }
                 └── Upstream
 
     Fragment 4
-    StreamProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4] }
+    StreamProject { exprs: [seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4, _row_id] }
     └── StreamProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, TumbleStart(date_time, '00:00:10':Interval) as $expr3] }
         └── StreamRowIdGen { row_id_index: 13 }
             └── StreamSourceScan { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] } { tables: [ SourceBackfill: 7 ] }
@@ -810,11 +814,11 @@
 
     Table 3 { columns: [ seller, $expr3, $expr4, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 4 { columns: [ id, name, $expr1, $expr2, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
+    Table 4 { columns: [ id, name, $expr1, $expr2, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
 
     Table 5 { columns: [ partition_id, backfill_progress, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 6 { columns: [ seller, $expr3, $expr4, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 6 { columns: [ seller, $expr3, $expr4, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 7 { columns: [ partition_id, backfill_progress, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 

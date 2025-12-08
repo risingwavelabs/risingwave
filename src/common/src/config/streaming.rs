@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common_proc_macro::serde_prefix_all;
+
 use super::*;
 
 mod async_stack_trace;
 mod join_encoding_type;
+mod over_window;
 
 pub use async_stack_trace::*;
 pub use join_encoding_type::*;
+pub use over_window::*;
 
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -36,7 +40,7 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
 
-    #[serde(default, with = "streaming_prefix")]
+    #[serde(default)]
     #[config_doc(omitted)]
     pub developer: StreamingDeveloperConfig,
 
@@ -53,11 +57,10 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-serde_with::with_prefix!(streaming_prefix "stream_");
-
 /// The subsections `[streaming.developer]`.
 ///
 /// It is put at [`StreamingConfig::developer`].
+#[serde_prefix_all("stream_", mode = "alias")]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingDeveloperConfig {
     /// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries
@@ -240,9 +243,42 @@ pub struct StreamingDeveloperConfig {
     #[serde(default)]
     pub join_encoding_type: JoinEncodingType,
 
+    /// The timeout for reading from the buffer of the sync log store on barrier.
+    /// Every epoch we will attempt to read the full buffer of the sync log store.
+    /// If we hit the timeout, we will stop reading and continue.
+    #[serde(default = "default::developer::sync_log_store_pause_duration_ms")]
+    pub sync_log_store_pause_duration_ms: usize,
+
+    /// The max buffer size for sync logstore, before we start flushing.
+    #[serde(default = "default::developer::sync_log_store_buffer_size")]
+    pub sync_log_store_buffer_size: usize,
+
+    /// Cache policy for partition cache in streaming over window.
+    /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
+    #[serde(default)]
+    pub over_window_cache_policy: OverWindowCachePolicy,
+
     #[serde(default, flatten)]
+    #[serde_prefix_all(skip)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
+}
+
+impl StreamingConfig {
+    /// Returns the dot-separated keys of all unrecognized fields, including those in `developer` section.
+    pub fn unrecognized_keys(&self) -> impl Iterator<Item = String> {
+        std::iter::from_coroutine(
+            #[coroutine]
+            || {
+                for k in self.unrecognized.inner().keys() {
+                    yield format!("streaming.{k}");
+                }
+                for k in self.developer.unrecognized.inner().keys() {
+                    yield format!("streaming.developer.{k}");
+                }
+            },
+        )
+    }
 }
 
 pub mod default {

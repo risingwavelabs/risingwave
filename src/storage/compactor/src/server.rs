@@ -33,6 +33,7 @@ use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
@@ -198,12 +199,30 @@ pub async fn compactor_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
+    let is_iceberg_compactor = matches!(
+        compactor_mode,
+        CompactorMode::DedicatedIceberg | CompactorMode::SharedIceberg
+    );
+
+    let compaction_executor = Arc::new(CompactionExecutor::new(
+        opts.compaction_worker_threads_number,
+    ));
+
+    let max_task_parallelism: u32 = (compaction_executor.worker_num() as f32
+        * config.storage.compactor_max_task_multiplier)
+        .ceil() as u32;
+
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
         opts.meta_address.clone(),
         WorkerType::Compactor,
         &advertise_addr,
-        Default::default(),
+        Property {
+            is_iceberg_compactor,
+            parallelism: max_task_parallelism,
+            ..Default::default()
+        },
         Arc::new(config.meta.clone()),
     )
     .await;
@@ -248,10 +267,6 @@ pub async fn compactor_serve(
     let object_id_manager = Arc::new(ObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
-    ));
-
-    let compaction_executor = Arc::new(CompactionExecutor::new(
-        opts.compaction_worker_threads_number,
     ));
 
     let compactor_context = CompactorContext {

@@ -784,9 +784,9 @@
     StreamMaterialize { columns: [col, k, ts, window_start, window_end], stream_key: [col, window_start, window_end], pk_columns: [col, window_start, window_end], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(1:Int32, window_start, window_end) }
       └─StreamHashJoin { type: Inner, predicate: 1:Int32 = t1.k, output: all }
-        ├─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
-        │ └─StreamExchange { dist: HashShard(1:Int32) }
-        │   └─StreamProject { exprs: [1:Int32] }
+        ├─StreamProject { exprs: [1:Int32] }
+        │ └─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
+        │   └─StreamExchange { dist: HashShard(1:Int32) }
         │     └─StreamValues { rows: [[1:Int32, 0:Int64], [2:Int32, 1:Int64]] }
         └─StreamExchange { dist: HashShard(t1.k) }
           └─StreamHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }

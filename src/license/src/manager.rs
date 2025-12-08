@@ -72,6 +72,15 @@ impl Tier {
             }),
         }
     }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Tier::Free => "free",
+            Tier::AllAsOf2_5 => "paid",
+            Tier::All => "all",
+            Tier::Custom { name, .. } => name,
+        }
+    }
 }
 
 /// Issuer of the license.

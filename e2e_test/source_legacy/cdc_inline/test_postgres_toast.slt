@@ -40,10 +40,9 @@ system ok
 psql -c "INSERT INTO test (id, v1, v2, v3, v4, v5, v6, v7, v8, v9, v100) SELECT 2, 22, jsonb_build_object('large_data', (SELECT jsonb_agg(jsonb_build_object('id', i, 'random_string', encode(gen_random_bytes(20), 'hex'), 'timestamp', now() + (i || ' seconds')::interval)) FROM generate_series(1, 500) i), 'nested_object', jsonb_build_object('level1', jsonb_build_object('level2', jsonb_build_object('data', encode(gen_random_bytes(100), 'hex'))))), (SELECT string_agg(encode(gen_random_bytes(10), 'hex'), '') FROM generate_series(1, 1000)), (SELECT string_agg(encode(gen_random_bytes(15), 'hex'), '') FROM generate_series(1, 1000)), (SELECT string_agg(encode(gen_random_bytes(200), 'hex'), '')::bytea FROM generate_series(1, 5000)), (SELECT array_agg(jsonb_build_object('array_id', gs.i, 'nested_data', jsonb_build_object('level1', jsonb_build_object('level2', jsonb_build_object('random_values', (SELECT jsonb_agg(encode(gen_random_bytes(10), 'hex')) FROM generate_series(1, 50))))), 'metadata', jsonb_build_object('timestamp', now() + (gs.i || ' seconds')::interval, 'random_string', encode(gen_random_bytes(20), 'hex')))) FROM generate_series(1, 300) gs(i)), ARRAY['small_string', (SELECT string_agg(encode(gen_random_bytes(10), 'hex'), '') FROM generate_series(1, 2000))], (SELECT array_agg((SELECT string_agg(encode(gen_random_bytes(8), 'hex'), '') FROM generate_series(1, 150))) FROM generate_series(1, 400)), (SELECT array_agg((SELECT string_agg(encode(gen_random_bytes(50), 'hex'), '')::bytea FROM generate_series(1, 100))) FROM generate_series(1, 200)), 100;"
 
 # Wait for data synchronization
-sleep 5s
 
 # Step 6: Verify initial TOAST data synchronization
-query TTTTTTTTTTTT
+query TTTTTTTTTTTT retry 6 backoff 1s
 select
     id,
     v1,
@@ -82,10 +81,9 @@ VALUES (
 );"
 
 # Wait for small data synchronization
-sleep 3s
 
 # Step 8: Verify small data synchronization
-query TTTTTTTTTTTT
+query TTTTTTTTTTTT retry 4 backoff 1s
 select
     id,
     v1,
@@ -111,13 +109,12 @@ system ok
 psql -c "UPDATE test SET v100 = 999 WHERE id = 3;"
 
 # Wait for update propagation
-sleep 3s
 
 # Step 10: Verify TOAST columns are preserved after UPDATE (id=2)
 # After updating non-TOAST columns, the original TOAST columns should remain unchanged
 # instead of being replaced by placeholders. Check that TOAST column lengths are preserved.
 # Verify TOAST columns have reasonable sizes (not placeholder values)
-query TTTTTTTTTTTT
+query TTTTTTTTTTTT retry 4 backoff 1s
 select
     id,
     v1,
@@ -140,11 +137,10 @@ system ok
 psql -c "DELETE FROM test WHERE id = 2;"
 
 # Wait for DELETE to propagate
-sleep 3s
 
 # Step 12: Verify DELETE was processed correctly
 # The row with id=2 should be removed from RisingWave
-query TTTTT
+query TTTTT retry 4 backoff 1s
 select count(*) from test where id = 2;
 ----
 0

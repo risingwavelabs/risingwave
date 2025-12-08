@@ -91,6 +91,13 @@ pub enum ErrorCode {
         #[backtrace]
         ArrayError,
     ),
+    #[cfg(feature = "datafusion")]
+    #[error("DataFusion error: {0}")]
+    DataFusionError(
+        #[from]
+        #[backtrace]
+        datafusion_common::DataFusionError,
+    ),
     #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]

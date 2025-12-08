@@ -39,6 +39,7 @@ struct RwWorkerNode {
     system_total_cpu_cores: Option<i64>,
     started_at: Option<Timestamptz>,
     resource_group: Option<String>,
+    is_iceberg_compactor: Option<bool>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_worker_nodes")]
@@ -53,6 +54,7 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
             let property = worker.property.as_ref();
             let resource = worker.resource.as_ref();
             let is_compute = worker.get_type().unwrap() == WorkerType::ComputeNode;
+            let is_compactor = worker.get_type().unwrap() == WorkerType::Compactor;
             RwWorkerNode {
                 id: worker.id.as_i32_id(),
                 host: host.map(|h| h.host.clone()),
@@ -84,6 +86,11 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                     .map(|ts| Timestamptz::from_secs(ts as i64).unwrap()),
                 resource_group: if is_compute {
                     property.and_then(|p| p.resource_group.clone())
+                } else {
+                    None
+                },
+                is_iceberg_compactor: if is_compactor {
+                    property.map(|p| p.is_iceberg_compactor)
                 } else {
                     None
                 },

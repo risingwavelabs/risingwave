@@ -333,7 +333,6 @@ public class DbzConnectorConfig {
         }
 
         LOG.info("Final Debezium properties: {}", dbzProps);
-
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;

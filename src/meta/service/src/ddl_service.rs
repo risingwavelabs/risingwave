@@ -452,7 +452,7 @@ impl DdlService for DdlServiceImpl {
         let version = self.ddl_controller.run_command(command).await?;
 
         self.sink_manager
-            .stop_sink_coordinator(SinkId::from(sink_id))
+            .stop_sink_coordinator(vec![SinkId::from(sink_id)])
             .await;
 
         Ok(Response::new(DropSinkResponse {
@@ -1064,6 +1064,27 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(AlterFragmentParallelismResponse {}))
+    }
+
+    async fn alter_streaming_job_config(
+        &self,
+        request: Request<AlterStreamingJobConfigRequest>,
+    ) -> Result<Response<AlterStreamingJobConfigResponse>, Status> {
+        let AlterStreamingJobConfigRequest {
+            job_id,
+            entries_to_add,
+            keys_to_remove,
+        } = request.into_inner();
+
+        self.ddl_controller
+            .run_command(DdlCommand::AlterStreamingJobConfig(
+                job_id,
+                entries_to_add,
+                keys_to_remove,
+            ))
+            .await?;
+
+        Ok(Response::new(AlterStreamingJobConfigResponse {}))
     }
 
     /// Auto schema change for cdc sources,

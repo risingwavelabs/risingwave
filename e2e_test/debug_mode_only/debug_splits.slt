@@ -42,9 +42,8 @@ create table one_split_err(x int) with (
   debug_splits = '[{"split_info": {"partition": 0, "start_offset": -1, "stop_offset": null, "topic": "test_debug_splits_non_exist"}, "split_type": "kafka"}]'
 ) format plain encode json;
 
-sleep 1s
 
-query I
+query I retry 4 backoff 1s
 select count(*) from all_splits;
 ----
 6

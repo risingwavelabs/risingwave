@@ -684,7 +684,7 @@ impl ControlStreamManager {
                                 .into_iter()
                                 .map(|(subscription_id, retention)| {
                                     (
-                                        subscription_id.as_raw_id(),
+                                        subscription_id.as_subscriber_id(),
                                         SubscriberType::Subscription(retention),
                                     )
                                 })
@@ -787,7 +787,7 @@ impl ControlStreamManager {
                 subscribers
                     .entry(*upstream_table_id)
                     .or_default()
-                    .try_insert(job_id.as_raw_id(), SubscriberType::SnapshotBackfill)
+                    .try_insert(job_id.as_subscriber_id(), SubscriberType::SnapshotBackfill)
                     .expect("non-duplicate");
             }
             ongoing_snapshot_backfill_jobs

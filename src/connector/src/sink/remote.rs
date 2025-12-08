@@ -52,7 +52,6 @@ use risingwave_rpc_client::{
     SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
-use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, UnboundedSender, unbounded_channel};
@@ -60,7 +59,6 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::SinkCommittedEpochSubscriber;
 use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
@@ -72,8 +70,8 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    LogSinker, Result, Sink, SinkCommitCoordinator, SinkError, SinkLogReader, SinkParam,
-    SinkWriterMetrics, SinkWriterParam,
+    LogSinker, Result, SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError,
+    SinkLogReader, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
 macro_rules! def_remote_sink {
@@ -543,7 +541,6 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
 }
 
 impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
-    type Coordinator = RemoteCoordinator;
     type LogSinker = CoordinatedLogSinker<CoordinatedRemoteSinkWriter>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
@@ -570,10 +567,10 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
-        RemoteCoordinator::new::<R>(self.param.clone()).await
+    ) -> Result<SinkCommitCoordinator> {
+        let coordinator = RemoteCoordinator::new::<R>(self.param.clone()).await?;
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -691,9 +688,9 @@ impl RemoteCoordinator {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+impl SinglePhaseCommitCoordinator for RemoteCoordinator {
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
     }
 
     async fn commit(

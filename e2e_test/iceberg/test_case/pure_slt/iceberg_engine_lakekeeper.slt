@@ -37,9 +37,8 @@ insert into t_lakekeeper_basic values(1, 'alice', 100), (2, 'bob', 200), (3, 'ch
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ??? rowsort
+query ??? rowsort retry 6 backoff 1s
 select * from t_lakekeeper_basic;
 ----
 1 alice 100
@@ -53,9 +52,8 @@ update t_lakekeeper_basic set v = 999 where name = 'alice';
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ??? rowsort
+query ??? rowsort retry 6 backoff 1s
 select * from t_lakekeeper_basic;
 ----
 1 alice 999
@@ -69,9 +67,8 @@ delete from t_lakekeeper_basic where id = 2;
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ??? rowsort
+query ??? rowsort retry 6 backoff 1s
 select * from t_lakekeeper_basic;
 ----
 1 alice 999
@@ -111,9 +108,8 @@ INSERT INTO t_lakekeeper_complex VALUES
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ??????????? rowsort
+query ??????????? rowsort retry 6 backoff 1s
 select * from t_lakekeeper_complex;
 ----
 1 42 test t 2024-01-01 2024-01-01 12:00:00+00:00 123.4500000000 {1:100,2:200} {1,2,3} (10,hello) {"key": "value"}
@@ -144,9 +140,8 @@ insert into t_lakekeeper_no_pk values('test1', 85), ('test2', 92), ('test3', 78)
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ?? rowsort
+query ?? rowsort retry 6 backoff 1s
 select * from t_lakekeeper_no_pk;
 ----
 test1 85
@@ -180,9 +175,8 @@ insert into t_lakekeeper_partition values
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ??? rowsort
+query ??? rowsort retry 6 backoff 1s
 select * from t_lakekeeper_partition;
 ----
 1 10 a

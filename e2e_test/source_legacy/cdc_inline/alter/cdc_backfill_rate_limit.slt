@@ -54,7 +54,7 @@ create table my_orders (
 
 sleep 3s
 
-query I
+query I retry 4 backoff 1s
 select count(*) from my_orders;
 ----
 0
@@ -66,7 +66,8 @@ ALTER TABLE my_orders SET backfill_rate_limit = 1000;
 # wait alter ddl
 sleep 3s
 
-query I
+# keep retry does not work here
+query I retry 3 backoff 1s
 select count(*) from my_orders;
 ----
 3

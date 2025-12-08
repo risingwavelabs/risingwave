@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common_proc_macro::serde_prefix_all;
+
 use super::*;
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -22,7 +24,7 @@ pub struct BatchConfig {
     #[serde(default)]
     pub worker_threads_num: Option<usize>,
 
-    #[serde(default, with = "batch_prefix")]
+    #[serde(default)]
     #[config_doc(omitted)]
     pub developer: BatchDeveloperConfig,
 
@@ -63,11 +65,10 @@ pub struct BatchConfig {
     pub enable_spill: bool,
 }
 
-serde_with::with_prefix!(batch_prefix "batch_");
-
 /// The subsections `[batch.developer]`.
 ///
 /// It is put at [`BatchConfig::developer`].
+#[serde_prefix_all("batch_", mode = "alias")]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct BatchDeveloperConfig {
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and

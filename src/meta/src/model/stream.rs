@@ -27,6 +27,7 @@ use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, PbActorLocation};
+use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
 };
@@ -362,7 +363,14 @@ impl StreamJobFragments {
 
 pub type StreamJobActorsToCreate = HashMap<
     WorkerId,
-    HashMap<FragmentId, (StreamNode, Vec<StreamActorWithUpDownstreams>, HashSet<u32>)>,
+    HashMap<
+        FragmentId,
+        (
+            StreamNode,
+            Vec<StreamActorWithUpDownstreams>,
+            HashSet<SubscriberId>,
+        ),
+    >,
 >;
 
 impl StreamJobFragments {

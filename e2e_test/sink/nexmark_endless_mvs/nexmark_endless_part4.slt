@@ -1,9 +1,8 @@
 include ../../nexmark/create_sources.slt.part
 include ../../streaming/nexmark/views/q103.slt.part
 
-sleep 15s
 
-query I
+query I retry 16 backoff 1s
 select count(*) > 0 from (select * from nexmark_q103 limit 1);
 ----
 t
@@ -16,9 +15,8 @@ include ../../nexmark/drop_sources.slt.part
 include ../../nexmark/create_sources.slt.part
 include ../../streaming/nexmark/views/q104.slt.part
 
-sleep 15s
 
-query I
+query I retry 16 backoff 1s
 select count(*) > 0 from (select * from nexmark_q104 limit 1);
 ----
 t
@@ -31,9 +29,8 @@ include ../../nexmark/drop_sources.slt.part
 include ../../nexmark/create_sources.slt.part
 include ../../streaming/nexmark/views/q105.slt.part
 
-sleep 20s
 
-query I
+query I retry 21 backoff 1s
 select count(*) > 0 from (select * from nexmark_q105 limit 1);
 ----
 t

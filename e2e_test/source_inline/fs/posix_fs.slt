@@ -62,9 +62,8 @@ diamonds_mv	FS_FETCH	{MVIEW,FS_FETCH}	0
 diamonds_mv	SOURCE	{SOURCE}	0
 
 
-sleep 3s
 
-query TTTT rowsort
+query TTTT rowsort retry 4 backoff 1s
 select * from diamonds;
 ----
 0.22 Premium I 62
@@ -93,9 +92,8 @@ order by name, node_name;
 ----
 
 
-sleep 3s
 
-query TTTT rowsort
+query TTTT rowsort retry 4 backoff 1s
 select * from diamonds_mv;
 ----
 0.22 Premium I 62

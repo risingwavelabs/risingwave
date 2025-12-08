@@ -1,0 +1,8 @@
+statement ok
+set enable_locality_backfill=true;
+
+statement ok
+CREATE MATERIALIZED VIEW mv as with v as (select 1 as a, 2 as b, 3 as c) select count(*) from v group by a;
+
+statement ok
+DROP MATERIALIZED VIEW mv;

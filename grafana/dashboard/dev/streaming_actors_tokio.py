@@ -9,83 +9,15 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Streaming Actors (Tokio)",
             [
-                panels.timeseries_actor_latency(
-                    "Actor Execution Time",
-                    "",
+                panels.timeseries_percentage(
+                    "Tokio: Actor Poll Rate Per Actor",
+                    "This can be used to estimate the CPU usage of an actor",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_actor_execution_time')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Fast Poll Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops_small(
-                    "Tokio: Actor Fast Poll Count",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Fast Poll Avg Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Slow Poll Total Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops_small(
-                    "Tokio: Actor Slow Poll Count",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Slow Poll Avg Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Poll Total Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -95,27 +27,29 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Poll Avg Time",
+                panels.timeseries_percentage(
+                    "Tokio: Actor Poll Avg Rate Per Poll",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Idle Total Time",
-                    "",
+                panels.timeseries_percentage(
+                    "Tokio: Actor Idle Rate Per Actor",
+                    "Idle time could be due to no data to process, or waiting for async operations like IO",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -125,27 +59,29 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Idle Avg Time",
+                panels.timeseries_percentage(
+                    "Tokio: Actor Idle Avg Rate Per Idle",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / (rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Scheduled Total Time",
-                    "",
+                panels.timeseries_percentage(
+                    "Tokio: Actor Scheduling Delay Rate Per Actor",
+                    "Scheduling delay could be due to poor scheduling priority, or a lack of CPU resources - for instance if there are long polling durations, can be mitigated by scaling up the number of worker threads, or improving the concurrency of the operator",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"sum(rate({metric('stream_actor_scheduled_duration')}[$__rate_interval])) by (fragment_id)"
+                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f" / 1000000000",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -155,17 +91,17 @@ def _(outer_panels: Panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Scheduled Avg Time",
+                panels.timeseries_percentage(
+                    "Tokio: Actor Scheduled Avg Rate Per Scheduled",
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
+                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / (rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                            "fragment {{fragment_id}}",
                         ),
                     ],
                 ),

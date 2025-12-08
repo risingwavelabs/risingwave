@@ -686,6 +686,15 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
+    async fn alter_config(
+        &self,
+        _job_id: JobId,
+        _entries_to_add: HashMap<String, String>,
+        _keys_to_remove: Vec<String>,
+    ) -> Result<()> {
+        todo!()
+    }
+
     async fn alter_swap_rename(&self, _object: alter_swap_rename_request::Object) -> Result<()> {
         todo!()
     }

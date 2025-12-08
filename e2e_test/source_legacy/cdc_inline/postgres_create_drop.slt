@@ -24,9 +24,8 @@ create table tt1 (v1 int,
   slot.name = 'tt1_slot',
 );
 
-sleep 3s
 
-query IT
+query IT retry 4 backoff 1s
 SELECT * FROM tt1;
 ----
 1 2023-10-23 10:00:00+00:00 2
@@ -51,9 +50,8 @@ create table tt1 (v1 int,
   slot.name = 'tt1_slot',
 );
 
-sleep 3s
 
-query IT
+query IT retry 4 backoff 1s
 SELECT * FROM tt1;
 ----
 1 2023-10-23 10:00:00+00:00 3

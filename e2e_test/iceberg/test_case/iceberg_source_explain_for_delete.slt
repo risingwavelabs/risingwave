@@ -77,9 +77,8 @@ delete from s1 where i1 = 7;
 statement ok
 flush;
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 select * from iceberg_t1_source order by i1;
 ----
 1 2 3

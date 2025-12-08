@@ -530,53 +530,39 @@ impl StreamActorManager {
             self.runtime.spawn(may_track_hummock)
         };
 
-        let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
-            || self
-                .env
-                .global_config()
-                .developer
-                .enable_actor_tokio_metrics
+        let enable_count_metrics = self.streaming_metrics.level >= MetricLevel::Debug;
+        let monitor_handle = if self
+            .env
+            .global_config()
+            .developer
+            .enable_actor_tokio_metrics
         {
             tracing::info!("Tokio metrics are enabled.");
             let streaming_metrics = self.streaming_metrics.clone();
             let actor_monitor_task = self.runtime.spawn(async move {
-                let metrics = streaming_metrics.new_actor_metrics(actor_id);
-                loop {
-                    let task_metrics = monitor.cumulative();
-                    metrics
-                        .actor_execution_time
-                        .set(task_metrics.total_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_fast_poll_duration
-                        .set(task_metrics.total_fast_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_fast_poll_cnt
-                        .set(task_metrics.total_fast_poll_count as i64);
-                    metrics
-                        .actor_slow_poll_duration
-                        .set(task_metrics.total_slow_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_slow_poll_cnt
-                        .set(task_metrics.total_slow_poll_count as i64);
+                let metrics = streaming_metrics.new_actor_metrics(actor_id, fragment_id);
+                let mut interval = tokio::time::interval(Duration::from_secs(15));
+                for task_metrics in monitor.intervals() {
+                    interval.tick().await; // tick at the start since the first interval tick is at 0s.
                     metrics
                         .actor_poll_duration
-                        .set(task_metrics.total_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_poll_cnt
-                        .set(task_metrics.total_poll_count as i64);
+                        .inc_by(task_metrics.total_poll_duration.as_nanos() as u64);
                     metrics
                         .actor_idle_duration
-                        .set(task_metrics.total_idle_duration.as_secs_f64());
-                    metrics
-                        .actor_idle_cnt
-                        .set(task_metrics.total_idled_count as i64);
+                        .inc_by(task_metrics.total_idle_duration.as_nanos() as u64);
                     metrics
                         .actor_scheduled_duration
-                        .set(task_metrics.total_scheduled_duration.as_secs_f64());
-                    metrics
-                        .actor_scheduled_cnt
-                        .set(task_metrics.total_scheduled_count as i64);
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                        .inc_by(task_metrics.total_scheduled_duration.as_nanos() as u64);
+
+                    if enable_count_metrics {
+                        metrics.actor_poll_cnt.inc_by(task_metrics.total_poll_count);
+                        metrics
+                            .actor_idle_cnt
+                            .inc_by(task_metrics.total_idled_count);
+                        metrics
+                            .actor_scheduled_cnt
+                            .inc_by(task_metrics.total_scheduled_count);
+                    }
                 }
             });
             Some(actor_monitor_task)

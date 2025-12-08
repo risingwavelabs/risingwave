@@ -139,10 +139,9 @@ mysql -e "
         (18446251075179777772, 4294967295, 65535, 255, 'debezium');
 "
 
-sleep 3s
 
 # Verify total count in RisingWave (50 backfill + 3 debezium = 53)
-query I
+query I retry 4 backoff 1s
 select count(*) as row_cnt from rw_unsigned_int_upcast;
 ----
 53

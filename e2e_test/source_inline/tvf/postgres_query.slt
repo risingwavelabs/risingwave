@@ -38,9 +38,8 @@ create source postgres_cdc_source with (
   database.name = 'source_test'
 );
 
-sleep 1s
 
-query II
+query II retry 4 backoff 1s
 select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '$PGPASSWORD', 'source_test', 'select * from test where id > 90;');
 ----
 91 t 1 1 1 1 1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 08:00:00+00:00 text varchar 1 day {} \x01

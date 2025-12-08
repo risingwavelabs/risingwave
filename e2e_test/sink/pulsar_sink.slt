@@ -44,9 +44,8 @@ FLUSH;
 
 # We can't control Sink -> Source Table
 # latency. We just have to wait.
-sleep 5s
 
-query IT rowsort
+query IT rowsort retry 6 backoff 1s
 SELECT * FROM pulsar_source;
 ----
 1 test1

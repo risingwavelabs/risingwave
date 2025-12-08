@@ -98,7 +98,7 @@ select id from t_refresh order by id;
 
 
 # wait for refresh
-query I retry 10 backoff 1s
+query I retry 11 backoff 1s
 select id from iceberg_batch_table order by id;
 ----
 1
@@ -122,9 +122,8 @@ delete from t_refresh where name = 'zzz' and foo = 'c';
 statement ok
 flush;
 
-sleep 10s
 
-query ?
+query ? retry 11 backoff 1s
 select count(*) = 1 from rw_iceberg_files where source_name = '__iceberg_source_t_refresh' and content = 'EqualityDeletes';
 ----
 t

@@ -30,8 +30,7 @@ insert into t values(1, 'xxx');
 statement ok
 FLUSH;
 
-sleep 5s
-query ??
+query ?? retry 6 backoff 1s
 select * from t;
 ----
 1 xxx
@@ -77,8 +76,7 @@ INSERT INTO full_type_t VALUES
 statement ok
 FLUSH;
 
-sleep 5s
-query ????????????????? rowsort
+query ????????????????? rowsort retry 6 backoff 1s
 select * from full_type_t
 ----
 1 1 1 1000 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.1100000000 {1:100,2:200} {1,2,3} (1,2) {"a": "foo", "b": "bar"} (1,1,1,1000,1.1,1.11,1-1,t,2022-03-11,"2022-03-11 01:00:00+00:00","2022-03-11 01:00:00",1.1100000000,"{""a"": ""foo"", ""b"": ""bar""}") {"(1,\"{1:(\"\"\\\\\\\\xdeadbeef\"\"),2:(\"\"\\\\\\\\xdeadbeef\"\")}\")","(2,\"{3:(\"\"\\\\\\\\xdeadbeef\"\"),4:(\"\"\\\\\\\\xdeadbeef\"\")}\")"}
@@ -151,9 +149,8 @@ insert into t_without_pk values('xxx');
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ?
+query ? retry 6 backoff 1s
 select * from t_without_pk;
 ----
 xxx
@@ -185,8 +182,7 @@ INSERT INTO price (id, price, date) VALUES
 statement ok
 FLUSH;
 
-sleep 5s
-query ??? rowsort
+query ??? rowsort retry 6 backoff 1s
 SELECT id, price, date FROM price WHERE date <= DATE '2025-02-10' - interval '5' day;
 ----
 1 100.5000000000 2025-02-01
@@ -231,8 +227,7 @@ insert into t_hosted_catalog values(1, 'xxx');
 statement ok
 FLUSH;
 
-sleep 5s
-query ??
+query ?? retry 6 backoff 1s
 select * from t_hosted_catalog;
 ----
 1 xxx

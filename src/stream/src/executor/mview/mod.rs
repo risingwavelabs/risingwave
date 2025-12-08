@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod cache;
 pub mod materialize;
 pub mod refresh_progress_table;
 
@@ -19,6 +20,4 @@ pub mod refresh_progress_table;
 pub(crate) mod test_utils;
 
 pub use materialize::*;
-pub use refresh_progress_table::{
-    ProgressRefreshStage, RefreshProgressEntry, RefreshProgressStats, RefreshProgressTable,
-};
+pub use refresh_progress_table::RefreshProgressTable;

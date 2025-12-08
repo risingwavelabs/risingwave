@@ -62,3 +62,23 @@
     ) WHERE rank <= 1;
   expected_outputs:
     - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t (
+      id int
+    , p1 int
+    , p2 int
+    , time int
+    , v1 int
+    , v2 int
+    );
+    select
+        *
+        , lag(v1, 0) over (partition by p1 order by id) as out5
+        , lag(v1, 1) over (partition by p1, p2 order by id) as out6
+        , lag(v1) over (partition by p1, p2 order by time, id) as out7
+        , lead(v2, 1) over (partition by p1, p2 order by time, id) as out8
+        , lead(v2, 2) over (partition by p1, p2 order by v1, v2) as out9
+    from t;
+  expected_outputs:
+    - stream_plan

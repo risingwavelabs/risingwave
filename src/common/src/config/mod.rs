@@ -37,6 +37,7 @@ pub use storage::{
     extract_storage_memory_config,
 };
 pub mod merge;
+pub mod mutate;
 pub mod system;
 pub mod utils;
 
@@ -345,7 +346,7 @@ pub mod default {
         }
 
         pub fn enable_actor_tokio_metrics() -> bool {
-            false
+            true
         }
 
         pub fn stream_enable_auto_schema_change() -> bool {
@@ -392,6 +393,14 @@ pub mod default {
         pub fn refresh_scheduler_interval_sec() -> u64 {
             60
         }
+
+        pub fn sync_log_store_pause_duration_ms() -> usize {
+            64
+        }
+
+        pub fn sync_log_store_buffer_size() -> usize {
+            2048
+        }
     }
 }
 
@@ -401,6 +410,7 @@ pub const MAX_BLOCK_CACHE_SHARD_BITS: usize = 6; // It means that there will be 
 
 #[cfg(test)]
 pub mod tests {
+    use expect_test::expect;
     use risingwave_license::LicenseKey;
 
     use super::*;
@@ -628,5 +638,72 @@ pub mod tests {
             assert_eq!(config.meta.table_high_write_throughput_threshold, 10);
             assert_eq!(config.meta.table_low_write_throughput_threshold, 5);
         }
+    }
+
+    // Previously, we have prefixes like `stream_` for all configs under `streaming.developer`.
+    // Later we removed the prefixes, but we still want to guarantee the backward compatibility.
+    #[test]
+    fn test_prefix_alias() {
+        let config: RwConfig = toml::from_str(
+            "
+            [streaming.developer]
+            stream_chunk_size = 114514
+
+            [streaming.developer.stream_compute_client_config]
+            connect_timeout_secs = 42
+            ",
+        )
+        .unwrap();
+
+        assert_eq!(config.streaming.developer.chunk_size, 114514);
+        assert_eq!(
+            config
+                .streaming
+                .developer
+                .compute_client_config
+                .connect_timeout_secs,
+            42
+        );
+    }
+
+    #[test]
+    fn test_prefix_alias_duplicate() {
+        let config = toml::from_str::<RwConfig>(
+            "
+            [streaming.developer]
+            stream_chunk_size = 114514
+            chunk_size = 1919810
+            ",
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 2, column 13
+              |
+            2 |             [streaming.developer]
+              |             ^^^^^^^^^^^^^^^^^^^^^
+            duplicate field `chunk_size`
+        "#]]
+        .assert_eq(&config.to_string());
+
+        let config = toml::from_str::<RwConfig>(
+            "
+            [streaming.developer.stream_compute_client_config]
+            connect_timeout_secs = 5
+
+            [streaming.developer.compute_client_config]
+            connect_timeout_secs = 10
+            ",
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 2, column 24
+              |
+            2 |             [streaming.developer.stream_compute_client_config]
+              |                        ^^^^^^^^^
+            duplicate field `compute_client_config`
+        "#]]
+        .assert_eq(&config.to_string());
     }
 }

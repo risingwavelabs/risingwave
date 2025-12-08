@@ -166,9 +166,9 @@
     select * from t1 Union select * from t2;
   stream_plan: |-
     StreamMaterialize { columns: [ts, v1, v2], stream_key: [ts, v1, v2], pk_columns: [ts, v1, v2], pk_conflict: NoCheck, watermark_columns: [ts] }
-    └─StreamAppendOnlyDedup { dedup_cols: [t1.ts, t1.v1, t1.v2] }
-      └─StreamExchange { dist: HashShard(t1.ts, t1.v1, t1.v2) }
-        └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2], output_watermarks: [[t1.ts]] }
+    └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2], output_watermarks: [[t1.ts]] }
+      └─StreamAppendOnlyDedup { dedup_cols: [t1.ts, t1.v1, t1.v2] }
+        └─StreamExchange { dist: HashShard(t1.ts, t1.v1, t1.v2) }
           └─StreamUnion { all: true, output_watermarks: [[t1.ts]] }
             ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
             │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, 0:Int32], output_watermarks: [[t1.ts]] }

@@ -1,0 +1,145 @@
+statement ok
+create table cf (v int);
+
+statement ok
+alter table cf set config (
+    streaming.developer.chunk_size = 511,
+    streaming.developer.join_encoding_type = "cpu_optimized",
+    streaming.developer.enable_executor_row_count = TrUe
+);
+
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf';
+----
+cf	streaming.developer.chunk_size	511
+cf	streaming.developer.enable_executor_row_count	true
+cf	streaming.developer.join_encoding_type	"cpu_optimized"
+
+# Update existing override
+statement ok
+alter table cf set config (
+    streaming.developer.chunk_size = 1023
+);
+
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf';
+----
+cf	streaming.developer.chunk_size	1023
+cf	streaming.developer.enable_executor_row_count	true
+cf	streaming.developer.join_encoding_type	"cpu_optimized"
+
+# Reset to default with `NULL`
+statement ok
+alter table cf set config (
+    streaming.developer.chunk_size = NULL
+)
+
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf';
+----
+cf	streaming.developer.enable_executor_row_count	true
+cf	streaming.developer.join_encoding_type	"cpu_optimized"
+
+# Reset to default with `reset`
+statement ok
+alter table cf reset config (
+    streaming.developer.join_encoding_type,
+    streaming.developer.enable_executor_row_count
+);
+
+query TTT
+select name, key, value from rw_streaming_job_config where name = 'cf';
+----
+
+# Error: duplicated key
+statement error
+alter table cf set config (
+    streaming.developer.chunk_size = 512,
+    streaming.developer.chunk_size = 1024
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: Duplicate option for ALTER CONFIG: streaming.developer.chunk_size
+
+
+# Error: not streaming configuration
+statement error
+alter table cf set config (
+    batch.not_streaming = 1
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid input syntax: ALTER CONFIG only accepts options starting with `streaming.`
+
+
+# Error: invalid type
+skipif madsim
+statement error
+alter table cf set config (
+    streaming.developer.chunk_size = "omakase"
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/AlterStreamingJobConfig`) failed: Internal error
+  2: invalid streaming job config override
+  3: failed to deserialize merged config
+  4: invalid type: string "omakase", expected usize
+in `developer.chunk_size`
+
+
+# Error: invalid value
+skipif madsim
+statement error
+alter table cf set config (
+    streaming.developer.join_encoding_type = "nothing_optimized"
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/AlterStreamingJobConfig`) failed: Internal error
+  2: invalid streaming job config override
+  3: failed to deserialize merged config
+  4: expect one of [memory_optimized, cpu_optimized]
+in `developer.join_encoding_type`
+
+
+# Error: unrecognized key
+statement error
+alter table cf set config (
+    streaming.unknown = 1,
+    streaming.developer.dev_unknown = 2
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Invalid Parameter Value: Invalid parameter: unrecognized configs: ["streaming.unknown", "streaming.developer.dev_unknown"]
+
+
+# Error: using deprecated prefixed config key
+skipif madsim
+statement error
+alter table cf set config (
+    streaming.developer.stream_chunk_size = 512
+);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/AlterStreamingJobConfig`) failed: Internal error
+  2: invalid streaming job config override
+  3: failed to deserialize merged config
+  4: duplicate field `chunk_size`
+in `developer`
+
+
+
+statement ok
+drop table cf;

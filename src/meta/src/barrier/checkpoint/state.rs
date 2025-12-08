@@ -177,7 +177,7 @@ impl BarrierWorkerState {
             }) => {
                 self.database_info.register_subscriber(
                     upstream_mv_table_id.as_job_id(),
-                    subscription_id.as_raw_id(),
+                    subscription_id.as_subscriber_id(),
                     SubscriberType::Subscription(*retention_second),
                 );
             }
@@ -192,7 +192,7 @@ impl BarrierWorkerState {
                 {
                     self.database_info.register_subscriber(
                         upstream_mv_table_id.as_job_id(),
-                        info.streaming_job.id().as_raw_id(),
+                        info.streaming_job.id().as_subscriber_id(),
                         SubscriberType::SnapshotBackfill,
                     );
                 }
@@ -244,7 +244,7 @@ impl BarrierWorkerState {
                     .database_info
                     .unregister_subscriber(
                         upstream_mv_table_id.as_job_id(),
-                        subscription_id.as_raw_id(),
+                        subscription_id.as_subscriber_id(),
                     )
                     .is_none()
                 {
@@ -257,7 +257,7 @@ impl BarrierWorkerState {
                         assert_matches!(
                             self.database_info.unregister_subscriber(
                                 upstream_mv_table_id.as_job_id(),
-                                snapshot_backfill_job_id.as_raw_id()
+                                snapshot_backfill_job_id.as_subscriber_id()
                             ),
                             Some(SubscriberType::SnapshotBackfill)
                         );

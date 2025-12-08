@@ -38,6 +38,10 @@ public class NoDataRecoverySnapshotter extends NoDataSnapshotter {
             return false;
         }
 
+        if (!offsetExists || snapshotInProgress) {
+            return true;
+        }
+
         boolean should = !((HistorizedDatabaseSchema) databaseSchema).getSchemaHistory().exists();
         LOGGER.debug("shouldSnapshotSchema {}", should);
         return should;

@@ -21,8 +21,7 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
 use super::*;
-use crate::executor::MaterializeExecutor;
-use crate::executor::materialize::RefreshableMaterializeArgs;
+use crate::executor::{MaterializeExecutor, RefreshableMaterializeArgs};
 
 pub struct MaterializeExecutorBuilder;
 

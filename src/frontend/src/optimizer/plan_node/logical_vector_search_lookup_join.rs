@@ -66,17 +66,14 @@ impl VectorSearchLookupJoinCore {
     }
 
     fn struct_type(&self) -> StructType {
-        StructType::new(
+        StructType::row_expr_type(
             self.lookup_output_indices
                 .iter()
                 .map(|i| {
                     let field = &self.lookup.schema().fields[*i];
-                    (field.name.clone(), field.data_type.clone())
+                    field.data_type.clone()
                 })
-                .chain(
-                    self.include_distance
-                        .then(|| ("vector_distance".to_owned(), VECTOR_DISTANCE_TYPE)),
-                ),
+                .chain(self.include_distance.then_some(VECTOR_DISTANCE_TYPE)),
         )
     }
 }
