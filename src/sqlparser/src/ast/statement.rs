@@ -278,7 +278,7 @@ impl Parser<'_> {
             } else {
                 FormatEncodeOptions::native().into()
             })
-        } else if connector.contains("iceberg") {
+        } else if connector.contains("iceberg") || connector.contains("adbc_snowflake") {
             let expected = FormatEncodeOptions::none();
             if self.peek_format_encode_format() {
                 let schema = parse_format_encode(self)?.into_v2();
