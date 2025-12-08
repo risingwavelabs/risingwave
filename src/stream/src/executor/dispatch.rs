@@ -109,7 +109,7 @@ impl DispatchExecutorMetrics {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: ActorId,
-    config: Arc<StreamingConfig>,
+    actor_config: Arc<StreamingConfig>,
     metrics: DispatchExecutorMetrics,
     new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     pending_new_output_requests: HashMap<ActorId, NewOutputRequest>,
@@ -185,7 +185,7 @@ impl DispatchExecutorInner {
             }};
         }
 
-        let limit = self.config.developer.exchange_concurrent_dispatchers;
+        let limit = self.actor_config.developer.exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
         match msg {
             MessageBatch::BarrierBatch(barrier_batch) => {
@@ -423,7 +423,7 @@ impl DispatchExecutor {
         dispatchers: Vec<DispatcherImpl>,
         actor_id: ActorId,
         fragment_id: FragmentId,
-        config: Arc<StreamingConfig>,
+        actor_config: Arc<StreamingConfig>,
         metrics: Arc<StreamingMetrics>,
     ) -> (
         Self,
@@ -438,7 +438,7 @@ impl DispatchExecutor {
                 dispatchers,
                 actor_id,
                 fragment_id,
-                config,
+                actor_config,
                 metrics,
             ),
             tx,
@@ -451,14 +451,14 @@ impl DispatchExecutor {
         dispatchers: Vec<DispatcherImpl>,
         actor_id: ActorId,
         fragment_id: FragmentId,
-        config: Arc<StreamingConfig>,
+        actor_config: Arc<StreamingConfig>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
             let mut info = input.info().clone();
             info.identity = format!("{} (embedded trouble)", info.identity);
-            let troublemaker = TroublemakerExecutor::new(input, config.developer.chunk_size);
+            let troublemaker = TroublemakerExecutor::new(input, actor_config.developer.chunk_size);
             input = (info, troublemaker).into();
         }
 
@@ -483,7 +483,7 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                config,
+                actor_config,
                 metrics,
                 new_output_request_rx,
                 pending_new_output_requests: Default::default(),
@@ -496,7 +496,7 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        let max_barrier_count_per_batch = self.inner.config.developer.max_barrier_batch_size;
+        let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
         #[try_stream]
         async move {
             let mut input = self.input.execute().peekable();
