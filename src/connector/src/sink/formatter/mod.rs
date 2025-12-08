@@ -92,7 +92,7 @@ pub enum SinkFormatterImpl {
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
     AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
     AppendOnlyBytesTemplate(AppendOnlyFormatter<BytesEncoder, TemplateEncoder>),
-    AppendOnlyBytes(AppendOnlyFormatter<JsonEncoder, BytesEncoder>),
+    AppendOnlyBytesBytes(AppendOnlyFormatter<BytesEncoder, BytesEncoder>),
     // upsert
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
@@ -550,7 +550,7 @@ impl SinkFormatterImpl {
                     Impl::AppendOnlyBytesTemplate(build(p).await?)
                 }
                 (F::AppendOnly, E::Template, None) => Impl::AppendOnlyTemplate(build(p).await?),
-                (F::AppendOnly, E::Bytes, None) => Impl::AppendOnlyBytes(build(p).await?),
+                (F::AppendOnly, E::Bytes, None) => Impl::AppendOnlyBytesBytes(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Text)) => Impl::UpsertTextJson(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Bytes)) => {
                     Impl::UpsertBytesJson(build(p).await?)
@@ -585,7 +585,7 @@ impl SinkFormatterImpl {
                 | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text | E::Bytes, _)
                 | (_, E::Parquet, _)
                 | (_, _, Some(E::Parquet))
-                | (F::AppendOnly, E::Bytes, _)
+                | (F::AppendOnly, E::Bytes, Some(_))
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
                 => {
                     return Err(SinkError::Config(anyhow!(
@@ -634,7 +634,7 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::UpsertTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyBytesTemplate($name) => $body,
             SinkFormatterImpl::UpsertBytesTemplate($name) => $body,
-            SinkFormatterImpl::AppendOnlyBytes($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesBytes($name) => $body,
         }
     };
 }
@@ -676,7 +676,7 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
             SinkFormatterImpl::UpsertTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyBytesTemplate(_) => unreachable!(),
             SinkFormatterImpl::UpsertBytesTemplate(_) => unreachable!(),
-            SinkFormatterImpl::AppendOnlyBytes($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesBytes($name) => unreachable!(),
         }
     };
 }
