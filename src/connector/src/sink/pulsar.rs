@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::BoxFuture;
 use futures::{FutureExt, TryFuture, TryFutureExt};
 use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
@@ -67,10 +66,10 @@ fn pulsar_to_sink_err(e: pulsar::Error) -> SinkError {
     SinkError::Pulsar(anyhow!(e))
 }
 
-fn build_pulsar_producer<'a>(
-    pulsar: &'a Pulsar<TokioExecutor>,
-    config: &'a PulsarConfig,
-) -> BoxFuture<'a, Result<Producer<TokioExecutor>>> {
+async fn build_pulsar_producer(
+    pulsar: &Pulsar<TokioExecutor>,
+    config: &PulsarConfig,
+) -> Result<Producer<TokioExecutor>> {
     pulsar
         .producer()
         .with_options(ProducerOptions {
@@ -81,7 +80,7 @@ fn build_pulsar_producer<'a>(
         .with_topic(&config.common.topic)
         .build()
         .map_err(pulsar_to_sink_err)
-        .boxed()
+        .await
 }
 
 #[serde_as]
@@ -263,37 +262,34 @@ pub use opaque_type::PulsarDeliveryFuture;
 use opaque_type::may_delivery_future;
 
 impl PulsarSinkWriter {
-    pub fn new(
+    pub async fn new(
         config: PulsarConfig,
         schema: Schema,
         downstream_pk: Vec<usize>,
         format_desc: &SinkFormatDesc,
         db_name: String,
         sink_from_name: String,
-    ) -> BoxFuture<'_, Result<Self>> {
-        async move {
-            let formatter = SinkFormatterImpl::new(
-                format_desc,
-                schema,
-                downstream_pk,
-                db_name,
-                sink_from_name,
-                &config.common.topic,
-            )
+    ) -> Result<Self> {
+        let formatter = SinkFormatterImpl::new(
+            format_desc,
+            schema,
+            downstream_pk,
+            db_name,
+            sink_from_name,
+            &config.common.topic,
+        )
+        .await?;
+        let pulsar = config
+            .common
+            .build_client(&config.oauth, &config.aws_auth_props)
             .await?;
-            let pulsar = config
-                .common
-                .build_client(&config.oauth, &config.aws_auth_props)
-                .await?;
-            let producer = build_pulsar_producer(&pulsar, &config).await?;
-            Ok(Self {
-                formatter,
-                pulsar,
-                producer,
-                config,
-            })
-        }
-        .boxed()
+        let producer = build_pulsar_producer(&pulsar, &config).await?;
+        Ok(Self {
+            formatter,
+            pulsar,
+            producer,
+            config,
+        })
     }
 }
 

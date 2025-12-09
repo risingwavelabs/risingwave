@@ -904,7 +904,8 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflec
 fn to_gcloud_descriptor(desc: &DescriptorProto) -> Result<DescriptorProto014> {
     let bytes = Message::encode_to_vec(desc);
     Message014::decode(bytes.as_slice())
-        .map_err(|e| SinkError::BigQuery(anyhow!(e).context("failed to convert descriptor proto")))
+        .context("failed to convert descriptor proto")
+        .map_err(SinkError::BigQuery)
 }
 
 fn build_protobuf_schema<'a>(

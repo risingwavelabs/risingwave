@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, ConflictBehavior, Field, TableId, checked_conflict_behaviors,
+    ColumnDesc, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, RowExt};
@@ -1041,9 +1041,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         let columns: Vec<ColumnDesc> = column_ids
             .into_iter()
             .zip_eq_fast(schema.fields.iter())
-            .map(|(column_id, field): (ColumnId, &Field)| {
-                ColumnDesc::unnamed(column_id, field.data_type())
-            })
+            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
         let row_serde = BasicSerde::new(

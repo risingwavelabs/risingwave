@@ -286,13 +286,12 @@ fn create_wasm_runtime(binary: &[u8]) -> Result<Runtime> {
 
     use md5::Digest as _;
     let md5 = md5::Md5::digest(binary);
-    let md5_key: [u8; 16] = md5.into();
-    if let Some(runtime) = RUNTIMES.get(&md5_key) {
+    if let Some(runtime) = RUNTIMES.get(md5.as_slice()) {
         return Ok(runtime);
     }
 
     let runtime = Runtime::new(binary)?;
-    RUNTIMES.insert(md5_key, runtime.clone());
+    RUNTIMES.insert(md5.into(), runtime.clone());
     Ok(runtime)
 }
 

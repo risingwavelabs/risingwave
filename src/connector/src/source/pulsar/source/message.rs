@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use prost_011::Message as _;
-use pulsar::consumer::Message as PulsarMessage;
+use pulsar::consumer::Message;
 
 use crate::source::{SourceMessage, SourceMeta};
 
@@ -23,8 +23,8 @@ pub struct PulsarMeta {
     pub ack_message_id: Option<Vec<u8>>,
 }
 
-impl From<PulsarMessage<Vec<u8>>> for SourceMessage {
-    fn from(msg: PulsarMessage<Vec<u8>>) -> Self {
+impl From<Message<Vec<u8>>> for SourceMessage {
+    fn from(msg: Message<Vec<u8>>) -> Self {
         let message_id = msg.message_id.id;
         let ack_data_bytes = message_id.encode_to_vec();
 

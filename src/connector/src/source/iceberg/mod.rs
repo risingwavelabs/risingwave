@@ -522,7 +522,7 @@ impl IcebergSplitEnumerator {
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
         let schema = scan
             .snapshot()
-            .ok_or_else(|| anyhow!("snapshot not found"))?
+            .context("snapshot not found")?
             .schema(table.metadata())?;
         let mut equality_ids: Option<Vec<i32>> = None;
         let mut have_position_delete = false;
