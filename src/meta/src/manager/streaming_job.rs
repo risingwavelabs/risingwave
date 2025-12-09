@@ -324,7 +324,9 @@ impl StreamingJob {
 
     // Check whether we should notify the FE about the `CREATING` catalog of this job.
     pub fn should_notify_creating(&self) -> bool {
-        self.is_materialized_view() || matches!(self.create_type(), CreateType::Background)
+        self.is_materialized_view()
+            || self.is_sink()
+            || matches!(self.create_type(), CreateType::Background)
     }
 
     pub fn is_sink_into_table(&self) -> bool {

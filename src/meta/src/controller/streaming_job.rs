@@ -1108,6 +1108,9 @@ impl CatalogController {
                 if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
                     need_grant_default_privileges = false;
                 }
+                // If sinks were pre-notified during CREATING, we should use Update at finish
+                // to avoid duplicate Add notifications (align with MV behavior).
+                notification_op = NotificationOperation::Update;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
                 });
