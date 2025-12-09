@@ -213,9 +213,6 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
-
-  // Record the actors that the barrier has passed. Only used for debugging.
-  repeated uint32 passed_actors = 255;
 }
 
 message Watermark {

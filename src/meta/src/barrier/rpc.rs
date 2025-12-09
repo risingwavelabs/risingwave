@@ -1005,7 +1005,6 @@ impl ControlStreamManager {
                         tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span())
                             .to_protobuf(),
                         kind: barrier_info.kind.to_protobuf() as i32,
-                        passed_actors: vec![],
                     };
 
                     node.handle
