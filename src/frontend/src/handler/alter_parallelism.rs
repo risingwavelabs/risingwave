@@ -25,7 +25,7 @@ use super::alter_utils::resolve_streaming_job_id_for_alter;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::FragmentId;
 use crate::error::{ErrorCode, Result};
-use crate::handler::util::execute_with_long_running_notification;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 
 pub async fn handle_alter_parallelism(
     handler_args: HandlerArgs,
@@ -47,6 +47,7 @@ pub async fn handle_alter_parallelism(
         catalog_writer.alter_parallelism(job_id, target_parallelism, deferred),
         &session,
         "ALTER PARALLELISM",
+        LongRunningNotificationAction::SuggestRecover,
     )
     .await?;
 

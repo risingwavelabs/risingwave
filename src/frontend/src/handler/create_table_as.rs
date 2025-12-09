@@ -27,7 +27,7 @@ use crate::handler::create_table::{
     ColumnIdGenerator, CreateTableProps, gen_create_table_plan_without_source,
 };
 use crate::handler::query::handle_query;
-use crate::handler::util::execute_with_long_running_notification;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::stream_fragmenter::GraphJobType;
 use crate::{Binder, OptimizerContext, build_graph};
 
@@ -153,6 +153,7 @@ pub async fn handle_create_as(
         ),
         &session,
         "CREATE TABLE AS",
+        LongRunningNotificationAction::DiagnoseBarrierLatency,
     )
     .await?;
 

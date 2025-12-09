@@ -76,7 +76,9 @@ use crate::handler::create_source::{
     UPSTREAM_SOURCE_KEY, bind_connector_props, bind_create_source_or_table_with_connector,
     bind_source_watermark, handle_addition_columns,
 };
-use crate::handler::util::{SourceSchemaCompatExt, execute_with_long_running_notification};
+use crate::handler::util::{
+    LongRunningNotificationAction, SourceSchemaCompatExt, execute_with_long_running_notification,
+};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, build_cdc_scan_options_with_options};
 use crate::optimizer::plan_node::{
     LogicalCdcScan, LogicalPlanRef, LogicalSource, StreamPlanRef as PlanRef,
@@ -1473,6 +1475,10 @@ pub async fn handle_create_table(
     match engine {
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
+            let action = match job_type {
+                TableJobType::SharedCdcSource => LongRunningNotificationAction::MonitorBackfillJob,
+                _ => LongRunningNotificationAction::DiagnoseBarrierLatency,
+            };
             execute_with_long_running_notification(
                 catalog_writer.create_table(
                     source.map(|s| s.to_prost()),
@@ -1484,6 +1490,7 @@ pub async fn handle_create_table(
                 ),
                 &session,
                 "CREATE HUMMOCK TABLE",
+                action,
             )
             .await?;
         }
@@ -2232,6 +2239,10 @@ pub async fn create_iceberg_engine_table(
     let _ = Jvm::get_or_init()?;
 
     let catalog_writer = session.catalog_writer()?;
+    let action = match job_type {
+        TableJobType::SharedCdcSource => LongRunningNotificationAction::MonitorBackfillJob,
+        _ => LongRunningNotificationAction::DiagnoseBarrierLatency,
+    };
     let res = execute_with_long_running_notification(
         catalog_writer.create_iceberg_table(
             PbTableJobInfo {
@@ -2249,6 +2260,7 @@ pub async fn create_iceberg_engine_table(
         ),
         &session,
         "CREATE ICEBERG TABLE",
+        action,
     )
     .await;
 

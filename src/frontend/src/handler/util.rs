@@ -337,10 +337,43 @@ pub fn get_table_catalog_by_table_name(
 ///     "DROP TABLE",
 /// ).await?;
 /// ```
+#[derive(Clone, Copy)]
+pub enum LongRunningNotificationAction {
+    SuggestRecover,
+    DiagnoseBarrierLatency,
+    MonitorBackfillJob,
+}
+
+impl LongRunningNotificationAction {
+    fn build_message(self, operation_name: &str, notify_timeout_secs: u32) -> String {
+        match self {
+            LongRunningNotificationAction::SuggestRecover => format!(
+                "{} has taken more than {} secs, likely due to high barrier latency.\n\
+                You may trigger cluster recovery to let {} take effect immediately.\n\
+                Run RECOVER in a separate session to trigger recovery.\n\
+                See: https://docs.risingwave.com/sql/commands/sql-recover#recover",
+                operation_name, notify_timeout_secs, operation_name
+            ),
+            LongRunningNotificationAction::DiagnoseBarrierLatency => format!(
+                "{} has taken more than {} secs, likely due to high barrier latency.\n\
+                See: https://docs.risingwave.com/performance/metrics#barrier-monitoring for steps to diagnose high barrier latency.",
+                operation_name, notify_timeout_secs
+            ),
+            LongRunningNotificationAction::MonitorBackfillJob => format!(
+                "{} has taken more than {} secs; barrier latency might be high. Please check barrier latency metrics to confirm.\n\
+                You can also run SHOW JOBS to track the progress of the job.\n\
+                See: https://docs.risingwave.com/performance/metrics#barrier-monitoring and https://docs.risingwave.com/sql/commands/sql-show-jobs",
+                operation_name, notify_timeout_secs
+            ),
+        }
+    }
+}
+
 pub async fn execute_with_long_running_notification<F, T>(
     operation_fut: F,
     session: &SessionImpl,
     operation_name: &str,
+    action: LongRunningNotificationAction,
 ) -> RwResult<T>
 where
     F: std::future::Future<Output = RwResult<T>>,
@@ -357,13 +390,7 @@ where
 
     select! {
         _ = notify_fut => {
-            session.notice_to_user(format!(
-                "{} has taken more than {} secs, likely due to high barrier latency.\n\
-                You may trigger cluster recovery to let {} take effect immediately.\n\
-                Run RECOVER in a separate session to trigger recovery.\n\
-                See: https://docs.risingwave.com/sql/commands/sql-recover#recover",
-                operation_name, notify_timeout_secs, operation_name
-            ));
+            session.notice_to_user(action.build_message(operation_name, notify_timeout_secs));
             operation_fut.await
         }
         result = &mut operation_fut => {

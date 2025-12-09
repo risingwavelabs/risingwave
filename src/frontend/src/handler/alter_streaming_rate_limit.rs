@@ -22,7 +22,7 @@ use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
-use crate::handler::util::execute_with_long_running_notification;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::session::SessionImpl;
 
 pub async fn handle_alter_streaming_rate_limit(
@@ -113,6 +113,7 @@ pub async fn handle_alter_streaming_rate_limit(
         handle_alter_streaming_rate_limit_by_id(&session, kind, id, rate_limit, stmt_type),
         &session,
         "ALTER STREAMING RATE LIMIT",
+        LongRunningNotificationAction::SuggestRecover,
     )
     .await
 }

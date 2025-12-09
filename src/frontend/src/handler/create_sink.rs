@@ -61,7 +61,10 @@ use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
+use crate::handler::util::{
+    LongRunningNotificationAction, check_connector_match_connection_type,
+    ensure_connection_type_allowed, execute_with_long_running_notification,
+};
 use crate::optimizer::plan_node::{
     IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
     StreamProject, generic,
@@ -617,9 +620,13 @@ pub async fn handle_create_sink(
             ));
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_sink(sink.to_proto(), graph, dependencies, if_not_exists)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.create_sink(sink.to_proto(), graph, dependencies, if_not_exists),
+        &session,
+        "CREATE SINK",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
