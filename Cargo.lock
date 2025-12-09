@@ -13058,6 +13058,7 @@ dependencies = [
  "moka",
  "multimap 0.10.0",
  "parking_lot 0.12.5",
+ "paste",
  "pin-project",
  "pretty_assertions",
  "prometheus",
