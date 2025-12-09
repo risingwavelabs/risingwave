@@ -49,7 +49,8 @@ use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
-use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
+use risingwave_pb::task_service::batch_exchange_service_server::BatchExchangeServiceServer;
+use risingwave_pb::task_service::stream_exchange_service_server::StreamExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_storage::StateStoreImpl;
@@ -457,7 +458,13 @@ pub async fn compute_node_serve(
         .layer(TracingExtractLayer::new())
         // XXX: unlimit the max message size to allow arbitrary large SQL input.
         .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
-        .add_service(ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX))
+        .add_service(
+            BatchExchangeServiceServer::new(exchange_srv.clone())
+                .max_decoding_message_size(usize::MAX),
+        )
+        .add_service(
+            StreamExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX),
+        )
         .add_service({
             let await_tree_reg = stream_srv.mgr.await_tree_reg().cloned();
             let srv = StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);

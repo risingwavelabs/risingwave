@@ -20,7 +20,8 @@ use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
 use risingwave_pb::id::FragmentId;
-use risingwave_pb::task_service::exchange_service_server::ExchangeService;
+use risingwave_pb::task_service::batch_exchange_service_server::BatchExchangeService;
+use risingwave_pb::task_service::stream_exchange_service_server::StreamExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits, permits,
 };
@@ -44,9 +45,8 @@ pub type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, S
 pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
 
 #[async_trait::async_trait]
-impl ExchangeService for ExchangeServiceImpl {
+impl BatchExchangeService for ExchangeServiceImpl {
     type GetDataStream = BatchDataStream;
-    type GetStreamStream = StreamDataStream;
 
     async fn get_data(
         &self,
@@ -72,6 +72,11 @@ impl ExchangeService for ExchangeServiceImpl {
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }
+}
+
+#[async_trait::async_trait]
+impl StreamExchangeService for ExchangeServiceImpl {
+    type GetStreamStream = StreamDataStream;
 
     #[define_opaque(StreamDataStream)]
     async fn get_stream(
