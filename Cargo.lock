@@ -2041,7 +2041,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.11.0",
  "log",
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -5134,7 +5134,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.111",
- "unicode-xid",
 ]
 
 [[package]]
@@ -6784,6 +6783,15 @@ dependencies = [
 
 [[package]]
 name = "hashlink"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
+dependencies = [
+ "hashbrown 0.14.5",
+]
+
+[[package]]
+name = "hashlink"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
@@ -7156,7 +7164,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -7189,7 +7197,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -7236,7 +7244,7 @@ dependencies = [
  "num-bigint",
  "once_cell",
  "opendal 0.54.1",
- "ordered-float 4.6.0",
+ "ordered-float 4.1.1",
  "parquet 56.2.0",
  "rand 0.8.5",
  "reqsign",
@@ -7581,6 +7589,15 @@ name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
 dependencies = [
  "either",
 ]
@@ -9530,9 +9547,18 @@ dependencies = [
 
 [[package]]
 name = "ordered-float"
-version = "4.6.0"
+version = "3.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bb71e1b3fa6ca1c61f383464aaf2bb0e2f8e772a1f01d486832464de363b951"
+checksum = "2a54938017eacd63036332b4ae5c8a49fc8c0c1d6d629893057e4f13609edd06"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "ordered-float"
+version = "4.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "536900a8093134cf9ccf00a27deb3532421099e958d9dd431135d0c7543ca1e8"
 dependencies = [
  "num-traits",
 ]
@@ -9984,15 +10010,6 @@ dependencies = [
  "bytes",
  "chrono",
  "postgres-types",
-]
-
-[[package]]
-name = "pgvector"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc58e2d255979a31caa7cabfa7aac654af0354220719ab7a68520ae7a91e8c0b"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -10678,8 +10695,8 @@ name = "prost-build"
 version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.13.0",
+ "heck 0.4.1",
+ "itertools 0.11.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -10711,7 +10728,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -10724,7 +10741,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -14112,19 +14129,17 @@ dependencies = [
 
 [[package]]
 name = "sea-orm"
-version = "1.1.19"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d945f62558fac19e5988680d2fdf747b734c2dbc6ce2cb81ba33ed8dde5b103"
+checksum = "d5680a8b686985116607ef5f5af2b1f9e1cc2c228330e93101816a0baa279afa"
 dependencies = [
  "async-stream",
  "async-trait",
  "bigdecimal 0.4.8",
  "chrono",
- "derive_more 2.0.1",
- "futures-util",
+ "futures",
  "log",
  "ouroboros",
- "pgvector",
  "rust_decimal",
  "sea-orm-macros",
  "sea-query",
@@ -14133,7 +14148,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "strum 0.26.3",
- "thiserror 2.0.17",
+ "thiserror 1.0.63",
  "time",
  "tracing",
  "url",
@@ -14142,9 +14157,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-cli"
-version = "1.1.19"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c94492e2ab6c045b4cc38013809ce255d14c3d352c9f0d11e6b920e2adc948ad"
+checksum = "70a157f42d291ccbd6e913b9d9b12dbe2ccbcf0472efc60c8715dd1254083aec"
 dependencies = [
  "chrono",
  "clap",
@@ -14152,7 +14167,6 @@ dependencies = [
  "glob",
  "regex",
  "sea-schema",
- "sqlx",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -14160,11 +14174,11 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-macros"
-version = "1.1.19"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84c2e64a50a9cc8339f10a27577e10062c7f995488e469f2c95762c5ee847832"
+checksum = "3a239e3bb1b566ad4ec2654d0d193d6ceddfd733487edc9c21a64d214c773910"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "sea-bae",
@@ -14174,13 +14188,14 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-migration"
-version = "1.1.19"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7315c0cadb7e60fb17ee2bb282aa27d01911fc2a7e5836ec1d4ac37d19250bb4"
+checksum = "63ba07e9f2479cc671758fcb1edee42ff2e32c34b3e67ab41d0af1e41f73c74e"
 dependencies = [
  "async-trait",
  "clap",
  "dotenvy",
+ "futures",
  "sea-orm",
  "sea-orm-cli",
  "sea-schema",
@@ -14190,14 +14205,14 @@ dependencies = [
 
 [[package]]
 name = "sea-query"
-version = "0.32.7"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a5d1c518eaf5eda38e5773f902b26ab6d5e9e9e2bb2349ca6c64cf96f80448c"
+checksum = "085e94f7d7271c0393ac2d164a39994b1dff1b06bc40cd9a0da04f3d672b0fee"
 dependencies = [
  "bigdecimal 0.4.8",
  "chrono",
  "inherent",
- "ordered-float 4.6.0",
+ "ordered-float 3.9.1",
  "rust_decimal",
  "sea-query-derive",
  "serde_json",
@@ -14237,9 +14252,9 @@ dependencies = [
 
 [[package]]
 name = "sea-schema"
-version = "0.16.2"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2239ff574c04858ca77485f112afea1a15e53135d3097d0c86509cef1def1338"
+checksum = "aab1592d17860a9a8584d9b549aebcd06f7bdc3ff615f71752486ba0b05b1e6e"
 dependencies = [
  "futures",
  "sea-query",
@@ -14998,6 +15013,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqlformat"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b7b278788e7be4d0d29c0f39497a0eef3fba6bbc8e70d8bf7fde46edeaa9e85"
+dependencies = [
+ "itertools 0.11.0",
+ "nom",
+ "unicode_categories",
+]
+
+[[package]]
 name = "sqllogictest"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -15067,8 +15093,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx"
-version = "0.8.6"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=8e5389db1c78236d13224968758fe76e68b44748#8e5389db1c78236d13224968758fe76e68b44748"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -15079,36 +15105,41 @@ dependencies = [
 
 [[package]]
 name = "sqlx-core"
-version = "0.8.6"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=8e5389db1c78236d13224968758fe76e68b44748#8e5389db1c78236d13224968758fe76e68b44748"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
- "base64 0.22.1",
+ "atoi",
  "bigdecimal 0.4.8",
+ "byteorder",
  "bytes",
  "chrono",
  "crc",
  "crossbeam-queue",
  "either",
  "event-listener 5.3.1",
+ "futures-channel",
  "futures-core",
  "futures-intrusive",
  "futures-io",
  "futures-util",
- "hashbrown 0.15.5",
- "hashlink",
+ "hashbrown 0.14.5",
+ "hashlink 0.9.1",
+ "hex",
  "indexmap 2.12.0",
  "log",
  "madsim-tokio",
  "memchr",
  "native-tls",
  "once_cell",
+ "paste",
  "percent-encoding",
  "rust_decimal",
  "serde",
  "serde_json",
  "sha2",
  "smallvec",
- "thiserror 2.0.17",
+ "sqlformat",
+ "thiserror 1.0.63",
  "time",
  "tokio-stream 0.1.17",
  "tracing",
@@ -15118,8 +15149,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros"
-version = "0.8.6"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=8e5389db1c78236d13224968758fe76e68b44748#8e5389db1c78236d13224968758fe76e68b44748"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -15130,8 +15161,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros-core"
-version = "0.8.6"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=8e5389db1c78236d13224968758fe76e68b44748#8e5389db1c78236d13224968758fe76e68b44748"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "dotenvy",
  "either",
@@ -15149,13 +15180,14 @@ dependencies = [
  "sqlx-postgres",
  "sqlx-sqlite",
  "syn 2.0.111",
+ "tempfile",
  "url",
 ]
 
 [[package]]
 name = "sqlx-mysql"
-version = "0.8.6"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=8e5389db1c78236d13224968758fe76e68b44748#8e5389db1c78236d13224968758fe76e68b44748"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
  "base64 0.22.1",
@@ -15191,7 +15223,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.17",
+ "thiserror 1.0.63",
  "time",
  "tracing",
  "uuid",
@@ -15200,8 +15232,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-postgres"
-version = "0.8.6"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=8e5389db1c78236d13224968758fe76e68b44748#8e5389db1c78236d13224968758fe76e68b44748"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
  "base64 0.22.1",
@@ -15214,6 +15246,7 @@ dependencies = [
  "etcetera",
  "futures-channel",
  "futures-core",
+ "futures-io",
  "futures-util",
  "hex",
  "hkdf",
@@ -15233,7 +15266,7 @@ dependencies = [
  "smallvec",
  "sqlx-core",
  "stringprep",
- "thiserror 2.0.17",
+ "thiserror 1.0.63",
  "time",
  "tracing",
  "uuid",
@@ -15242,10 +15275,9 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.8.6"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=8e5389db1c78236d13224968758fe76e68b44748#8e5389db1c78236d13224968758fe76e68b44748"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
- "async-channel 2.5.0",
  "atoi",
  "chrono",
  "flume",
@@ -15260,7 +15292,6 @@ dependencies = [
  "serde",
  "serde_urlencoded",
  "sqlx-core",
- "thiserror 2.0.17",
  "time",
  "tracing",
  "url",
@@ -16694,6 +16725,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f962df74c8c05a667b5ee8bcf162993134c104e96440b663c8daa176dc772d8c"
 
 [[package]]
+name = "unicode_categories"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
+
+[[package]]
 name = "unindent"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18070,7 +18107,7 @@ checksum = "4ce2a4ff45552406d02501cea6c18d8a7e50228e7736a872951fe2fe75c91be7"
 dependencies = [
  "arraydeque",
  "encoding_rs",
- "hashlink",
+ "hashlink 0.10.0",
 ]
 
 [[package]]

@@ -260,19 +260,15 @@ risingwave_variables = { path = "./src/utils/variables" }
 rw_futures_util = { path = "src/utils/futures_util" }
 rw_iter_util = { path = "src/utils/iter_util" }
 rw_resource_util = { path = "src/utils/resource_util" }
-sea-orm = { version = "1.1.19", features = [
+sea-orm = { version = "=1.1.1", features = [
     "sqlx-all",
     "runtime-tokio-native-tls",
     "with-uuid",
 ] }
-sea-orm-migration = { version = "1.1.19", features = [
-    "sqlx-postgres",
-    "sqlx-mysql",
-    "sqlx-sqlite",
-] }
+sea-orm-migration = "=1.1.1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1.15"
-sqlx = { version = "0.8.6", default-features = false, features = [
+sqlx = { version = "=0.8.2", default-features = false, features = [
     "bigdecimal",
     "chrono",
     "json",
@@ -417,8 +413,9 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae
 # tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
-# sqlx version: v0.8.6
-sqlx = { git = "https://github.com/risingwavelabs/sqlx.git", rev = "8e5389db1c78236d13224968758fe76e68b44748" }
+# sqlx version: v0.8.2
+# patch diffs: https://github.com/madsim-rs/sqlx/pull/4
+sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a2b7f30dee69f647e28dec81" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-json-no-preserve_order" }
 
