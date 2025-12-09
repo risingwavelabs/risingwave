@@ -237,34 +237,6 @@ drop table empty_table;
 
 # end
 
-# error on auto schema change on cross database table
-statement ok
-create database d1;
-
-statement ok
-create database d2;
-
-statement ok
-set database to d1;
-
-statement ok
-create table table_in_other_database(id int, name string);
-
-statement ok
-set database to d2;
-
-statement error auto schema change sink does not support created from cross database table
-create sink s from d1.public.table_in_other_database with (connector = 'blackhole', auto.schema.change = 'true');
-
-statement ok
-drop database d1;
-
-connection other
-statement ok
-drop database d2;
-
-#end
-
 # test auto schema change with sink decouple
 
 statement ok
@@ -299,5 +271,33 @@ drop table t2;
 
 statement ok
 set sink_decouple to default;
+
+#end
+
+# error on auto schema change on cross database table
+statement ok
+create database d1;
+
+statement ok
+create database d2;
+
+statement ok
+set database to d1;
+
+statement ok
+create table table_in_other_database(id int, name string);
+
+statement ok
+set database to d2;
+
+statement error auto schema change sink does not support created from cross database table
+create sink s from d1.public.table_in_other_database with (connector = 'blackhole', auto.schema.change = 'true');
+
+statement ok
+drop database d1;
+
+connection other
+statement ok
+drop database d2;
 
 #end
