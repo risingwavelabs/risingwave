@@ -304,6 +304,8 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                         remaining_files = %state.file_queue.len(),
                         "attempting to recover from fetch error, will retry on next barrier"
                     );
+
+                    continue;
                 }
 
                 // ----- Upstream Messages (barriers, file assignments) -----
