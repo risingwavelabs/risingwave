@@ -322,27 +322,28 @@ impl LogStoreBufferSender {
         ret
     }
 
-    pub(crate) async fn await_barrier_truncation(
+    pub(crate) async fn wait_for_barrier_truncation(
         &self,
         curr_epoch: u64,
     ) -> ReaderTruncationOffsetType {
-        let mut ret = None;
         loop {
+            let notified = self.truncate_notify.notified();
+
             {
                 let mut inner = self.buffer.inner();
-                while let Some((epoch, _)) = inner.truncation_list.front()
-                    && *epoch <= curr_epoch
-                {
-                    ret = inner.truncation_list.pop_front();
+                while let Some((epoch, seq_id)) = inner.truncation_list.pop_front() {
+                    assert!(
+                        epoch <= curr_epoch,
+                        "truncation epoch {} should not be larger than current epoch {}",
+                        epoch,
+                        curr_epoch
+                    );
+                    if epoch == curr_epoch && seq_id.is_none() {
+                        return (epoch, seq_id);
+                    }
                 }
             }
-            if let Some((epoch, None)) = ret
-                && epoch == curr_epoch
-            {
-                return (epoch, None);
-            }
 
-            let notified = self.truncate_notify.notified();
             notified
                 .instrument_await("Wait For Barrier Truncation")
                 .await;

@@ -181,7 +181,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             options.add_columns,
         );
         if has_schema_change {
-            let truncate_offset = self.tx.await_barrier_truncation(epoch).await;
+            let truncate_offset = self.tx.wait_for_barrier_truncation(epoch).await;
             assert_eq!(truncate_offset, (epoch, None));
             self.last_truncate_offset = Some(truncate_offset);
         }
