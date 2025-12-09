@@ -86,6 +86,12 @@ impl FetchState {
 
     /// Reset all state for a new refresh cycle.
     fn reset_for_refresh(&mut self) {
+        tracing::info!(
+            "reset_for_refresh: clearing file_queue_len={}, in_flight_files_len={}, splits_on_fetch={}",
+            self.file_queue.len(),
+            self.in_flight_files.len(),
+            self.splits_on_fetch
+        );
         self.file_queue.clear();
         self.in_flight_files.clear();
         self.splits_on_fetch = 0;
@@ -95,13 +101,12 @@ impl FetchState {
     }
 
     /// Check if we should report load finished to the barrier manager.
-    fn should_report_load_finished(&self, is_checkpoint: bool) -> bool {
+    fn should_report_load_finished(&self) -> bool {
         self.splits_on_fetch == 0
             && self.file_queue.is_empty()
             && self.in_flight_files.is_empty()
             && self.is_list_finished
             && self.is_refreshing
-            && is_checkpoint
     }
 
     /// Mark the refresh cycle as complete after reporting load finished.
@@ -120,8 +125,11 @@ impl FetchState {
     fn mark_file_fetched(&mut self) {
         self.splits_on_fetch -= 1;
 
-        // When all files in the batch complete successfully, clear in-flight tracking.
-        if self.splits_on_fetch == 0 && *self.is_batch_finished.read() {
+        // When all files in the current batch complete successfully, clear in-flight tracking.
+        // We don't need to wait for is_batch_finished because by the time splits_on_fetch reaches 0,
+        // all files have been processed successfully.
+        if self.splits_on_fetch == 0 {
+            tracing::info!("All files fetched successfully, clearing in_flight_files");
             self.in_flight_files.clear();
         }
     }
@@ -308,7 +316,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                             &mut stream,
                         );
 
-                        if state.should_report_load_finished(barrier.is_checkpoint()) {
+                        if barrier.is_checkpoint() && state.should_report_load_finished() {
                             tracing::info!(
                                 ?barrier.epoch,
                                 actor_id = %self.actor_ctx.id,
@@ -339,7 +347,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
 
                     Message::Chunk(chunk) => {
                         let files = Self::parse_file_assignments(&chunk);
-                        tracing::debug!("received {} file assignments", files.len());
+                        tracing::debug!("Received {} file assignments from upstream", files.len());
                         state.enqueue_files(files);
                     }
 
@@ -390,6 +398,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 tracing::info!(
                     ?barrier.epoch,
                     source_id = %core.source_id,
+                    is_checkpoint = barrier.is_checkpoint(),
                     "RefreshStart: resetting state for new refresh cycle"
                 );
                 state.reset_for_refresh();
@@ -401,6 +410,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
                 tracing::info!(
                     ?barrier.epoch,
                     source_id = %core.source_id,
+                    is_checkpoint = barrier.is_checkpoint(),
                     "ListFinish: upstream finished listing files"
                 );
                 state.is_list_finished = true;
@@ -447,9 +457,10 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         }
 
         if batch.is_empty() {
+            tracing::info!("Batch is empty, setting stream to pending");
             stream.replace_data_stream(stream::pending().boxed());
         } else {
-            tracing::debug!("starting batch reader with {} files", batch.len());
+            tracing::debug!("Starting batch reader with {} files", batch.len());
             state.splits_on_fetch += batch.len();
             *state.is_batch_finished.write() = false;
 
