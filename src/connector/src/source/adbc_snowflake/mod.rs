@@ -207,13 +207,42 @@ impl AdbcSnowflakeProperties {
     }
 
     /// Create an ADBC Snowflake database connection.
+    /// This validates that the driver library is available before attempting connection.
     pub fn create_database(&self) -> ConnectorResult<Database> {
-        let mut driver = Driver::try_load()
-            .map_err(|e| anyhow!("Failed to load ADBC Snowflake driver: {}", e))?;
+        // Validate driver availability and load the driver
+        let mut driver = Driver::try_load().map_err(|e| {
+            anyhow!(
+                "Failed to load ADBC Snowflake driver shared library. \
+                Error: {}. \
+                Please ensure that:\n\
+                1. The ADBC Snowflake driver is installed correctly\n\
+                2. The shared library (libadbc_driver_snowflake.so on Linux, \
+                   libadbc_driver_snowflake.dylib on macOS, or \
+                   adbc_driver_snowflake.dll on Windows) is in your library path\n\
+                3. Environment variables like LD_LIBRARY_PATH (Linux), \
+                   DYLD_LIBRARY_PATH (macOS), or PATH (Windows) are set correctly\n\
+                4. All required dependencies of the ADBC Snowflake driver are installed",
+                e
+            )
+        })?;
+
         let builder = self.build_database_builder()?;
-        let database = builder
-            .build(&mut driver)
-            .map_err(|e| anyhow!("Failed to create database: {}", e))?;
+        let database = builder.build(&mut driver).map_err(|e| {
+            anyhow!(
+                "Failed to create Snowflake database connection. \
+                Error: {}. \
+                Please verify your credentials and connection parameters:\n\
+                - Account: {}\n\
+                - Database: {}\n\
+                - Schema: {}\n\
+                - Warehouse: {}",
+                e,
+                self.account,
+                self.database,
+                self.schema,
+                self.warehouse
+            )
+        })?;
         Ok(database)
     }
 
