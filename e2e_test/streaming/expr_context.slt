@@ -28,7 +28,7 @@ insert into tint values(1);
 query TT
 select * from mv1;
 ----
-0001-01-01 12:01:07-04:56
+0001-01-01 12:00:59-04:56
 
 query TT
 select * from mv2;
