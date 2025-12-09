@@ -276,11 +276,19 @@ impl common::WorkerNode {
             .parallelism as usize
     }
 
+    fn compactor_node_parallelism(&self) -> usize {
+        assert_eq!(self.r#type(), WorkerType::Compactor);
+        self.property
+            .as_ref()
+            .expect("property should be exist")
+            .parallelism as usize
+    }
+
     pub fn parallelism(&self) -> Option<usize> {
-        if WorkerType::ComputeNode == self.r#type() {
-            Some(self.compute_node_parallelism())
-        } else {
-            None
+        match self.r#type() {
+            WorkerType::ComputeNode => Some(self.compute_node_parallelism()),
+            WorkerType::Compactor => Some(self.compactor_node_parallelism()),
+            _ => None,
         }
     }
 

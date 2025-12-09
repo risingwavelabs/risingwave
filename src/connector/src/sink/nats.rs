@@ -14,6 +14,7 @@
 use core::fmt::Debug;
 use core::future::IntoFuture;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow};
 use async_nats::jetstream::context::Context;
@@ -75,6 +76,10 @@ impl EnforceSecret for NatsSink {
 pub struct NatsSinkWriter {
     pub config: NatsConfig,
     context: Context,
+    /// Hold the client Arc to keep it alive. This allows the shared client cache to reuse
+    /// the connection while we're still using it.
+    #[expect(dead_code)]
+    client: Arc<async_nats::Client>,
     #[expect(dead_code)]
     schema: Schema,
     json_encoder: JsonEncoder,
@@ -139,14 +144,16 @@ impl Sink for NatsSink {
 
 impl NatsSinkWriter {
     pub async fn new(config: NatsConfig, schema: Schema) -> Result<Self> {
-        let context = config
+        let client = config
             .common
-            .build_context()
+            .build_client()
             .await
             .map_err(|e| SinkError::Nats(anyhow!(e)))?;
+        let context = NatsCommon::build_context_from_client(&client);
         Ok::<_, SinkError>(Self {
             config: config.clone(),
             context,
+            client,
             schema: schema.clone(),
             json_encoder: JsonEncoder::new(
                 schema,

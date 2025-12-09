@@ -213,9 +213,6 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
-
-  // Record the actors that the barrier has passed. Only used for debugging.
-  repeated uint32 passed_actors = 255;
 }
 
 message Watermark {
@@ -966,7 +963,8 @@ message OverWindowNode {
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
-  OverWindowCachePolicy cache_policy = 5;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  OverWindowCachePolicy cache_policy = 5 [deprecated = true];
 }
 
 message LocalApproxPercentileNode {
@@ -988,8 +986,10 @@ message RowMergeNode {
 
 message SyncLogStoreNode {
   catalog.Table log_store_table = 1;
-  uint32 pause_duration_ms = 2;
-  uint32 buffer_size = 3;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  optional uint32 pause_duration_ms = 2 [deprecated = true];
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  optional uint32 buffer_size = 3 [deprecated = true];
   bool aligned = 4;
 }
 

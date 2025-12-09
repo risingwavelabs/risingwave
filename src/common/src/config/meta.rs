@@ -160,6 +160,16 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether meta should request pausing all data sources on the next bootstrap.
+    /// This allows us to pause the cluster on next bootstrap in an offline way.
+    /// It's important for standalone or single node deployments.
+    /// In those cases, meta node, frontend and compute may all be co-located.
+    /// If the compute node enters an inconsistent state, and continuously crashloops,
+    /// we may not be able to connect to the cluster to run `alter system set pause_on_next_bootstrap = true;`.
+    /// By providing it in the static config, we can have an offline way to trigger the pause on bootstrap.
+    #[serde(default = "default::meta::pause_on_next_bootstrap_offline")]
+    pub pause_on_next_bootstrap_offline: bool,
+
     /// Whether to disable adaptive-scaling feature.
     #[serde(default)]
     pub disable_automatic_parallelism_control: bool,
@@ -593,6 +603,10 @@ pub mod default {
 
         pub fn default_parallelism() -> DefaultParallelism {
             DefaultParallelism::Full
+        }
+
+        pub fn pause_on_next_bootstrap_offline() -> bool {
+            false
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {

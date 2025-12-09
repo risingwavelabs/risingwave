@@ -39,6 +39,7 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
 use crate::stream::{SourceChange, SplitState};
 
@@ -89,8 +90,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
+        let job_id = job.job_id();
         job.finish(&self.metadata_manager, &self.source_manager)
-            .await
+            .await?;
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+        Ok(())
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]

@@ -14,7 +14,6 @@
 
 mod non_zero64;
 mod opt;
-mod over_window;
 pub mod parallelism;
 mod query_mode;
 mod search_path;
@@ -25,7 +24,6 @@ mod visibility_mode;
 use chrono_tz::Tz;
 use itertools::Itertools;
 pub use opt::OptionConfig;
-pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
@@ -34,7 +32,7 @@ use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
 use crate::config::mutate::TomlTableMutateExt;
-use crate::config::streaming::JoinEncodingType;
+use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
 use crate::session_config::parallelism::ConfigParallelism;
@@ -351,9 +349,12 @@ pub struct SessionConfig {
     sink_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
-    /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
-    #[parameter(default = OverWindowCachePolicy::default(), alias = "rw_streaming_over_window_cache_policy")]
-    streaming_over_window_cache_policy: OverWindowCachePolicy,
+    /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None, alias = "rw_streaming_over_window_cache_policy")]
+    streaming_over_window_cache_policy: OptionConfig<OverWindowCachePolicy>,
 
     /// Run DDL statements in background
     #[parameter(default = false)]
@@ -403,12 +404,18 @@ pub struct SessionConfig {
     /// The timeout for reading from the buffer of the sync log store on barrier.
     /// Every epoch we will attempt to read the full buffer of the sync log store.
     /// If we hit the timeout, we will stop reading and continue.
-    #[parameter(default = 64_usize)]
-    streaming_sync_log_store_pause_duration_ms: usize,
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_sync_log_store_pause_duration_ms: OptionConfig<usize>,
 
     /// The max buffer size for sync logstore, before we start flushing.
-    #[parameter(default = 2048_usize)]
-    streaming_sync_log_store_buffer_size: usize,
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_sync_log_store_buffer_size: OptionConfig<usize>,
 
     /// Whether to disable purifying the definition of the table or source upon retrieval.
     /// Only set this if encountering issues with functionalities like `SHOW` or `ALTER TABLE/SOURCE`.
@@ -438,6 +445,11 @@ pub struct SessionConfig {
     /// if there is any row INSERT/UPDATE/DELETE operation corresponding to the ttled primary key.
     #[parameter(default = false)]
     unsafe_enable_storage_retention_for_non_append_only_tables: bool,
+
+    /// Enable DataFusion Engine
+    /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
+    #[parameter(default = false)]
+    enable_datafusion_engine: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
@@ -555,6 +567,21 @@ impl SessionConfig {
                 .upsert("streaming.developer.join_encoding_type", v)
                 .unwrap();
         }
+        if let Some(v) = self.streaming_sync_log_store_pause_duration_ms.as_ref() {
+            table
+                .upsert("streaming.developer.sync_log_store_pause_duration_ms", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_sync_log_store_buffer_size.as_ref() {
+            table
+                .upsert("streaming.developer.sync_log_store_buffer_size", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_over_window_cache_policy.as_ref() {
+            table
+                .upsert("streaming.developer.over_window_cache_policy", v)
+                .unwrap();
+        }
 
         let res = toml::to_string(&table)?;
 
@@ -603,12 +630,19 @@ mod test {
         config
             .set_streaming_join_encoding(Some(JoinEncodingType::Cpu).into(), &mut ())
             .unwrap();
+        config
+            .set_streaming_over_window_cache_policy(
+                Some(OverWindowCachePolicy::RecentFirstN).into(),
+                &mut (),
+            )
+            .unwrap();
 
         // Check the converted config override string.
         let override_str = config.to_initial_streaming_config_override().unwrap();
         expect![[r#"
             [streaming.developer]
             join_encoding_type = "cpu_optimized"
+            over_window_cache_policy = "recent_first_n"
         "#]]
         .assert_eq(&override_str);
 
@@ -617,5 +651,9 @@ mod test {
             .unwrap()
             .unwrap();
         assert_eq!(merged.developer.join_encoding_type, JoinEncodingType::Cpu);
+        assert_eq!(
+            merged.developer.over_window_cache_policy,
+            OverWindowCachePolicy::RecentFirstN
+        );
     }
 }
