@@ -684,17 +684,13 @@ impl<S: StateStore> GapFillExecutor<S> {
         config: &'a FillConfig<'a>,
         state: &'a mut FillState<'a, S>,
     ) {
-        let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
-            prev_row.datum_at(config.time_column_index),
-            curr_row.datum_at(config.time_column_index),
-        ) else {
-            tracing::error!(
-                "Gap fill skipped: time column contains NULL values. prev_row: {:?}, curr_row: {:?}",
-                prev_row,
-                curr_row
-            );
-            return Ok(());
-        };
+        // Time column should never be NULL due to validation in execute_inner
+        let prev_time_scalar = prev_row
+            .datum_at(config.time_column_index)
+            .expect("Gap fill time column must be non-NULL");
+        let curr_time_scalar = curr_row
+            .datum_at(config.time_column_index)
+            .expect("Gap fill time column must be non-NULL");
 
         let prev_time = match prev_time_scalar {
             ScalarRefImpl::Timestamp(ts) => ts,
@@ -938,6 +934,11 @@ impl<S: StateStore> GapFillExecutor<S> {
 
                         match op {
                             Op::Insert | Op::UpdateInsert => {
+                                // Validate that time column is not NULL
+                                let _ = row
+                                    .datum_at(time_column_index)
+                                    .expect("Gap fill time column must be non-NULL");
+
                                 let cache_key = managed_state.serialize_time_to_cache_key(&row);
 
                                 // Find previous and next original row neighbors.
@@ -1068,6 +1069,11 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 }
                             }
                             Op::Delete | Op::UpdateDelete => {
+                                // Validate that time column is not NULL
+                                let _ = row
+                                    .datum_at(time_column_index)
+                                    .expect("Gap fill time column must be non-NULL");
+
                                 let cache_key = managed_state.serialize_time_to_cache_key(&row);
 
                                 // Find previous and next original row neighbors before deletion.

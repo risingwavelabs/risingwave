@@ -80,17 +80,13 @@ impl<S: StateStore> ExecutorInner<S> {
         metrics: &'a GapFillMetrics,
         chunk_builder: &'a mut StreamChunkBuilder,
     ) {
-        let (Some(prev_time_scalar), Some(curr_time_scalar)) = (
-            prev_row.datum_at(time_column_index),
-            curr_row.datum_at(time_column_index),
-        ) else {
-            tracing::error!(
-                "Gap fill skipped: time column contains NULL values. prev_row: {:?}, curr_row: {:?}",
-                prev_row,
-                curr_row
-            );
-            return Ok(());
-        };
+        // Time column should never be NULL due to validation in execute_inner
+        let prev_time_scalar = prev_row
+            .datum_at(time_column_index)
+            .expect("Gap fill time column must be non-NULL");
+        let curr_time_scalar = curr_row
+            .datum_at(time_column_index)
+            .expect("Gap fill time column must be non-NULL");
 
         let prev_time = match prev_time_scalar {
             ScalarRefImpl::Timestamp(ts) => ts,
@@ -352,6 +348,12 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                         .consume(watermark.val.clone(), &mut this.buffer_table)
                     {
                         let current_row = row?;
+
+                        // Validate that time column is not NULL
+                        let _ = current_row
+                            .datum_at(this.time_column_index)
+                            .expect("Gap fill time column must be non-NULL");
+
                         if let Some(p_row) = &staging_prev_row {
                             #[for_await]
                             for chunk in ExecutorInner::<S>::generate_filled_rows(
