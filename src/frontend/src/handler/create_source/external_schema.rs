@@ -22,14 +22,47 @@ mod json;
 use json::*;
 mod avro;
 use avro::extract_avro_table_schema;
-pub mod adbc_snowflake;
-use adbc_snowflake::extract_adbc_snowflake_columns;
 pub mod debezium;
 pub mod iceberg;
 use iceberg::extract_iceberg_columns;
 mod protobuf;
 use protobuf::extract_protobuf_table_schema;
 pub mod nexmark;
+
+/// Define a feature-gated function from a module.
+///
+/// This macro conditionally includes a module and re-exports a function from it.
+/// When the feature is disabled, it generates a stub function that returns an error.
+macro_rules! feature_gated_function {
+    (
+        mod $mod_name:ident,
+        $feature_name:literal,
+        async fn $func_name:ident ( $( $param_name:ident : $param_type:ty ),* $(,)? ) -> $ret_type:ty
+    ) => {
+        #[cfg(feature = $feature_name)]
+        pub mod $mod_name;
+        #[cfg(feature = $feature_name)]
+        use $mod_name::$func_name;
+
+        #[cfg(not(feature = $feature_name))]
+        #[allow(unused_variables)]
+        pub async fn $func_name( $( $param_name : $param_type ),* ) -> $ret_type {
+            Err(anyhow::anyhow!(
+                "Feature `{}` is not enabled at compile time. \
+                Please enable it in `Cargo.toml` and rebuild.",
+                $feature_name
+            ))
+        }
+    };
+}
+
+feature_gated_function!(
+    mod adbc_snowflake,
+    "source-adbc_snowflake",
+    async fn extract_adbc_snowflake_columns(
+        with_properties: &WithOptionsSecResolved,
+    ) -> anyhow::Result<Vec<ColumnCatalog>>
+);
 
 /// Resolves the schema of the source from external schema file.
 /// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
