@@ -429,6 +429,7 @@ mod runner {
                     "get error from control stream",
                     "cluster is under recovering",
                     "streaming vnode mapping has not been initialized",
+                    "streaming vnode mapping not found",
                 ];
                 let should_retry = i < MAX_RETRY
                     && allowed_errs
