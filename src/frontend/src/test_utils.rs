@@ -1190,6 +1190,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _kind: PbThrottleTarget,
         _id: u32,
         _rate_limit: Option<u32>,
+        _throttle_type: Option<risingwave_pb::meta::ThrottleType>,
     ) -> RpcResult<()> {
         unimplemented!()
     }

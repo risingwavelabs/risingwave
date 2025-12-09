@@ -108,7 +108,7 @@ pub async fn handle_alter_streaming_rate_limit(
         }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };
-    handle_alter_streaming_rate_limit_by_id(&session, kind, id, rate_limit, stmt_type).await
+    handle_alter_streaming_rate_limit_by_id(&session, kind, id, rate_limit, stmt_type, None).await
 }
 
 pub async fn handle_alter_streaming_rate_limit_by_id(
@@ -117,6 +117,7 @@ pub async fn handle_alter_streaming_rate_limit_by_id(
     id: u32,
     rate_limit: i32,
     stmt_type: StatementType,
+    throttle_type: Option<risingwave_pb::meta::ThrottleType>,
 ) -> Result<RwPgResponse> {
     let meta_client = session.env().meta_client();
 
@@ -126,7 +127,7 @@ pub async fn handle_alter_streaming_rate_limit_by_id(
         Some(rate_limit as u32)
     };
 
-    meta_client.apply_throttle(kind, id, rate_limit).await?;
+    meta_client.apply_throttle(kind, id, rate_limit, throttle_type).await?;
 
     Ok(PgResponse::empty_result(stmt_type))
 }

@@ -133,6 +133,7 @@ pub trait FrontendMetaClient: Send + Sync {
         kind: PbThrottleTarget,
         id: u32,
         rate_limit: Option<u32>,
+        throttle_type: Option<risingwave_pb::meta::ThrottleType>,
     ) -> Result<()>;
 
     async fn alter_fragment_parallelism(
@@ -371,9 +372,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         kind: PbThrottleTarget,
         id: u32,
         rate_limit: Option<u32>,
+        throttle_type: Option<risingwave_pb::meta::ThrottleType>,
     ) -> Result<()> {
         self.0
-            .apply_throttle(kind, id, rate_limit)
+            .apply_throttle(kind, id, rate_limit, throttle_type)
             .await
             .map(|_| ())
     }

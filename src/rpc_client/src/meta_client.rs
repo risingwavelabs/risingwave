@@ -1237,11 +1237,13 @@ impl MetaClient {
         kind: PbThrottleTarget,
         id: u32,
         rate: Option<u32>,
+        throttle_type: Option<ThrottleType>,
     ) -> Result<ApplyThrottleResponse> {
         let request = ApplyThrottleRequest {
             kind: kind as i32,
             id,
             rate,
+            throttle_type: throttle_type.map(|t| t as i32),
         };
         let resp = self.inner.apply_throttle(request).await?;
         Ok(resp)

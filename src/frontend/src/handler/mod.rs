@@ -1355,10 +1355,7 @@ pub async fn handle(
             fragment_ids,
             operation,
         } => match operation {
-            AlterFragmentOperation::SetBackfillRateLimit { rate_limit }
-            | AlterFragmentOperation::SetSourceRateLimit { rate_limit }
-            | AlterFragmentOperation::SetDmlRateLimit { rate_limit }
-            | AlterFragmentOperation::SetSinkRateLimit { rate_limit } => {
+            AlterFragmentOperation::SetBackfillRateLimit { rate_limit } => {
                 let [fragment_id] = fragment_ids.as_slice() else {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "ALTER FRAGMENT ... SET rate limit supports exactly one fragment id"
@@ -1372,6 +1369,61 @@ pub async fn handle(
                     *fragment_id,
                     rate_limit,
                     StatementType::SET_VARIABLE,
+                    Some(risingwave_pb::meta::ThrottleType::Backfill),
+                )
+                .await
+            }
+            AlterFragmentOperation::SetSourceRateLimit { rate_limit } => {
+                let [fragment_id] = fragment_ids.as_slice() else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "ALTER FRAGMENT ... SET rate limit supports exactly one fragment id"
+                            .to_owned(),
+                    )
+                    .into());
+                };
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                    &handler_args.session,
+                    PbThrottleTarget::Fragment,
+                    *fragment_id,
+                    rate_limit,
+                    StatementType::SET_VARIABLE,
+                    Some(risingwave_pb::meta::ThrottleType::SourceRateLimit),
+                )
+                .await
+            }
+            AlterFragmentOperation::SetDmlRateLimit { rate_limit } => {
+                let [fragment_id] = fragment_ids.as_slice() else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "ALTER FRAGMENT ... SET rate limit supports exactly one fragment id"
+                            .to_owned(),
+                    )
+                    .into());
+                };
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                    &handler_args.session,
+                    PbThrottleTarget::Fragment,
+                    *fragment_id,
+                    rate_limit,
+                    StatementType::SET_VARIABLE,
+                    Some(risingwave_pb::meta::ThrottleType::Dml),
+                )
+                .await
+            }
+            AlterFragmentOperation::SetSinkRateLimit { rate_limit } => {
+                let [fragment_id] = fragment_ids.as_slice() else {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "ALTER FRAGMENT ... SET rate limit supports exactly one fragment id"
+                            .to_owned(),
+                    )
+                    .into());
+                };
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                    &handler_args.session,
+                    PbThrottleTarget::Fragment,
+                    *fragment_id,
+                    rate_limit,
+                    StatementType::SET_VARIABLE,
+                    Some(risingwave_pb::meta::ThrottleType::SinkRateLimit),
                 )
                 .await
             }

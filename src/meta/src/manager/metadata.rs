@@ -659,6 +659,22 @@ impl MetadataManager {
             .collect())
     }
 
+    pub async fn update_fragment_rate_limit_by_fragment_id_and_type(
+        &self,
+        fragment_id: FragmentId,
+        rate_limit: Option<u32>,
+        throttle_type: risingwave_pb::meta::ThrottleType,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let fragment_actors = self
+            .catalog_controller
+            .update_fragment_rate_limit_by_fragment_id_and_type(fragment_id as _, rate_limit, throttle_type)
+            .await?;
+        Ok(fragment_actors
+            .into_iter()
+            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+            .collect())
+    }
+
     #[await_tree::instrument]
     pub async fn update_fragment_splits(
         &self,

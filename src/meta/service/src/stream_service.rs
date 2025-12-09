@@ -167,8 +167,16 @@ impl StreamManagerService for StreamServiceImpl {
                     .await?
             }
             ThrottleTarget::Fragment => {
+                let throttle_type = request.throttle_type();
+                if throttle_type == ThrottleType::Unspecified {
+                    return Err(Status::invalid_argument("unspecified throttle type for fragment"));
+                }
                 self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
+                    .update_fragment_rate_limit_by_fragment_id_and_type(
+                        request.id.into(),
+                        request.rate,
+                        throttle_type,
+                    )
                     .await?
             }
             ThrottleTarget::Unspecified => {
