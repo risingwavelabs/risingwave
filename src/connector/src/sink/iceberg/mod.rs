@@ -1688,6 +1688,64 @@ const SCHEMA_ID: &str = "schema_id";
 const PARTITION_SPEC_ID: &str = "partition_spec_id";
 const DATA_FILES: &str = "data_files";
 
+/// Maximum size for column statistics (min/max values) in bytes.
+/// Column statistics larger than this will be truncated to avoid metadata bloat.
+/// This is especially important for large fields like JSONB, TEXT, BINARY, etc.
+///
+/// Temporary workaround for large column statistics in `DataFile` metadata.
+/// TODO: Remove this once iceberg-rust supports configurable statistics size limits.
+const MAX_COLUMN_STAT_SIZE: usize = 1024; // 1KB
+
+/// Truncate large column statistics from serialized data file metadata.
+///
+/// This function removes `lower_bounds` and `upper_bounds` that exceed
+/// `MAX_COLUMN_STAT_SIZE` to prevent metadata bloat and OOM errors.
+///
+/// For large fields (JSONB, TEXT, BINARY), storing full min/max values provides
+/// little query optimization benefit but can cause metadata to balloon to gigabytes.
+///
+/// # Arguments
+/// * `json_value` - Mutable reference to the JSON representation of a `DataFile`
+fn truncate_large_column_stats(json_value: &mut serde_json::Value) {
+    if let serde_json::Value::Object(obj) = json_value {
+        // Process lower_bounds
+        if let Some(serde_json::Value::Object(lower_bounds)) = obj.get_mut("lower_bounds") {
+            lower_bounds.retain(|field_id, value| {
+                if let serde_json::Value::Array(bytes) = value {
+                    let size = bytes.len();
+                    if size > MAX_COLUMN_STAT_SIZE {
+                        tracing::debug!(
+                            field_id = field_id,
+                            size = size,
+                            "Truncating large lower_bound statistic"
+                        );
+                        return false;
+                    }
+                }
+                true
+            });
+        }
+
+        // Process upper_bounds
+        if let Some(serde_json::Value::Object(upper_bounds)) = obj.get_mut("upper_bounds") {
+            upper_bounds.retain(|field_id, value| {
+                if let serde_json::Value::Array(bytes) = value {
+                    let size = bytes.len();
+                    if size > MAX_COLUMN_STAT_SIZE {
+                        tracing::debug!(
+                            field_id = field_id,
+                            size = size,
+                            "Truncating large upper_bound statistic"
+                        );
+                        return false;
+                    }
+                }
+                true
+            });
+        }
+    }
+}
+
 #[derive(Default, Clone)]
 struct IcebergCommitResult {
     schema_id: i32,
@@ -1807,7 +1865,13 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for SinkMetadata {
             value
                 .data_files
                 .iter()
-                .map(serde_json::to_value)
+                .map(
+                    |data_file| -> std::result::Result<serde_json::Value, serde_json::Error> {
+                        let mut json_value = serde_json::to_value(data_file)?;
+                        truncate_large_column_stats(&mut json_value);
+                        Ok(json_value)
+                    },
+                )
                 .collect::<std::result::Result<Vec<serde_json::Value>, _>>()
                 .context("Can't serialize data files to json")?,
         );
@@ -1843,7 +1907,13 @@ impl TryFrom<IcebergCommitResult> for Vec<u8> {
             value
                 .data_files
                 .iter()
-                .map(serde_json::to_value)
+                .map(
+                    |data_file| -> std::result::Result<serde_json::Value, serde_json::Error> {
+                        let mut json_value = serde_json::to_value(data_file)?;
+                        truncate_large_column_stats(&mut json_value);
+                        Ok(json_value)
+                    },
+                )
                 .collect::<std::result::Result<Vec<serde_json::Value>, _>>()
                 .context("Can't serialize data files to json")?,
         );
@@ -2485,8 +2555,9 @@ mod test {
     use crate::sink::iceberg::{
         COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, ENABLE_COMPACTION,
         ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergConfig,
-        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-        SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+        MAX_COLUMN_STAT_SIZE, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+        SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+        SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, truncate_large_column_stats,
     };
 
     pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -2900,6 +2971,81 @@ mod test {
             "snapshot_expiration_clear_expired_meta_data"
         );
         assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
+    }
+
+    #[test]
+    fn test_truncate_large_column_stats() {
+        use serde_json::json;
+
+        // Test case 1: Small statistics should be preserved
+        let mut small_stats = json!({
+            "content": "data",
+            "file_path": "s3://bucket/file.parquet",
+            "file_format": "PARQUET",
+            "record_count": 1000,
+            "file_size_in_bytes": 1024000,
+            "lower_bounds": {
+                "1": [0, 0, 0, 1],  // 4 bytes - should be kept
+                "2": [50, 48, 50, 52]  // "2024" - 4 bytes - should be kept
+            },
+            "upper_bounds": {
+                "1": [0, 0, 0, 100],  // 4 bytes - should be kept
+                "2": [50, 48, 50, 53]  // "2025" - 4 bytes - should be kept
+            }
+        });
+
+        truncate_large_column_stats(&mut small_stats);
+
+        // All small stats should be preserved
+        assert!(small_stats["lower_bounds"]["1"].is_array());
+        assert!(small_stats["lower_bounds"]["2"].is_array());
+        assert!(small_stats["upper_bounds"]["1"].is_array());
+        assert!(small_stats["upper_bounds"]["2"].is_array());
+
+        // Test case 2: Large statistics should be removed
+        let large_data: Vec<u8> = vec![0u8; MAX_COLUMN_STAT_SIZE + 1]; // 1025 bytes
+        let mut large_stats = json!({
+            "content": "data",
+            "file_path": "s3://bucket/file.parquet",
+            "file_format": "PARQUET",
+            "record_count": 1000,
+            "file_size_in_bytes": 1024000,
+            "lower_bounds": {
+                "1": [0, 0, 0, 1],  // 4 bytes - should be kept
+                "3": &large_data  // >1KB - should be removed
+            },
+            "upper_bounds": {
+                "1": [0, 0, 0, 100],  // 4 bytes - should be kept
+                "3": &large_data  // >1KB - should be removed
+            }
+        });
+
+        truncate_large_column_stats(&mut large_stats);
+
+        // Small field should be preserved
+        assert!(large_stats["lower_bounds"]["1"].is_array());
+        assert!(large_stats["upper_bounds"]["1"].is_array());
+
+        // Large field should be removed
+        assert!(large_stats["lower_bounds"]["3"].is_null());
+        assert!(large_stats["upper_bounds"]["3"].is_null());
+
+        // Test case 3: Mixed case with exact threshold
+        let threshold_data: Vec<u8> = vec![0u8; MAX_COLUMN_STAT_SIZE]; // Exactly 1024 bytes
+        let mut threshold_stats = json!({
+            "lower_bounds": {
+                "4": &threshold_data // Exactly at threshold - should be kept
+            },
+            "upper_bounds": {
+                "4": &threshold_data
+            }
+        });
+
+        truncate_large_column_stats(&mut threshold_stats);
+
+        // At threshold should be kept
+        assert!(threshold_stats["lower_bounds"]["4"].is_array());
+        assert!(threshold_stats["upper_bounds"]["4"].is_array());
     }
 
     #[test]
