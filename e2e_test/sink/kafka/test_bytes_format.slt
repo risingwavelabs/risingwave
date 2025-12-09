@@ -47,20 +47,35 @@ create table t_non_bytea (
     data varchar
 );
 
-statement error BYTES format requires the column to be of type BYTEA, but got type character varying
+statement error
 create sink sink_bytes_format_error2 from t_non_bytea with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-bytes-format-error2'
 ) format plain encode bytes (force_append_only = 'true');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
+  2: failed to validate sink
+  3: config error
+  4: ENCODE BYTES requires the column to be of type BYTEA, but got type character varying
+
 
 # Test that upsert format with bytes encoding is not supported
-statement error connector kafka does not support format Upsert with encode Bytes
+statement error
 create sink sink_upsert_bytes_error from t_single_bytea with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-upsert-bytes-error'
 ) format upsert encode bytes;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Bind error: connector kafka does not support format Upsert with encode Bytes
+
 
 # Test bytes format with key encoding
 statement ok
