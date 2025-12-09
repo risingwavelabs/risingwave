@@ -76,6 +76,7 @@ use crate::controller::utils::{
     get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
     resolve_no_shuffle_actor_dispatcher,
 };
+use crate::error::MetaError;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -1030,25 +1031,27 @@ impl CatalogController {
         let actor_infos = {
             let info = self.env.shared_actor_infos().read_guard();
 
-            fragment_objects
-                .into_iter()
-                .flat_map(|(fragment_id, object_id, schema_id, object_type)| {
-                    let SharedFragmentInfo {
-                        fragment_id,
-                        actors,
-                        ..
-                    } = info.get_fragment(fragment_id as _).unwrap();
-                    actors.keys().map(move |actor_id| {
-                        (
-                            *actor_id as _,
-                            *fragment_id as _,
-                            object_id,
-                            schema_id,
-                            object_type,
-                        )
-                    })
-                })
-                .collect_vec()
+            let mut result = Vec::new();
+
+            for (fragment_id, object_id, schema_id, object_type) in fragment_objects {
+                let Some(fragment) = info.get_fragment(fragment_id as _) else {
+                    return Err(MetaError::unavailable(format!(
+                        "shared actor info missing for fragment {fragment_id} while listing actors"
+                    )));
+                };
+
+                for actor_id in fragment.actors.keys() {
+                    result.push((
+                        *actor_id as _,
+                        fragment.fragment_id as _,
+                        object_id,
+                        schema_id,
+                        object_type,
+                    ));
+                }
+            }
+
+            result
         };
 
         Ok(actor_infos)
