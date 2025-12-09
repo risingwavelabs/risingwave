@@ -198,7 +198,7 @@ impl FromStr for CompactionType {
             "files-with-delete" => Ok(CompactionType::FilesWithDelete),
             _ => Err(format!(
                 "Unknown compaction type '{}', must be one of: 'full', 'small-files', 'files-with-delete'",
-                s // 使用原始输入字符串来显示错误，而不是规范化后的
+                s
             )),
         }
     }
