@@ -36,6 +36,7 @@ all-connectors = [
     "risingwave_connector/all-sinks",
     "risingwave_connector/all-sources",
     "risingwave_compute/all-sources",
+    "risingwave_frontend/all-sources",
 ]
 datafusion = ["risingwave_frontend/datafusion"]
 
