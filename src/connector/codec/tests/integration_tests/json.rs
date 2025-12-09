@@ -106,105 +106,105 @@ async fn test_json_schema_parse() {
     expect![[r#"
         {
           "$schema": "http://json-schema.org/draft-07/schema#",
-          "type": "object",
           "definitions": {
-            "stringType": {
-              "type": "string"
-            },
-            "marketObj": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
             "marketArray": {
-              "type": "object",
               "additionalProperties": {
-                "type": "array",
                 "items": {
                   "type": "string"
-                }
-              }
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "marketObj": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
             },
             "recurrentType": {
-              "type": "object",
               "properties": {
                 "id": {
                   "type": "string"
                 },
                 "next": {
-                  "type": "object",
                   "properties": {
                     "id": {
                       "type": "string"
                     },
                     "next": {}
-                  }
+                  },
+                  "type": "object"
                 }
-              }
+              },
+              "type": "object"
+            },
+            "stringType": {
+              "type": "string"
             }
           },
           "properties": {
+            "cats": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
             "id": {
               "type": "string"
             },
-            "name": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "cats": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            },
             "meta": {
-              "type": "object",
               "properties": {
                 "active": {
-                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
-                  }
+                  },
+                  "type": "object"
                 },
                 "tags": {
-                  "type": "object",
                   "additionalProperties": {
-                    "type": "array",
                     "items": {
                       "type": "string"
-                    }
-                  }
+                    },
+                    "type": "array"
+                  },
+                  "type": "object"
                 }
-              }
+              },
+              "type": "object"
+            },
+            "name": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
             },
             "recurrent": {
-              "type": "object",
               "properties": {
                 "id": {
                   "type": "string"
                 },
                 "next": {
-                  "type": "object",
                   "properties": {
                     "id": {
                       "type": "string"
                     },
                     "next": {}
-                  }
+                  },
+                  "type": "object"
                 }
-              }
+              },
+              "type": "object"
             }
           },
           "required": [
             "id",
             "name"
-          ]
+          ],
+          "type": "object"
         }"#]]
     .assert_eq(&serde_json::to_string_pretty(&json_schema.0).unwrap());
 
