@@ -279,6 +279,7 @@ bye() {
 trap bye EXIT
 
 echo "~~~ Check logs"
+echo "Log file sizes:"
 du -ah ${PREFIX_LOG}
 
 for out_file in ${PREFIX_LOG}/*.log
@@ -289,11 +290,6 @@ do
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > ${LOG_SIZE_LIMIT} )) ; then
-  echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
-  exit 1
-fi
-
 log_files=( "${PREFIX_LOG}"/*.log )
 if [ -e "${log_files[0]}" ]; then
   sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?[[:space:]]+//' "${log_files[@]}" > "${TMP_FILE}"
@@ -301,14 +297,19 @@ if [ -e "${log_files[0]}" ]; then
   total_lines=$(wc -l < "${TMP_FILE}")
   if [ "$total_lines" -gt 0 ]; then
     top_duplicates=$(sort "${TMP_FILE}" | uniq -c | sort -nr | head -20)
+    echo "Top duplicated lines:"
+    echo "$top_duplicates"
     max_count=$(echo "$top_duplicates" | head -n 1 | awk '{print $1}')
     if [ "${max_count:-0}" -gt ${LOG_LINE_DUPLICATE_LIMIT} ]; then
-      echo "$(tput setaf 1)ERROR: log line repeated too many times (${max_count}).$(tput sgr0) Please disable unnecessary logs."
-      echo "Top duplicated lines (timestamp stripped):"
-      echo "$top_duplicates"
+      echo "$(tput setaf 1)ERROR: log line repeated too many times (up to ${max_count}).$(tput sgr0) Please disable unnecessary logs."
       exit 1
     fi
   fi
+fi
+
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > ${LOG_SIZE_LIMIT} )) ; then
+  echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
+  exit 1
 fi
 '''
 
