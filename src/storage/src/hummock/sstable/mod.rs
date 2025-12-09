@@ -564,7 +564,7 @@ mod tests {
         .await;
 
         // skip sst serde
-        let sstable = q(42.into(), meta.clone(), true);
+        let sstable = Sstable::new(42.into(), meta.clone(), true);
 
         let buffer = bincode::serialize(&sstable).unwrap();
 
