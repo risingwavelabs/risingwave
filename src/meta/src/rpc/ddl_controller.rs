@@ -1964,7 +1964,7 @@ impl DdlController {
                 .iter()
                 .map(|sink| sink.original_fragment.fragment_id)
                 .collect();
-            for (_, downstream_fragment, _) in &mut downstream_fragments {
+            for (_, downstream_fragment, nodes) in &mut downstream_fragments {
                 if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {
@@ -1978,6 +1978,7 @@ impl DdlController {
                     }
 
                     *downstream_fragment = (&sink.new_fragment_info(), stream_job.id()).into();
+                    *nodes = sink.new_fragment.nodes.clone();
                 }
             }
             assert!(remaining_fragment.is_empty());

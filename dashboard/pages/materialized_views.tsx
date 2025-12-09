@@ -23,8 +23,10 @@ import {
 import { getMaterializedViews } from "../lib/api/streaming"
 
 export default function MaterializedViews() {
-  return Relations("Materialized Views", getMaterializedViews, [
-    ...streamingJobColumns,
-    ...tableColumns,
-  ])
+  return Relations(
+    "Materialized Views",
+    getMaterializedViews,
+    [...streamingJobColumns, ...tableColumns],
+    { withStreamingJobs: true }
+  )
 }

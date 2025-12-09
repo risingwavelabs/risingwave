@@ -28,7 +28,6 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -1034,6 +1033,8 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
+        use risingwave_common::util::iter_util::ZipEqFast;
+
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_index).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
