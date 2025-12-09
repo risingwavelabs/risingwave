@@ -137,7 +137,11 @@ impl WorkerNodeManager {
             serving_mapping.keys()
         );
         write_guard.worker_nodes = nodes.into_iter().map(|w| (w.id, w)).collect();
-        write_guard.streaming_fragment_vnode_mapping = Some(streaming_mapping);
+        write_guard.streaming_fragment_vnode_mapping = if streaming_mapping.is_empty() {
+            None
+        } else {
+            Some(streaming_mapping)
+        };
         write_guard.serving_fragment_vnode_mapping = serving_mapping;
     }
 
