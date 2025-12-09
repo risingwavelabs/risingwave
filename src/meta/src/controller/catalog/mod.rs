@@ -913,11 +913,9 @@ impl CatalogControllerInner {
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
-                streaming_job::Column::JobStatus.eq(JobStatus::Created).or(
-                    table::Column::TableType
-                        .eq(TableType::MaterializedView)
-                        .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
-                ),
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Created)
+                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
             )
             .all(&self.db)
             .await?;
@@ -937,10 +935,20 @@ impl CatalogControllerInner {
             .into_iter()
             .collect();
 
+        let sink_ids: HashSet<SinkId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .into_tuple::<SinkId>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+
         let job_ids: HashSet<JobId> = table_objs
             .iter()
             .map(|(t, _)| t.table_id.as_job_id())
             .chain(job_statuses.keys().cloned())
+            .chain(sink_ids.into_iter().map(|s| s.as_job_id()))
             .collect();
 
         let internal_table_objs = Table::find()
