@@ -1025,16 +1025,11 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_sinks` return all `CREATED` and `BACKGROUND` sinks.
+    /// `list_sinks` return all sinks.
     async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
         let sink_objs = Sink::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Created)
-                    .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
-            )
             .all(&self.db)
             .await?;
 
