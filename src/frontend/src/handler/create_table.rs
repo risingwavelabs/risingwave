@@ -95,11 +95,11 @@ use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
     COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
-    COMPACTION_TRIGGER_SNAPSHOT_COUNT, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs,
+    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, CompactionType, ENABLE_COMPACTION,
+    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
+    IcebergSink, IcebergWriteMode, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -1908,15 +1908,19 @@ pub async fn create_iceberg_engine_table(
     }
 
     if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
-        match write_mode.to_lowercase().as_str() {
-            ICEBERG_WRITE_MODE_MERGE_ON_READ => {
-                sink_with.insert(
-                    WRITE_MODE.to_owned(),
-                    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
-                );
+        let write_mode = IcebergWriteMode::try_from(write_mode.as_str()).map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "invalid write_mode: {}, must be one of: {}, {}",
+                write_mode, ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
+            ))
+        })?;
+
+        match write_mode {
+            IcebergWriteMode::MergeOnRead => {
+                sink_with.insert(WRITE_MODE.to_owned(), write_mode.as_str().to_owned());
             }
 
-            ICEBERG_WRITE_MODE_COPY_ON_WRITE => {
+            IcebergWriteMode::CopyOnWrite => {
                 if table.append_only {
                     return Err(ErrorCode::NotSupported(
                         "COPY ON WRITE is not supported for append-only iceberg table".to_owned(),
@@ -1925,18 +1929,7 @@ pub async fn create_iceberg_engine_table(
                     .into());
                 }
 
-                sink_with.insert(
-                    WRITE_MODE.to_owned(),
-                    ICEBERG_WRITE_MODE_COPY_ON_WRITE.to_owned(),
-                );
-            }
-
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "write_mode must be one of: {}, {}",
-                    ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
-                ))
-                .into());
+                sink_with.insert(WRITE_MODE.to_owned(), write_mode.as_str().to_owned());
             }
         }
 
@@ -1962,12 +1955,14 @@ pub async fn create_iceberg_engine_table(
                     COMPACTION_MAX_SNAPSHOTS_NUM, max_snapshots_num_before_compaction
                 ))
             })?;
+
         if max_snapshots_num_before_compaction == 0 {
             bail!(format!(
                 "{} must be greater than 0",
                 COMPACTION_MAX_SNAPSHOTS_NUM
             ));
         }
+
         sink_with.insert(
             COMPACTION_MAX_SNAPSHOTS_NUM.to_owned(),
             max_snapshots_num_before_compaction.to_string(),
@@ -2087,6 +2082,30 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove(COMPACTION_TARGET_FILE_SIZE_MB));
+    }
+
+    if let Some(compaction_type) = handler_args.with_options.get(COMPACTION_TYPE) {
+        let compaction_type = CompactionType::try_from(compaction_type.as_str()).map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "invalid compaction_type: {}, must be one of {:?}",
+                compaction_type,
+                &[
+                    CompactionType::Full,
+                    CompactionType::SmallFiles,
+                    CompactionType::FilesWithDelete
+                ]
+            ))
+        })?;
+
+        sink_with.insert(
+            COMPACTION_TYPE.to_owned(),
+            compaction_type.as_str().to_owned(),
+        );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(COMPACTION_TYPE));
     }
 
     let partition_by = handler_args

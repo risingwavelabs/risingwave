@@ -634,10 +634,10 @@ IcebergConfig:
     default: Default::default
     allow_alter_on_fly: true
   - name: write_mode
-    field_type: String
+    field_type: IcebergWriteMode
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
-    default: ICEBERG_WRITE_MODE_MERGE_ON_READ . to_owned ()
+    default: 'IcebergWriteMode :: MergeOnRead'
   - name: snapshot_expiration_max_age_millis
     field_type: i64
     comments: |-
@@ -691,7 +691,7 @@ IcebergConfig:
     default: Default::default
     allow_alter_on_fly: true
   - name: compaction.type
-    field_type: String
+    field_type: CompactionType
     comments: |-
       Compaction type: `full`, `small-files`, or `files-with-delete`
       If not set, will default to `full`
