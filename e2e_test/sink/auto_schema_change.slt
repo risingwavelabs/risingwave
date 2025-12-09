@@ -257,6 +257,9 @@ alter table t2 add column v3 int default 66;
 statement ok
 insert into t2 values (2, 'bbb', 10);
 
+statement ok
+flush;
+
 query ITI rowsort
 select * from t2;
 ----
