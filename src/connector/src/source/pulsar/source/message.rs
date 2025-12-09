@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prost::Message as ProstMessage;
+use prost_011::Message as _;
 use pulsar::consumer::Message as PulsarMessage;
 
 use crate::source::{SourceMessage, SourceMeta};

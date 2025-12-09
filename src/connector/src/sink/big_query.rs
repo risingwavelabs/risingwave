@@ -17,6 +17,7 @@ use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use anyhow::{Context, anyhow};
+use async_trait::async_trait;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use futures::future::pending;
@@ -41,14 +42,14 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use phf::{Set, phf_set};
+use prost::Message;
+use prost_014::Message as Message014;
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
     field_descriptor_proto,
 };
-use prost_types014::DescriptorProto as DescriptorProto014;
-use prost::Message;
-use prost014::Message as Message014;
+use prost_types_014::DescriptorProto as DescriptorProto014;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -56,7 +57,6 @@ use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use tokio::sync::mpsc;
-use async_trait::async_trait;
 use url::Url;
 use uuid::Uuid;
 use with_options::WithOptions;

@@ -76,7 +76,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = { version = "0.18.0", optional = true }
 glob = "0.3"
-google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", features = [
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.4", features = [
     "auth",
 ], optional = true }
 google-cloud-gax = { package = "gcloud-gax", version = "1" }
@@ -84,7 +84,7 @@ google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", featur
     "pubsub",
     "bigquery",
 ], optional = true }
-google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
+google-cloud-pubsub = { package = "gcloud-pubsub", version = "1.5" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
@@ -121,8 +121,9 @@ prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { version = "0.15", features = ["serde"] }
 prost-types = "0.13"
-prost-types014 = { package = "prost-types", version = "0.14" }
-prost014 = { package = "prost", version = "0.14" }
+prost-types-014 = { package = "prost-types", version = "0.14" }
+prost-011 = { package = "prost", version = "0.11" }
+prost-014 = { package = "prost", version = "0.14" }
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
