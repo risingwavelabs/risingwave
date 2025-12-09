@@ -90,6 +90,8 @@ impl CompactionConfigBuilder {
                 enable_optimize_l0_interval_selection: Some(
                     compaction_config::enable_optimize_l0_interval_selection(),
                 ),
+                vnode_aligned_level_size_threshold:
+                    compaction_config::vnode_aligned_level_size_threshold(),
             },
         }
     }

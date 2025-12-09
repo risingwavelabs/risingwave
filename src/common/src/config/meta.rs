@@ -808,6 +808,7 @@ pub mod default {
         const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
+        const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -913,6 +914,10 @@ pub mod default {
 
         pub fn enable_optimize_l0_interval_selection() -> bool {
             false
+        }
+
+        pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
+            DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
         }
     }
 }
