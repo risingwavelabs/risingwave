@@ -21,15 +21,11 @@ all-sources = []
 sink-bigquery = [
     "dep:gcp-bigquery-client",
     "dep:google-cloud-bigquery",
-    #    "dep:google-cloud-gax",
     "dep:google-cloud-googleapis",
 ]
 sink-deltalake = ["dep:deltalake"]
-sink-google_pubsub = [
-    # "dep:google-cloud-pubsub",
-    #    "dep:google-cloud-gax",
-    "dep:google-cloud-googleapis",
-]
+# TODO: pubsub source is not feature-gated, thus `google-cloud-pubsub` cannot be optional.
+sink-google_pubsub = ["dep:google-cloud-googleapis"]
 sink-clickhouse = ["dep:clickhouse"]
 sink-doris = []
 sink-starrocks = []
