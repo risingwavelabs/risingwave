@@ -913,9 +913,11 @@ impl CatalogControllerInner {
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Created)
-                    .or(table::Column::TableType.eq(TableType::MaterializedView)),
+                streaming_job::Column::JobStatus.eq(JobStatus::Created).or(
+                    table::Column::TableType
+                        .eq(TableType::MaterializedView)
+                        .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
+                ),
             )
             .all(&self.db)
             .await?;
