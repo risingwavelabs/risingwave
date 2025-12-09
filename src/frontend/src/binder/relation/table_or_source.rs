@@ -187,11 +187,7 @@ impl Binder {
                             as_of,
                         )?
                     } else {
-                        return Err(CatalogError::NotFound(
-                            "table or source",
-                            table_name.to_owned(),
-                        )
-                        .into());
+                        return Err(CatalogError::not_found("table or source", table_name).into());
                     }
                 }
                 None => (|| {
@@ -266,7 +262,7 @@ impl Binder {
                         }
                     }
 
-                    Err(CatalogError::NotFound("table or source", table_name.to_owned()).into())
+                    Err(CatalogError::not_found("table or source", table_name).into())
                 })()?,
             }
         };

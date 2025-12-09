@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use super::*;
-use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::{Binder, bind_data_type};
 
@@ -90,15 +89,17 @@ pub async fn handle_drop_function(
                 }
                 function.id
             }
-            Err(CatalogError::NotFound(kind, _)) if kind == "function" && if_exists => {
-                return Ok(RwPgResponse::builder(stmt_type)
-                    .notice(format!(
-                        "function \"{}\" does not exist, skipping",
-                        function_name
-                    ))
-                    .into());
+            Err(e) => {
+                if if_exists && e.is_not_found("function") {
+                    return Ok(RwPgResponse::builder(stmt_type)
+                        .notice(format!(
+                            "function \"{}\" does not exist, skipping",
+                            function_name
+                        ))
+                        .into());
+                }
+                return Err(e.into());
             }
-            Err(e) => return Err(e.into()),
         }
     };
 
