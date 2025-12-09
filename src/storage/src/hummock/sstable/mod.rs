@@ -123,7 +123,9 @@ struct SerdeSstable {
 
 impl From<SerdeSstable> for Sstable {
     fn from(SerdeSstable { id, meta }: SerdeSstable) -> Self {
-        Sstable::new(id, meta)
+        // set skip_bloom_filter_in_serde to false because the behavior
+        // is determined by the serializer
+        Sstable::new(id, meta, false)
     }
 }
 
@@ -135,6 +137,9 @@ pub struct Sstable {
     pub meta: SstableMeta,
     #[serde(skip)]
     pub filter_reader: XorFilterReader,
+    /// sst serde happens when a sst meta is written to meta disk cache.
+    /// excluding bloom filter from serde can reduce the meta disk cache entry size
+    /// and reduce the disk io throughput at the cost of making the bloom filter useless
     #[serde(skip)]
     skip_bloom_filter_in_serde: bool,
 }
@@ -165,13 +170,18 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
+    pub fn new(
+        id: HummockSstableObjectId,
+        mut meta: SstableMeta,
+        skip_bloom_filter_in_serde: bool,
+    ) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
         Self {
             id,
             meta,
             filter_reader,
+            skip_bloom_filter_in_serde,
         }
     }
 
@@ -553,7 +563,21 @@ mod tests {
         )
         .await;
 
-        let sstable = Sstable::new(42.into(), meta);
+        // skip sst serde
+        let sstable = q(42.into(), meta.clone(), true);
+
+        let buffer = bincode::serialize(&sstable).unwrap();
+
+        let s: Sstable = bincode::deserialize(&buffer).unwrap();
+
+        assert_eq!(s.id, sstable.id);
+        assert_eq!(s.meta, sstable.meta);
+        assert!(!sstable.filter_reader.is_empty());
+        // the table filter reader is empty because bloom filter is skipped in serde
+        assert!(s.filter_reader.is_empty());
+
+        // enable sst serde
+        let sstable = Sstable::new(42.into(), meta, false);
 
         let buffer = bincode::serialize(&sstable).unwrap();
 

@@ -722,6 +722,7 @@ impl SstableStore {
         let meta_path = self.get_sst_data_path(object_id);
         let stats_ptr = stats.remote_io_time.clone();
         let range = sstable_info_ref.meta_offset as usize..;
+        let skip_bloom_filter_in_serde = self.skip_bloom_filter_in_serde;
 
         let entry = self.meta_cache.get_or_fetch(&object_id, || async move {
             let now = Instant::now();
@@ -731,7 +732,7 @@ impl SstableStore {
                 .await?;
             let meta = SstableMeta::decode(&buf[..])?;
 
-            let sst = Sstable::new(object_id, meta);
+            let sst = Sstable::new(object_id, meta, skip_bloom_filter_in_serde);
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
             Ok::<_, anyhow::Error>(Box::new(sst))
@@ -771,7 +772,7 @@ impl SstableStore {
     }
 
     pub fn insert_meta_cache(&self, object_id: HummockSstableObjectId, meta: SstableMeta) {
-        let sst = Sstable::new(object_id, meta);
+        let sst = Sstable::new(object_id, meta, self.skip_bloom_filter_in_serde);
         self.meta_cache.insert(object_id, Box::new(sst));
     }
 
