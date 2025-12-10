@@ -321,7 +321,7 @@ impl CompactionCatalogManager {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         let mut table_id_to_vnode = HashMap::new();
         let mut table_id_to_watermark_serde = HashMap::new();
-        let mut table_id_to_watermark_serde_wrapper = HashMap::new();
+        let mut table_id_to_value_watermark_serde = HashMap::new();
 
         {
             let guard = self.table_id_to_catalog.read();
@@ -337,9 +337,9 @@ impl CompactionCatalogManager {
                     // watermark
                     table_id_to_watermark_serde
                         .insert(*table_id, build_watermark_col_serde(table_catalog));
-                    table_id_to_watermark_serde_wrapper.insert(
+                    table_id_to_value_watermark_serde.insert(
                         *table_id,
-                        build_watermark_col_serde_wrapper(table_catalog).map(Arc::new),
+                        build_value_watermark_col_serde(table_catalog).map(Arc::new),
                     );
 
                     false
@@ -368,7 +368,7 @@ impl CompactionCatalogManager {
                     let key_extractor = FilterKeyExtractorImpl::from_table(&table);
                     let vnode = table.vnode_count();
                     let watermark_serde = build_watermark_col_serde(&table);
-                    let watermark_serde_wrapper = build_watermark_col_serde_wrapper(&table);
+                    let value_watermark_serde = build_value_watermark_col_serde(&table);
                     guard.insert(table_id, table);
                     // filter-key-extractor
                     multi_filter_key_extractor.register(table_id, key_extractor);
@@ -378,8 +378,8 @@ impl CompactionCatalogManager {
 
                     // watermark
                     table_id_to_watermark_serde.insert(table_id, watermark_serde);
-                    table_id_to_watermark_serde_wrapper
-                        .insert(table_id, watermark_serde_wrapper.map(Arc::new));
+                    table_id_to_value_watermark_serde
+                        .insert(table_id, value_watermark_serde.map(Arc::new));
                 }
             }
         }
@@ -388,7 +388,7 @@ impl CompactionCatalogManager {
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
             table_id_to_watermark_serde,
-            table_id_to_watermark_serde_wrapper,
+            table_id_to_value_watermark_serde,
         )))
     }
 
@@ -399,7 +399,7 @@ impl CompactionCatalogManager {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         let mut table_id_to_vnode = HashMap::new();
         let mut table_id_to_watermark_serde = HashMap::new();
-        let mut table_id_to_watermark_serde_wrapper = HashMap::new();
+        let mut value_table_id_to_watermark_serde = HashMap::new();
         for (table_id, table_catalog) in table_catalogs {
             // filter-key-extractor
             multi_filter_key_extractor
@@ -410,9 +410,9 @@ impl CompactionCatalogManager {
 
             // watermark
             table_id_to_watermark_serde.insert(table_id, build_watermark_col_serde(&table_catalog));
-            table_id_to_watermark_serde_wrapper.insert(
+            value_table_id_to_watermark_serde.insert(
                 table_id,
-                build_watermark_col_serde_wrapper(&table_catalog).map(Arc::new),
+                build_value_watermark_col_serde(&table_catalog).map(Arc::new),
             );
         }
 
@@ -420,7 +420,7 @@ impl CompactionCatalogManager {
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
             table_id_to_watermark_serde,
-            table_id_to_watermark_serde_wrapper,
+            value_table_id_to_watermark_serde,
         ))
     }
 }
@@ -435,8 +435,7 @@ pub struct CompactionCatalogAgent {
     // cache for reduce serde build
     table_id_to_watermark_serde:
         HashMap<StateTableId, Option<(OrderedRowSerde, OrderedRowSerde, usize)>>,
-    table_id_to_watermark_serde_wrapper:
-        HashMap<StateTableId, Option<WatermarkColumnSerdeWrapperRef>>,
+    value_table_id_to_watermark_serde: HashMap<StateTableId, Option<ValueWatermarkColumnSerdeRef>>,
 }
 
 impl CompactionCatalogAgent {
@@ -447,16 +446,16 @@ impl CompactionCatalogAgent {
             StateTableId,
             Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
         >,
-        table_id_to_watermark_serde_wrapper: HashMap<
+        value_table_id_to_watermark_serde: HashMap<
             StateTableId,
-            Option<WatermarkColumnSerdeWrapperRef>,
+            Option<ValueWatermarkColumnSerdeRef>,
         >,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
             table_id_to_vnode,
             table_id_to_watermark_serde,
-            table_id_to_watermark_serde_wrapper,
+            value_table_id_to_watermark_serde,
         }
     }
 
@@ -465,7 +464,7 @@ impl CompactionCatalogAgent {
             filter_key_extractor_manager: FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor),
             table_id_to_vnode: Default::default(),
             table_id_to_watermark_serde: Default::default(),
-            table_id_to_watermark_serde_wrapper: Default::default(),
+            value_table_id_to_watermark_serde: Default::default(),
         }
     }
 
@@ -483,7 +482,7 @@ impl CompactionCatalogAgent {
             .map(|table_id| (*table_id, None))
             .collect();
 
-        let table_id_to_watermark_serde_wrapper = table_id_to_vnode
+        let value_table_id_to_watermark_serde = table_id_to_vnode
             .keys()
             .map(|table_id| (*table_id, None))
             .collect();
@@ -492,7 +491,7 @@ impl CompactionCatalogAgent {
             full_key_filter_key_extractor,
             table_id_to_vnode,
             table_id_to_watermark_serde,
-            table_id_to_watermark_serde_wrapper,
+            value_table_id_to_watermark_serde,
         ))
     }
 }
@@ -528,17 +527,17 @@ impl CompactionCatalogAgent {
             .clone()
     }
 
-    pub fn watermark_serde_wrapper(
+    pub fn value_watermark_serde(
         &self,
         table_id: StateTableId,
-    ) -> Option<WatermarkColumnSerdeWrapperRef> {
-        self.table_id_to_watermark_serde_wrapper
+    ) -> Option<ValueWatermarkColumnSerdeRef> {
+        self.value_table_id_to_watermark_serde
             .get(&table_id)
             .unwrap_or_else(|| {
                 panic!(
                     "table_id not found {} all_table_ids {:?}",
                     table_id,
-                    self.table_id_to_watermark_serde_wrapper.keys()
+                    self.value_table_id_to_watermark_serde.keys()
                 )
             })
             .clone()
@@ -600,17 +599,17 @@ fn build_watermark_col_serde(
     }
 }
 
-fn build_watermark_col_serde_wrapper(table_catalog: &Table) -> Option<WatermarkColumnSerdeWrapper> {
+fn build_value_watermark_col_serde(table_catalog: &Table) -> Option<ValueWatermarkColumnSerde> {
     // TODO: get this clean_watermark_index from table_catalog
     let clean_watermark_index: Option<usize> = None;
     let clean_watermark_index = clean_watermark_index?;
-    Some(WatermarkColumnSerdeWrapper::new(
+    Some(ValueWatermarkColumnSerde::new(
         table_catalog,
         clean_watermark_index,
     ))
 }
 
-pub struct WatermarkColumnSerdeWrapper {
+pub struct ValueWatermarkColumnSerde {
     /// For `ColumnAwareSerde`, only 1 column is deserialized.
     row_serde: EitherSerde,
     /// For `ColumnAwareSerde`, index have been rewritten to 0.
@@ -618,9 +617,9 @@ pub struct WatermarkColumnSerdeWrapper {
     watermark_column_mem_encoding_order: OrderType,
 }
 
-pub type WatermarkColumnSerdeWrapperRef = Arc<WatermarkColumnSerdeWrapper>;
+pub type ValueWatermarkColumnSerdeRef = Arc<ValueWatermarkColumnSerde>;
 
-impl WatermarkColumnSerdeWrapper {
+impl ValueWatermarkColumnSerde {
     fn new(table_catalog: &Table, clean_watermark_index: usize) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns

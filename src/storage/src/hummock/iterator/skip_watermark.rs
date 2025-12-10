@@ -29,9 +29,7 @@ use risingwave_hummock_sdk::table_watermark::{
 };
 
 use super::SkipWatermarkState;
-use crate::compaction_catalog_manager::{
-    CompactionCatalogAgentRef, WatermarkColumnSerdeWrapperRef,
-};
+use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, ValueWatermarkColumnSerdeRef};
 use crate::hummock::HummockResult;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::value::HummockValue;
@@ -458,10 +456,10 @@ pub type NonPkPrefixSkipWatermarkIterator<I> =
 pub type ValueSkipWatermarkIter<I> = SkipWatermarkIterator<I, ValueSkipWatermarkState>;
 
 pub struct ValueSkipWatermarkState {
-    watermarks: BTreeMap<TableId, ReadTableWatermark>,
+    pub watermarks: BTreeMap<TableId, ReadTableWatermark>,
     remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Bytes)>,
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
-    last_serde: Option<WatermarkColumnSerdeWrapperRef>,
+    last_serde: Option<ValueWatermarkColumnSerdeRef>,
     last_table_id: Option<TableId>,
 }
 
@@ -486,6 +484,11 @@ impl ValueSkipWatermarkState {
         let watermarks = safe_epoch_read_table_watermarks_impl(safe_epoch_watermarks);
         Self::new(watermarks, compaction_catalog_agent_ref)
     }
+
+    pub fn may_delete(&self, key: &FullKey<&[u8]>) -> bool {
+        let table_id = key.user_key.table_id;
+        self.watermarks.contains_key(&table_id)
+    }
 }
 
 impl SkipWatermarkState for ValueSkipWatermarkState {
@@ -505,7 +508,7 @@ impl SkipWatermarkState for ValueSkipWatermarkState {
                 self.last_table_id = Some(key_table_id);
                 self.last_serde = self
                     .compaction_catalog_agent_ref
-                    .watermark_serde_wrapper(*table_id);
+                    .value_watermark_serde(*table_id);
             }
             match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
                 Ordering::Less => {
