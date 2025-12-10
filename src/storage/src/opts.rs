@@ -120,6 +120,7 @@ pub struct StorageOpts {
     pub meta_file_cache_fifo_probation_ratio: f64,
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
+    pub sst_skip_bloom_filter_in_serde: bool,
 
     pub vector_file_block_size_kb: usize,
     pub vector_block_cache_capacity_mb: usize,
@@ -260,6 +261,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_fifo_probation_ratio: c.storage.meta_file_cache.fifo_probation_ratio,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             meta_file_cache_throttle,
+            sst_skip_bloom_filter_in_serde: c.storage.sst_skip_bloom_filter_in_serde,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,

@@ -108,6 +108,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
                 MetricLevel::Disabled,
             )),
             use_new_object_prefix_strategy: read_plan.use_new_object_prefix_strategy,
+            skip_bloom_filter_in_serde: false,
             meta_cache,
             block_cache,
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),

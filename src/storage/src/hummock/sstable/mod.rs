@@ -123,18 +123,41 @@ struct SerdeSstable {
 
 impl From<SerdeSstable> for Sstable {
     fn from(SerdeSstable { id, meta }: SerdeSstable) -> Self {
-        Sstable::new(id, meta)
+        // set skip_bloom_filter_in_serde to false because the behavior
+        // is determined by the serializer
+        Sstable::new(id, meta, false)
     }
 }
 
 /// [`Sstable`] is a handle for accessing SST.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(from = "SerdeSstable")]
 pub struct Sstable {
     pub id: HummockSstableObjectId,
     pub meta: SstableMeta,
     #[serde(skip)]
     pub filter_reader: XorFilterReader,
+    /// sst serde happens when a sst meta is written to meta disk cache.
+    /// excluding bloom filter from serde can reduce the meta disk cache entry size
+    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    #[serde(skip)]
+    skip_bloom_filter_in_serde: bool,
+}
+
+impl Serialize for Sstable {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut serde_sstable = SerdeSstable {
+            id: self.id,
+            meta: self.meta.clone(),
+        };
+        if !self.skip_bloom_filter_in_serde {
+            serde_sstable.meta.bloom_filter = self.filter_reader.encode_to_bytes();
+        }
+        serde_sstable.serialize(serializer)
+    }
 }
 
 impl Debug for Sstable {
@@ -147,13 +170,18 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
+    pub fn new(
+        id: HummockSstableObjectId,
+        mut meta: SstableMeta,
+        skip_bloom_filter_in_serde: bool,
+    ) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
         Self {
             id,
             meta,
             filter_reader,
+            skip_bloom_filter_in_serde,
         }
     }
 
@@ -535,12 +563,31 @@ mod tests {
         )
         .await;
 
-        let buffer = bincode::serialize(&meta).unwrap();
+        // skip sst serde
+        let sstable = Sstable::new(42.into(), meta.clone(), true);
 
-        let m: SstableMeta = bincode::deserialize(&buffer).unwrap();
+        let buffer = bincode::serialize(&sstable).unwrap();
 
-        assert_eq!(meta, m);
+        let s: Sstable = bincode::deserialize(&buffer).unwrap();
 
-        println!("{} vs {}", buffer.len(), meta.encoded_size());
+        assert_eq!(s.id, sstable.id);
+        assert_eq!(s.meta, sstable.meta);
+        assert!(!sstable.filter_reader.is_empty());
+        // the table filter reader is empty because bloom filter is skipped in serde
+        assert!(s.filter_reader.is_empty());
+
+        // enable sst serde
+        let sstable = Sstable::new(42.into(), meta, false);
+
+        let buffer = bincode::serialize(&sstable).unwrap();
+
+        let s: Sstable = bincode::deserialize(&buffer).unwrap();
+
+        assert_eq!(s.id, sstable.id);
+        assert_eq!(s.meta, sstable.meta);
+        assert_eq!(
+            s.filter_reader.encode_to_bytes(),
+            sstable.filter_reader.encode_to_bytes()
+        );
     }
 }

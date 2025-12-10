@@ -47,6 +47,16 @@ impl Xor8FilterBuilder {
         };
         Self { key_hash_entries }
     }
+
+    fn build_from_xor8(xor_filter: &Xor8) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
+        buf.put_u64_le(xor_filter.seed);
+        buf.put_u32_le(xor_filter.block_length as u32);
+        buf.put_slice(xor_filter.fingerprints.as_ref());
+        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
+        buf.put_u8(FOOTER_XOR8);
+        buf
+    }
 }
 
 impl Xor16FilterBuilder {
@@ -124,13 +134,8 @@ impl FilterBuilder for Xor8FilterBuilder {
         });
 
         let xor_filter = Xor8::from(&self.key_hash_entries);
-        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
-        buf.put_u64_le(xor_filter.seed);
-        buf.put_u32_le(xor_filter.block_length as u32);
-        buf.put_slice(xor_filter.fingerprints.as_ref());
-        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
-        buf.put_u8(FOOTER_XOR8);
-        buf
+        self.key_hash_entries.clear();
+        Self::build_from_xor8(&xor_filter)
     }
 
     fn approximate_len(&self) -> usize {
@@ -414,6 +419,25 @@ impl XorFilterReader {
     pub fn is_block_based_filter(&self) -> bool {
         matches!(self.filter, XorFilter::BlockXor16(_))
     }
+
+    pub fn encode_to_bytes(&self) -> Vec<u8> {
+        match &self.filter {
+            XorFilter::Xor8(filter) => Xor8FilterBuilder::build_from_xor8(filter),
+            XorFilter::Xor16(filter) => Xor16FilterBuilder::build_from_xor16(filter),
+            XorFilter::BlockXor16(reader) => {
+                let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
+                for (_, filter) in &reader.filters {
+                    let block = Xor16FilterBuilder::build_from_xor16(filter);
+                    data.put_u32_le(block.len() as u32);
+                    data.extend(block);
+                }
+                // Add footer to tell which kind of filter. 253 indicates a blocked xor16 filter.
+                data.put_u32_le(reader.filters.len() as u32);
+                data.put_u8(FOOTER_BLOCKED_XOR16);
+                data
+            }
+        }
+    }
 }
 
 impl Clone for XorFilterReader {
@@ -538,5 +562,72 @@ mod tests {
         } else {
             panic!();
         }
+    }
+
+    // Test to make sure filter key builder finish produce the same result as the filter reader encode_to_bytes
+    #[tokio::test]
+    async fn test_xor_filter_builder_and_reader() {
+        // Test Xor8 filter
+        let mut xor8_builder = Xor8FilterBuilder::new(100);
+        for i in 0..100 {
+            xor8_builder.add_key(&test_user_key_of(i).encode(), 0);
+        }
+        let xor8_bytes = xor8_builder.finish(None);
+        let xor8_reader = XorFilterReader::new(&xor8_bytes, &[]);
+        let xor8_encoded = xor8_reader.encode_to_bytes();
+        assert_eq!(
+            xor8_bytes, xor8_encoded,
+            "Xor8 builder and reader should produce identical bytes"
+        );
+
+        // Test Xor16 filter
+        let mut xor16_builder = Xor16FilterBuilder::new(100);
+        for i in 0..100 {
+            xor16_builder.add_key(&test_user_key_of(i).encode(), 0);
+        }
+        let xor16_bytes = xor16_builder.finish(None);
+        let xor16_reader = XorFilterReader::new(&xor16_bytes, &[]);
+        let xor16_encoded = xor16_reader.encode_to_bytes();
+        assert_eq!(
+            xor16_bytes, xor16_encoded,
+            "Xor16 builder and reader should produce identical bytes"
+        );
+
+        // Test BlockedXor16 filter
+        let mut blocked_builder = BlockedXor16FilterBuilder::new(1024);
+        let mut block_metas = Vec::new();
+
+        // Create multiple blocks
+        for block_idx in 0..3 {
+            for i in 0..50 {
+                let key_idx = block_idx * 50 + i;
+                blocked_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
+            }
+
+            // Create a block meta for this block
+            let smallest_key = FullKey {
+                user_key: test_user_key_of(block_idx * 50),
+                epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+            };
+
+            block_metas.push(BlockMeta {
+                smallest_key: smallest_key.encode(),
+                len: 0,
+                offset: 0,
+                uncompressed_size: 0,
+                total_key_count: 50,
+                stale_key_count: 0,
+            });
+
+            blocked_builder.switch_block(None);
+        }
+
+        let blocked_bytes = blocked_builder.finish(None);
+        let blocked_reader = XorFilterReader::new(&blocked_bytes, &block_metas);
+        let blocked_encoded = blocked_reader.encode_to_bytes();
+        assert_eq!(
+            blocked_bytes, blocked_encoded,
+            "BlockedXor16 builder and reader should produce identical bytes"
+        );
     }
 }

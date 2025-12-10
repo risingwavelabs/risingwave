@@ -86,6 +86,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
         recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
+        skip_bloom_filter_in_serde: false,
 
         meta_cache,
         block_cache,
