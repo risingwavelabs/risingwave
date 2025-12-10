@@ -140,43 +140,60 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<ApplyThrottleResponse>, Status> {
         let request = request.into_inner();
 
-        let actor_to_apply = match request.kind() {
-            ThrottleTarget::Source | ThrottleTarget::TableWithSource => {
+        // Decode enums from raw i32 fields to handle decoupled target/type.
+        let throttle_target = ThrottleTarget::try_from(request.throttle_target)
+            .unwrap_or(ThrottleTarget::Unspecified);
+        let throttle_type =
+            ThrottleType::try_from(request.throttle_type).unwrap_or(ThrottleType::Unspecified);
+
+        let actor_to_apply = match (throttle_type, throttle_target) {
+            (ThrottleType::Source, ThrottleTarget::Source) => {
                 self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
                     .await?
             }
-            ThrottleTarget::Mv => {
+            (ThrottleType::Source, ThrottleTarget::Table) => {
+                // Resolve associated source from table id, then throttle the source
+                let associated_source_id = self
+                    .metadata_manager
+                    .get_table_associated_source_id(request.id.into())
+                    .await?
+                    .ok_or_else(|| Status::invalid_argument("table has no associated source"))?;
+                self.metadata_manager
+                    .update_source_rate_limit_by_source_id(associated_source_id, request.rate)
+                    .await?
+            }
+            (ThrottleType::Backfill, ThrottleTarget::Mv)
+            | (ThrottleType::Backfill, ThrottleTarget::Table) => {
                 self.metadata_manager
                     .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
-            ThrottleTarget::CdcTable => {
-                self.metadata_manager
-                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
-                    .await?
-            }
-            ThrottleTarget::TableDml => {
+            (ThrottleType::Dml, ThrottleTarget::Table) => {
                 self.metadata_manager
                     .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
                     .await?
             }
-            ThrottleTarget::Sink => {
+            (ThrottleType::Sink, ThrottleTarget::Sink) => {
                 self.metadata_manager
                     .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
                     .await?
             }
-            ThrottleTarget::Fragment => {
+            // Fragment target is independent of throttle type.
+            (_, ThrottleTarget::Fragment) => {
                 self.metadata_manager
                     .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
                     .await?
             }
-            ThrottleTarget::Unspecified => {
-                return Err(Status::invalid_argument("unspecified throttle target"));
+            _ => {
+                return Err(Status::invalid_argument(format!(
+                    "unsupported throttle target/type: {:?}/{:?}",
+                    throttle_target, throttle_type
+                )));
             }
         };
 
-        let job_id = if request.kind() == ThrottleTarget::Fragment {
+        let job_id = if throttle_target == ThrottleTarget::Fragment {
             self.metadata_manager
                 .catalog_controller
                 .get_fragment_streaming_job_id(request.id.into())
