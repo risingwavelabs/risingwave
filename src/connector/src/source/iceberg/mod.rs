@@ -147,10 +147,10 @@ impl IcebergFileScanTaskJsonStr {
     }
 }
 
-/// Builder for constructing [`IcebergFileScanTask`]s from a stream of [`FileScanTask`]s.
+/// Builder for constructing `IcebergFileScanTask`s from a stream of `FileScanTask`s.
 ///
-/// The builder is configured with an [`IcebergScanType`] to determine which type of scan
-/// (e.g., data, delete, position delete) to perform. The [`build`] method consumes a stream
+/// The builder is configured with an `IcebergScanType` to determine which type of scan
+/// (e.g., data, delete, position delete) to perform. The `build` method consumes a stream
 /// of file scan tasks and collects those matching the configured scan type.
 pub struct IcebergFileScanTaskBuilder {
     iceberg_scan_type: IcebergScanType,
@@ -169,9 +169,10 @@ impl IcebergFileScanTaskBuilder {
     /// Consumes a stream of [`FileScanTask`]s and collects those matching the configured scan type.
     ///
     /// The behavior depends on the scan type:
-    /// - For [`IcebergScanType::DataScan`], collects data file tasks.
-    /// - For [`IcebergScanType::DeleteScan`], collects delete file tasks.
-    /// - For [`IcebergScanType::PosDeleteScan`], collects position delete file tasks.
+    /// - For `IcebergScanType::DataScan`, collects data file tasks.
+    /// - For `IcebergScanType::EqualityDeleteScan`, collects delete file tasks.
+    /// - For `IcebergScanType::PositionDeleteScan`, collects position delete file tasks.
+    /// - For `IcebergScanType::CountStar`, sums up the record counts of data file tasks.
     ///
     /// # Arguments
     ///
