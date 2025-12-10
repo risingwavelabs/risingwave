@@ -15,7 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::util::execute_with_long_running_notification;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -67,6 +67,7 @@ pub async fn handle_drop_subscription(
         catalog_writer.drop_subscription(subscription_id, cascade),
         &session,
         "DROP SUBSCRIPTION",
+        LongRunningNotificationAction::SuggestRecover,
     )
     .await?;
 

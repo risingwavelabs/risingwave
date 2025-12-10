@@ -31,6 +31,7 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
@@ -262,15 +263,19 @@ pub async fn handle_create_mv_bound(
             ));
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_materialized_view(
+    execute_with_long_running_notification(
+        catalog_writer.create_materialized_view(
             table.to_prost(),
             graph,
             dependencies,
             resource_group,
             if_not_exists,
-        )
-        .await?;
+        ),
+        &session,
+        "CREATE MATERIALIZED VIEW",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
