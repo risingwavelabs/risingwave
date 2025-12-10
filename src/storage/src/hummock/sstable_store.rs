@@ -507,19 +507,17 @@ impl SstableStore {
                         object_id,
                         file_size
                     );
-                    return Err(foyer::Error::other(HummockError::from(e)));
+                    return Err(HummockError::from(e));
                 }
             };
-            let block = Box::new(
-                Block::decode(block_data, uncompressed_capacity).map_err(foyer::Error::other)?,
-            );
+            let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
             Ok(block)
         };
 
         match policy {
             CachePolicy::Fill(hint) => {
                 let properties = HybridCacheProperties::default().with_hint(hint);
-                let fetch = self.block_cache.get_or_fetch(&idx, |_| {
+                let fetch = self.block_cache.get_or_fetch(&idx, || {
                     fetch_block.map(|res| res.map(|block| (block, properties)))
                 });
                 Ok(BlockResponse::Fetch(fetch))
@@ -535,13 +533,13 @@ impl SstableStore {
                         entry,
                     ))),
                     _ => {
-                        let block = fetch_block.await.map_err(HummockError::foyer_error)?;
+                        let block = fetch_block.await?;
                         Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
                     }
                 }
             }
             CachePolicy::Disable => {
-                let block = fetch_block.await.map_err(HummockError::foyer_error)?;
+                let block = fetch_block.await?;
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
             }
         }
@@ -575,17 +573,12 @@ impl SstableStore {
         let meta_offset = vector_file.meta_offset;
         let entry = self
             .vector_meta_cache
-            .get_or_fetch(&vector_file.object_id.as_raw(), move |_| async move {
-                let encoded_footer = store
-                    .read(&path, meta_offset..)
-                    .await
-                    .map_err(foyer::MemoryError::other)?;
-                let meta = VectorFileMeta::decode_footer(&encoded_footer)
-                    .map_err(foyer::MemoryError::other)?;
-                Ok(HummockVectorIndexMetaFile::from(meta))
+            .get_or_fetch(&vector_file.object_id.as_raw(), || async move {
+                let encoded_footer = store.read(&path, meta_offset..).await?;
+                let meta = VectorFileMeta::decode_footer(&encoded_footer)?;
+                Ok::<_, anyhow::Error>(HummockVectorIndexMetaFile::from(meta))
             })
-            .await
-            .map_err(HummockError::other)?;
+            .await?;
         stats.file_meta_total += 1;
         if entry.source() == foyer::Source::Outer {
             stats.file_meta_miss += 1;
@@ -606,17 +599,12 @@ impl SstableStore {
         let end_offset = start_offset + block_meta.block_size;
         let entry = self
             .vector_block_cache
-            .get_or_fetch(&(vector_file.object_id, block_idx), move |_| async move {
-                let encoded_block = store
-                    .read(&path, start_offset..end_offset)
-                    .await
-                    .map_err(foyer::MemoryError::other)?;
-                let block =
-                    VectorBlock::decode(&encoded_block).map_err(foyer::MemoryError::other)?;
-                Ok(Box::new(block))
+            .get_or_fetch(&(vector_file.object_id, block_idx), || async move {
+                let encoded_block = store.read(&path, start_offset..end_offset).await?;
+                let block = VectorBlock::decode(&encoded_block)?;
+                Ok::<_, anyhow::Error>(Box::new(block))
             })
             .await
-            .map_err(foyer::Error::from)
             .map_err(HummockError::foyer_error)?;
 
         stats.file_block_total += 1;
@@ -655,17 +643,12 @@ impl SstableStore {
             self.get_object_data_path(HummockObjectId::HnswGraphFile(graph_file.object_id));
         let entry = self
             .vector_meta_cache
-            .get_or_fetch(&graph_file.object_id.as_raw(), |_| async move {
-                let encoded_graph = store
-                    .read(&graph_file_path, ..)
-                    .await
-                    .map_err(foyer::MemoryError::other)?;
-                let graph = PbHnswGraph::decode(encoded_graph.as_ref())
-                    .map_err(foyer::MemoryError::other)?;
-                Ok(HummockVectorIndexMetaFile::from(graph))
+            .get_or_fetch(&graph_file.object_id.as_raw(), || async move {
+                let encoded_graph = store.read(&graph_file_path, ..).await?;
+                let graph = PbHnswGraph::decode(encoded_graph.as_ref())?;
+                Ok::<_, anyhow::Error>(HummockVectorIndexMetaFile::from(graph))
             })
             .await
-            .map_err(foyer::Error::from)
             .map_err(HummockError::foyer_error)?;
         stats.hnsw_graph_total += 1;
         if entry.source() == foyer::Source::Outer {
@@ -732,25 +715,28 @@ impl SstableStore {
         let stats_ptr = stats.remote_io_time.clone();
         let range = sstable_info_ref.meta_offset as usize..;
 
-        let entry = self
-            .meta_cache
-            .get_or_fetch(&object_id, move |_| async move {
-                let now = Instant::now();
-                let buf = store
-                    .read(&meta_path, range)
-                    .await
-                    .map_err(foyer::Error::other)?;
-                let meta = SstableMeta::decode(&buf[..]).map_err(foyer::Error::other)?;
+        let entry = self.meta_cache.get_or_fetch(&object_id, || async move {
+            let now = Instant::now();
+            let buf = store
+                .read(&meta_path, range)
+                .instrument_await("get_meta_response".verbose())
+                .await?;
+            let meta = SstableMeta::decode(&buf[..])?;
 
-                let sst = Sstable::new(object_id, meta);
-                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-                stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                Ok(Box::new(sst))
-            });
+            let sst = Sstable::new(object_id, meta);
+            let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+            stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
+            Ok::<_, anyhow::Error>(Box::new(sst))
+        });
 
         stats.cache_meta_block_total += 1;
 
-        async move { entry.await.map_err(HummockError::foyer_error) }
+        async move {
+            entry
+                .instrument_await("fetch_meta".verbose())
+                .await
+                .map_err(HummockError::foyer_error)
+        }
     }
 
     pub async fn list_sst_object_metadata_from_object_store(
