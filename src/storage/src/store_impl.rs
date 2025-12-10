@@ -717,7 +717,7 @@ impl StateStoreImpl {
                         .with_capacity(opts.meta_file_cache_capacity_mb * MB)
                         .with_throttle(opts.meta_file_cache_throttle.clone())
                         .build()
-                        .map_err(HummockError::foyer_io_error)?;
+                        .map_err(HummockError::foyer_error)?;
                     let engine_builder = BlockEngineBuilder::new(device)
                         .with_block_size(opts.meta_file_cache_file_capacity_mb * MB)
                         .with_indexer_shards(opts.meta_file_cache_indexer_shards)
@@ -767,7 +767,7 @@ impl StateStoreImpl {
                         .with_capacity(opts.data_file_cache_capacity_mb * MB)
                         .with_throttle(opts.data_file_cache_throttle.clone())
                         .build()
-                        .map_err(HummockError::foyer_io_error)?;
+                        .map_err(HummockError::foyer_error)?;
                     let engine_builder = BlockEngineBuilder::new(device)
                         .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
                         .with_indexer_shards(opts.data_file_cache_indexer_shards)
