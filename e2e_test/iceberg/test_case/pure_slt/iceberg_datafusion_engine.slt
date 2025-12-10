@@ -45,7 +45,7 @@ select * from t for system_time as of '2222-12-10 11:48:06';
 1 xxx
 
 statement ok
-insert into t select i, repeat('x', i) from generate_series(2,5) as s(i);
+insert into t select i, repeat('x', i + 2) from generate_series(2,5) as s(i);
 
 statement ok
 FLUSH;
