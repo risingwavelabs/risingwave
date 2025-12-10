@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::id::FragmentId;
 use risingwave_rpc_client::error::TonicStatusWrapper;
 
 use crate::task::ActorId;
@@ -22,7 +23,7 @@ use crate::task::ActorId;
 /// exits or panics on other errors, or the network connection is broken.
 /// Therefore, this error is usually not the root case of the failure in the
 /// streaming graph.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExchangeChannelClosed {
     message: String,
 
@@ -78,6 +79,17 @@ impl ExchangeChannelClosed {
         Self {
             message: format!(
                 "exchange channel from remote upstream actor {upstream} closed unexpectedly"
+            ),
+            source: source.map(Into::into),
+        }
+    }
+
+    /// Creates a new error indicating that the multiplexed exchange channel from the remote
+    /// upstream is closed unexpectedly, with an optional gRPC error as the cause.
+    pub fn remote_input_fragment(fragment: FragmentId, source: Option<tonic::Status>) -> Self {
+        Self {
+            message: format!(
+                "multiplexed exchange channel from remote fragment {fragment} closed unexpectedly",
             ),
             source: source.map(Into::into),
         }

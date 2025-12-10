@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use futures::StreamExt;
 use futures::stream::SelectAll;
@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use risingwave_pb::id::ActorId;
 use risingwave_pb::task_service::{GetMuxStreamRequest, GetMuxStreamResponse, PbPermits};
 use risingwave_stream::executor::DispatcherMessageBatch;
-use risingwave_stream::executor::exchange::permit::MessageWithPermits;
+use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Permits};
 use risingwave_stream::task::LocalStreamManager;
 use tonic::{Status, Streaming};
 
@@ -54,24 +54,29 @@ impl StreamExchangeServiceImpl {
             }
         };
 
-        enum Req {
+        enum Event {
             Request(Result<GetMuxStreamRequest, Status>),
-            Message {
+            ExchangeMessage {
                 up_actor_id: ActorId,
                 down_actor_id: ActorId,
                 message: MessageWithPermits,
             },
         }
 
+        // Merge events from the downstream client and all upstream actors.
         let mut select_all = SelectAll::new();
-        select_all.push(request_stream.map(Req::Request).boxed());
+        select_all.push(request_stream.map(Event::Request).left_stream());
 
-        let mut all_permits = HashMap::new();
+        // Weak permit handles of all registered actor pairs.
+        let mut all_permit_handles: HashMap<(ActorId, ActorId), Weak<Permits>> = HashMap::new();
 
-        while let Some(r) = select_all.next().await {
-            match r {
-                Req::Request(req) => match req?.value.unwrap() {
+        while let Some(event) = select_all.next().await {
+            match event {
+                // Request from the downstream client.
+                Event::Request(req) => match req?.value.unwrap() {
                     Value::Init(_) => unreachable!("the stream has already been initialized"),
+
+                    // Register a new actor pair to this multiplexed stream.
                     Value::Register(Register {
                         up_actor_id,
                         down_actor_id,
@@ -83,35 +88,47 @@ impl StreamExchangeServiceImpl {
                                 (up_actor_id, down_actor_id),
                             )
                             .await?;
-                        let permits = Arc::downgrade(&receiver.permits());
-                        all_permits.insert((up_actor_id, down_actor_id), permits);
+                        all_permit_handles.insert(
+                            (up_actor_id, down_actor_id),
+                            Arc::downgrade(&receiver.permits()),
+                        );
                         select_all.push(
-                            receiver
-                                .into_raw_stream()
-                                .map(move |message| Req::Message {
+                            Box::pin(receiver.into_raw_stream())
+                                .map(move |message| Event::ExchangeMessage {
                                     up_actor_id,
                                     down_actor_id,
                                     message,
                                 })
-                                .boxed(),
+                                .right_stream(),
                         );
                     }
+
+                    // Add permits back to the upstream.
                     Value::AddPermits(AddPermits {
                         up_actor_id,
                         down_actor_id,
                         permits,
                     }) => {
-                        if let Some(to_add) = permits.unwrap().value
-                            && let Some(permits) = all_permits
+                        if let Some(to_add) = permits.unwrap().value {
+                            if let Some(permits) = all_permit_handles
                                 .get(&(up_actor_id, down_actor_id))
                                 .and_then(|p| p.upgrade())
-                        {
-                            permits.add_permits(to_add);
+                            {
+                                permits.add_permits(to_add);
+                            } else {
+                                tracing::warn!(
+                                    %up_actor_id,
+                                    %down_actor_id,
+                                    ?to_add,
+                                    "failed to add permits to non-existing actor pair",
+                                );
+                            }
                         }
                     }
                 },
 
-                Req::Message {
+                // Exchange message from the upstream.
+                Event::ExchangeMessage {
                     up_actor_id,
                     down_actor_id,
                     message: MessageWithPermits { message, permits },
@@ -124,7 +141,7 @@ impl StreamExchangeServiceImpl {
                         | DispatcherMessageBatch::BarrierBatch(_)) => msg,
                     };
                     let proto = message.to_protobuf();
-                    // forward the acquired permit to the downstream
+
                     let response = GetMuxStreamResponse {
                         message: Some(proto),
                         permits: Some(PbPermits { value: permits }),

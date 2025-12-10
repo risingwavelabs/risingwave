@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use mux_remote_input::MuxExchangeWorkers;
+
 mod mux_remote_input;
 
 use std::pin::Pin;

@@ -127,7 +127,7 @@ where
 
 /// A wrapper of [`tonic::Status`] that provides better error message and extracts
 /// the source chain from the `details` field.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TonicStatusWrapper {
     inner: tonic::Status,
 
