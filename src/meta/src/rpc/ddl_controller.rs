@@ -777,10 +777,23 @@ impl DdlController {
         for fragment in table_fragments.fragments.values_mut() {
             for actor in &mut fragment.actors {
                 if let Some(node) = &mut actor.nodes {
-                    visit_stream_node(node, |node| {
-                        if let NodeBody::Merge(merge_node) = node {
+                    visit_stream_node(node, |node| match node {
+                        NodeBody::Merge(merge_node) => {
                             assert!(!merge_node.upstream_actor_id.is_empty(), "All the mergers for the union should have been fully assigned beforehand.");
                         }
+                        NodeBody::Source(source_node) => {
+                            if std::env::var("RW_PAUSE_NEW_SINK_INTO_TABLE").is_ok() {
+                                if let Some(node_inner) = &mut source_node.source_inner {
+                                    tracing::debug!(
+                                        fragment_id = fragment.fragment_id,
+                                        source_id = node_inner.source_id,
+                                        "Set table's source_rate_limit to 0 for new sink into table."
+                                    );
+                                    node_inner.rate_limit = Some(0);
+                                }
+                            }
+                        }
+                        _ => {}
                     });
                 }
             }
