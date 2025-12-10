@@ -771,19 +771,20 @@ where
             .map(|idx| idx as i32);
 
         // Restore persisted table watermark.
-        let (watermark_serde, _watermark_type) = watermark_serde_and_type(
+        let pair = watermark_serde_and_type(
             clean_watermark_index_in_pk,
             clean_watermark_index_in_value,
             &pk_serde,
             &data_types,
         );
-
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some(max_watermark) = max_watermark_of_vnodes {
+        let committed_watermark = if let Some((watermark_serde, _watermark_type)) = pair
+            && let Some(max_watermark) = max_watermark_of_vnodes
+        {
             let deserialized = watermark_serde
                 .deserialize(&max_watermark)
                 .ok()
@@ -1467,17 +1468,19 @@ where
             }
         };
 
-        let (watermark_serializer, watermark_type) = watermark_serde_and_type(
+        let pair = watermark_serde_and_type(
             self.clean_watermark_index_in_pk,
             self.clean_watermark_index_in_value,
             &self.pk_serde,
             &self.data_types,
         );
-        let watermark_suffix =
-            serialize_row(row::once(Some(watermark.clone())), &watermark_serializer);
 
         // Compute Delete Ranges
-        let seal_watermark = if should_clean_watermark {
+        let seal_watermark = if let Some((watermark_serializer, watermark_type)) = pair
+            && should_clean_watermark
+        {
+            let watermark_suffix =
+                serialize_row(row::once(Some(watermark.clone())), &watermark_serializer);
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes().iter_vnodes().collect_vec()
             }, "delete range");
@@ -1956,29 +1959,35 @@ fn watermark_serde_and_type<'a>(
     clean_watermark_index_in_value: Option<i32>,
     pk_serde: &'a OrderedRowSerde,
     data_types: &'a [DataType],
-) -> (Cow<'a, OrderedRowSerde>, WatermarkSerdeType) {
+) -> Option<(Cow<'a, OrderedRowSerde>, WatermarkSerdeType)> {
     match (clean_watermark_index_in_pk, clean_watermark_index_in_value) {
         (Some(_), Some(_)) => unreachable!(),
         (Some(watermark_pk_idx), None) => {
+            if pk_serde.get_order_types().is_empty() {
+                return None;
+            }
             let serde = pk_serde.index(watermark_pk_idx as usize);
             let serde_type = if watermark_pk_idx == 0 {
                 WatermarkSerdeType::PkPrefix
             } else {
                 WatermarkSerdeType::NonPkPrefix
             };
-            (serde, serde_type)
+            Some((serde, serde_type))
         }
         (None, Some(watermark_column_idx)) => {
             let serde = Cow::Owned(OrderedRowSerde::new(
                 vec![data_types[watermark_column_idx as usize].clone()],
                 vec![OrderType::ascending()],
             ));
-            (serde, WatermarkSerdeType::Value)
+            Some((serde, WatermarkSerdeType::Value))
         }
         (None, None) => {
+            if pk_serde.get_order_types().is_empty() {
+                return None;
+            }
             let watermark_pk_idx = 0;
             let serde = pk_serde.index(watermark_pk_idx);
-            (serde, WatermarkSerdeType::PkPrefix)
+            Some((serde, WatermarkSerdeType::PkPrefix))
         }
     }
 }
