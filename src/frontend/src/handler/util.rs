@@ -360,7 +360,7 @@ impl LongRunningNotificationAction {
                 operation_name, notify_timeout_secs
             ),
             LongRunningNotificationAction::MonitorBackfillJob => format!(
-                "{} has taken more than {} secs; barrier latency might be high. Please check barrier latency metrics to confirm.\n\
+                "{} has taken more than {} secs, barrier latency might be high. Please check barrier latency metrics to confirm.\n\
                 You can also run SHOW JOBS to track the progress of the job.\n\
                 See: https://docs.risingwave.com/performance/metrics#barrier-monitoring and https://docs.risingwave.com/sql/commands/sql-show-jobs",
                 operation_name, notify_timeout_secs
