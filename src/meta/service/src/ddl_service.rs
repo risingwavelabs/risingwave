@@ -1599,7 +1599,10 @@ impl DdlService for DdlServiceImpl {
                 .collect();
             let _ = self
                 .barrier_scheduler
-                .run_command(database_id, Command::Throttle(mutation))
+                .run_command(
+                    database_id,
+                    Command::Throttle(mutation, risingwave_pb::meta::ThrottleType::Source),
+                )
                 .await?;
         }
 
