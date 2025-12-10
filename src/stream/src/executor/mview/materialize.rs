@@ -222,15 +222,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         yield Message::Barrier(barrier);
         self.state_table.init_epoch(first_epoch).await?;
 
-        match self.conflict_behavior {
-            checked_conflict_behaviors!() => {
-                self.materialize_cache
-                    .init_vnode_max_keys(&self.state_table)
-                    .await?;
-            }
-            _ => {}
-        };
-
         #[for_await]
         for msg in input {
             let msg = msg?;
@@ -332,14 +323,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         && b.has_more_downstream_fragments(self.actor_context.id)
                     {
                         self.may_have_downstream = true;
-                        match self.conflict_behavior {
-                            checked_conflict_behaviors!() => {
-                                self.materialize_cache
-                                    .init_vnode_max_keys(&self.state_table)
-                                    .await?;
-                            }
-                            _ => {}
-                        };
+                        self.materialize_cache.vnode_max_keys.clear();
                     }
                     Self::may_update_depended_subscriptions(
                         &mut self.depended_subscription_ids,
@@ -369,14 +353,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         && cache_may_stale
                     {
                         self.materialize_cache.lru_cache.clear();
-                        match self.conflict_behavior {
-                            checked_conflict_behaviors!() => {
-                                self.materialize_cache
-                                    .init_vnode_max_keys(&self.state_table)
-                                    .await?;
-                            }
-                            _ => {}
-                        };
+                        self.materialize_cache.vnode_max_keys.clear();
                     }
 
                     self.metrics
@@ -736,7 +713,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         &mut self,
         state_table: &StateTableInner<S, SD>,
     ) -> StreamExecutorResult<()> {
-        self.vnode_max_keys.clear();
+        assert!(self.vnode_max_keys.is_empty());
         'vnode_loop: for vnode in state_table.vnodes().iter_vnodes() {
             let table_iter = state_table
                 .rev_iter_keyed_row_with_vnode(
@@ -773,6 +750,10 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         toastable_column_indices: Option<&[usize]>,
     ) -> StreamExecutorResult<ChangeBuffer> {
         assert_matches!(conflict_behavior, checked_conflict_behaviors!());
+
+        if self.vnode_max_keys.is_empty() {
+            self.init_vnode_max_keys(table).await?;
+        }
 
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
@@ -999,7 +980,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             });
         }
 
-        tracing::info!(
+        tracing::trace!(
             "MaterializeCache fetch_keys: total {}, skipped {}, to_get {}",
             skip_key_cnt + get_key_cnt,
             skip_key_cnt,
