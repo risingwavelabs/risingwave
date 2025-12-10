@@ -120,9 +120,6 @@ pub async fn handle_alter_streaming_rate_limit(
             let reader = session.env().catalog_reader().read_guard();
             let (sink, schema_name) =
                 reader.get_any_sink_by_name(db_name, schema_path, &real_table_name)?;
-            if sink.target_table.is_some() {
-                bail!("ALTER SINK_RATE_LIMIT is not for sink into table")
-            }
             session.check_privilege_for_drop_alter(schema_name, &**sink)?;
             (StatementType::ALTER_SINK, sink.id.as_raw_id())
         }
