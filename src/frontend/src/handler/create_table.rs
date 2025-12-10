@@ -1489,7 +1489,7 @@ pub async fn handle_create_table(
                     dependencies,
                 ),
                 &session,
-                "CREATE HUMMOCK TABLE",
+                "CREATE TABLE",
                 action,
             )
             .await?;
