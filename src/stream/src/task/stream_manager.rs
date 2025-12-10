@@ -56,7 +56,7 @@ pub mod await_tree_key {
     }
 }
 
-/// `LocalStreamManager` directly handles public API for streaming, e.g., `StreamService`, `ExchangeService`.
+/// `LocalStreamManager` directly handles public API for streaming, e.g., `StreamService`, `StreamExchangeService`.
 ///
 /// Interacts with meta, and sends [`LocalActorOperation`] events to [`LocalBarrierWorker`].
 /// Note: barriers are handled by [`ControlStreamHandle`]. The control stream is established in [`Self::handle_new_control_stream`],

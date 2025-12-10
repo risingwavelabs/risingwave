@@ -215,6 +215,7 @@ pub struct Model {
     pub webhook_info: Option<WebhookSourceInfo>,
     pub engine: Option<Engine>,
     pub clean_watermark_index_in_pk: Option<i32>,
+    pub clean_watermark_indices: Option<I32Array>,
     pub refreshable: bool,
     pub vector_index_info: Option<VectorIndexInfo>,
     pub cdc_table_type: Option<CdcTableType>,
@@ -357,7 +358,20 @@ impl From<PbTable> for ActiveModel {
             engine: Set(pb_table
                 .engine
                 .map(|engine| Engine::from(PbEngine::try_from(engine).expect("Invalid engine")))),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: Set(pb_table.clean_watermark_index_in_pk),
+            clean_watermark_indices: Set(if pb_table.clean_watermark_indices.is_empty() {
+                None
+            } else {
+                Some(
+                    pb_table
+                        .clean_watermark_indices
+                        .iter()
+                        .map(|x| *x as i32)
+                        .collect::<Vec<_>>()
+                        .into(),
+                )
+            }),
             refreshable: Set(pb_table.refreshable),
             vector_index_info: Set(pb_table
                 .vector_index_info
