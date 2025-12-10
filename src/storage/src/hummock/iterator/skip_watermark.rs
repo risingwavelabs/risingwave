@@ -936,6 +936,7 @@ mod tests {
                     full_key_filter_key_extractor,
                     table_id_to_vnode,
                     table_id_to_watermark_serde,
+                    HashMap::default(),
                 ));
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -1001,6 +1002,7 @@ mod tests {
                     full_key_filter_key_extractor,
                     table_id_to_vnode,
                     table_id_to_watermark_serde,
+                    HashMap::default(),
                 ));
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -1062,6 +1064,7 @@ mod tests {
                     full_key_filter_key_extractor,
                     table_id_to_vnode,
                     table_id_to_watermark_serde,
+                    HashMap::default(),
                 ));
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -1123,6 +1126,7 @@ mod tests {
                     full_key_filter_key_extractor,
                     table_id_to_vnode,
                     table_id_to_watermark_serde,
+                    HashMap::default(),
                 ));
 
                 let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -1297,6 +1301,7 @@ mod tests {
                 full_key_filter_key_extractor,
                 table_id_to_vnode,
                 table_id_to_watermark_serde,
+                HashMap::default(),
             ));
 
             let mut iter = NonPkPrefixSkipWatermarkIterator::new(
@@ -1398,6 +1403,7 @@ mod tests {
                 full_key_filter_key_extractor,
                 table_id_to_vnode,
                 table_id_to_watermark_serde,
+                HashMap::default(),
             ));
 
             let non_pk_prefix_iter = NonPkPrefixSkipWatermarkIterator::new(

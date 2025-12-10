@@ -21,7 +21,6 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
-use risingwave_common::row::OwnedRow;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
