@@ -268,10 +268,13 @@ TMP_FILE=$(mktemp)
 
 bye() {
   local status=$?
+  if [[ $status -eq 2 ]]; then
+    echo "Please disable unnecessary logs by doing following:"
+    echo "- Use DEBUG or TRACE level for logs that are debugging-oriented."
+    echo "- Use LogSuppressor to apply rate limit to verbose logs."
+  fi
   if [[ $status -ne 0 ]]; then
     echo "You may download the log files from the \"Artifacts\" tab."
-  else
-    echo "All good!"
   fi
   rm -f "${TMP_FILE}"
   exit $status
@@ -299,20 +302,21 @@ if [ -e "${log_files[0]}" ]; then
 
   total_lines=$(wc -l < "${TMP_FILE}")
   if [ "$total_lines" -gt 0 ]; then
-    top_duplicates=$(sort "${TMP_FILE}" | uniq -c | sort -nr | head -20)
+    top_duplicates=$(sort "${TMP_FILE}" | uniq -c | sort -nr | head -30)
     echo "Top duplicated lines:"
+    echo "(Note: DEBUG/TRACE logs are shown here but won't fail the check.)"
     echo "$top_duplicates"
-    max_count=$(echo "$top_duplicates" | head -n 1 | awk '{print $1}')
+    max_count=$(echo "$top_duplicates" | awk '{count=$1; $1=""; sub(/^ /,""); if ($1 !~ /^DEBUG/) { print count; exit }}')
     if [ "${max_count:-0}" -gt ${LOG_LINE_DUPLICATE_LIMIT} ]; then
-      echo "$(tput setaf 1)ERROR: log line repeated too many times (up to ${max_count}).$(tput sgr0) Please disable unnecessary logs."
-      exit 1
+      echo "$(tput setaf 1)ERROR: non-DEBUG/TRACE log line repeated too many times (up to ${max_count}).$(tput sgr0)"
+      exit 2
     fi
   fi
 fi
 
 if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > ${LOG_SIZE_LIMIT} )) ; then
-  echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
-  exit 1
+  echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0)"
+  exit 2
 fi
 '''
 
