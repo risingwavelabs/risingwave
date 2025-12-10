@@ -2259,7 +2259,7 @@ pub async fn create_iceberg_engine_table(
             if_not_exists,
         ),
         &session,
-        "CREATE ICEBERG TABLE",
+        "CREATE TABLE",
         action,
     )
     .await;
