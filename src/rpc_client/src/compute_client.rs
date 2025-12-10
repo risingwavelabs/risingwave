@@ -36,7 +36,8 @@ use risingwave_pb::monitor_service::{
     StackTraceResponse,
 };
 use risingwave_pb::plan_common::ExprContext;
-use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
+use risingwave_pb::task_service::batch_exchange_service_client::BatchExchangeServiceClient;
+use risingwave_pb::task_service::stream_exchange_service_client::StreamExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
@@ -60,7 +61,8 @@ use crate::{RpcClient, RpcClientPool};
 // We should consider splitting them into different clients.
 #[derive(Clone)]
 pub struct ComputeClient {
-    pub exchange_client: ExchangeServiceClient<Channel>,
+    pub batch_exchange_client: BatchExchangeServiceClient<Channel>,
+    pub stream_exchange_client: StreamExchangeServiceClient<Channel>,
     pub task_client: TaskServiceClient<Channel>,
     pub monitor_client: MonitorServiceClient<Channel>,
     pub config_client: ConfigServiceClient<Channel>,
@@ -85,15 +87,18 @@ impl ComputeClient {
     }
 
     pub fn with_channel(addr: HostAddr, channel: Channel) -> Self {
-        let exchange_client =
-            ExchangeServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        let batch_exchange_client =
+            BatchExchangeServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        let stream_exchange_client =
+            StreamExchangeServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let task_client =
             TaskServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let monitor_client =
             MonitorServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let config_client = ConfigServiceClient::new(channel);
         Self {
-            exchange_client,
+            batch_exchange_client,
+            stream_exchange_client,
             task_client,
             monitor_client,
             config_client,
@@ -103,7 +108,7 @@ impl ComputeClient {
 
     pub async fn get_data(&self, output_id: TaskOutputId) -> Result<Streaming<GetDataResponse>> {
         Ok(self
-            .exchange_client
+            .batch_exchange_client
             .clone()
             .get_data(GetDataRequest {
                 task_output_id: Some(output_id),
@@ -130,7 +135,7 @@ impl ComputeClient {
             .unwrap();
 
         let response_stream = self
-            .exchange_client
+            .stream_exchange_client
             .clone()
             .get_mux_stream(UnboundedReceiverStream::new(request_receiver))
             .await
@@ -180,7 +185,7 @@ impl ComputeClient {
         );
 
         let response_stream = self
-            .exchange_client
+            .stream_exchange_client
             .clone()
             .get_stream(request_stream)
             .await

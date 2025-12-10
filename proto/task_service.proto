@@ -185,8 +185,11 @@ message GetMuxStreamResponse {
   uint32 down_actor_id = 4;
 }
 
-service ExchangeService {
+service BatchExchangeService {
   rpc GetData(GetDataRequest) returns (stream GetDataResponse);
+}
+
+service StreamExchangeService {
   rpc GetStream(stream GetStreamRequest) returns (stream GetStreamResponse);
   rpc GetMuxStream(stream GetMuxStreamRequest) returns (stream GetMuxStreamResponse);
 }

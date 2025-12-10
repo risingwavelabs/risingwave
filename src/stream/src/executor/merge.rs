@@ -473,12 +473,13 @@ mod tests {
     use futures::future::try_join_all;
     use risingwave_common::array::Op;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_pb::task_service::exchange_service_server::{
-        ExchangeService, ExchangeServiceServer,
+    use risingwave_pb::task_service::stream_exchange_service_server::{
+        StreamExchangeService, StreamExchangeServiceServer,
     };
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetMuxStreamRequest, GetMuxStreamResponse,
-        GetStreamRequest, GetStreamResponse, PbPermits,
+        GetStreamRequest, GetStreamRequest, GetStreamResponse, GetStreamResponse, PbPermits,
+        PbPermits,
     };
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
@@ -859,17 +860,9 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl ExchangeService for FakeExchangeService {
-        type GetDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+    impl StreamExchangeService for FakeExchangeService {
         type GetMuxStreamStream = ReceiverStream<std::result::Result<GetMuxStreamResponse, Status>>;
         type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
-
-        async fn get_data(
-            &self,
-            _: Request<GetDataRequest>,
-        ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
-            unimplemented!()
-        }
 
         async fn get_stream(
             &self,
@@ -926,7 +919,7 @@ mod tests {
 
         // Start a server.
         let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
-        let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
+        let exchange_svc = StreamExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
         });
         let cp_server_run = server_run.clone();

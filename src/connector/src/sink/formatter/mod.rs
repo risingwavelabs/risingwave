@@ -92,6 +92,7 @@ pub enum SinkFormatterImpl {
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
     AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
     AppendOnlyBytesTemplate(AppendOnlyFormatter<BytesEncoder, TemplateEncoder>),
+    AppendOnlyBytes(AppendOnlyFormatter<BytesEncoder, BytesEncoder>),
     // upsert
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
@@ -215,15 +216,40 @@ fn ensure_only_one_pk<'a>(
 
 impl EncoderBuild for BytesEncoder {
     async fn build(params: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let (pk_index, schema_ref) = ensure_only_one_pk("BYTES", &params, &pk_indices)?;
-        if let DataType::Bytea = schema_ref.data_type() {
-            Ok(BytesEncoder::new(params.schema, pk_index))
-        } else {
-            Err(SinkError::Config(anyhow!(
-                "The key encode is BYTES, but the primary key column {} has type {}",
-                schema_ref.name,
-                schema_ref.data_type
-            )))
+        match pk_indices {
+            // This is being used as a key encoder
+            Some(_) => {
+                let (pk_index, schema_ref) = ensure_only_one_pk("BYTES", &params, &pk_indices)?;
+                if let DataType::Bytea = schema_ref.data_type() {
+                    Ok(BytesEncoder::new(params.schema, pk_index))
+                } else {
+                    Err(SinkError::Config(anyhow!(
+                        "The key encode is BYTES, but the primary key column {} has type {}",
+                        schema_ref.name,
+                        schema_ref.data_type
+                    )))
+                }
+            }
+            // This is being used as a value encoder
+            None => {
+                // Ensure the schema has exactly one column and it's of type BYTEA
+                if params.schema.len() != 1 {
+                    return Err(SinkError::Config(anyhow!(
+                        "ENCODE BYTES requires exactly one column, got {} columns",
+                        params.schema.len()
+                    )));
+                }
+
+                let field = &params.schema.fields[0];
+                if let DataType::Bytea = field.data_type {
+                    Ok(BytesEncoder::new(params.schema, 0))
+                } else {
+                    Err(SinkError::Config(anyhow!(
+                        "ENCODE BYTES requires the column to be of type BYTEA, but got type {}",
+                        field.data_type
+                    )))
+                }
+            }
         }
     }
 }
@@ -524,6 +550,7 @@ impl SinkFormatterImpl {
                     Impl::AppendOnlyBytesTemplate(build(p).await?)
                 }
                 (F::AppendOnly, E::Template, None) => Impl::AppendOnlyTemplate(build(p).await?),
+                (F::AppendOnly, E::Bytes, None) => Impl::AppendOnlyBytes(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Text)) => Impl::UpsertTextJson(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Bytes)) => {
                     Impl::UpsertBytesJson(build(p).await?)
@@ -553,13 +580,12 @@ impl SinkFormatterImpl {
                 }
                 (F::AppendOnly, E::Avro, _)
                 | (F::Upsert, E::Protobuf, _)
-                | (F::Debezium, E::Json, Some(_))
-                | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _)
-                | (F::AppendOnly, E::Bytes, _)
                 | (F::Upsert, E::Bytes, _)
-                | (F::Debezium, E::Bytes, _)
+                | (F::Debezium, E::Json, Some(_))
+                | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text | E::Bytes, _)
                 | (_, E::Parquet, _)
                 | (_, _, Some(E::Parquet))
+                | (F::AppendOnly, E::Bytes, Some(_))
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
                 => {
                     return Err(SinkError::Config(anyhow!(
@@ -608,6 +634,7 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::UpsertTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyBytesTemplate($name) => $body,
             SinkFormatterImpl::UpsertBytesTemplate($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytes($name) => $body,
         }
     };
 }
@@ -649,6 +676,7 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
             SinkFormatterImpl::UpsertTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyBytesTemplate(_) => unreachable!(),
             SinkFormatterImpl::UpsertBytesTemplate(_) => unreachable!(),
+            SinkFormatterImpl::AppendOnlyBytes(_) => unreachable!(),
         }
     };
 }

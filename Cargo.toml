@@ -150,13 +150,13 @@ axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
 axum-extra = "0.9"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
-criterion = { version = "0.7", features = ["async_futures"] }
+criterion = { version = "0.8", features = ["async_futures"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 # TODO(MrCroxx): Switch to a release version.
-foyer = { git = "https://github.com/foyer-rs/foyer", rev = "061ac7c66b5bb130eee8879b1f85578bd5ac1df8", features = ["serde", "tracing", "nightly"] }
+foyer = { version = "0.21.0", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.16", features = [
@@ -190,7 +190,10 @@ linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
 madsim = "0.2.34"
 mixtrics = { version = "0.2", features = ["prometheus"] }
-mysql_async = { version = "0.36", features = ["native-tls-tls", "rust_decimal"] }
+mysql_async = { version = "0.36", features = [
+    "native-tls-tls",
+    "rust_decimal",
+] }
 opendal = "0.53"
 opentelemetry = "0.29"
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
@@ -281,7 +284,7 @@ sqlx = { version = "0.8.2", default-features = false, features = [
     "time",
     "uuid",
 ] }
-thiserror = { git = "https://github.com/BugenZhao/thiserror.git", tag = "bz-provide-3" }
+thiserror = "2"
 thiserror-ext = { version = "0.3.1-alpha.2", features = ["provide"] }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [

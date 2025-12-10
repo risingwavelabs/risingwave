@@ -23,7 +23,7 @@
 //!
 //! ### External Interface Layer
 //! - Meta Service: Central coordination service
-//! - [`LocalStreamManager`]: Public API handler for StreamService/ExchangeService
+//! - [`LocalStreamManager`]: Public API handler for StreamService/StreamExchangeService
 //!
 //! ### Core Control Layer
 //! - [`LocalBarrierWorker`]: Central event coordinator and barrier processor

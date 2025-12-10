@@ -41,7 +41,6 @@ use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
-use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
@@ -64,7 +63,6 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
 use thiserror_ext::AsReport;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -1570,17 +1568,7 @@ impl DdlController {
                     .await?;
                 IGNORED_NOTIFICATION_VERSION
             }
-            JobStatus::Created => {
-                let version = self.drop_object(object_type, object_id, drop_mode).await?;
-                #[cfg(not(madsim))]
-                if let StreamingJobId::Sink(sink_id) = job_id {
-                    // delete system table for exactly once iceberg sink
-                    // todo(wcy-fdu): optimize the logic to be Iceberg unique.
-                    let db = self.env.meta_store_ref().conn.clone();
-                    clean_all_rows_by_sink_id(&db, sink_id).await?;
-                }
-                version
-            }
+            JobStatus::Created => self.drop_object(object_type, object_id, drop_mode).await?,
         };
 
         Ok(version)
@@ -1976,7 +1964,7 @@ impl DdlController {
                 .iter()
                 .map(|sink| sink.original_fragment.fragment_id)
                 .collect();
-            for (_, downstream_fragment, _) in &mut downstream_fragments {
+            for (_, downstream_fragment, nodes) in &mut downstream_fragments {
                 if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {
@@ -1990,6 +1978,7 @@ impl DdlController {
                     }
 
                     *downstream_fragment = (&sink.new_fragment_info(), stream_job.id()).into();
+                    *nodes = sink.new_fragment.nodes.clone();
                 }
             }
             assert!(remaining_fragment.is_empty());
@@ -2267,33 +2256,6 @@ fn report_create_object(
         Some(obj_type),
         attr_info,
     );
-}
-
-async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: SinkId) -> MetaResult<()> {
-    match Entity::delete_many()
-        .filter(Column::SinkId.eq(sink_id))
-        .exec(db)
-        .await
-    {
-        Ok(result) => {
-            let deleted_count = result.rows_affected;
-
-            tracing::info!(
-                "Deleted {} items for sink_id = {} in iceberg exactly once system table.",
-                deleted_count,
-                sink_id
-            );
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!(
-                "Error deleting records for sink_id = {} from iceberg exactly once system table: {:?}",
-                sink_id,
-                e.as_report()
-            );
-            Err(e.into())
-        }
-    }
 }
 
 pub fn build_upstream_sink_info(

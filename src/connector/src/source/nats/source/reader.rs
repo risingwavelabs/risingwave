@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -30,6 +32,10 @@ use crate::source::{
 
 pub struct NatsSplitReader {
     consumer: consumer::Consumer<consumer::pull::Config>,
+    /// Hold the client Arc to keep it alive. This allows the shared client cache to reuse
+    /// the connection while we're still using it.
+    #[expect(dead_code)]
+    client: Arc<async_nats::Client>,
     #[expect(dead_code)]
     properties: NatsProperties,
     parser_config: ParserConfig,
@@ -84,7 +90,7 @@ impl SplitReader for NatsSplitReader {
         };
         properties.set_config(&mut config);
 
-        let consumer = properties
+        let (consumer, client) = properties
             .common
             .build_consumer(
                 properties.stream.clone(),
@@ -92,11 +98,13 @@ impl SplitReader for NatsSplitReader {
                 split_id.to_string(),
                 start_position.clone(),
                 config,
+                None, // Let build_consumer get/create the shared client
             )
             .await?;
 
         Ok(Self {
             consumer,
+            client,
             properties,
             parser_config,
             source_ctx,
