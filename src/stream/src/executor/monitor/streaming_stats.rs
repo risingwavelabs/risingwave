@@ -1178,7 +1178,7 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-    let materialize_cache_prune_count = register_guarded_int_counter_vec_with_registry!(
+        let materialize_cache_prune_count = register_guarded_int_counter_vec_with_registry!(
             "stream_materialize_cache_prune_count",
             "Materialize executor cache prune count (by vnode max key)",
             &["actor_id", "table_id", "fragment_id"],
@@ -1314,7 +1314,7 @@ impl StreamingMetrics {
             materialize_cache_total_count,
             materialize_input_row_count,
             materialize_current_epoch,
-            materialize_cache_prune_count
+            materialize_cache_prune_count,
         }
     }
 
