@@ -236,6 +236,49 @@ impl TwoPhaseCommitHandler {
             epoch,
         );
     }
+
+    async fn try_commit(
+        &mut self,
+        coordinator: &mut BoxTwoPhaseCoordinator,
+        epoch: u64,
+        metadata: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let start_time = Instant::now();
+        let commit_res = run_future_with_periodic_fn(
+            coordinator.commit(epoch, metadata),
+            Duration::from_secs(5),
+            || {
+                warn!(
+                    elapsed = ?start_time.elapsed(),
+                    %self.sink_id,
+                    "committing during try_commit"
+                );
+            },
+        )
+        .await;
+
+        match commit_res {
+            Ok(_) => {
+                self.ack_committed(epoch).await?;
+            }
+            Err(e) => {
+                self.failed_committed(epoch, e);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn flush_all_pending_items(
+        &mut self,
+        coordinator: &mut BoxTwoPhaseCoordinator,
+    ) -> anyhow::Result<()> {
+        while !self.pending_epochs.is_empty() || !self.prepared_epochs.is_empty() {
+            let (epoch, metadata) = self.next_to_commit().await?;
+            self.try_commit(coordinator, epoch, metadata).await?;
+        }
+        Ok(())
+    }
 }
 
 struct CoordinationHandleManager {
@@ -452,6 +495,7 @@ impl CoordinationHandleManager {
         &mut self,
         altered_handles: impl Iterator<Item = HandleId>,
         prev_commit_epoch: u64,
+        two_phase_flush_fut: Option<impl Future<Output = anyhow::Result<()>>>,
     ) -> anyhow::Result<HashSet<HandleId>> {
         let mut requests = AligningRequests::default();
         for handle_id in altered_handles {
@@ -492,6 +536,10 @@ impl CoordinationHandleManager {
                     );
                 }
             }
+        }
+        // If it is two-phase commit, we need to flush all pending items before starting new handles.
+        if let Some(two_phase_flush_fut) = two_phase_flush_fut {
+            two_phase_flush_fut.await?;
         }
         self.start(Some(prev_commit_epoch), requests.handle_ids.iter().cloned())?;
         Ok(requests.handle_ids)
@@ -646,6 +694,14 @@ impl CoordinatorWorker {
                                 prev_commit_epoch.ok_or_else(|| {
                                     anyhow!("should have committed once on alter parallelisms")
                                 })?,
+                                two_phase_handler.as_mut().map(|handler| {
+                                    let SinkCommitCoordinator::TwoPhase(coordinator) =
+                                        &mut coordinator
+                                    else {
+                                        unreachable!("should be two-phase commit coordinator");
+                                    };
+                                    handler.flush_all_pending_items(coordinator)
+                                }),
                             )
                             .await?;
                         continue;
@@ -659,6 +715,14 @@ impl CoordinatorWorker {
                                 prev_commit_epoch.ok_or_else(|| {
                                     anyhow!("should have committed once on alter parallelisms")
                                 })?,
+                                two_phase_handler.as_mut().map(|handler| {
+                                    let SinkCommitCoordinator::TwoPhase(coordinator) =
+                                        &mut coordinator
+                                    else {
+                                        unreachable!("should be two-phase commit coordinator");
+                                    };
+                                    handler.flush_all_pending_items(coordinator)
+                                }),
                             )
                             .await?;
                         continue;
@@ -677,28 +741,9 @@ impl CoordinatorWorker {
                         unreachable!("should be two-phase commit coordinator");
                     };
                     let two_phase_handler = two_phase_handler.as_mut().expect("should exist");
-                    let start_time = Instant::now();
-                    let commit_res = run_future_with_periodic_fn(
-                        coordinator.commit(epoch, metadata),
-                        Duration::from_secs(5),
-                        || {
-                            warn!(
-                                elapsed = ?start_time.elapsed(),
-                                %sink_id,
-                                "committing"
-                            );
-                        },
-                    )
-                    .await;
-
-                    match commit_res {
-                        Ok(_) => {
-                            two_phase_handler.ack_committed(epoch).await?;
-                        }
-                        Err(e) => {
-                            two_phase_handler.failed_committed(epoch, e);
-                        }
-                    }
+                    two_phase_handler
+                        .try_commit(coordinator, epoch, metadata)
+                        .await?;
 
                     continue;
                 }
@@ -831,6 +876,10 @@ impl CoordinatorWorker {
         for (epoch, metadata) in pending_items {
             two_phase_handler.push_new_item(epoch, metadata);
         }
+
+        two_phase_handler
+            .flush_all_pending_items(coordinator)
+            .await?;
 
         Ok((last_committed_epoch, two_phase_handler))
     }
