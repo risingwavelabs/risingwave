@@ -230,7 +230,7 @@ impl IcebergFileScanTaskBuilder {
                 Ok(IcebergFileScanTask::CountStar(count))
             }
             _ => {
-                bail!("Unspecified iceberg scan type")
+                bail!("Unexpected iceberg scan type: {:?}", self.iceberg_scan_type)
             }
         }
     }
