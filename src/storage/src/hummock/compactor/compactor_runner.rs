@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
@@ -30,7 +30,6 @@ use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, add_table_stats_map};
-use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{
     HummockSstableObjectId, KeyComparator, can_concat, compact_task_output_to_string,
     full_key_can_concat,
@@ -245,8 +244,6 @@ impl CompactorRunner {
 
         // // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // // in https://github.com/risingwavelabs/risingwave/issues/13148
-        // TODO: get value_table_watermarks from compaction task
-        let value_table_watermarks: BTreeMap<TableId, TableWatermarks> = BTreeMap::default();
         // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         let combine_iter = {
@@ -271,7 +268,7 @@ impl CompactorRunner {
             ValueSkipWatermarkIter::new(
                 pk_skip_watermark_iter,
                 ValueSkipWatermarkState::from_safe_epoch_watermarks(
-                    value_table_watermarks,
+                    self.compact_task.value_table_watermarks.clone(),
                     compaction_catalog_agent_ref,
                 ),
             )

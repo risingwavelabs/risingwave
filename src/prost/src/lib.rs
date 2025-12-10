@@ -571,6 +571,22 @@ impl catalog::Table {
         // Return the minimum PK index
         clean_watermark_indices_in_pk.iter().min().copied()
     }
+
+    pub fn get_clean_watermark_column_index_in_value(&self) -> Option<usize> {
+        self.get_clean_watermark_column_indices()
+            .iter()
+            .filter_map(|&col_idx| {
+                if self
+                    .pk
+                    .iter()
+                    .any(|col_order| col_order.column_index == col_idx)
+                {
+                    return None;
+                }
+                Some(col_idx as usize)
+            })
+            .min()
+    }
 }
 
 impl std::fmt::Debug for meta::SystemParams {

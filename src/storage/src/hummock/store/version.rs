@@ -278,8 +278,8 @@ impl HummockReadVersion {
                                     .committed_epoch,
                             ))
                         }
-
-                        WatermarkSerdeType::NonPkPrefix => None, /* do not fill the non-pk prefix watermark to index */
+                        WatermarkSerdeType::NonPkPrefix => None,
+                        WatermarkSerdeType::Value => todo!("ZW"),
                     },
                     None => None,
                 }

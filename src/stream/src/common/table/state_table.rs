@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::ops::Bound;
@@ -56,7 +57,7 @@ use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
 use risingwave_storage::row_serde::row_serde_util::{
-    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
+    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, serialize_row,
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
@@ -155,6 +156,7 @@ pub struct StateTableInner<
     op_consistency_level: StateTableOpConsistencyLevel,
 
     clean_watermark_index_in_pk: Option<i32>,
+    clean_watermark_index_in_value: Option<i32>,
 
     /// Flag to indicate whether the state table has called `commit`, but has not called
     /// `post_yield_barrier` on the `StateTablePostCommit` callback yet.
@@ -372,6 +374,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                     warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written non pk prefix watermark");
                     self.all_rows = None;
                 }
+                WatermarkSerdeType::Value => todo!("ZW"),
             }
         }
         self.state_store
@@ -755,6 +758,9 @@ where
         let clean_watermark_index_in_pk: Option<i32> = table_catalog
             .get_clean_watermark_index_in_pk_compat()
             .map(|idx| idx as i32);
+        let clean_watermark_index_in_value = table_catalog
+            .get_clean_watermark_column_index_in_value()
+            .map(|idx| idx as i32);
 
         // Restore persisted table watermark.
         let watermark_serde = if pk_indices.is_empty() {
@@ -813,6 +819,7 @@ where
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
             clean_watermark_index_in_pk,
+            clean_watermark_index_in_value,
             on_post_commit: false,
         }
     }
@@ -1429,14 +1436,33 @@ where
             !self.pk_indices().is_empty(),
             "see pending watermark on empty pk"
         );
-        // Get the watermark PK index
-        let watermark_pk_idx = self.clean_watermark_index_in_pk.unwrap_or(0) as usize;
 
-        let watermark_serializer = self.pk_serde.index(watermark_pk_idx);
-
-        let watermark_type = match watermark_pk_idx {
-            0 => WatermarkSerdeType::PkPrefix,
-            _ => WatermarkSerdeType::NonPkPrefix,
+        let (watermark_serializer, watermark_type) = match (
+            self.clean_watermark_index_in_pk,
+            self.clean_watermark_index_in_value,
+        ) {
+            (Some(_), Some(_)) => unreachable!(),
+            (Some(watermark_pk_idx), None) => {
+                let serde = self.pk_serde.index(watermark_pk_idx as usize);
+                let serde_type = if watermark_pk_idx == 0 {
+                    WatermarkSerdeType::PkPrefix
+                } else {
+                    WatermarkSerdeType::NonPkPrefix
+                };
+                (serde, serde_type)
+            }
+            (None, Some(watermark_column_idx)) => {
+                let serde = Cow::Owned(OrderedRowSerde::new(
+                    vec![self.data_types[watermark_column_idx as usize].clone()],
+                    vec![OrderType::ascending()],
+                ));
+                (serde, WatermarkSerdeType::Value)
+            }
+            (None, None) => {
+                let watermark_pk_idx = 0;
+                let serde = self.pk_serde.index(watermark_pk_idx);
+                (serde, WatermarkSerdeType::PkPrefix)
+            }
         };
 
         let should_clean_watermark = {
@@ -1461,7 +1487,7 @@ where
         };
 
         let watermark_suffix =
-            serialize_pk(row::once(Some(watermark.clone())), &watermark_serializer);
+            serialize_row(row::once(Some(watermark.clone())), &watermark_serializer);
 
         // Compute Delete Ranges
         let seal_watermark = if should_clean_watermark {
