@@ -332,6 +332,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         && b.has_more_downstream_fragments(self.actor_context.id)
                     {
                         self.may_have_downstream = true;
+                        match self.conflict_behavior {
+                            checked_conflict_behaviors!() => {
+                                self.materialize_cache
+                                    .init_vnode_max_keys(&self.state_table)
+                                    .await?;
+                            }
+                            _ => {}
+                        };
                     }
                     Self::may_update_depended_subscriptions(
                         &mut self.depended_subscription_ids,
@@ -751,6 +759,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             let prev = self.vnode_max_keys.insert(vnode, None);
             assert_eq!(prev, None);
         }
+        tracing::trace!("Initialized vnode max keys: {:?}", self.vnode_max_keys);
         assert_eq!(self.vnode_max_keys.len(), state_table.vnodes().count_ones());
         Ok(())
     }
@@ -990,7 +999,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             });
         }
 
-        tracing::trace!(
+        tracing::info!(
             "MaterializeCache fetch_keys: total {}, skipped {}, to_get {}",
             skip_key_cnt + get_key_cnt,
             skip_key_cnt,
