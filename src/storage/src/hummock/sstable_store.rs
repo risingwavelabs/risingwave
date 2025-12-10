@@ -197,6 +197,7 @@ pub struct SstableStoreConfig {
     pub recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
     pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub use_new_object_prefix_strategy: bool,
+    pub skip_bloom_filter_in_serde: bool,
 
     pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
     pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
@@ -230,6 +231,11 @@ pub struct SstableStore {
     /// For an old cluster, `use_new_object_prefix_strategy` is set to False.
     /// The final decision of whether to divide prefixes is based on this field and the specific object store type, this approach is implemented to ensure backward compatibility.
     use_new_object_prefix_strategy: bool,
+
+    /// sst serde happens when a sst meta is written to meta disk cache.
+    /// excluding bloom filter from serde can reduce the meta disk cache entry size
+    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    skip_bloom_filter_in_serde: bool,
 }
 
 impl SstableStore {
@@ -251,6 +257,7 @@ impl SstableStore {
             prefetch_buffer_capacity: config.prefetch_buffer_capacity,
             max_prefetch_block_number: config.max_prefetch_block_number,
             use_new_object_prefix_strategy: config.use_new_object_prefix_strategy,
+            skip_bloom_filter_in_serde: config.skip_bloom_filter_in_serde,
         }
     }
 
@@ -296,6 +303,7 @@ impl SstableStore {
             max_prefetch_block_number: 16, /* compactor won't use this parameter, so just assign a default value. */
             recent_filter: Arc::new(NoneRecentFilter::default().into()),
             use_new_object_prefix_strategy,
+            skip_bloom_filter_in_serde: false,
 
             meta_cache,
             block_cache,
@@ -736,6 +744,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static + use<> {
         let object_id = sstable_info_ref.object_id;
+        let skip_bloom_filter_in_serde = self.skip_bloom_filter_in_serde;
 
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
@@ -750,7 +759,7 @@ impl SstableStore {
                     .map_err(foyer::Error::other)?;
                 let meta = SstableMeta::decode(&buf[..]).map_err(foyer::Error::other)?;
 
-                let sst = Sstable::new(object_id, meta);
+                let sst = Sstable::new(object_id, meta, skip_bloom_filter_in_serde);
                 let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                 stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
                 Ok(Box::new(sst))
@@ -790,7 +799,7 @@ impl SstableStore {
     }
 
     pub fn insert_meta_cache(&self, object_id: HummockSstableObjectId, meta: SstableMeta) {
-        let sst = Sstable::new(object_id, meta);
+        let sst = Sstable::new(object_id, meta, self.skip_bloom_filter_in_serde);
         self.meta_cache.insert(object_id, Box::new(sst));
     }
 
