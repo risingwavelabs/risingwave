@@ -274,6 +274,14 @@ impl IcebergFileScanTask {
         }
     }
 
+    /// Splits the current `IcebergFileScanTask` into multiple smaller tasks.
+    ///
+    /// # Parameters
+    /// - `split_num`: The number of splits to create. The scan tasks will be divided as evenly as possible among the splits.
+    ///
+    /// # Returns
+    /// Returns a `ConnectorResult` containing a vector of split `IcebergFileScanTask`s.
+    /// For `CountStar` variant, returns a single-element vector containing itself.
     pub fn split(self, split_num: usize) -> ConnectorResult<Vec<IcebergFileScanTask>> {
         match self {
             IcebergFileScanTask::Data(file_scan_tasks) => {
