@@ -1176,7 +1176,7 @@ impl HummockManager {
             return Ok(false);
         };
 
-        if compact_task.target_level <= compact_task.base_level
+        if compact_task.target_level < compact_task.base_level
             || compact_task.existing_table_ids.len() != 1
         {
             return Ok(false);

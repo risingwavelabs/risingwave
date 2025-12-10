@@ -533,6 +533,8 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
+    #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
+    pub vnode_aligned_level_size_threshold: Option<u64>,
 }
 
 pub mod default {
