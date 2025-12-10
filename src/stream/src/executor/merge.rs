@@ -477,9 +477,7 @@ mod tests {
         StreamExchangeService, StreamExchangeServiceServer,
     };
     use risingwave_pb::task_service::{
-        GetDataRequest, GetDataResponse, GetMuxStreamRequest, GetMuxStreamResponse,
-        GetStreamRequest, GetStreamRequest, GetStreamResponse, GetStreamResponse, PbPermits,
-        PbPermits,
+        GetMuxStreamRequest, GetMuxStreamResponse, GetStreamRequest, GetStreamResponse, PbPermits,
     };
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;

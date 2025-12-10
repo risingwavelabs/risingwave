@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::SelectAll;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
-use risingwave_pb::id::{ActorId, FragmentId};
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::task_service::stream_exchange_service_server::StreamExchangeService;
 use risingwave_pb::task_service::{
     GetMuxStreamRequest, GetMuxStreamResponse, GetStreamRequest, GetStreamResponse, PbPermits,
@@ -33,9 +31,10 @@ use tonic::{Request, Response, Status, Streaming};
 
 pub mod metrics;
 pub use metrics::{GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS, StreamExchangeServiceMetrics};
+mod mux;
 
 pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
-pub type NewStreamDataStream =
+pub type MuxStreamDataStream =
     impl Stream<Item = std::result::Result<GetMuxStreamResponse, Status>>;
 
 #[derive(Clone)]
@@ -46,7 +45,7 @@ pub struct StreamExchangeServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamExchangeService for StreamExchangeServiceImpl {
-    type GetMuxStreamStream = NewStreamDataStream;
+    type GetMuxStreamStream = MuxStreamDataStream;
     type GetStreamStream = StreamDataStream;
 
     #[define_opaque(StreamDataStream)]
@@ -101,7 +100,7 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
         )))
     }
 
-    #[define_opaque(NewStreamDataStream)]
+    #[define_opaque(MuxStreamDataStream)]
     async fn get_mux_stream(
         &self,
         request: Request<Streaming<GetMuxStreamRequest>>,
@@ -112,118 +111,6 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             self.stream_mgr.clone(),
             request_stream,
         )))
-    }
-}
-
-impl StreamExchangeServiceImpl {
-    #[try_stream(ok = GetMuxStreamResponse, error = Status)]
-    async fn get_mux_stream_impl(
-        stream_mgr: LocalStreamManager,
-        mut request_stream: Streaming<GetMuxStreamRequest>,
-    ) {
-        use risingwave_pb::task_service::get_mux_stream_request::*;
-
-        // Extract the first `Init` request from the stream.
-        let Init {
-            up_fragment_id: _,
-            down_fragment_id: _,
-            database_id,
-            term_id,
-        } = {
-            let req = request_stream
-                .next()
-                .await
-                .ok_or_else(|| Status::invalid_argument("get_mux_stream request is empty"))??;
-            match req.value.unwrap() {
-                Value::Init(init) => init,
-                Value::Register(_) | Value::AddPermits(_) => {
-                    unreachable!("the first message must be `Init`")
-                }
-            }
-        };
-
-        enum Req {
-            Request(Result<GetMuxStreamRequest, Status>),
-            Message {
-                up_actor_id: ActorId,
-                down_actor_id: ActorId,
-                message: MessageWithPermits,
-            },
-        }
-
-        let mut select_all = SelectAll::new();
-        select_all.push(request_stream.map(Req::Request).boxed());
-
-        let mut all_permits = HashMap::new();
-
-        while let Some(r) = select_all.next().await {
-            match r {
-                Req::Request(req) => match req?.value.unwrap() {
-                    Value::Init(_) => unreachable!("the stream has already been initialized"),
-                    Value::Register(Register {
-                        up_actor_id,
-                        down_actor_id,
-                    }) => {
-                        let receiver = stream_mgr
-                            .take_receiver(
-                                database_id,
-                                term_id.clone(),
-                                (up_actor_id, down_actor_id),
-                            )
-                            .await?;
-                        let permits = Arc::downgrade(&receiver.permits());
-                        all_permits.insert((up_actor_id, down_actor_id), permits);
-                        select_all.push(
-                            receiver
-                                .into_raw_stream()
-                                .map(move |message| Req::Message {
-                                    up_actor_id,
-                                    down_actor_id,
-                                    message,
-                                })
-                                .boxed(),
-                        );
-                    }
-                    Value::AddPermits(AddPermits {
-                        up_actor_id,
-                        down_actor_id,
-                        permits,
-                    }) => {
-                        if let Some(to_add) = permits.unwrap().value
-                            && let Some(permits) = all_permits
-                                .get(&(up_actor_id, down_actor_id))
-                                .and_then(|p| p.upgrade())
-                        {
-                            permits.add_permits(to_add);
-                        }
-                    }
-                },
-
-                Req::Message {
-                    up_actor_id,
-                    down_actor_id,
-                    message: MessageWithPermits { message, permits },
-                } => {
-                    let message = match message {
-                        DispatcherMessageBatch::Chunk(chunk) => {
-                            DispatcherMessageBatch::Chunk(chunk.compact_vis())
-                        }
-                        msg @ (DispatcherMessageBatch::Watermark(_)
-                        | DispatcherMessageBatch::BarrierBatch(_)) => msg,
-                    };
-                    let proto = message.to_protobuf();
-                    // forward the acquired permit to the downstream
-                    let response = GetMuxStreamResponse {
-                        message: Some(proto),
-                        permits: Some(PbPermits { value: permits }),
-                        up_actor_id,
-                        down_actor_id,
-                    };
-
-                    yield response;
-                }
-            }
-        }
     }
 }
 
