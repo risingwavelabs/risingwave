@@ -28,7 +28,7 @@ use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_pb::meta::PbThrottleTarget;
+use risingwave_pb::meta::{PbThrottleTarget, PbThrottleType};
 use risingwave_sqlparser::ast::*;
 use thiserror_ext::AsReport;
 use util::get_table_catalog_by_table_name;
@@ -1388,21 +1388,15 @@ pub async fn handle(
                     )
                     .into());
                 };
-                let meta_client = handler_args.session.env().meta_client();
-                let rate = if rate_limit < 0 {
-                    None
-                } else {
-                    Some(rate_limit as u32)
-                };
-                meta_client
-                    .apply_throttle(
-                        PbThrottleTarget::Fragment,
-                        risingwave_pb::meta::PbThrottleType::Unspecified,
-                        *fragment_id,
-                        rate,
-                    )
-                    .await?;
-                Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
+                    &handler_args.session,
+                    PbThrottleTarget::Fragment,
+                    PbThrottleType::Backfill,
+                    *fragment_id,
+                    rate_limit,
+                    StatementType::SET_VARIABLE,
+                )
+                .await
             }
             AlterFragmentOperation::SetParallelism { parallelism } => {
                 alter_parallelism::handle_alter_fragment_parallelism(
