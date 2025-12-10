@@ -202,6 +202,11 @@ pub struct TableCatalog {
 
     pub clean_watermark_index_in_pk: Option<usize>,
 
+    /// Indices of watermark columns in all columns that should be used for state cleaning.
+    /// This replaces `clean_watermark_index_in_pk` but is kept for backward compatibility.
+    /// When set, this takes precedence over `clean_watermark_index_in_pk`.
+    pub clean_watermark_indices: Vec<usize>,
+
     /// Whether the table supports manual refresh operations
     pub refreshable: bool,
 
@@ -616,7 +621,13 @@ impl TableCatalog {
             webhook_info: self.webhook_info.clone(),
             job_id: self.job_id,
             engine: Some(self.engine.to_protobuf().into()),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
+            clean_watermark_indices: self
+                .clean_watermark_indices
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
             cdc_table_type: self
@@ -845,7 +856,13 @@ impl From<PbTable> for TableCatalog {
             webhook_info: tb.webhook_info,
             job_id: tb.job_id,
             engine,
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+            clean_watermark_indices: tb
+                .clean_watermark_indices
+                .iter()
+                .map(|&x| x as usize)
+                .collect(),
 
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
@@ -943,7 +960,9 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
 
             refreshable: false,
             vector_index_info: None,
@@ -1015,6 +1034,7 @@ mod tests {
                 job_id: None,
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
+                clean_watermark_indices: vec![],
 
                 refreshable: false,
                 vector_index_info: None,

@@ -27,6 +27,7 @@ use crate::handler::create_table::{
     ColumnIdGenerator, CreateTableProps, gen_create_table_plan_without_source,
 };
 use crate::handler::query::handle_query;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::stream_fragmenter::GraphJobType;
 use crate::{Binder, OptimizerContext, build_graph};
 
@@ -141,16 +142,20 @@ pub async fn handle_create_as(
     );
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_table(
+    execute_with_long_running_notification(
+        catalog_writer.create_table(
             source,
             table.to_prost(),
             graph,
             TableJobType::Unspecified,
             if_not_exists,
             HashSet::default(),
-        )
-        .await?;
+        ),
+        &session,
+        "CREATE TABLE AS",
+        LongRunningNotificationAction::DiagnoseBarrierLatency,
+    )
+    .await?;
 
     // Generate insert
     let insert = Statement::Insert {
