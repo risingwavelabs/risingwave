@@ -716,41 +716,6 @@ where
             row_serde.kind().is_column_aware()
         );
 
-        // Restore persisted table watermark.
-        let watermark_serde = if pk_indices.is_empty() {
-            None
-        } else {
-            match table_catalog.clean_watermark_index_in_pk {
-                None => Some(pk_serde.index(0)),
-                Some(clean_watermark_index_in_pk) => {
-                    Some(pk_serde.index(clean_watermark_index_in_pk as usize))
-                }
-            }
-        };
-        let max_watermark_of_vnodes = distribution
-            .vnodes()
-            .iter_vnodes()
-            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
-            .max();
-        let committed_watermark = if let Some(deser) = watermark_serde
-            && let Some(max_watermark) = max_watermark_of_vnodes
-        {
-            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
-                assert!(row.len() == 1);
-                row[0].clone()
-            });
-            if deserialized.is_none() {
-                tracing::error!(
-                    vnodes = ?distribution.vnodes(),
-                    watermark = ?max_watermark,
-                    "Failed to deserialize persisted watermark from state store.",
-                );
-            }
-            deserialized
-        } else {
-            None
-        };
-
         let watermark_cache = if USE_WATERMARK_CACHE {
             StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
         } else {
@@ -786,6 +751,43 @@ where
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
+        // Get clean watermark PK index using the helper method
+        let clean_watermark_index_in_pk: Option<i32> = table_catalog
+            .get_clean_watermark_index_in_pk_compat()
+            .map(|idx| idx as i32);
+
+        // Restore persisted table watermark.
+        let watermark_serde = if pk_indices.is_empty() {
+            None
+        } else {
+            // Use the watermark PK index from clean_watermark_index_in_pk
+            let pk_idx = clean_watermark_index_in_pk.unwrap_or(0) as usize;
+            Some(pk_serde.index(pk_idx))
+        };
+        let max_watermark_of_vnodes = distribution
+            .vnodes()
+            .iter_vnodes()
+            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
+            .max();
+        let committed_watermark = if let Some(deser) = watermark_serde
+            && let Some(max_watermark) = max_watermark_of_vnodes
+        {
+            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
+                assert!(row.len() == 1);
+                row[0].clone()
+            });
+            if deserialized.is_none() {
+                tracing::error!(
+                    vnodes = ?distribution.vnodes(),
+                    watermark = ?max_watermark,
+                    "Failed to deserialize persisted watermark from state store.",
+                );
+            }
+            deserialized
+        } else {
+            None
+        };
+
         Self {
             table_id,
             row_store: StateTableRowStore {
@@ -810,7 +812,7 @@ where
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
-            clean_watermark_index_in_pk: table_catalog.clean_watermark_index_in_pk,
+            clean_watermark_index_in_pk,
             on_post_commit: false,
         }
     }
@@ -1393,7 +1395,8 @@ where
                     let keyed_row = entry?;
                     let pk = self.pk_serde.deserialize(keyed_row.key())?;
                     // watermark column should be part of the pk
-                    if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
+                    let pk_idx = self.clean_watermark_index_in_pk.unwrap_or(0) as usize;
+                    if !pk.is_null_at(pk_idx) {
                         pks.push(pk);
                     }
                 }
@@ -1426,21 +1429,14 @@ where
             !self.pk_indices().is_empty(),
             "see pending watermark on empty pk"
         );
-        let watermark_serializer = {
-            match self.clean_watermark_index_in_pk {
-                None => self.pk_serde.index(0),
-                Some(clean_watermark_index_in_pk) => {
-                    self.pk_serde.index(clean_watermark_index_in_pk as usize)
-                }
-            }
-        };
+        // Get the watermark PK index
+        let watermark_pk_idx = self.clean_watermark_index_in_pk.unwrap_or(0) as usize;
 
-        let watermark_type = match self.clean_watermark_index_in_pk {
-            None => WatermarkSerdeType::PkPrefix,
-            Some(clean_watermark_index_in_pk) => match clean_watermark_index_in_pk {
-                0 => WatermarkSerdeType::PkPrefix,
-                _ => WatermarkSerdeType::NonPkPrefix,
-            },
+        let watermark_serializer = self.pk_serde.index(watermark_pk_idx);
+
+        let watermark_type = match watermark_pk_idx {
+            0 => WatermarkSerdeType::PkPrefix,
+            _ => WatermarkSerdeType::NonPkPrefix,
         };
 
         let should_clean_watermark = {
