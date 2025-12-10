@@ -754,6 +754,12 @@ impl CatalogController {
         Ok(result)
     }
 
+    pub async fn count_streaming_jobs(&self) -> MetaResult<usize> {
+        let inner = self.inner.read().await;
+        let count = StreamingJob::find().count(&inner.db).await?;
+        Ok(usize::try_from(count).context("streaming job count overflow")?)
+    }
+
     pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {
         let inner = self.inner.read().await;
         let job_states = StreamingJob::find()

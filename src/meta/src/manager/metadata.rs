@@ -545,10 +545,7 @@ impl MetadataManager {
     }
 
     pub async fn count_streaming_job(&self) -> MetaResult<usize> {
-        self.catalog_controller
-            .list_streaming_job_infos()
-            .await
-            .map(|x| x.len())
+        self.catalog_controller.count_streaming_jobs().await
     }
 
     pub async fn list_stream_job_desc(&self) -> MetaResult<Vec<MetaTelemetryJobDesc>> {
