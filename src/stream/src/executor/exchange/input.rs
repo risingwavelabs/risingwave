@@ -214,7 +214,6 @@ mod remote_input {
 
     use anyhow::Context;
     use await_tree::InstrumentAwait;
-    use futures::Stream;
     use risingwave_pb::task_service::{GetStreamResponse, permits};
     use tokio::sync::mpsc;
     use tonic::Streaming;
@@ -248,7 +247,7 @@ mod remote_input {
 
     #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
     async fn run_inner(
-        stream: impl Stream<Item = Result<GetStreamResponse, tonic::Status>>,
+        stream: Streaming<GetStreamResponse>,
         permits_tx: mpsc::UnboundedSender<permits::Value>,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
@@ -373,6 +372,7 @@ pub(crate) async fn new_input(
 }
 
 impl DispatcherMessageBatch {
+    /// Split the batch into multiple messages.
     fn into_messages(self) -> impl ExactSizeIterator<Item = DispatcherMessage> {
         use either::Either;
 

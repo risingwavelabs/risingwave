@@ -127,10 +127,11 @@ impl ComputeClient {
     )> {
         use risingwave_pb::task_service::get_mux_stream_request::*;
 
+        // Create channel used for future requests (including register new actor pairs and add permits) to the upstream.
         let (request_sender, request_receiver) = mpsc::unbounded_channel();
         request_sender
             .send(GetMuxStreamRequest {
-                value: Some(Value::Init(init)),
+                value: Some(Value::Init(init.clone())),
             })
             .unwrap();
 
@@ -139,6 +140,14 @@ impl ComputeClient {
             .clone()
             .get_mux_stream(UnboundedReceiverStream::new(request_receiver))
             .await
+            .inspect_err(|_| {
+                tracing::error!(
+                    "failed to create mux stream from remote_input {} from fragment {} to fragment {}",
+                    self.addr,
+                    init.up_fragment_id,
+                    init.down_fragment_id
+                )
+            })
             .map_err(RpcError::from_compute_status)?
             .into_inner();
 

@@ -107,7 +107,8 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
     pub exchange_concurrent_dispatchers: usize,
 
-    /// Force all exchanges to be remote exchanges, i.e., use gRPC. This is for debugging only.
+    /// Force all exchanges to be remote exchanges, i.e., use gRPC even for local exchanges between
+    /// actors on the same compute node. This is for debugging only.
     #[serde(default = "default::developer::stream_exchange_force_remote")]
     pub exchange_force_remote: bool,
 
