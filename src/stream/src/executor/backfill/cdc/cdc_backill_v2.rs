@@ -31,12 +31,11 @@ use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
 };
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
-use risingwave_pb::meta::ThrottleType;
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
-use crate::executor::UpdateMutation;
+use crate::executor::{ThrottleType, UpdateMutation};
 use crate::executor::backfill::cdc::cdc_backfill::{
     build_reader_and_poll_upstream, transform_upstream,
 };

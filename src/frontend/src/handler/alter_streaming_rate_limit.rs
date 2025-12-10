@@ -14,7 +14,8 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
-use risingwave_pb::meta::{ThrottleTarget as PbThrottleTarget, ThrottleType as PbThrottleType};
+use risingwave_pb::common::ThrottleType as PbThrottleType;
+use risingwave_pb::meta::ThrottleTarget as PbThrottleTarget;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};

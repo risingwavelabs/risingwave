@@ -1235,7 +1235,7 @@ impl MetaClient {
     pub async fn apply_throttle(
         &self,
         throttle_target: PbThrottleTarget,
-        throttle_type: risingwave_pb::meta::PbThrottleType,
+        throttle_type: risingwave_pb::common::PbThrottleType,
         id: u32,
         rate: Option<u32>,
     ) -> Result<ApplyThrottleResponse> {
