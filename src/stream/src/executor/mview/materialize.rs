@@ -14,9 +14,9 @@
 
 use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::marker::PhantomData;
-use std::ops::{Deref, Index};
+use std::ops::{Bound, Deref, Index};
 
 use bytes::Bytes;
 use futures::stream;
@@ -26,6 +26,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ConflictBehavior, TableId, checked_conflict_behaviors,
 };
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{CompactedRow, OwnedRow};
 use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -35,6 +36,7 @@ use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerializer};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::catalog::table::Engine;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
+use risingwave_storage::store::PrefetchOptions;
 
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
@@ -220,6 +222,15 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         yield Message::Barrier(barrier);
         self.state_table.init_epoch(first_epoch).await?;
 
+        match self.conflict_behavior {
+            checked_conflict_behaviors!() => {
+                self.materialize_cache
+                    .init_vnode_max_keys(&self.state_table)
+                    .await?;
+            }
+            _ => {}
+        };
+
         #[for_await]
         for msg in input {
             let msg = msg?;
@@ -350,6 +361,14 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         && cache_may_stale
                     {
                         self.materialize_cache.lru_cache.clear();
+                        match self.conflict_behavior {
+                            checked_conflict_behaviors!() => {
+                                self.materialize_cache
+                                    .init_vnode_max_keys(&self.state_table)
+                                    .await?;
+                            }
+                            _ => {}
+                        };
                     }
 
                     self.metrics
@@ -681,6 +700,7 @@ struct MaterializeCache<SD> {
     lru_cache: ManagedLruCache<Vec<u8>, CacheValue>,
     row_serde: BasicSerde,
     version_column_indices: Vec<u32>,
+    vnode_max_keys: BTreeMap<VirtualNode, Option<Vec<u8>>>,
     _serde: PhantomData<SD>,
 }
 
@@ -699,8 +719,40 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
             lru_cache,
             row_serde,
             version_column_indices,
+            vnode_max_keys: BTreeMap::new(),
             _serde: PhantomData,
         }
+    }
+
+    async fn init_vnode_max_keys<S: StateStore>(
+        &mut self,
+        state_table: &StateTableInner<S, SD>,
+    ) -> StreamExecutorResult<()> {
+        self.vnode_max_keys.clear();
+        'vnode_loop: for vnode in state_table.vnodes().iter_vnodes() {
+            let table_iter = state_table
+                .rev_iter_keyed_row_with_vnode(
+                    vnode,
+                    &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                    PrefetchOptions::new(false, false),
+                )
+                .await?;
+
+            #[for_await]
+            for res in table_iter {
+                let key_row = res?;
+                assert_eq!(vnode, key_row.vnode());
+                let prev = self
+                    .vnode_max_keys
+                    .insert(vnode, Some(key_row.key().to_vec()));
+                assert_eq!(prev, None);
+                continue 'vnode_loop;
+            }
+            let prev = self.vnode_max_keys.insert(vnode, None);
+            assert_eq!(prev, None);
+        }
+        assert_eq!(self.vnode_max_keys.len(), state_table.vnodes().count_ones());
+        Ok(())
     }
 
     async fn handle<S: StateStore>(
@@ -887,6 +939,8 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
+        let mut skip_key_cnt = 0;
+        let mut get_key_cnt = 0;
         for key in keys {
             metrics.materialize_cache_total_count.inc();
 
@@ -897,12 +951,50 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                 metrics.materialize_cache_hit_count.inc();
                 continue;
             }
+
+            if !self.vnode_max_keys.is_empty() {
+                let key_row = table.pk_serde().deserialize(key).unwrap();
+                let vnode = table.compute_vnode_by_pk(key_row);
+                let must_be_new_key =
+                    if let Some(max_key) = self.vnode_max_keys.get_mut(&vnode).unwrap() {
+                        if key > max_key.as_slice() {
+                            // Update the max key for the vnode
+                            *max_key = key.to_vec();
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        self.vnode_max_keys.insert(vnode, Some(key.to_vec()));
+                        true
+                    };
+
+                if must_be_new_key {
+                    // Key is definitely not in this vnode. Cache as None directly.
+                    match conflict_behavior {
+                        checked_conflict_behaviors!() => self.lru_cache.put(key.to_vec(), None),
+                        _ => unreachable!(),
+                    };
+                    skip_key_cnt += 1;
+                    continue;
+                }
+            }
+
+            get_key_cnt += 1;
+
             futures.push(async {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 let row = table.get_row(key_row).await?.map(CompactedRow::from);
                 StreamExecutorResult::Ok((key.to_vec(), row))
             });
         }
+
+        tracing::trace!(
+            "MaterializeCache fetch_keys: total {}, skipped {}, to_get {}",
+            skip_key_cnt + get_key_cnt,
+            skip_key_cnt,
+            get_key_cnt
+        );
 
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {

@@ -1568,6 +1568,18 @@ where
             .map_ok(|(_, row)| row))
     }
 
+    pub async fn rev_iter_keyed_row_with_vnode(
+        &self,
+        vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
+        Ok(self
+            .rev_iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
+            .await?
+            .map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)))
+    }
+
     pub async fn iter_keyed_row_with_vnode(
         &self,
         vnode: VirtualNode,
@@ -1809,6 +1821,21 @@ where
         // TODO: provide a trace of useful params.
         self.row_store
             .iter_kv(vnode, memcomparable_range, None, prefetch_options)
+            .await
+    }
+
+    async fn rev_iter_kv_with_pk_range<'a, K: CopyFromSlice + FromVnodeBytes>(
+        &'a self,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        // Optional vnode that returns an iterator only over the given range under that vnode.
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTableInner` owns.
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl PkRowStream<'a, K>> {
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        self.row_store
+            .rev_iter_kv(vnode, memcomparable_range, None, prefetch_options)
             .await
     }
 
