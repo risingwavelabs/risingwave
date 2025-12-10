@@ -386,7 +386,7 @@ impl GlobalStreamManager {
             }
         };
 
-        tracing::info!("cleaning creating job info: {}", job_id);
+        tracing::debug!("cleaning creating job info: {}", job_id);
         self.creating_job_info.delete_job(job_id).await;
         result
     }
