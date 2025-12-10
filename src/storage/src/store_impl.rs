@@ -847,6 +847,7 @@ impl StateStoreImpl {
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
                     use_new_object_prefix_strategy,
+                    skip_bloom_filter_in_serde: opts.sst_skip_bloom_filter_in_serde,
 
                     meta_cache,
                     block_cache,

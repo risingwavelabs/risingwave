@@ -200,6 +200,7 @@ impl HummockServiceOpts {
                 MetricLevel::Disabled,
             )),
             use_new_object_prefix_strategy,
+            skip_bloom_filter_in_serde: opts.sst_skip_bloom_filter_in_serde,
             meta_cache,
             block_cache,
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),

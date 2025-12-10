@@ -119,6 +119,12 @@ pub struct StorageConfig {
     #[config_doc(nested)]
     pub meta_file_cache: FileCacheConfig,
 
+    /// sst serde happens when a sst meta is written to meta disk cache.
+    /// excluding bloom filter from serde can reduce the meta disk cache entry size
+    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    #[serde(default = "default::storage::sst_skip_bloom_filter_in_serde")]
+    pub sst_skip_bloom_filter_in_serde: bool,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub cache_refill: CacheRefillConfig,
@@ -1024,6 +1030,10 @@ pub mod default {
 
         pub fn iceberg_compaction_target_file_size_mb() -> u32 {
             1024
+        }
+
+        pub fn sst_skip_bloom_filter_in_serde() -> bool {
+            false
         }
 
         pub fn iceberg_compaction_enable_validate() -> bool {
