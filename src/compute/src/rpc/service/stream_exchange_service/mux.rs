@@ -68,7 +68,7 @@ impl StreamExchangeServiceImpl {
         select_all.push(request_stream.map(Event::Request).left_stream());
 
         // Weak permit handles of all registered actor pairs.
-        let mut all_permit_handles: HashMap<(ActorId, ActorId), Weak<Permits>> = HashMap::new();
+        let mut permit_handles: HashMap<(ActorId, ActorId), Weak<Permits>> = HashMap::new();
 
         while let Some(event) = select_all.next().await {
             match event {
@@ -88,7 +88,7 @@ impl StreamExchangeServiceImpl {
                                 (up_actor_id, down_actor_id),
                             )
                             .await?;
-                        all_permit_handles.insert(
+                        permit_handles.insert(
                             (up_actor_id, down_actor_id),
                             Arc::downgrade(&receiver.permits()),
                         );
@@ -109,20 +109,22 @@ impl StreamExchangeServiceImpl {
                         down_actor_id,
                         permits,
                     }) => {
-                        if let Some(to_add) = permits.unwrap().value {
-                            if let Some(permits) = all_permit_handles
-                                .get(&(up_actor_id, down_actor_id))
-                                .and_then(|p| p.upgrade())
-                            {
-                                permits.add_permits(to_add);
+                        let Some(permits) = permits.unwrap().value else {
+                            continue;
+                        };
+                        if let Some(handle) = permit_handles.get(&(up_actor_id, down_actor_id)) {
+                            if let Some(handle) = handle.upgrade() {
+                                handle.add_permits(permits);
                             } else {
-                                tracing::warn!(
-                                    %up_actor_id,
-                                    %down_actor_id,
-                                    ?to_add,
-                                    "failed to add permits to non-existing actor pair",
-                                );
+                                // The channel is already closed, ignore the request.
                             }
+                        } else {
+                            tracing::warn!(
+                                %up_actor_id,
+                                %down_actor_id,
+                                ?permits,
+                                "add permits to unregistered actor pair",
+                            );
                         }
                     }
                 },
