@@ -147,15 +147,39 @@ impl IcebergFileScanTaskJsonStr {
     }
 }
 
+/// Builder for constructing [`IcebergFileScanTask`]s from a stream of [`FileScanTask`]s.
+///
+/// The builder is configured with an [`IcebergScanType`] to determine which type of scan
+/// (e.g., data, delete, position delete) to perform. The [`build`] method consumes a stream
+/// of file scan tasks and collects those matching the configured scan type.
 pub struct IcebergFileScanTaskBuilder {
     iceberg_scan_type: IcebergScanType,
 }
 
 impl IcebergFileScanTaskBuilder {
+    /// Creates a new [`IcebergFileScanTaskBuilder`] for the given scan type.
+    ///
+    /// # Arguments
+    ///
+    /// * `iceberg_scan_type` - The type of scan to perform (e.g., data, delete).
     pub fn new(iceberg_scan_type: IcebergScanType) -> Self {
         Self { iceberg_scan_type }
     }
 
+    /// Consumes a stream of [`FileScanTask`]s and collects those matching the configured scan type.
+    ///
+    /// The behavior depends on the scan type:
+    /// - For [`IcebergScanType::DataScan`], collects data file tasks.
+    /// - For [`IcebergScanType::DeleteScan`], collects delete file tasks.
+    /// - For [`IcebergScanType::PosDeleteScan`], collects position delete file tasks.
+    ///
+    /// # Arguments
+    ///
+    /// * `file_scan_stream` - The stream of file scan tasks to consume.
+    ///
+    /// # Returns
+    ///
+    /// A [`ConnectorResult`] containing the constructed [`IcebergFileScanTask`].
     pub async fn build(
         self,
         file_scan_stream: FileScanTaskStream,
