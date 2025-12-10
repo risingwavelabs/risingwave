@@ -976,6 +976,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         _ => unreachable!(),
                     };
                     skip_key_cnt += 1;
+                    metrics.materialize_cache_prune_count.inc();
                     continue;
                 }
             }
