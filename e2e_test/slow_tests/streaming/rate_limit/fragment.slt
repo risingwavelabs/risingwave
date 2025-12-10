@@ -38,7 +38,7 @@ skipif madsim
 system ok
 fragment_id=$(PGUSER=root psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} -p ${RISEDEV_RW_FRONTEND_PORT} -d dev -t -c "select fragment_id from rw_fragments where flags @> ARRAY['STREAM_SCAN']")
 echo "fragment_id:" $fragment_id
-PGUSER=root psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} -p ${RISEDEV_RW_FRONTEND_PORT} -d dev -c "ALTER FRAGMENT $fragment_id SET RATE_LIMIT = default;"
+PGUSER=root psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} -p ${RISEDEV_RW_FRONTEND_PORT} -d dev -c "ALTER FRAGMENT $fragment_id SET BACKFILL_RATE_LIMIT = default;"
 
 
 statement ok

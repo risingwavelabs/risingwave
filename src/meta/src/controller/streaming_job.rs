@@ -2386,6 +2386,83 @@ impl CatalogController {
             .await
     }
 
+    pub async fn update_fragment_rate_limit_by_fragment_id_and_type(
+        &self,
+        fragment_id: FragmentId,
+        rate_limit: Option<u32>,
+        throttle_type: risingwave_pb::meta::ThrottleType,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        use risingwave_pb::meta::ThrottleType;
+        let update_rate_limit = |fragment_type_mask: FragmentTypeMask,
+                                 stream_node: &mut PbStreamNode| {
+            let mut found = false;
+            match throttle_type {
+                ThrottleType::Backfill => {
+                    if fragment_type_mask.contains_any(FragmentTypeFlag::backfill_rate_limit_fragments()) {
+                        visit_stream_node_mut(stream_node, |node| {
+                            if let PbNodeBody::StreamCdcScan(node) = node {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                            if let PbNodeBody::StreamScan(node) = node {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                            if let PbNodeBody::SourceBackfill(node) = node {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                        });
+                    }
+                }
+                ThrottleType::SourceRateLimit => {
+                    if fragment_type_mask.contains_any(FragmentTypeFlag::source_rate_limit_fragments()) {
+                        visit_stream_node_mut(stream_node, |node| {
+                            if let PbNodeBody::Source(source_node) = node {
+                                if let Some(node_inner) = &mut source_node.source_inner {
+                                    node_inner.rate_limit = rate_limit;
+                                    found = true;
+                                }
+                            }
+                            if let PbNodeBody::StreamFsFetch(fs_fetch_node) = node {
+                                if let Some(node_inner) = &mut fs_fetch_node.node_inner {
+                                    node_inner.rate_limit = rate_limit;
+                                    found = true;
+                                }
+                            }
+                        });
+                    }
+                }
+                ThrottleType::Dml => {
+                    if fragment_type_mask.contains_any(FragmentTypeFlag::dml_rate_limit_fragments()) {
+                        visit_stream_node_mut(stream_node, |node| {
+                            if let PbNodeBody::Dml(node) = node {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                        });
+                    }
+                }
+                ThrottleType::SinkRateLimit => {
+                    if fragment_type_mask.contains_any(FragmentTypeFlag::sink_rate_limit_fragments()) {
+                        visit_stream_node_mut(stream_node, |node| {
+                            if let PbNodeBody::Sink(node) = node {
+                                node.rate_limit = rate_limit;
+                                found = true;
+                            }
+                        });
+                    }
+                }
+                ThrottleType::Unspecified => {
+                    // Do nothing
+                }
+            }
+            found
+        };
+        self.mutate_fragment_by_fragment_id(fragment_id, update_rate_limit, "fragment not found")
+            .await
+    }
+
     /// Note: `FsFetch` created in old versions are not included.
     /// Since this is only used for debugging, it should be fine.
     pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {

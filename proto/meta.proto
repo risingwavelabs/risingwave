@@ -357,10 +357,20 @@ enum ThrottleTarget {
   FRAGMENT = 7;
 }
 
+enum ThrottleType {
+  THROTTLE_TYPE_UNSPECIFIED = 0;
+  BACKFILL = 1;
+  SOURCE_RATE_LIMIT = 2;
+  DML = 3;
+  SINK_RATE_LIMIT = 4;
+}
+
 message ApplyThrottleRequest {
   ThrottleTarget kind = 1;
   uint32 id = 2;
   optional uint32 rate = 3;
+  // For FRAGMENT throttle target, this specifies the type of rate limit to apply
+  optional ThrottleType throttle_type = 4;
 }
 
 message ApplyThrottleResponse {
