@@ -222,7 +222,7 @@ impl IcebergFileScanTaskBuilder {
                 let mut count = 0u64;
                 consume_stream(file_scan_stream, |task| {
                     if !matches!(task.data_file_content, DataContentType::Data) || !task.deletes.is_empty() {
-                        bail!("Unexpected file type: {:?} in CountStar builder or task's deletes is empty", task.data_file_content)
+                        bail!("Unexpected file type: {:?} in CountStar builder or task's deletes are not empty", task.data_file_content)
                     }
                     count += task.record_count.expect("must have");
                     Ok(())
