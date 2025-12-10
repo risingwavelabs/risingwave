@@ -147,20 +147,9 @@ impl StreamManagerService for StreamServiceImpl {
             ThrottleType::try_from(request.throttle_type).unwrap_or(ThrottleType::Unspecified);
 
         let actor_to_apply = match (throttle_type, throttle_target) {
-            (ThrottleType::Source, ThrottleTarget::Source) => {
+            (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
                 self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
-                    .await?
-            }
-            (ThrottleType::Source, ThrottleTarget::Table) => {
-                // Resolve associated source from table id, then throttle the source
-                let associated_source_id = self
-                    .metadata_manager
-                    .get_table_associated_source_id(request.id.into())
-                    .await?
-                    .ok_or_else(|| Status::invalid_argument("table has no associated source"))?;
-                self.metadata_manager
-                    .update_source_rate_limit_by_source_id(associated_source_id, request.rate)
                     .await?
             }
             (ThrottleType::Backfill, ThrottleTarget::Mv)
@@ -180,7 +169,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
                     .await?
             }
-            // Fragment target is independent of throttle type.
+            // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
                 self.metadata_manager
                     .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
