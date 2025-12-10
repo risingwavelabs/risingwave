@@ -223,7 +223,7 @@ impl StreamManagerService for StreamServiceImpl {
             .collect();
         let _i = self
             .barrier_scheduler
-            .run_command(database_id, Command::Throttle(mutation))
+            .run_command(database_id, Command::Throttle(mutation, throttle_type))
             .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))

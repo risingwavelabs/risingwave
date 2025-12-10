@@ -929,7 +929,7 @@ impl InflightDatabaseInfo {
                 | Command::MergeSnapshotBackfillStreamingJobs(_)
                 | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }
-                | Command::Throttle(_)
+                | Command::Throttle(..)
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
                 | Command::ConnectorPropsChange(_)

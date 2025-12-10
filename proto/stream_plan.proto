@@ -114,11 +114,23 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message ThrottleMutation {
+  // Throttle type to indicate which executors should apply the rate limit.
+  // Keep the enum values aligned with meta.ThrottleType for semantic consistency.
+  enum ThrottleType {
+    THROTTLE_TYPE_UNSPECIFIED = 0;
+    THROTTLE_TYPE_DML = 1;
+    THROTTLE_TYPE_BACKFILL = 2;
+    THROTTLE_TYPE_SOURCE = 3;
+    THROTTLE_TYPE_SINK = 4;
+  }
   message RateLimit {
     optional uint32 rate_limit = 1;
   }
 
+  // Actor -> RateLimit
   map<uint32, RateLimit> actor_throttle = 1;
+  // Which kind of executors should honor this rate limit.
+  ThrottleType throttle_type = 2;
 }
 
 message SubscriptionUpstreamInfo {
@@ -172,7 +184,7 @@ message BarrierMutation {
     PauseMutation pause = 7;
     // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
-    // Throttle specific source exec or backfill exec.
+    // Alter the RateLimit of some specific executors
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
