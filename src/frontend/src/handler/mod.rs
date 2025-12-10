@@ -849,7 +849,8 @@ pub async fn handle(
             AlterTableOperation::SetSourceRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::TableWithSource,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::meta::PbThrottleType::Source,
                     name,
                     rate_limit,
                 )
@@ -862,7 +863,8 @@ pub async fn handle(
             AlterTableOperation::SetDmlRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::TableDml,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::meta::PbThrottleType::Dml,
                     name,
                     rate_limit,
                 )
@@ -889,7 +891,8 @@ pub async fn handle(
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::CdcTable,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::meta::PbThrottleType::Backfill,
                     name,
                     rate_limit,
                 )
@@ -1036,6 +1039,7 @@ pub async fn handle(
                     alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                         handler_args,
                         PbThrottleTarget::Mv,
+                        risingwave_pb::meta::PbThrottleType::Backfill,
                         name,
                         rate_limit,
                     )
@@ -1165,6 +1169,7 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
                     PbThrottleTarget::Sink,
+                    risingwave_pb::meta::PbThrottleType::Sink,
                     name,
                     rate_limit,
                 )
@@ -1260,6 +1265,7 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
                     PbThrottleTarget::Source,
+                    risingwave_pb::meta::PbThrottleType::Source,
                     name,
                     rate_limit,
                 )
@@ -1363,14 +1369,21 @@ pub async fn handle(
                     )
                     .into());
                 };
-                alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
-                    &handler_args.session,
-                    PbThrottleTarget::Fragment,
-                    *fragment_id,
-                    rate_limit,
-                    StatementType::SET_VARIABLE,
-                )
-                .await
+                let meta_client = handler_args.session.env().meta_client();
+                let rate = if rate_limit < 0 {
+                    None
+                } else {
+                    Some(rate_limit as u32)
+                };
+                meta_client
+                    .apply_throttle(
+                        PbThrottleTarget::Fragment,
+                        risingwave_pb::meta::PbThrottleType::Unspecified,
+                        *fragment_id,
+                        rate,
+                    )
+                    .await?;
+                Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
             }
             AlterFragmentOperation::SetParallelism { parallelism } => {
                 alter_parallelism::handle_alter_fragment_parallelism(
