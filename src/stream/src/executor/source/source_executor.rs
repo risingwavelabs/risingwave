@@ -44,10 +44,10 @@ use tokio::time::Instant;
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
-use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
+use crate::executor::{ThrottleType, UpdateMutation};
 use crate::task::LocalBarrierManager;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
@@ -685,8 +685,13 @@ impl<S: StateStore> SourceExecutor<S> {
                                     },
                                 );
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
+                            Mutation::Throttle {
+                                actor_throttle: actor_to_apply,
+                                throttle_type,
+                            } => {
+                                if *throttle_type == ThrottleType::Source
+                                    && let Some(new_rate_limit) =
+                                        actor_to_apply.get(&self.actor_ctx.id)
                                     && *new_rate_limit != self.rate_limit_rps
                                 {
                                     tracing::info!(
