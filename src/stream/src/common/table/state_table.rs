@@ -374,7 +374,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                     warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written non pk prefix watermark");
                     self.all_rows = None;
                 }
-                WatermarkSerdeType::Value => todo!("ZW"),
+                WatermarkSerdeType::Value => {
+                    warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written value watermark");
+                    self.all_rows = None;
+                }
             }
         }
         self.state_store
@@ -755,6 +758,11 @@ where
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
         // Get clean watermark PK index using the helper method
+        assert!(
+            table_catalog.clean_watermark_indices.len() <= 1,
+            "more than 1 watermark indices found: {:?}",
+            table_catalog.clean_watermark_indices
+        );
         let clean_watermark_index_in_pk: Option<i32> = table_catalog
             .get_clean_watermark_index_in_pk_compat()
             .map(|idx| idx as i32);

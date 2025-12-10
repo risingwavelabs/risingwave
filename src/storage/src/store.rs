@@ -815,7 +815,7 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                                     .expect("should not failed")
                             })
                             .collect(),
-                        match PbWatermarkSerdeType::from_i32(watermark_serde_type).unwrap() {
+                        match PbWatermarkSerdeType::try_from(watermark_serde_type).unwrap() {
                             PbWatermarkSerdeType::TypeUnspecified => unreachable!(),
                             PbWatermarkSerdeType::PkPrefix => WatermarkSerdeType::PkPrefix,
                             PbWatermarkSerdeType::NonPkPrefix => WatermarkSerdeType::NonPkPrefix,

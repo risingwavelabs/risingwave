@@ -573,7 +573,6 @@ impl HummockManager {
                     for (table_id, watermark) in version
                         .latest_version()
                         .safe_epoch_table_watermarks(&table_ids_to_be_compacted)
-                        .into_iter()
                     {
                         match watermark.watermark_type {
                             WatermarkSerdeType::PkPrefix => {

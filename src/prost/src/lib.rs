@@ -572,6 +572,7 @@ impl catalog::Table {
         clean_watermark_indices_in_pk.iter().min().copied()
     }
 
+    /// Returns the column index of non-pk watermark column.
     pub fn get_clean_watermark_column_index_in_value(&self) -> Option<usize> {
         self.get_clean_watermark_column_indices()
             .iter()

@@ -600,8 +600,8 @@ fn build_watermark_col_serde(
 }
 
 fn build_value_watermark_col_serde(table_catalog: &Table) -> Option<ValueWatermarkColumnSerde> {
-    // TODO: get this clean_watermark_index from table_catalog
-    let clean_watermark_index: Option<usize> = None;
+    let clean_watermark_index: Option<usize> =
+        table_catalog.get_clean_watermark_column_index_in_value();
     let clean_watermark_index = clean_watermark_index?;
     Some(ValueWatermarkColumnSerde::new(
         table_catalog,
@@ -642,7 +642,7 @@ impl ValueWatermarkColumnSerde {
         // Correctness requires the assumption that a table contains at most one watermark column.
         let watermark_column_mem_encoding_order = match pk_order_type {
             Some(o) => o,
-            // TODO: confirm order type for non-pk watermark olumn.
+            // Correctness requires the assumption that the order is the same as the one used in StateTable when serializing watermark for value column.
             None => OrderType::ascending(),
         };
         // Correctness requires on the assumption that all columns are stored in the row. (See comment on Table::value_indices.)
