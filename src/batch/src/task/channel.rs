@@ -96,7 +96,7 @@ impl ChanReceiverImpl {
 
 /// Output-channel is a synchronous, bounded single-producer-multiple-consumer queue.
 /// The producer is the local task executor, the consumer is
-/// [`ExchangeService`](risingwave_pb::task_service::exchange_service_server::ExchangeService).
+/// [`BatchExchangeService`](risingwave_pb::task_service::batch_exchange_service_server::BatchExchangeService).
 /// The implementation depends on the shuffling strategy.
 pub fn create_output_channel(
     shuffle: &ExchangeInfo,
