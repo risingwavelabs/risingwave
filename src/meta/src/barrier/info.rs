@@ -1010,7 +1010,7 @@ impl InflightDatabaseInfo {
                 | Command::DropStreamingJobs { .. }
                 | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }
-                | Command::Throttle(_)
+                | Command::Throttle(..)
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
                 | Command::ConnectorPropsChange(_)
