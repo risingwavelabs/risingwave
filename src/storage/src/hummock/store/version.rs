@@ -658,7 +658,7 @@ impl HummockVersionReader {
         // prune uncommitted ssts with the keyrange
         let pruned_uncommitted_ssts =
             prune_overlapping_ssts(&uncommitted_ssts, table_id, &single_table_key_range);
-        for local_sst in &pruned_uncommitted_ssts {
+        for local_sst in pruned_uncommitted_ssts {
             local_stats.staging_sst_get_count += 1;
             if let Some(iter) = get_from_sstable_info(
                 self.sstable_store.clone(),
