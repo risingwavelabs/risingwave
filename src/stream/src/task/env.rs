@@ -101,9 +101,14 @@ impl StreamEnvironment {
         use risingwave_dml::dml_manager::DmlManager;
         use risingwave_rpc_client::ComputeClientPool;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
+
+        // TODO(mux): remove this after we default `exchange_force_remote` to false
+        let mut config = StreamingConfig::default();
+        config.developer.exchange_force_remote = false;
+
         StreamEnvironment {
             server_addr: "127.0.0.1:2333".parse().unwrap(),
-            global_config: Arc::new(StreamingConfig::default()),
+            global_config: Arc::new(config),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 MonitoredStorageMetrics::unused(),

@@ -222,12 +222,12 @@ pub mod default {
         }
 
         pub fn stream_exchange_force_remote() -> bool {
-            // TODO: default to false, as it's for debugging only
+            // TODO(mux): default to false, as it's for debugging only
             true
         }
 
         pub fn stream_exchange_remote_use_multiplexing() -> bool {
-            // TODO: default to false until it's tested to be stable
+            // TODO(mux): default to false until it's tested to be stable
             true
         }
 
