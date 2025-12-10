@@ -28,7 +28,6 @@ use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_pb::common::PbThrottleType;
 use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_sqlparser::ast::*;
 use thiserror_ext::AsReport;
@@ -1383,7 +1382,7 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
                     &handler_args.session,
                     PbThrottleTarget::Fragment,
-                    PbThrottleType::Backfill,
+                    risingwave_pb::common::PbThrottleType::Backfill,
                     *fragment_id,
                     rate_limit,
                     StatementType::SET_VARIABLE,
