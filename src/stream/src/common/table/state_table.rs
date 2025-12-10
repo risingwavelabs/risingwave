@@ -771,25 +771,26 @@ where
             .map(|idx| idx as i32);
 
         // Restore persisted table watermark.
-        let watermark_serde = if pk_indices.is_empty() {
-            None
-        } else {
-            // Use the watermark PK index from clean_watermark_index_in_pk
-            let pk_idx = clean_watermark_index_in_pk.unwrap_or(0) as usize;
-            Some(pk_serde.index(pk_idx))
-        };
+        let (watermark_serde, _watermark_type) = watermark_serde_and_type(
+            clean_watermark_index_in_pk,
+            clean_watermark_index_in_value,
+            &pk_serde,
+            &data_types,
+        );
+
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some(deser) = watermark_serde
-            && let Some(max_watermark) = max_watermark_of_vnodes
-        {
-            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
-                assert!(row.len() == 1);
-                row[0].clone()
-            });
+        let committed_watermark = if let Some(max_watermark) = max_watermark_of_vnodes {
+            let deserialized = watermark_serde
+                .deserialize(&max_watermark)
+                .ok()
+                .and_then(|row| {
+                    assert!(row.len() == 1);
+                    row[0].clone()
+                });
             if deserialized.is_none() {
                 tracing::error!(
                     vnodes = ?distribution.vnodes(),
@@ -1445,34 +1446,6 @@ where
             "see pending watermark on empty pk"
         );
 
-        let (watermark_serializer, watermark_type) = match (
-            self.clean_watermark_index_in_pk,
-            self.clean_watermark_index_in_value,
-        ) {
-            (Some(_), Some(_)) => unreachable!(),
-            (Some(watermark_pk_idx), None) => {
-                let serde = self.pk_serde.index(watermark_pk_idx as usize);
-                let serde_type = if watermark_pk_idx == 0 {
-                    WatermarkSerdeType::PkPrefix
-                } else {
-                    WatermarkSerdeType::NonPkPrefix
-                };
-                (serde, serde_type)
-            }
-            (None, Some(watermark_column_idx)) => {
-                let serde = Cow::Owned(OrderedRowSerde::new(
-                    vec![self.data_types[watermark_column_idx as usize].clone()],
-                    vec![OrderType::ascending()],
-                ));
-                (serde, WatermarkSerdeType::Value)
-            }
-            (None, None) => {
-                let watermark_pk_idx = 0;
-                let serde = self.pk_serde.index(watermark_pk_idx);
-                (serde, WatermarkSerdeType::PkPrefix)
-            }
-        };
-
         let should_clean_watermark = {
             {
                 if USE_WATERMARK_CACHE && self.watermark_cache.is_synced() {
@@ -1494,6 +1467,12 @@ where
             }
         };
 
+        let (watermark_serializer, watermark_type) = watermark_serde_and_type(
+            self.clean_watermark_index_in_pk,
+            self.clean_watermark_index_in_value,
+            &self.pk_serde,
+            &self.data_types,
+        );
         let watermark_suffix =
             serialize_row(row::once(Some(watermark.clone())), &watermark_serializer);
 
@@ -1970,6 +1949,38 @@ fn fill_non_output_indices(
     }
     let data_chunk = DataChunk::new(full_columns, vis);
     StreamChunk::from_parts(ops, data_chunk)
+}
+
+fn watermark_serde_and_type<'a>(
+    clean_watermark_index_in_pk: Option<i32>,
+    clean_watermark_index_in_value: Option<i32>,
+    pk_serde: &'a OrderedRowSerde,
+    data_types: &'a [DataType],
+) -> (Cow<'a, OrderedRowSerde>, WatermarkSerdeType) {
+    match (clean_watermark_index_in_pk, clean_watermark_index_in_value) {
+        (Some(_), Some(_)) => unreachable!(),
+        (Some(watermark_pk_idx), None) => {
+            let serde = pk_serde.index(watermark_pk_idx as usize);
+            let serde_type = if watermark_pk_idx == 0 {
+                WatermarkSerdeType::PkPrefix
+            } else {
+                WatermarkSerdeType::NonPkPrefix
+            };
+            (serde, serde_type)
+        }
+        (None, Some(watermark_column_idx)) => {
+            let serde = Cow::Owned(OrderedRowSerde::new(
+                vec![data_types[watermark_column_idx as usize].clone()],
+                vec![OrderType::ascending()],
+            ));
+            (serde, WatermarkSerdeType::Value)
+        }
+        (None, None) => {
+            let watermark_pk_idx = 0;
+            let serde = pk_serde.index(watermark_pk_idx);
+            (serde, WatermarkSerdeType::PkPrefix)
+        }
+    }
 }
 
 #[cfg(test)]
