@@ -262,7 +262,7 @@ pub struct IcebergSplitEnumerator {
 
 #[derive(Debug, Clone)]
 pub struct IcebergDeleteParameters {
-    pub equality_delete_columns: Vec<String>,
+    pub equality_delete_columns: Vec<Vec<String>>,
     pub has_position_delete: bool,
     pub snapshot_id: Option<i64>,
 }
@@ -515,7 +515,7 @@ impl IcebergSplitEnumerator {
     pub async fn all_delete_parameters(
         table: &Table,
         snapshot_id: i64,
-    ) -> ConnectorResult<(Vec<String>, bool)> {
+    ) -> ConnectorResult<(Vec<Vec<String>>, bool)> {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
@@ -524,7 +524,7 @@ impl IcebergSplitEnumerator {
             .map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
         let schema = scan.snapshot().schema(table.metadata())?;
-        let mut equality_ids = vec![];
+        let mut equality_ids = HashSet::new();
         let mut have_position_delete = false;
         #[for_await]
         for task in file_scan_stream {
@@ -533,11 +533,7 @@ impl IcebergSplitEnumerator {
                 match delete_file.data_file_content {
                     iceberg::spec::DataContentType::Data => {}
                     iceberg::spec::DataContentType::EqualityDeletes => {
-                        if equality_ids.is_empty() {
-                            equality_ids = delete_file.equality_ids.clone();
-                        } else if equality_ids != delete_file.equality_ids {
-                            bail!("The schema of iceberg equality delete file must be consistent");
-                        }
+                        equality_ids.insert(delete_file.equality_ids.clone());
                     }
                     iceberg::spec::DataContentType::PositionDeletes => {
                         have_position_delete = true;
@@ -547,10 +543,16 @@ impl IcebergSplitEnumerator {
         }
         let delete_columns = equality_ids
             .into_iter()
-            .map(|id| match schema.name_by_field_id(id) {
-                Some(name) => Ok::<std::string::String, ConnectorError>(name.to_owned()),
-                None => bail!("Delete field id {} not found in schema", id),
-            })
+            .map(|ids| 
+                ids.into_iter()
+                    .map(|field_id| {
+                        match schema.name_by_field_id(field_id) {
+                            Some(name) => Ok::<std::string::String, ConnectorError>(name.to_owned()),
+                            None => bail!("Delete field id {} not found in schema", field_id),
+                        }
+                    })
+                    .collect()
+                )
             .collect::<ConnectorResult<Vec<_>>>()?;
 
         Ok((delete_columns, have_position_delete))

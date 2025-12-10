@@ -99,18 +99,52 @@ impl FallibleRule<Logical> for SourceToIcebergScanRule {
 
 fn build_equality_delete_hashjoin_scan(
     source: &LogicalSource,
-    delete_column_names: Vec<String>,
+    delete_column_names: Vec<Vec<String>>,
     data_iceberg_scan: PlanRef,
     snapshot_id: Option<i64>,
 ) -> Result<PlanRef> {
-    // equality delete scan
+    // The join condition is delete_column_name is equal and sequence number is less than, join type is left anti
+    let build_inputs = |scan: &PlanRef, offset: usize, delete_column_name: &Vec<String>| {
+        let delete_column_index_map = scan
+            .schema()
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(index, data_column)| (&data_column.name, (index, &data_column.data_type)))
+            .collect::<std::collections::HashMap<_, _>>();
+        let delete_column_inputs = delete_column_name
+            .iter()
+            .map(|name| {
+                let (index, data_type) = delete_column_index_map.get(name).unwrap();
+                InputRef {
+                    index: offset + index,
+                    data_type: (*data_type).clone(),
+                }
+            })
+            .collect::<Vec<InputRef>>();
+            let seq_num_inputs = InputRef {
+                index: scan
+                    .schema()
+                    .fields()
+                    .iter()
+                    .position(|f| f.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME))
+                    .unwrap()
+                    + offset,
+                data_type: risingwave_common::types::DataType::Int64,
+            };
+            (delete_column_inputs, seq_num_inputs)
+        };
+
+    let mut plan = data_iceberg_scan;
+    for delete_column_name in delete_column_names {
+        // equality delete scan
     let column_catalog_map = source
         .core
         .column_catalog
         .iter()
         .map(|c| (&c.column_desc.name, c))
         .collect::<std::collections::HashMap<_, _>>();
-    let column_catalog: Vec<_> = delete_column_names
+    let column_catalog: Vec<_> = delete_column_name
         .iter()
         .chain(std::iter::once(
             &ICEBERG_SEQUENCE_NUM_COLUMN_NAME.to_owned(),
@@ -125,75 +159,45 @@ fn build_equality_delete_hashjoin_scan(
         snapshot_id,
     );
 
-    let data_columns_len = data_iceberg_scan.schema().len();
-    // The join condition is delete_column_names is equal and sequence number is less than, join type is left anti
-    let build_inputs = |scan: &PlanRef, offset: usize| {
-        let delete_column_index_map = scan
-            .schema()
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(index, data_column)| (&data_column.name, (index, &data_column.data_type)))
-            .collect::<std::collections::HashMap<_, _>>();
-        let delete_column_inputs = delete_column_names
-            .iter()
-            .map(|name| {
-                let (index, data_type) = delete_column_index_map.get(name).unwrap();
-                InputRef {
-                    index: offset + index,
-                    data_type: (*data_type).clone(),
-                }
-            })
-            .collect::<Vec<InputRef>>();
-        let seq_num_inputs = InputRef {
-            index: scan
-                .schema()
-                .fields()
-                .iter()
-                .position(|f| f.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME))
-                .unwrap()
-                + offset,
-            data_type: risingwave_common::types::DataType::Int64,
-        };
-        (delete_column_inputs, seq_num_inputs)
-    };
-    let (join_left_delete_column_inputs, join_left_seq_num_input) =
-        build_inputs(&data_iceberg_scan, 0);
-    let equality_delete_iceberg_scan = equality_delete_iceberg_scan.into();
-    let (join_right_delete_column_inputs, join_right_seq_num_input) =
-        build_inputs(&equality_delete_iceberg_scan, data_columns_len);
+    let data_columns_len = plan.schema().len();
+        let (join_left_delete_column_inputs, join_left_seq_num_input) =
+            build_inputs(&plan, 0, &delete_column_name);
+        let equality_delete_iceberg_scan = equality_delete_iceberg_scan.into();
+        let (join_right_delete_column_inputs, join_right_seq_num_input) =
+            build_inputs(&equality_delete_iceberg_scan, data_columns_len, &delete_column_name);
 
-    let mut eq_join_expr = join_left_delete_column_inputs
-        .iter()
-        .zip_eq_fast(join_right_delete_column_inputs.iter())
-        .map(|(left, right)| {
-            Ok(FunctionCall::new(
-                ExprType::Equal,
-                vec![left.clone().into(), right.clone().into()],
+        let mut eq_join_expr = join_left_delete_column_inputs
+            .iter()
+            .zip_eq_fast(join_right_delete_column_inputs.iter())
+            .map(|(left, right)| {
+                Ok(FunctionCall::new(
+                    ExprType::Equal,
+                    vec![left.clone().into(), right.clone().into()],
+                )?
+                .into())
+            })
+            .collect::<Result<Vec<ExprImpl>>>()?;
+        eq_join_expr.push(
+            FunctionCall::new(
+                ExprType::LessThan,
+                vec![
+                    join_left_seq_num_input.into(),
+                    join_right_seq_num_input.into(),
+                ],
             )?
-            .into())
-        })
-        .collect::<Result<Vec<ExprImpl>>>()?;
-    eq_join_expr.push(
-        FunctionCall::new(
-            ExprType::LessThan,
-            vec![
-                join_left_seq_num_input.into(),
-                join_right_seq_num_input.into(),
-            ],
-        )?
-        .into(),
-    );
-    let on = Condition {
-        conjunctions: eq_join_expr,
-    };
-    let join = LogicalJoin::new(
-        data_iceberg_scan,
-        equality_delete_iceberg_scan,
-        risingwave_pb::plan_common::JoinType::LeftAnti,
-        on,
-    );
-    Ok(join.into())
+            .into(),
+        );
+        let on = Condition {
+            conjunctions: eq_join_expr,
+        };
+        plan = LogicalJoin::new(
+            plan,
+            equality_delete_iceberg_scan,
+            risingwave_pb::plan_common::JoinType::LeftAnti,
+            on,
+        ).into();   
+    }
+    Ok(plan)
 }
 
 fn build_position_delete_hashjoin_scan(
