@@ -55,7 +55,9 @@ use crate::hummock::compactor::{
     fast_compactor_runner,
 };
 use crate::hummock::iterator::{
-    Forward, HummockIterator, MergeIterator, SkipWatermarkIterV2, SkipWatermarkStateV2, ValueMeta,
+    Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
+    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
+    ValueMeta, ValueSkipWatermarkIter, ValueSkipWatermarkState,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -243,18 +245,37 @@ impl CompactorRunner {
 
         // // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // // in https://github.com/risingwavelabs/risingwave/issues/13148
-        // TODO: get this table_watermarks from compaction task
-        let table_watermarks: BTreeMap<TableId, TableWatermarks> = BTreeMap::default();
-        let combine_iter = SkipWatermarkIterV2::new(
-            MonitoredCompactorIterator::new(
-                MergeIterator::for_compactor(table_iters),
-                task_progress,
-            ),
-            SkipWatermarkStateV2::from_safe_epoch_watermarks(
-                table_watermarks,
-                compaction_catalog_agent_ref,
-            ),
-        );
+        // TODO: get value_table_watermarks from compaction task
+        let value_table_watermarks: BTreeMap<TableId, TableWatermarks> = BTreeMap::default();
+        // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // in https://github.com/risingwavelabs/risingwave/issues/13148
+        let combine_iter = {
+            let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
+                MonitoredCompactorIterator::new(
+                    MergeIterator::for_compactor(table_iters),
+                    task_progress,
+                ),
+                PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.pk_prefix_table_watermarks.clone(),
+                ),
+            );
+
+            let pk_skip_watermark_iter = NonPkPrefixSkipWatermarkIterator::new(
+                skip_watermark_iter,
+                NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.non_pk_prefix_table_watermarks.clone(),
+                    compaction_catalog_agent_ref.clone(),
+                ),
+            );
+
+            ValueSkipWatermarkIter::new(
+                pk_skip_watermark_iter,
+                ValueSkipWatermarkState::from_safe_epoch_watermarks(
+                    value_table_watermarks,
+                    compaction_catalog_agent_ref,
+                ),
+            )
+        };
 
         Ok(combine_iter)
     }

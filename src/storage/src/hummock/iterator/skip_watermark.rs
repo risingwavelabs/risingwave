@@ -455,9 +455,9 @@ pub type PkPrefixSkipWatermarkIterator<I> = SkipWatermarkIterator<I, PkPrefixSki
 pub type NonPkPrefixSkipWatermarkIterator<I> =
     SkipWatermarkIterator<I, NonPkPrefixSkipWatermarkState>;
 
-pub type SkipWatermarkIterV2<I> = SkipWatermarkIterator<I, SkipWatermarkStateV2>;
+pub type ValueSkipWatermarkIter<I> = SkipWatermarkIterator<I, ValueSkipWatermarkState>;
 
-pub struct SkipWatermarkStateV2 {
+pub struct ValueSkipWatermarkState {
     watermarks: BTreeMap<TableId, ReadTableWatermark>,
     remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Bytes)>,
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
@@ -465,7 +465,7 @@ pub struct SkipWatermarkStateV2 {
     last_table_id: Option<TableId>,
 }
 
-impl SkipWatermarkStateV2 {
+impl ValueSkipWatermarkState {
     pub fn new(
         watermarks: BTreeMap<TableId, ReadTableWatermark>,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
@@ -488,7 +488,7 @@ impl SkipWatermarkStateV2 {
     }
 }
 
-impl SkipWatermarkState for SkipWatermarkStateV2 {
+impl SkipWatermarkState for ValueSkipWatermarkState {
     #[inline(always)]
     fn has_watermark(&self) -> bool {
         !self.remain_watermarks.is_empty()
