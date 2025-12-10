@@ -469,6 +469,11 @@ impl CoordinationHandleManager {
     }
 }
 
+/// Represents the coordinator worker's state machine for handling schema changes.
+/// 
+/// - `Running`: Normal operation, handles can be started immediately
+/// - `WaitingForFlushed`: Waiting for all pending two-phase commits to complete before starting new handles. This
+///   ensures new sink executors load the correct schema.
 enum CoordinatorWorkerState {
     Running,
     WaitingForFlushed(HashSet<HandleId>),
@@ -814,7 +819,7 @@ impl CoordinatorWorker {
         }
     }
 
-    /// Return the log store rewind start epoch if exists.
+    /// Return `TwoPhaseCommitHandler` initialized from the persisted state in the meta store.
     async fn init_state_from_store(
         &mut self,
         db: &DatabaseConnection,
