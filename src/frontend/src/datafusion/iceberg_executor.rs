@@ -17,7 +17,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Int64Array, RecordBatch, StringArray};
-use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::TableProvider;
 use datafusion::error::Result as DFResult;
@@ -245,7 +244,6 @@ impl IcebergScanInner {
 
     #[try_stream(ok = RecordBatch, error = DataFusionError)]
     pub async fn execute_inner(self: Arc<Self>, chunk_size: usize, partition: usize) {
-        let mut buffer = RecordBatchBuffer::new(chunk_size);
         let reader = self
             .table
             .reader_builder()
@@ -256,81 +254,22 @@ impl IcebergScanInner {
             .read(tokio_stream::once(Ok(task)).boxed())
             .await
             .map_err(to_datafusion_error)?;
+        let mut pos_start: i64 = 0;
 
         #[for_await]
-        for (i, batch) in stream.enumerate() {
+        for batch in stream {
             let batch = batch.map_err(to_datafusion_error)?;
             let batch = append_metadata(
                 batch,
                 self.need_seq_num,
                 self.need_file_path_and_pos,
                 &self.tasks[partition],
-                (i * chunk_size).try_into().unwrap(),
+                pos_start,
             )?;
             let batch = cast_batch(self.arrow_schema.clone(), batch)?;
-            if let Some(batch) = buffer.add(batch)? {
-                yield batch;
-            }
-        }
-
-        if let Some(batch) = buffer.finish()? {
+            pos_start += i64::try_from(batch.num_rows()).unwrap();
             yield batch;
         }
-    }
-}
-
-struct RecordBatchBuffer {
-    buffer: Vec<RecordBatch>,
-    current_rows: usize,
-    max_record_batch_rows: usize,
-}
-
-impl RecordBatchBuffer {
-    fn new(max_record_batch_rows: usize) -> Self {
-        Self {
-            buffer: vec![],
-            current_rows: 0,
-            max_record_batch_rows,
-        }
-    }
-
-    fn add(&mut self, batch: RecordBatch) -> Result<Option<RecordBatch>, DataFusionError> {
-        // Case 1: New batch itself is large enough and buffer is empty or too small to be significant
-        if batch.num_rows() >= self.max_record_batch_rows && self.buffer.is_empty() {
-            // Buffer was empty, yield current large batch directly
-            return Ok(Some(batch));
-        }
-
-        // Case 2: Buffer will overflow with the new batch
-        if !self.buffer.is_empty()
-            && (self.current_rows + batch.num_rows() > self.max_record_batch_rows)
-        {
-            let combined = self.finish_internal()?; // Drain and combine buffer
-            self.current_rows = batch.num_rows();
-            self.buffer.push(batch); // Add current batch to now-empty buffer
-            return Ok(combined); // Return the combined batch from buffer
-        }
-
-        // Case 3: Buffer has space
-        self.current_rows += batch.num_rows();
-        self.buffer.push(batch);
-        Ok(None)
-    }
-
-    // Helper to drain and combine buffer, used by add and finish
-    fn finish_internal(&mut self) -> Result<Option<RecordBatch>, DataFusionError> {
-        if self.buffer.is_empty() {
-            return Ok(None);
-        }
-        let schema_to_use = self.buffer[0].schema();
-        let batches_to_combine = std::mem::take(&mut self.buffer);
-        let combined = concat_batches(&schema_to_use, &batches_to_combine)?;
-        self.current_rows = 0;
-        Ok(Some(combined))
-    }
-
-    fn finish(mut self) -> Result<Option<RecordBatch>, DataFusionError> {
-        self.finish_internal()
     }
 }
 

@@ -33,6 +33,7 @@ statement ok
 FLUSH;
 
 sleep 5s
+
 query ??
 select * from t;
 ----
@@ -49,11 +50,15 @@ insert into t select i, repeat('x', i) from generate_series(2,5) as s(i);
 statement ok
 FLUSH;
 
+sleep 5s
+
 statement ok
 delete from t where id = 1;
 
 statement ok
 FLUSH;
+
+sleep 5s
 
 query ?? rowsort
 select * from t;
@@ -68,6 +73,8 @@ delete from t where id >= 4;
 
 statement ok
 FLUSH;
+
+sleep 5s
 
 query ?? rowsort
 select * from t;
