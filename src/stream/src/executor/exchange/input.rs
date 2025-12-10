@@ -164,16 +164,34 @@ impl RemoteInput {
             .developer
             .exchange_remote_use_multiplexing
         {
-            return RemoteInput::new_mux(
+            RemoteInput::new_mux(
                 local_barrier_manager,
                 upstream_addr,
                 up_down_ids,
                 up_down_frag,
                 metrics,
             )
-            .await;
+            .await
+        } else {
+            RemoteInput::new_simple(
+                local_barrier_manager,
+                upstream_addr,
+                up_down_ids,
+                up_down_frag,
+                metrics,
+            )
+            .await
         }
+    }
 
+    /// Create a remote input with the simple, per actor-pair implementation.
+    pub(crate) async fn new_simple(
+        local_barrier_manager: &LocalBarrierManager,
+        upstream_addr: HostAddr,
+        up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
+        metrics: Arc<StreamingMetrics>,
+    ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
         let client = local_barrier_manager

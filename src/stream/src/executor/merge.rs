@@ -905,7 +905,7 @@ mod tests {
             &self,
             _request: Request<Streaming<GetMuxStreamRequest>>,
         ) -> std::result::Result<Response<Self::GetMuxStreamStream>, Status> {
-            unimplemented!()
+            unreachable!("test case should use simple `get_stream`")
         }
     }
 
@@ -938,7 +938,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let remote_input = {
-            RemoteInput::new(
+            RemoteInput::new_simple(
                 &test_env.local_barrier_manager,
                 addr.into(),
                 (0.into(), 0.into()),
