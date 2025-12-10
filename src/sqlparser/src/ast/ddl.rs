@@ -228,6 +228,9 @@ pub enum AlterSinkOperation {
     SetSinkRateLimit {
         rate_limit: i32,
     },
+    SetBackfillRateLimit {
+        rate_limit: i32,
+    },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -560,6 +563,9 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
