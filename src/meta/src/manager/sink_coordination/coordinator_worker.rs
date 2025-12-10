@@ -237,49 +237,6 @@ impl TwoPhaseCommitHandler {
         );
     }
 
-    async fn try_commit(
-        &mut self,
-        coordinator: &mut BoxTwoPhaseCoordinator,
-        epoch: u64,
-        metadata: Vec<u8>,
-    ) -> anyhow::Result<()> {
-        let start_time = Instant::now();
-        let commit_res = run_future_with_periodic_fn(
-            coordinator.commit(epoch, metadata),
-            Duration::from_secs(5),
-            || {
-                warn!(
-                    elapsed = ?start_time.elapsed(),
-                    %self.sink_id,
-                    "committing during try_commit"
-                );
-            },
-        )
-        .await;
-
-        match commit_res {
-            Ok(_) => {
-                self.ack_committed(epoch).await?;
-            }
-            Err(e) => {
-                self.failed_committed(epoch, e);
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn flush_all_pending_items(
-        &mut self,
-        coordinator: &mut BoxTwoPhaseCoordinator,
-    ) -> anyhow::Result<()> {
-        while !self.pending_epochs.is_empty() || !self.prepared_epochs.is_empty() {
-            let (epoch, metadata) = self.next_to_commit().await?;
-            self.try_commit(coordinator, epoch, metadata).await?;
-        }
-        Ok(())
-    }
-
     fn is_empty(&self) -> bool {
         self.pending_epochs.is_empty() && self.prepared_epochs.is_empty()
     }
@@ -910,10 +867,6 @@ impl CoordinatorWorker {
         for (epoch, metadata) in pending_items {
             two_phase_handler.push_new_item(epoch, metadata);
         }
-
-        two_phase_handler
-            .flush_all_pending_items(coordinator)
-            .await?;
 
         Ok(two_phase_handler)
     }

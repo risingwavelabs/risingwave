@@ -126,16 +126,16 @@ profile:
       - use: compute-node
       - use: frontend
       - use: compactor
-      - use: compactor
-        compactor-mode: "dedicated-iceberg"
-        port: 6661
-        exporter-port: 1261
-      - use: prometheus
-      - use: grafana
-      - use: kafka
-        persist-data: true
-      - use: lakekeeper
-        port: 8181
+      # - use: compactor
+      #   compactor-mode: "dedicated-iceberg"
+      #   port: 6661
+      #   exporter-port: 1261
+      # - use: prometheus
+      # - use: grafana
+      # - use: kafka
+      #   persist-data: true
+      # - use: lakekeeper
+      #   port: 8181
 
   standalone-full-peripherals:
     steps:
