@@ -164,6 +164,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .await?
             }
             (ThrottleType::Backfill, ThrottleTarget::Mv)
+            | (ThrottleType::Backfill, ThrottleTarget::Sink)
             | (ThrottleType::Backfill, ThrottleTarget::Table) => {
                 self.metadata_manager
                     .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
