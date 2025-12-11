@@ -208,7 +208,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     let default_filter = {
         let mut filter = filter::Targets::new();
 
-        // Configure levels for some RisingWave crates.
+        // Configure levels for some RisingWave crates. Can still be overridden by `RUST_LOG`.
         // Other RisingWave crates like `stream` and `storage` will follow the default level.
         filter = filter
             .with_target("auto_schema_change", Level::INFO)
@@ -219,7 +219,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             // debug-purposed events are disabled unless `RUST_LOG` overrides
             .with_target("events", Level::OFF);
 
-        // Configure levels for external crates.
+        // Configure levels for external crates. Can still be overridden by `RUST_LOG`.
+        // Other external crates will follow the default level.
         filter = filter
             .with_target("foyer", Level::INFO)
             .with_target("aws", Level::INFO)
@@ -238,7 +239,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("wasmtime", Level::INFO)
             .with_target("sqlx", Level::WARN)
             .with_target("opendal", Level::INFO)
-            .with_target("reqsign", Level::INFO);
+            .with_target("reqsign", Level::INFO)
+            .with_target("jni", Level::INFO)
+            .with_target("async_nats", Level::INFO);
 
         // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
         let default_level = match deployment {
