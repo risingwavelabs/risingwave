@@ -645,26 +645,31 @@ impl ValueWatermarkColumnSerde {
             // Correctness requires the assumption that the order is the same as the one used in StateTable when serializing watermark for value column.
             None => OrderType::ascending(),
         };
-        // Correctness requires on the assumption that all columns are stored in the row. (See comment on Table::value_indices.)
-        debug_assert!(
-            table_catalog
-                .value_indices
-                .contains(&(clean_watermark_index as i32))
-        );
+        // Correctness requires the assumption that the watermark column is stored in the value. (See comment on Table::value_indices.)
+        let Some(watermark_index_in_value_indices) = table_catalog
+            .value_indices
+            .iter()
+            .position(|p| *p as usize == clean_watermark_index)
+        else {
+            panic!(
+                "Watermark index {} not found in value_indices {:?}.",
+                clean_watermark_index, table_catalog.value_indices
+            );
+        };
         let (row_serde, watermark_index_in_de_row) = if table_catalog.version.is_none() {
             let row_serde = BasicSerde::new(
                 Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
                 Arc::from(table_columns.into_boxed_slice()),
             )
             .into();
-            // The index is fixed for value encoding.
-            (row_serde, clean_watermark_index)
+            (row_serde, watermark_index_in_value_indices)
         } else {
             let row_serde = ColumnAwareSerde::new(
                 Arc::from_iter(iter::once(clean_watermark_index)),
                 Arc::from(table_columns.into_boxed_slice()),
             )
             .into();
+            // Only one column.
             (row_serde, 0)
         };
         Self {
