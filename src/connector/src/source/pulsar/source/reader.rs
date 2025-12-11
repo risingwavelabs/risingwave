@@ -185,18 +185,19 @@ impl SplitReader for PulsarBrokerReader {
 
         let mut already_read_offset = None;
 
-        let mut consumer_option = match split.start_offset.clone() {
+        let mut consumer_options = match split.start_offset.clone() {
             PulsarEnumeratorOffset::Earliest => {
-                if topic.starts_with("non-persistent://") {
+                let initial_position = if topic.starts_with("non-persistent://") {
                     tracing::warn!(
                         "Earliest offset is not supported for non-persistent topic, use Latest instead"
                     );
-                    ConsumerOptions::default().with_initial_position(InitialPosition::Latest)
+                    InitialPosition::Latest
                 } else {
-                    ConsumerOptions::default()
-                        .with_initial_position(InitialPosition::Earliest)
-                        .durable(false)
-                }
+                    InitialPosition::Earliest
+                };
+                ConsumerOptions::default()
+                    .with_initial_position(initial_position)
+                    .durable(false)
             }
             PulsarEnumeratorOffset::Latest => ConsumerOptions::default()
                 .with_initial_position(InitialPosition::Latest)
@@ -214,19 +215,20 @@ impl SplitReader for PulsarBrokerReader {
                         entry_id: start_message_id.entry_id,
                         batch_index: start_message_id.batch_index,
                     });
-                    pulsar::ConsumerOptions {
+                    ConsumerOptions {
                         durable: Some(false),
                         start_message_id: Some(start_message_id),
                         ..Default::default()
                     }
                 }
             }
-
             PulsarEnumeratorOffset::Timestamp(_) => ConsumerOptions::default(),
         };
-        consumer_option.read_compacted = props.consumer_options.read_compacted;
 
-        builder = builder.with_options(consumer_option);
+        // Apply read_compacted option to all consumer options
+        consumer_options.read_compacted = props.consumer_options.read_compacted;
+
+        builder = builder.with_options(consumer_options);
 
         if let Some(delay) = props.subscription_unacked_resend_delay {
             builder = builder.with_unacked_message_resend_delay(Some(delay));
