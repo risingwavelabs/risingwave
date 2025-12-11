@@ -18,7 +18,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
-use super::util::execute_with_long_running_notification;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
@@ -102,6 +102,7 @@ pub async fn handle_drop_index(
             catalog_writer.drop_index(index_id, cascade),
             &session,
             "DROP INDEX",
+            LongRunningNotificationAction::SuggestRecover,
         )
         .await?;
     }

@@ -194,6 +194,7 @@ impl StreamVectorIndexWrite {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
             refreshable: false,
             vector_index_info: Some(vector_index_info),
             cdc_table_type: None,

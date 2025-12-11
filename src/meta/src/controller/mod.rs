@@ -269,7 +269,13 @@ impl From<ObjectModel<table::Model>> for PbTable {
             webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
             job_id: value.0.belongs_to_job_id,
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
+            clean_watermark_indices: value
+                .0
+                .clean_watermark_indices
+                .map(|indices| indices.0.iter().map(|&x| x as u32).collect())
+                .unwrap_or_default(),
             refreshable: value.0.refreshable,
             vector_index_info: value.0.vector_index_info.map(|index| index.to_protobuf()),
             cdc_table_type: value
