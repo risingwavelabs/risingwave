@@ -828,11 +828,15 @@ impl IcebergCompactionManager {
 
         let txn = Transaction::new(&table);
 
-        let expired_snapshots = txn
+        let mut expired_snapshots = txn
             .expire_snapshot()
             .expire_older_than(snapshot_expiration_timestamp_ms)
             .clear_expire_files(iceberg_config.snapshot_expiration_clear_expired_files)
             .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
+
+        if let Some(retain_last) = iceberg_config.snapshot_expiration_retain_last {
+            expired_snapshots = expired_snapshots.retain_last(retain_last);
+        }
 
         let tx = expired_snapshots
             .apply(txn)
