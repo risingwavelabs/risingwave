@@ -48,7 +48,8 @@ echo "$java_version"
 echo "--- install postgresql server"
 DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get -y install tzdata
 sudo apt install postgresql postgresql-contrib libpq-dev -y
-sudo service postgresql start || sudo pg_ctlcluster 14 main start
+# Start postgresql service, try generic command first, then find the installed version
+sudo service postgresql start || sudo pg_ctlcluster $(ls /etc/postgresql/ | head -1) main start
 # disable password encryption
 sudo -u postgres psql -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
 sudo -u postgres createdb test
