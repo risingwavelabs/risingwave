@@ -137,7 +137,7 @@ mod test {
             Message::Barrier(Barrier::new_test_barrier(test_epoch(1)).with_mutation(
                 Mutation::Add(AddMutation {
                     adds: maplit::hashmap! {
-                        0 => vec![Dispatcher {
+                        0.into() => vec![Dispatcher {
                             downstream_actor_id: vec![actor_id],
                             ..Default::default()
                         }],

@@ -87,10 +87,8 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             .create_sst_writer(id, writer_options)
             .await
             .unwrap();
-        let table_id_to_vnode = HashMap::from_iter(vec![(
-            TableId::default().into(),
-            VirtualNode::COUNT_FOR_TEST,
-        )]);
+        let table_id_to_vnode =
+            HashMap::from_iter(vec![(TableId::default(), VirtualNode::COUNT_FOR_TEST)]);
 
         let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
 
@@ -166,6 +164,7 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
+        skip_bloom_filter_in_serde: false,
         meta_cache,
         block_cache,
         vector_meta_cache: CacheBuilder::new(1 << 10).build(),

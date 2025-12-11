@@ -58,11 +58,8 @@ impl ProjectExecutor {
         noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
-        let eliminate_noop_updates = noop_update_hint
-            || ctx
-                .streaming_config
-                .developer
-                .aggressive_noop_update_elimination;
+        let eliminate_noop_updates =
+            noop_update_hint || ctx.config.developer.aggressive_noop_update_elimination;
         Self {
             input,
             inner: Inner {

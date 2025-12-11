@@ -245,19 +245,7 @@ impl RemoteTableAccessor {
 #[async_trait::async_trait]
 impl StateTableAccessor for RemoteTableAccessor {
     async fn get_tables(&self, table_ids: &[TableId]) -> RpcResult<HashMap<TableId, Table>> {
-        Ok(self
-            .meta_client
-            .get_tables(
-                &table_ids
-                    .iter()
-                    .map(|table_id| table_id.as_raw_id())
-                    .collect_vec(),
-                true,
-            )
-            .await?
-            .into_iter()
-            .map(|(table_id, table)| (table_id.into(), table))
-            .collect())
+        self.meta_client.get_tables(table_ids.to_vec(), true).await
     }
 }
 
@@ -366,7 +354,7 @@ impl CompactionCatalogManager {
             let mut guard = self.table_id_to_catalog.write();
             for table_id in table_ids {
                 if let Some(table) = state_tables.remove(&table_id) {
-                    let table_id = table.id.into();
+                    let table_id = table.id;
                     let key_extractor = FilterKeyExtractorImpl::from_table(&table);
                     let vnode = table.vnode_count();
                     let watermark_serde = build_watermark_col_serde(&table);
@@ -521,7 +509,10 @@ pub type CompactionCatalogAgentRef = Arc<CompactionCatalogAgent>;
 fn build_watermark_col_serde(
     table_catalog: &Table,
 ) -> Option<(OrderedRowSerde, OrderedRowSerde, usize)> {
-    match table_catalog.clean_watermark_index_in_pk {
+    // Get clean watermark PK index using the helper method
+    let clean_watermark_index_in_pk = table_catalog.get_clean_watermark_index_in_pk_compat();
+
+    match clean_watermark_index_in_pk {
         None => {
             // non watermark table or watermark column is the first column (pk_prefix_watermark)
             None
@@ -553,14 +544,8 @@ fn build_watermark_col_serde(
 
             assert_eq!(pk_data_types.len(), pk_order_types.len());
             let pk_serde = OrderedRowSerde::new(pk_data_types, pk_order_types);
-            let watermark_col_serde = pk_serde
-                .index(clean_watermark_index_in_pk as usize)
-                .into_owned();
-            Some((
-                pk_serde,
-                watermark_col_serde,
-                clean_watermark_index_in_pk as usize,
-            ))
+            let watermark_col_serde = pk_serde.index(clean_watermark_index_in_pk).into_owned();
+            Some((pk_serde, watermark_col_serde, clean_watermark_index_in_pk))
         }
     }
 }
@@ -608,9 +593,9 @@ mod tests {
 
     fn build_table_with_prefix_column_num(column_count: u32) -> PbTable {
         PbTable {
-            id: 0,
-            schema_id: 0,
-            database_id: 0,
+            id: 0.into(),
+            schema_id: 0.into(),
+            database_id: 0.into(),
             name: "test".to_owned(),
             table_type: TableType::Table as i32,
             columns: vec![
@@ -661,7 +646,7 @@ mod tests {
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
-            fragment_id: 0,
+            fragment_id: 0.into(),
             dml_fragment_id: None,
             initialized_at_epoch: None,
             vnode_col_index: None,
@@ -689,11 +674,12 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,
-            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
     }
 

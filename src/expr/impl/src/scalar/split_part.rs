@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::{ExprError, Result, function};
 
 #[function("split_part(varchar, varchar, int4) -> varchar")]
@@ -21,7 +19,7 @@ pub fn split_part(
     string_expr: &str,
     delimiter_expr: &str,
     nth_expr: i32,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     if nth_expr == 0 {
         return Err(ExprError::InvalidParam {

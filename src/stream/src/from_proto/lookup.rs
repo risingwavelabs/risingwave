@@ -82,7 +82,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
             batch_table: storage_table,
             watermark_epoch: params.watermark_epoch,
-            chunk_size: params.env.config().developer.chunk_size,
+            chunk_size: params.config.developer.chunk_size,
         });
         Ok((params.info, exec).into())
     }

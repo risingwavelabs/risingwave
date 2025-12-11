@@ -35,9 +35,8 @@ SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() join t2  FOR SYSTEM_TIME AS 
 ----
 0
 
-sleep 5s
 
-query I
+query I retry 6 backoff 1s
 SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() - '5' second join t2  FOR SYSTEM_TIME AS OF now() on t1.k1=t2.k2;
 ----
 1

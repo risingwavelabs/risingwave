@@ -25,7 +25,7 @@ use mongodb::bson::{Array, Bson, Document, bson, doc};
 use mongodb::{Client, Namespace};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::Row;
 use risingwave_common::types::ScalarRefImpl;
 use serde::Deserialize;
@@ -112,7 +112,7 @@ const MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 4096;
 
 pub const MONGODB_PK_NAME: &str = "_id";
 
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
 const fn _default_bulk_write_max_entries() -> usize {
     1024
@@ -447,7 +447,7 @@ impl MongodbSinkWriter {
         let mut insert_builder: HashMap<MongodbNamespace, InsertCommandBuilder> = HashMap::new();
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                     tracing::warn!(
                         suppressed_count,
                         ?op,
@@ -637,7 +637,7 @@ impl MongodbPayloadWriter {
                 Some(ScalarRefImpl::Utf8(v)) => match v.parse::<Namespace>() {
                     Ok(ns) => Some(ns),
                     Err(err) => {
-                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                             tracing::warn!(
                                 suppressed_count,
                                 error = %err.as_report(),
@@ -649,7 +649,7 @@ impl MongodbPayloadWriter {
                     }
                 },
                 _ => {
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         tracing::warn!(
                             suppressed_count,
                             "the value of collection.name.field is null, fallback to use default collection.name"

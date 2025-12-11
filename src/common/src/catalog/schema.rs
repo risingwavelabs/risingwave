@@ -198,7 +198,7 @@ impl Schema {
         }
 
         for (a, b) in self.fields.iter().zip_eq_fast(other.fields.iter()) {
-            if a.data_type != b.data_type {
+            if !a.data_type.equals_datatype(&b.data_type) {
                 return false;
             }
         }

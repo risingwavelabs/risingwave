@@ -266,6 +266,7 @@ message ListStreamingJobStatesResponse {
     uint32 max_parallelism = 4;
     string name = 5;
     string resource_group = 6;
+    string config_override = 9;
     uint32 database_id = 7;
     uint32 schema_id = 8;
   }
@@ -372,8 +373,8 @@ message RecoverResponse {}
 
 message AlterConnectorPropsRequest {
   message AlterIcebergTableIds {
-    int32 source_id = 1;
-    int32 sink_id = 2;
+    uint32 source_id = 1;
+    uint32 sink_id = 2;
   }
   enum AlterConnectorPropsObject {
     UNSPECIFIED = 0;
@@ -406,6 +407,19 @@ message ListCdcProgressResponse {
   map<uint32, CdcProgress> cdc_progress = 1;
 }
 
+message ListRefreshTableStatesRequest {}
+
+message ListRefreshTableStatesResponse {
+  message RefreshTableState {
+    uint32 table_id = 1;
+    string current_status = 2;
+    optional string last_trigger_time = 3;
+    optional int64 trigger_interval_secs = 4;
+    optional string last_success_time = 5;
+  }
+  repeated RefreshTableState states = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -429,6 +443,7 @@ service StreamManagerService {
   rpc SetSyncLogStoreAligned(SetSyncLogStoreAlignedRequest) returns (SetSyncLogStoreAlignedResponse);
   rpc ListCdcProgress(ListCdcProgressRequest) returns (ListCdcProgressResponse);
   rpc ListUnmigratedTables(ListUnmigratedTablesRequest) returns (ListUnmigratedTablesResponse);
+  rpc ListRefreshTableStates(ListRefreshTableStatesRequest) returns (ListRefreshTableStatesResponse);
 }
 
 // Below for cluster service.

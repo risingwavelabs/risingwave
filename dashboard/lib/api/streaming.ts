@@ -62,6 +62,7 @@ export interface Relation {
   owner: number
   schemaId: number
   databaseId: number
+  streamingJob?: StreamingJob
 
   // For display
   columns?: (ColumnCatalog | Field)[]
@@ -81,6 +82,7 @@ export class StreamingJob {
   @Expose({ name: "parallelism" })
   _parallelism!: any
   maxParallelism!: number
+  configOverride!: string
 
   get parallelism() {
     const parallelism = this._parallelism

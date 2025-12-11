@@ -1134,3 +1134,9 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
     }
     Ok(vec)
 }
+
+impl From<::clickhouse::error::Error> for SinkError {
+    fn from(value: ::clickhouse::error::Error) -> Self {
+        SinkError::ClickHouse(value.to_report_string())
+    }
+}

@@ -23,11 +23,12 @@ use prometheus::{
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledHistogramVec, RelabeledMetricVec, UintGauge,
+    RelabeledGuardedIntGaugeVec, RelabeledHistogramVec, RelabeledMetricVec, UintGauge,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
 };
 use thiserror_ext::AsReport;
 use tracing::warn;
@@ -49,6 +50,12 @@ pub struct HummockStateStoreMetrics {
     pub iter_fetch_meta_duration: RelabeledGuardedHistogramVec,
     pub iter_fetch_meta_cache_unhits: IntGauge,
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
+
+    pub vector_object_request_counts: RelabeledGuardedIntCounterVec,
+    pub vector_request_stats: RelabeledGuardedHistogramVec,
+    pub vector_hnsw_graph_level_node_count: RelabeledGuardedIntGaugeVec,
+    pub vector_index_file_count: RelabeledGuardedIntGaugeVec,
+    pub vector_index_file_size: RelabeledGuardedIntGaugeVec,
 
     pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec,
     pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec,
@@ -229,6 +236,77 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+
+        // ----- vector -----
+        let vector_object_request_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_vector_object_request_counts",
+            "Metrics about vector object requests that have been issued",
+            &["table_id", "type", "mode"],
+            registry
+        )
+        .unwrap();
+        let vector_object_request_counts = RelabeledGuardedIntCounterVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_object_request_counts,
+            metric_level,
+        );
+
+        let opts = histogram_opts!(
+            "state_store_vector_request_stats",
+            "Metrics about vector requests",
+            exponential_buckets(100.0, 10.0, 5).unwrap(),
+        );
+
+        let vector_request_stats = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "type", "mode", "top_n", "ef"],
+            registry
+        )
+        .unwrap();
+        let vector_request_stats = RelabeledGuardedHistogramVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_request_stats,
+            metric_level,
+        );
+
+        let vector_hnsw_graph_level_node_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_hnsw_graph_level_node_count",
+            "Number of nodes in each level of hnsw graph",
+            &["table_id", "level"],
+            registry
+        )
+        .unwrap();
+        let vector_hnsw_graph_level_node_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_hnsw_graph_level_node_count,
+            metric_level,
+        );
+
+        let vector_index_file_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_index_file_count",
+            "Number of vector file",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+        let vector_index_file_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_index_file_count,
+            metric_level,
+        );
+
+        let vector_index_file_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_vector_index_file_size",
+            "total size of vector index file",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+        let vector_index_file_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Critical,
+            vector_index_file_size,
+            metric_level,
+        );
 
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_vec_with_registry!(
@@ -477,6 +555,11 @@ impl HummockStateStoreMetrics {
             iter_fetch_meta_duration,
             iter_fetch_meta_cache_unhits,
             iter_slow_fetch_meta_cache_unhits,
+            vector_object_request_counts,
+            vector_request_stats,
+            vector_hnsw_graph_level_node_count,
+            vector_index_file_count,
+            vector_index_file_size,
             read_req_bloom_filter_positive_counts,
             read_req_positive_but_non_exist_counts,
             read_req_check_bloom_filter_counts,
@@ -514,89 +597,129 @@ impl HummockStateStoreMetrics {
 pub trait MemoryCollector: Sync + Send {
     fn get_meta_memory_usage(&self) -> u64;
     fn get_data_memory_usage(&self) -> u64;
+    fn get_vector_meta_memory_usage(&self) -> u64;
+    fn get_vector_data_memory_usage(&self) -> u64;
     fn get_uploading_memory_usage(&self) -> u64;
     fn get_prefetch_memory_usage(&self) -> usize;
     fn get_meta_cache_memory_usage_ratio(&self) -> f64;
     fn get_block_cache_memory_usage_ratio(&self) -> f64;
+    fn get_vector_meta_cache_memory_usage_ratio(&self) -> f64;
+    fn get_vector_data_cache_memory_usage_ratio(&self) -> f64;
     fn get_shared_buffer_usage_ratio(&self) -> f64;
 }
 
 #[derive(Clone)]
 struct StateStoreCollector {
     memory_collector: Arc<dyn MemoryCollector>,
-    descs: Vec<Desc>,
+    collectors: Vec<Arc<dyn Collector>>,
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
+    vector_data_cache_size: IntGauge,
+    vector_meta_cache_size: IntGauge,
     uploading_memory_size: IntGauge,
     prefetch_memory_size: IntGauge,
     meta_cache_usage_ratio: Gauge,
     block_cache_usage_ratio: Gauge,
+    vector_data_cache_usage_ratio: Gauge,
+    vector_meta_cache_usage_ratio: Gauge,
     uploading_memory_usage_ratio: Gauge,
 }
 
 impl StateStoreCollector {
     pub fn new(memory_collector: Arc<dyn MemoryCollector>) -> Self {
-        let mut descs = Vec::new();
+        let mut collectors = Vec::new();
 
         let block_cache_size = IntGauge::with_opts(Opts::new(
             "state_store_block_cache_size",
             "the size of cache for data block cache",
         ))
         .unwrap();
-        descs.extend(block_cache_size.desc().into_iter().cloned());
+        collectors.push(Arc::new(block_cache_size.clone()) as _);
 
         let block_cache_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_block_cache_usage_ratio",
             "the ratio of block cache to it's pre-allocated memory",
         ))
         .unwrap();
-        descs.extend(block_cache_usage_ratio.desc().into_iter().cloned());
+        collectors.push(Arc::new(block_cache_usage_ratio.clone()) as _);
 
         let meta_cache_size = IntGauge::with_opts(Opts::new(
             "state_store_meta_cache_size",
             "the size of cache for meta file cache",
         ))
         .unwrap();
-        descs.extend(meta_cache_size.desc().into_iter().cloned());
+        collectors.push(Arc::new(meta_cache_size.clone()) as _);
 
         let meta_cache_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_meta_cache_usage_ratio",
             "the ratio of meta cache to it's pre-allocated memory",
         ))
         .unwrap();
-        descs.extend(meta_cache_usage_ratio.desc().into_iter().cloned());
+        collectors.push(Arc::new(meta_cache_usage_ratio.clone()) as _);
+
+        let vector_data_cache_size = IntGauge::with_opts(Opts::new(
+            "state_store_vector_data_cache_size",
+            "the size of cache for vector data file cache",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(vector_data_cache_size.clone()) as _);
+
+        let vector_data_cache_usage_ratio = Gauge::with_opts(Opts::new(
+            "state_store_vector_data_cache_usage_ratio",
+            "the ratio of vector data cache to it's pre-allocated memory",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(vector_data_cache_usage_ratio.clone()) as _);
+
+        let vector_meta_cache_size = IntGauge::with_opts(Opts::new(
+            "state_store_vector_meta_cache_size",
+            "the size of cache for vector meta file cache",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(vector_meta_cache_size.clone()) as _);
+
+        let vector_meta_cache_usage_ratio = Gauge::with_opts(Opts::new(
+            "state_store_vector_meta_cache_usage_ratio",
+            "the ratio of vector meta cache to it's pre-allocated memory",
+        ))
+        .unwrap();
+        collectors.push(Arc::new(vector_meta_cache_usage_ratio.clone()) as _);
 
         let uploading_memory_size = IntGauge::with_opts(Opts::new(
             "uploading_memory_size",
             "the size of uploading SSTs memory usage",
         ))
         .unwrap();
-        descs.extend(uploading_memory_size.desc().into_iter().cloned());
+        collectors.push(Arc::new(uploading_memory_size.clone()) as _);
 
         let uploading_memory_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_uploading_memory_usage_ratio",
             "the ratio of uploading SSTs memory usage to it's pre-allocated memory",
         ))
         .unwrap();
-        descs.extend(uploading_memory_usage_ratio.desc().into_iter().cloned());
+        collectors.push(Arc::new(uploading_memory_usage_ratio.clone()) as _);
 
         let prefetch_memory_size = IntGauge::with_opts(Opts::new(
             "state_store_prefetch_memory_size",
             "the size of prefetch memory usage",
         ))
         .unwrap();
-        descs.extend(prefetch_memory_size.desc().into_iter().cloned());
+        collectors.push(Arc::new(prefetch_memory_size.clone()) as _);
 
         Self {
             memory_collector,
-            descs,
+            collectors,
             block_cache_size,
             meta_cache_size,
+            vector_data_cache_size,
+            vector_meta_cache_size,
             uploading_memory_size,
             prefetch_memory_size,
             meta_cache_usage_ratio,
             block_cache_usage_ratio,
 
+            vector_data_cache_usage_ratio,
+            vector_meta_cache_usage_ratio,
             uploading_memory_usage_ratio,
         }
     }
@@ -604,7 +727,7 @@ impl StateStoreCollector {
 
 impl Collector for StateStoreCollector {
     fn desc(&self) -> Vec<&Desc> {
-        self.descs.iter().collect()
+        self.collectors.iter().flat_map(|c| c.desc()).collect()
     }
 
     fn collect(&self) -> Vec<proto::MetricFamily> {
@@ -612,6 +735,10 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_data_memory_usage() as i64);
         self.meta_cache_size
             .set(self.memory_collector.get_meta_memory_usage() as i64);
+        self.vector_data_cache_size
+            .set(self.memory_collector.get_vector_data_memory_usage() as _);
+        self.vector_meta_cache_size
+            .set(self.memory_collector.get_vector_meta_memory_usage() as _);
         self.uploading_memory_size
             .set(self.memory_collector.get_uploading_memory_usage() as i64);
         self.prefetch_memory_size
@@ -620,14 +747,18 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_meta_cache_memory_usage_ratio());
         self.block_cache_usage_ratio
             .set(self.memory_collector.get_block_cache_memory_usage_ratio());
+        self.vector_meta_cache_usage_ratio.set(
+            self.memory_collector
+                .get_vector_meta_cache_memory_usage_ratio(),
+        );
+        self.vector_data_cache_usage_ratio.set(
+            self.memory_collector
+                .get_vector_data_cache_memory_usage_ratio(),
+        );
         self.uploading_memory_usage_ratio
             .set(self.memory_collector.get_shared_buffer_usage_ratio());
         // collect MetricFamilies.
-        let mut mfs = Vec::with_capacity(3);
-        mfs.extend(self.block_cache_size.collect());
-        mfs.extend(self.meta_cache_size.collect());
-        mfs.extend(self.uploading_memory_size.collect());
-        mfs
+        self.collectors.iter().flat_map(|c| c.collect()).collect()
     }
 }
 

@@ -127,7 +127,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             group_by,
             caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
-            topn_cache_min_capacity: ctx.streaming_config.developer.topn_cache_min_capacity,
+            topn_cache_min_capacity: ctx.config.developer.topn_cache_min_capacity,
             metrics,
         })
     }

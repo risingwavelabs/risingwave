@@ -32,7 +32,7 @@ async fn rw_actor_vnodes_impl(
     actor_id: i32,
 ) -> Result<JsonbVal> {
     let vnode_indices = meta_client
-        .get_actor_vnodes(actor_id as u32)
+        .get_actor_vnodes((actor_id as u32).into())
         .await
         .map_err(|e| ExprError::Internal(e.into()))?;
 

@@ -17,12 +17,13 @@ use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::iter::once;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::log::LogSuppressor;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, PbLevelType, StateTableInfo, StateTableInfoDelta,
 };
@@ -521,7 +522,9 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                         } else {
                             #[expect(deprecated)]
                             // for backward-compatibility of previous hummock version delta
-                            BTreeSet::from_iter(group_construct.table_ids.iter().map(Into::into))
+                            BTreeSet::from_iter(
+                                group_construct.table_ids.iter().copied().map(Into::into),
+                            )
                         };
 
                         if group_construct.version() >= CompatibilityVersion::SplitGroupByTableId {
@@ -770,10 +773,15 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             }
             let contains = change_log_delta.contains_key(table_id);
             if !contains {
-                warn!(
-                        ?table_id,
-                        "table change log dropped due to no further change log at newly committed epoch",
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(|| LogSuppressor::per_second(1));
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                    warn!(
+                        suppressed_count,
+                        %table_id,
+                        "table change log dropped due to no further change log at newly committed epoch"
                     );
+                }
             }
             contains
         });
@@ -1658,7 +1666,7 @@ mod tests {
                 right: full_key_r.into(),
                 right_exclusive: false,
             },
-            table_ids: table_ids.iter().map(Into::into).collect(),
+            table_ids: table_ids.into_iter().map(Into::into).collect(),
             object_id: sst_id.into(),
             min_epoch: 20,
             max_epoch: 20,
@@ -1863,7 +1871,7 @@ mod tests {
                 right,
                 right_exclusive: false,
             },
-            table_ids: table_ids.iter().map(Into::into).collect(),
+            table_ids: table_ids.into_iter().map(Into::into).collect(),
             file_size: 100,
             sst_size: 100,
             uncompressed_file_size: 100,

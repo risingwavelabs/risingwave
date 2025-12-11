@@ -119,6 +119,12 @@ pub struct StorageConfig {
     #[config_doc(nested)]
     pub meta_file_cache: FileCacheConfig,
 
+    /// sst serde happens when a sst meta is written to meta disk cache.
+    /// excluding bloom filter from serde can reduce the meta disk cache entry size
+    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    #[serde(default = "default::storage::sst_skip_bloom_filter_in_serde")]
+    pub sst_skip_bloom_filter_in_serde: bool,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub cache_refill: CacheRefillConfig,
@@ -196,8 +202,6 @@ pub struct StorageConfig {
     pub time_travel_version_cache_capacity: u64,
 
     // iceberg compaction
-    #[serde(default = "default::storage::iceberg_compaction_target_file_size_mb")]
-    pub iceberg_compaction_target_file_size_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
     #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
@@ -224,10 +228,6 @@ pub struct StorageConfig {
     /// The smoothing factor for size estimation in iceberg compaction.(default: 0.3)
     #[serde(default = "default::storage::iceberg_compaction_size_estimation_smoothing_factor")]
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
-    // For Small File Compaction
-    /// The threshold for small file compaction in MB.
-    #[serde(default = "default::storage::iceberg_compaction_small_file_threshold_mb")]
-    pub iceberg_compaction_small_file_threshold_mb: u32,
     /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
     /// Effective pending budget = `ceil(max_task_parallelism * multiplier)`. Default 4.0.
     /// Set < 1.0 to reduce buffering (may increase `PullTask` RPC frequency); set higher to batch more tasks.
@@ -1033,8 +1033,8 @@ pub mod default {
             10
         }
 
-        pub fn iceberg_compaction_target_file_size_mb() -> u32 {
-            1024
+        pub fn sst_skip_bloom_filter_in_serde() -> bool {
+            false
         }
 
         pub fn iceberg_compaction_enable_validate() -> bool {
@@ -1075,10 +1075,6 @@ pub mod default {
 
         pub fn iceberg_compaction_size_estimation_smoothing_factor() -> f64 {
             0.3
-        }
-
-        pub fn iceberg_compaction_small_file_threshold_mb() -> u32 {
-            32
         }
 
         pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {

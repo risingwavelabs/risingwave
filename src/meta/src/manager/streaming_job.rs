@@ -16,10 +16,10 @@ use std::collections::HashSet;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::id::{DatabaseId, JobId, SchemaId};
+use risingwave_common::id::{ConnectionId, DatabaseId, JobId, SchemaId, SecretId};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
-use risingwave_meta_model::{SourceId, TableVersion, source, table};
+use risingwave_meta_model::{TableVersion, source, table};
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use sea_orm::entity::prelude::*;
@@ -120,22 +120,11 @@ impl StreamingJob {
 
     pub fn id(&self) -> JobId {
         match self {
-            Self::MaterializedView(table) => table.id,
-            Self::Sink(sink) => sink.id,
-            Self::Table(_, table, ..) => table.id,
-            Self::Index(index, _) => index.id,
-            Self::Source(source) => source.id,
-        }
-        .into()
-    }
-
-    pub fn mv_table(&self) -> Option<u32> {
-        match self {
-            Self::MaterializedView(table) => Some(table.id),
-            Self::Sink(_) => None,
-            Self::Table(_, table, ..) => Some(table.id),
-            Self::Index(_, table) => Some(table.id),
-            Self::Source(_) => None,
+            Self::MaterializedView(table) => table.id.as_job_id(),
+            Self::Sink(sink) => sink.id.as_job_id(),
+            Self::Table(_, table, ..) => table.id.as_job_id(),
+            Self::Index(index, _) => index.id.as_job_id(),
+            Self::Source(source) => source.id.as_share_source_job_id(),
         }
     }
 
@@ -157,7 +146,6 @@ impl StreamingJob {
             Self::Index(index, _) => index.schema_id,
             Self::Source(source) => source.schema_id,
         }
-        .into()
     }
 
     pub fn database_id(&self) -> DatabaseId {
@@ -168,7 +156,6 @@ impl StreamingJob {
             Self::Index(index, _) => index.database_id,
             Self::Source(source) => source.database_id,
         }
-        .into()
     }
 
     pub fn name(&self) -> String {
@@ -241,6 +228,7 @@ impl StreamingJob {
 
     pub fn create_type(&self) -> CreateType {
         match self {
+            Self::Table(_, table, ..) => table.get_create_type().unwrap_or(CreateType::Foreground),
             Self::MaterializedView(table) => {
                 table.get_create_type().unwrap_or(CreateType::Foreground)
             }
@@ -252,7 +240,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<u32>> {
+    pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<ConnectionId>> {
         match self {
             StreamingJob::Source(source) => Ok(get_referred_connection_ids_from_source(source)),
             StreamingJob::Table(source, _, _) => {
@@ -268,7 +256,7 @@ impl StreamingJob {
     }
 
     // Get the secret ids that are referenced by this job.
-    pub fn dependent_secret_ids(&self) -> MetaResult<HashSet<u32>> {
+    pub fn dependent_secret_ids(&self) -> MetaResult<HashSet<SecretId>> {
         match self {
             StreamingJob::Sink(sink) => Ok(get_referred_secret_ids_from_sink(sink)),
             StreamingJob::Table(source, _, _) => {
@@ -308,7 +296,7 @@ impl StreamingJob {
             StreamingJob::Source(source) => {
                 let new_version = source.get_version();
                 let original_version: Option<i64> =
-                    SourceModel::find_by_id(id.as_raw_id() as SourceId)
+                    SourceModel::find_by_id(id.as_shared_source_id())
                         .select_only()
                         .column(source::Column::Version)
                         .into_tuple()

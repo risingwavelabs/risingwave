@@ -39,6 +39,7 @@ env_scripts = [
   is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
   is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
   is_udf_enabled = get_env ENABLE_UDF
+  is_datafusion_enabled = get_env ENABLE_DATAFUSION
   is_default_features_disabled = get_env DISABLE_DEFAULT_FEATURES
 
   if ${is_sanitizer_enabled}
@@ -77,6 +78,11 @@ env_scripts = [
     set_env BUILD_HUMMOCK_TRACE_CMD "-p risingwave_storage --features hm-trace"
   else
     set_env BUILD_HUMMOCK_TRACE_CMD ""
+  end
+
+  if ${is_datafusion_enabled}
+    flags = get_env RISINGWAVE_FEATURE_FLAGS
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features datafusion"
   end
 
   is_ci = get_env RISINGWAVE_CI
@@ -256,21 +262,61 @@ script = '''
 #!/usr/bin/env bash
 set -e
 
+LOG_SIZE_LIMIT=8192
+LOG_LINE_DUPLICATE_LIMIT=1000
+TMP_FILE=$(mktemp)
+
+bye() {
+  local status=$?
+  if [[ $status -eq 2 ]]; then
+    echo "Please disable unnecessary logs by doing following:"
+    echo "- Use DEBUG or TRACE level for logs that are debugging-oriented."
+    echo "- Use LogSuppressor to apply rate limit to verbose logs."
+  fi
+  if [[ $status -ne 0 ]]; then
+    echo "You may download the log files from the \"Artifacts\" tab."
+  fi
+  rm -f "${TMP_FILE}"
+  exit $status
+}
+trap bye EXIT
+
 echo "~~~ Check logs"
+echo "Log file sizes:"
 du -ah ${PREFIX_LOG}
 
 for out_file in ${PREFIX_LOG}/*.log
 do
   if grep "panicked at" "$out_file" -C 100; then
-    echo "$(tput setaf 1)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
-    echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
+    echo "$(tput setaf 1)ERROR: \"panicked at\" found in $out_file$(tput sgr0). Please check if there's any bugs in this PR."
     exit 1
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 8192 )) ; then
-    echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
-    exit 1
+log_files=( "${PREFIX_LOG}"/*.log )
+if [ -e "${log_files[0]}" ]; then
+  sed -En 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?[[:space:]]+//p' "${log_files[@]}" \
+    | awk 'NF { print }' \
+    | perl -pe 'BEGIN { $ph = "<...>"; } s/"([^"\\]|\\.)*"/$ph/g; s/(?<![[:alnum:]_])-?[0-9]+(\.[0-9]+)?(?![[:alnum:]_])/$ph/g' \
+    > "${TMP_FILE}"
+
+  total_lines=$(wc -l < "${TMP_FILE}")
+  if [ "$total_lines" -gt 0 ]; then
+    top_duplicates=$(sort "${TMP_FILE}" | uniq -c | sort -nr | head -30)
+    echo "Top duplicated lines:"
+    echo "(Note: DEBUG/TRACE logs are shown here but won't fail the check.)"
+    echo "$top_duplicates"
+    max_count=$(echo "$top_duplicates" | awk '{count=$1; $1=""; sub(/^ /,""); if ($1 !~ /^DEBUG/) { print count; exit }}')
+    if [ "${max_count:-0}" -gt ${LOG_LINE_DUPLICATE_LIMIT} ]; then
+      echo "$(tput setaf 1)ERROR: non-DEBUG/TRACE log line repeated too many times (up to ${max_count}).$(tput sgr0)"
+      exit 2
+    fi
+  fi
+fi
+
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > ${LOG_SIZE_LIMIT} )) ; then
+  echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0)"
+  exit 2
 fi
 '''
 
@@ -1139,7 +1185,9 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
+set -x
 cargo clippy $@ ${RISINGWAVE_FEATURE_FLAGS}
+set +x
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
@@ -1168,7 +1216,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.30.2", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.39.0", crate_name = "typos-cli", binary = "typos", test_arg = [
     "--help",
 ], install_command = "binstall" }
 script = """

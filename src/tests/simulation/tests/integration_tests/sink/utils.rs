@@ -43,7 +43,10 @@ use risingwave_connector::sink::test_sink::{
 use risingwave_connector::sink::writer::{
     AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, SinkWriter,
 };
-use risingwave_connector::sink::{SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError};
+use risingwave_connector::sink::{
+    SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError,
+    TwoPhaseCommitCoordinator,
+};
 use risingwave_connector::source::test_source::{
     BoxSource, TestSourceRegistryGuard, TestSourceSplit, register_test_source,
 };
@@ -309,12 +312,9 @@ pub struct TestCoordinator {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for TestCoordinator {
-    async fn init(
-        &mut self,
-        subscriber: SinkCommittedEpochSubscriber,
-    ) -> risingwave_connector::sink::Result<Option<u64>> {
-        Ok(None)
+impl SinglePhaseCommitCoordinator for TestCoordinator {
+    async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
+        Ok(())
     }
 
     /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
@@ -327,6 +327,11 @@ impl SinkCommitCoordinator for TestCoordinator {
         metadata: Vec<SinkMetadata>,
         _add_columns: Option<Vec<Field>>,
     ) -> risingwave_connector::sink::Result<()> {
+        if SimulationTestSink::random_err(&self.err_rate) {
+            println!("commit with err");
+            self.store.inc_err();
+            return Err(SinkError::Internal(anyhow::anyhow!("fail to commit")));
+        }
         let file_ids = metadata.into_iter().map(|metadata| {
             let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
             usize::from_le_bytes((serialized.metadata.as_slice()).try_into().unwrap())
@@ -338,6 +343,74 @@ impl SinkCommitCoordinator for TestCoordinator {
                 .flatten(),
         );
         Ok(())
+    }
+}
+
+#[async_trait]
+impl TwoPhaseCommitCoordinator for TestCoordinator {
+    async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
+        Ok(())
+    }
+
+    async fn pre_commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        _add_columns: Option<Vec<Field>>,
+    ) -> risingwave_connector::sink::Result<Vec<u8>> {
+        if SimulationTestSink::random_err(&self.err_rate) {
+            println!("pre-commit with err");
+            self.store.inc_err();
+            return Err(SinkError::Internal(anyhow::anyhow!("fail to pre-commit")));
+        }
+
+        let mut pre_commit_metadata_bytes = Vec::new();
+        for metadata in metadata {
+            let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
+
+            pre_commit_metadata_bytes.push(serialized.metadata);
+        }
+
+        let pre_commit_metadata_bytes: Vec<u8> =
+            serde_json::to_vec(&pre_commit_metadata_bytes).unwrap();
+
+        Ok(pre_commit_metadata_bytes)
+    }
+
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        commit_metadata: Vec<u8>,
+    ) -> risingwave_connector::sink::Result<()> {
+        if commit_metadata.is_empty() {
+            return Ok(());
+        }
+
+        if SimulationTestSink::random_err(&self.err_rate) {
+            println!("commit with err");
+            self.store.inc_err();
+            return Err(SinkError::Internal(anyhow::anyhow!("fail to commit")));
+        }
+
+        let write_results_bytes: Vec<Vec<u8>> = serde_json::from_slice(&commit_metadata).unwrap();
+
+        let file_ids = write_results_bytes
+            .into_iter()
+            .map(|metadata_bytes: Vec<u8>| {
+                usize::from_le_bytes((metadata_bytes.as_slice()).try_into().unwrap())
+            });
+
+        self.store.insert_many(
+            file_ids
+                .into_iter()
+                .map(|file_id| self.staging_store.get(file_id))
+                .flatten(),
+        );
+        Ok(())
+    }
+
+    async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>) {
+        // No-op
     }
 }
 
@@ -416,7 +489,8 @@ pub struct SimulationTestSink {
 
 pub enum TestSinkType {
     SinkWriter,
-    CoordinatedSink,
+    SinglePhaseCoordinatedSink,
+    TwoPhaseCoordinatedSink,
     AsyncTruncate,
 }
 
@@ -425,7 +499,8 @@ macro_rules! for_all_sink_types {
     ($macro:path) => {
         $macro! {
             SinkWriter,
-            CoordinatedSink,
+            SinglePhaseCoordinatedSink,
+            TwoPhaseCoordinatedSink,
             AsyncTruncate,
         }
     };
@@ -438,7 +513,7 @@ impl SimulationTestSink {
         let store = TestSinkStore::new();
 
         let _sink_guard = match test_type {
-            TestSinkType::CoordinatedSink => {
+            TestSinkType::SinglePhaseCoordinatedSink => {
                 let staging_store = StagingDataStore::default();
                 register_build_coordinated_sink(
                     {
@@ -478,12 +553,64 @@ impl SimulationTestSink {
                         let err_rate = err_rate.clone();
                         let store = store.clone();
                         let staging_store = staging_store.clone();
-                        move |_, _, _| {
-                            Box::new(TestCoordinator {
+                        move |_, _| {
+                            let coordinator = TestCoordinator {
                                 err_rate: err_rate.clone(),
                                 store: store.clone(),
                                 staging_store: staging_store.clone(),
-                            })
+                            };
+                            SinkCommitCoordinator::SinglePhase(Box::new(coordinator))
+                        }
+                    },
+                )
+            }
+            TestSinkType::TwoPhaseCoordinatedSink => {
+                let staging_store = StagingDataStore::default();
+                register_build_coordinated_sink(
+                    {
+                        let parallelism_counter = parallelism_counter.clone();
+                        let err_rate = err_rate.clone();
+                        let store = store.clone();
+                        let staging_store = staging_store.clone();
+                        use risingwave_connector::sink::SinkWriterMetrics;
+                        use risingwave_connector::sink::writer::SinkWriterExt;
+                        move |param, writer_param| {
+                            parallelism_counter.fetch_add(1, Relaxed);
+                            let metrics = SinkWriterMetrics::new(&writer_param);
+                            let writer = CoordinatedTestWriter {
+                                store: store.clone(),
+                                parallelism_counter: parallelism_counter.clone(),
+                                err_rate: err_rate.clone(),
+                                staging_store: staging_store.clone(),
+                                staging: Default::default(),
+                            };
+                            async move {
+                                let log_sinker =
+                                    risingwave_connector::sink::boxed::boxed_log_sinker(
+                                        CoordinatedLogSinker::new(
+                                            &writer_param,
+                                            param,
+                                            writer,
+                                            NonZero::new(1).unwrap(),
+                                        )
+                                        .await?,
+                                    );
+                                Ok(log_sinker)
+                            }
+                            .boxed()
+                        }
+                    },
+                    {
+                        let err_rate = err_rate.clone();
+                        let store = store.clone();
+                        let staging_store = staging_store.clone();
+                        move |_, _| {
+                            let coordinator = TestCoordinator {
+                                err_rate: err_rate.clone(),
+                                store: store.clone(),
+                                staging_store: staging_store.clone(),
+                            };
+                            SinkCommitCoordinator::TwoPhase(Box::new(coordinator))
                         }
                     },
                 )

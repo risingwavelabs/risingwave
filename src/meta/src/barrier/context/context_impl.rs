@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag};
+use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
-use risingwave_meta_model::table::RefreshState;
+use risingwave_meta_model::ActorId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::SourceId;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    PbListFinishedSource, PbLoadFinishedSource,
+};
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
-use thiserror_ext::AsReport;
 
 use crate::MetaResult;
 use crate::barrier::command::CommandContext;
@@ -35,6 +39,7 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
 use crate::stream::{SourceChange, SplitState};
 
@@ -85,8 +90,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
+        let job_id = job.job_id();
         job.finish(&self.metadata_manager, &self.source_manager)
-            .await
+            .await?;
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+        Ok(())
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
@@ -116,112 +126,104 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     async fn handle_list_finished_source_ids(
         &self,
-        list_finished_source_ids: Vec<u32>,
+        list_finished: Vec<PbListFinishedSource>,
     ) -> MetaResult<()> {
-        use risingwave_common::catalog::TableId;
+        let mut list_finished_info: HashMap<(TableId, SourceId), HashSet<ActorId>> = HashMap::new();
 
-        tracing::info!(
-            "Handling list finished source IDs: {:?}",
-            list_finished_source_ids
-        );
+        for list_finished in list_finished {
+            let table_id = list_finished.table_id;
+            let associated_source_id = list_finished.associated_source_id;
+            list_finished_info
+                .entry((table_id, associated_source_id))
+                .or_default()
+                .insert(list_finished.reporter_actor_id);
+        }
 
-        use crate::barrier::Command;
-        for associated_source_id in list_finished_source_ids {
-            let res: MetaResult<()> = try {
-                tracing::info!(%associated_source_id, "Scheduling ListFinish command for refreshable batch source");
+        for ((table_id, associated_source_id), actors) in list_finished_info {
+            let allow_yield = self
+                .refresh_manager
+                .mark_list_stage_finished(table_id, &actors)?;
 
-                // For refreshable batch sources, associated_source_id is the table_id
-                let associated_source_id = TableId::new(associated_source_id);
-                // Use a proper lookup to get the table_id associated with the source_id
-                let table_id = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_table_by_associate_source_id(associated_source_id.as_raw_id() as _)
-                    .await
-                    .context("Failed to get table id for source")?
-                    .id
-                    .into();
-
-                // Find the database ID for this table
-                let database_id = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_object_database_id(associated_source_id.as_raw_id() as _)
-                    .await
-                    .context("Failed to get database id for table")?;
-
-                // Create ListFinish command
-                let list_finish_command = Command::ListFinish {
-                    table_id,
-                    associated_source_id,
-                };
-
-                // Schedule the command through the barrier system without waiting
-                self.barrier_scheduler
-                    .run_command_no_wait(database_id, list_finish_command)
-                    .context("Failed to schedule ListFinish command")?;
-
-                tracing::info!(%associated_source_id, %table_id, "ListFinish command scheduled successfully");
-            };
-            if let Err(e) = res {
-                tracing::error!(error = %e.as_report(), %associated_source_id, "Failed to handle source list finished");
+            if !allow_yield {
+                continue;
             }
+
+            // Find the database ID for this table
+            let database_id = self
+                .metadata_manager
+                .catalog_controller
+                .get_object_database_id(associated_source_id)
+                .await
+                .context("Failed to get database id for table")?;
+
+            // Create ListFinish command
+            let list_finish_command = Command::ListFinish {
+                table_id,
+                associated_source_id,
+            };
+
+            // Schedule the command through the barrier system without waiting
+            self.barrier_scheduler
+                .run_command_no_wait(database_id, list_finish_command)
+                .context("Failed to schedule ListFinish command")?;
+
+            tracing::info!(
+                %table_id,
+                %associated_source_id,
+                "ListFinish command scheduled successfully"
+            );
         }
         Ok(())
     }
 
     async fn handle_load_finished_source_ids(
         &self,
-        load_finished_source_ids: Vec<u32>,
+        load_finished: Vec<PbLoadFinishedSource>,
     ) -> MetaResult<()> {
-        use risingwave_common::catalog::TableId;
+        let mut load_finished_info: HashMap<(TableId, SourceId), HashSet<ActorId>> = HashMap::new();
 
-        tracing::info!(
-            "Handling load finished source IDs: {:?}",
-            load_finished_source_ids
-        );
+        for load_finished in load_finished {
+            let table_id = load_finished.table_id;
+            let associated_source_id = load_finished.associated_source_id;
+            load_finished_info
+                .entry((table_id, associated_source_id))
+                .or_default()
+                .insert(load_finished.reporter_actor_id);
+        }
 
-        use crate::barrier::Command;
-        for associated_source_id in load_finished_source_ids {
-            let res: MetaResult<()> = try {
-                tracing::info!(%associated_source_id, "Scheduling LoadFinish command for refreshable batch source");
+        for ((table_id, associated_source_id), actors) in load_finished_info {
+            let allow_yield = self
+                .refresh_manager
+                .mark_load_stage_finished(table_id, &actors)?;
 
-                // For refreshable batch sources, associated_source_id is the table_id
-                let associated_source_id = TableId::new(associated_source_id);
-                // Use a proper lookup to get the table_id associated with the source_id
-                let table_id = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_table_by_associate_source_id(associated_source_id.as_raw_id() as _)
-                    .await
-                    .context("Failed to get table id for source")?
-                    .id
-                    .into();
-
-                // Find the database ID for this table
-                let database_id = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_object_database_id(associated_source_id.as_raw_id() as _)
-                    .await
-                    .context("Failed to get database id for table")?;
-
-                // Create LoadFinish command
-                let load_finish_command = Command::LoadFinish {
-                    table_id,
-                    associated_source_id,
-                };
-
-                // Schedule the command through the barrier system without waiting
-                self.barrier_scheduler
-                    .run_command_no_wait(database_id, load_finish_command)
-                    .context("Failed to schedule LoadFinish command")?;
-
-                tracing::info!(%associated_source_id, %associated_source_id, "LoadFinish command scheduled successfully");
-            };
-            if let Err(e) = res {
-                tracing::error!(error = %e.as_report(), %associated_source_id, "Failed to handle source load finished");
+            if !allow_yield {
+                continue;
             }
+
+            // Find the database ID for this table
+            let database_id = self
+                .metadata_manager
+                .catalog_controller
+                .get_object_database_id(associated_source_id)
+                .await
+                .context("Failed to get database id for table")?;
+
+            // Create LoadFinish command
+            let load_finish_command = Command::LoadFinish {
+                table_id,
+                associated_source_id,
+            };
+
+            // Schedule the command through the barrier system without waiting
+            self.barrier_scheduler
+                .run_command_no_wait(database_id, load_finish_command)
+                .context("Failed to schedule LoadFinish command")?;
+
+            tracing::info!(
+                %table_id,
+                %associated_source_id,
+                "LoadFinish command scheduled successfully"
+            );
         }
 
         Ok(())
@@ -231,29 +233,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         refresh_finished_table_job_ids: Vec<JobId>,
     ) -> MetaResult<()> {
-        use risingwave_meta_model::table::RefreshState;
-
-        tracing::info!(
-            "Handling refresh finished table IDs: {:?}",
-            refresh_finished_table_job_ids
-        );
-
         for job_id in refresh_finished_table_job_ids {
-            let res: MetaResult<()> = try {
-                tracing::info!(%job_id, "Processing refresh finished for materialized view");
+            let table_id = job_id.as_mv_table_id();
 
-                // Update the table's refresh state back to Idle (refresh complete)
-                self.metadata_manager
-                    .catalog_controller
-                    .set_table_refresh_state(job_id.as_mv_table_id(), RefreshState::Idle)
-                    .await
-                    .context("Failed to set table refresh state to Idle")?;
-
-                tracing::info!(%job_id, "Table refresh completed, state updated to Idle");
-            };
-            if let Err(e) = res {
-                tracing::error!(error = %e.as_report(), %job_id, "Failed to handle refresh finished table");
-            }
+            self.refresh_manager.mark_refresh_complete(table_id).await?;
         }
 
         Ok(())
@@ -296,9 +279,16 @@ impl CommandContext {
             }
 
             Command::DropStreamingJobs {
+                streaming_job_ids,
                 unregistered_state_table_ids,
                 ..
             } => {
+                for job_id in streaming_job_ids {
+                    barrier_manager_context
+                        .refresh_manager
+                        .remove_progress_tracker(job_id.as_mv_table_id(), "drop_streaming_jobs");
+                }
+
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
@@ -314,7 +304,10 @@ impl CommandContext {
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(SourceChange::UpdateSourceProps {
-                        source_id_map_new_props: obj_id_map_props.clone(),
+                        source_id_map_new_props: obj_id_map_props
+                            .iter()
+                            .map(|(source_id, props)| (source_id.as_source_id(), props.clone()))
+                            .collect(),
                     })
                     .await;
             }
@@ -452,7 +445,7 @@ impl CommandContext {
                             .metadata_manager
                             .catalog_controller
                             .post_collect_job_fragments(
-                                sink.tmp_sink_id,
+                                sink.tmp_sink_id.as_job_id(),
                                 &Default::default(), // upstream_fragment_downstreams is already inserted in the job of upstream table
                                 None, // no replace plan
                                 None, // no init split assignment
@@ -488,24 +481,7 @@ impl CommandContext {
             Command::DropSubscription { .. } => {}
             Command::MergeSnapshotBackfillStreamingJobs(_) => {}
             Command::StartFragmentBackfill { .. } => {}
-            Command::Refresh { table_id, .. } => {
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .set_table_refresh_state(*table_id, RefreshState::Refreshing)
-                    .await?;
-            }
-            Command::ListFinish { .. } => {
-                // List stage completed, table remains in Refreshing state
-                // The next stage will be load completion
-            }
-            Command::LoadFinish { table_id, .. } => {
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .set_table_refresh_state(*table_id, RefreshState::Finishing)
-                    .await?;
-            }
+            Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
         }
 
         Ok(())

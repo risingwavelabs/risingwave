@@ -24,7 +24,7 @@ use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_meta_model::ObjectId;
+use risingwave_meta_model::SinkId;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
@@ -35,9 +35,8 @@ use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentId, StreamActor, StreamContext};
+use crate::model::{ActorId, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::assign_cdc_table_snapshot_splits_pairs;
 use crate::stream::{SourceChange, StreamFragmentGraph};
@@ -55,8 +54,7 @@ impl GlobalBarrierWorkerContextImpl {
             .clean_dirty_creating_jobs(database_id)
             .await?;
         self.metadata_manager
-            .catalog_controller
-            .reset_refreshing_tables(database_id)
+            .reset_all_refresh_jobs_to_idle()
             .await?;
 
         // unregister cleaned sources.
@@ -65,6 +63,71 @@ impl GlobalBarrierWorkerContextImpl {
                 dropped_source_ids: dirty_associated_source_ids,
             })
             .await;
+
+        Ok(())
+    }
+
+    async fn reset_sink_coordinator(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
+        if let Some(database_id) = database_id {
+            let sink_ids = self
+                .metadata_manager
+                .catalog_controller
+                .list_sink_ids(Some(database_id))
+                .await?;
+            self.sink_manager.stop_sink_coordinator(sink_ids).await;
+        } else {
+            self.sink_manager.reset().await;
+        }
+        Ok(())
+    }
+
+    async fn abort_dirty_pending_sink_state(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<()> {
+        let pending_sinks: HashSet<SinkId> = self
+            .metadata_manager
+            .catalog_controller
+            .list_all_pending_sinks(database_id)
+            .await?;
+
+        if pending_sinks.is_empty() {
+            return Ok(());
+        }
+
+        let sink_with_state_tables: HashMap<SinkId, Vec<TableId>> = self
+            .metadata_manager
+            .catalog_controller
+            .fetch_sink_with_state_table_ids(pending_sinks)
+            .await?;
+
+        let mut sink_committed_epoch: HashMap<SinkId, u64> = HashMap::new();
+
+        for (sink_id, table_ids) in sink_with_state_tables {
+            let Some(table_id) = table_ids.first() else {
+                return Err(anyhow!("no state table id in sink: {}", sink_id).into());
+            };
+
+            self.hummock_manager
+                .on_current_version(|version| -> MetaResult<()> {
+                    if let Some(committed_epoch) = version.table_committed_epoch(*table_id) {
+                        assert!(
+                            sink_committed_epoch
+                                .insert(sink_id, committed_epoch)
+                                .is_none()
+                        );
+                        Ok(())
+                    } else {
+                        Err(anyhow!("cannot get committed epoch on table {}.", table_id).into())
+                    }
+                })
+                .await?;
+        }
+
+        self.metadata_manager
+            .catalog_controller
+            .abort_pending_sink_epochs(sink_committed_epoch)
+            .await?;
 
         Ok(())
     }
@@ -96,7 +159,7 @@ impl GlobalBarrierWorkerContextImpl {
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_graph_info(
+    async fn resolve_database_info(
         &self,
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
@@ -269,15 +332,15 @@ impl GlobalBarrierWorkerContextImpl {
         let mut cdc_table_backfill_actors = HashMap::new();
 
         for (job_id, fragments) in jobs {
-            for fragment_info in fragments.values() {
-                if fragment_info
+            for fragment_infos in fragments.values() {
+                if fragment_infos
                     .fragment_type_mask
                     .contains(FragmentTypeFlag::StreamCdcScan)
                 {
                     cdc_table_backfill_actors
                         .entry(*job_id)
                         .or_insert_with(HashSet::new)
-                        .extend(fragment_info.actors.keys().cloned());
+                        .extend(fragment_infos.actors.keys().cloned());
                 }
             }
         }
@@ -315,7 +378,7 @@ impl GlobalBarrierWorkerContextImpl {
             .await?;
         for table in tables {
             assert_eq!(table.table_type(), PbTableType::Table);
-            let fragment_infos = jobs.get_mut(&table.id.into()).unwrap();
+            let fragment_infos = jobs.get_mut(&table.id.as_job_id()).unwrap();
             let mut target_fragment_id = None;
             for fragment in fragment_infos.values() {
                 let mut is_target_fragment = false;
@@ -361,6 +424,13 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
+                    self.reset_sink_coordinator(None)
+                        .await
+                        .context("reset sink coordinator")?;
+                    self.abort_dirty_pending_sink_state(None)
+                        .await
+                        .context("abort dirty pending sink state")?;
+
                     // Background job progress needs to be recovered.
                     tracing::info!("recovering background job progress");
                     let background_jobs = self
@@ -395,7 +465,7 @@ impl GlobalBarrierWorkerContextImpl {
                         for job_id in background_streaming_jobs {
                             let scan_types = self
                                 .metadata_manager
-                                .get_job_backfill_scan_types(job_id.as_raw_id() as ObjectId)
+                                .get_job_backfill_scan_types(job_id)
                                 .await?;
 
                             if scan_types
@@ -421,7 +491,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
-                        self.resolve_graph_info(None, &active_streaming_nodes)
+                        self.resolve_database_info(None, &active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
@@ -441,7 +511,7 @@ impl GlobalBarrierWorkerContextImpl {
                             .complete_dropped_tables(dropped_table_ids)
                             .await;
                         info = self
-                            .resolve_graph_info(None, &active_streaming_nodes)
+                            .resolve_database_info(None, &active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
                                 warn!(error = %err.as_report(), "resolve actor info failed");
@@ -585,6 +655,13 @@ impl GlobalBarrierWorkerContextImpl {
             .await
             .context("clean dirty streaming jobs")?;
 
+        self.reset_sink_coordinator(Some(database_id))
+            .await
+            .context("reset sink coordinator")?;
+        self.abort_dirty_pending_sink_state(Some(database_id))
+            .await
+            .context("abort dirty pending sink state")?;
+
         // Background job progress needs to be recovered.
         tracing::info!(
             ?database_id,
@@ -609,16 +686,15 @@ impl GlobalBarrierWorkerContextImpl {
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        let all_info = self
-            .resolve_graph_info(Some(database_id), &active_streaming_nodes)
+        let mut all_info = self
+            .resolve_database_info(Some(database_id), &active_streaming_nodes)
             .await
             .inspect_err(|err| {
                 warn!(error = %err.as_report(), "resolve actor info failed");
             })?;
 
         let mut database_info = all_info
-            .get(&database_id)
-            .cloned()
+            .remove(&database_id)
             .map_or_else(HashMap::new, |table_map| {
                 HashMap::from([(database_id, table_map)])
             });
@@ -700,6 +776,10 @@ impl GlobalBarrierWorkerContextImpl {
                     .next_generation(cdc_table_ids.into_iter()),
             )
         };
+
+        self.refresh_manager
+            .remove_trackers_by_database(database_id);
+
         Ok(Some(DatabaseRuntimeInfoSnapshot {
             job_infos: info,
             state_table_committed_epochs,
@@ -731,26 +811,25 @@ impl GlobalBarrierWorkerContextImpl {
         let mut stream_actors = HashMap::new();
 
         for (job_id, streaming_info) in all_info.values().flatten() {
-            let StreamingJobExtraInfo {
-                timezone,
-                job_definition,
-            } = job_extra_info
+            let extra_info = job_extra_info
                 .get(job_id)
                 .cloned()
                 .ok_or_else(|| anyhow!("no streaming job info for {}", job_id))?;
+            let expr_context = extra_info.stream_context().to_expr_context();
+            let job_definition = extra_info.job_definition;
+            let config_override = extra_info.config_override;
 
-            let expr_context = Some(StreamContext { timezone }.to_expr_context());
-
-            for (fragment_id, fragment_info) in streaming_info {
-                for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_info.actors {
+            for (fragment_id, fragment_infos) in streaming_info {
+                for (actor_id, InflightActorInfo { vnode_bitmap, .. }) in &fragment_infos.actors {
                     stream_actors.insert(
                         *actor_id,
                         StreamActor {
                             actor_id: *actor_id as _,
-                            fragment_id: *fragment_id as _,
+                            fragment_id: *fragment_id,
                             vnode_bitmap: vnode_bitmap.clone(),
                             mview_definition: job_definition.clone(),
-                            expr_context: expr_context.clone(),
+                            expr_context: Some(expr_context.clone()),
+                            config_override: config_override.clone(),
                         },
                     );
                 }

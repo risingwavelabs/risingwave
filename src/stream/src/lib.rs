@@ -100,10 +100,10 @@ mod consistency {
             debug_assert!(!crate::consistency::enable_strict_consistency());
 
             use std::sync::LazyLock;
-            use risingwave_common::log::LogSuppresser;
+            use risingwave_common::log::LogSuppressor;
 
-            static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
-            if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+            static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
+            if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                 tracing::error!(suppressed_count, $($arg)*);
             }
         };

@@ -43,7 +43,8 @@ use super::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
-use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, Sink, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";

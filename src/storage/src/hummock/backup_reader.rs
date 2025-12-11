@@ -195,7 +195,7 @@ impl BackupReader {
             .snapshot_metadata
             .iter()
             .find(|v| {
-                if let Some(m) = v.state_table_info.get(&table_id.as_raw_id()) {
+                if let Some(m) = v.state_table_info.get(&table_id) {
                     return epoch == m.committed_epoch;
                 }
                 false

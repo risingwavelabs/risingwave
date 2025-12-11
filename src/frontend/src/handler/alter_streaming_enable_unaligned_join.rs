@@ -31,13 +31,13 @@ pub async fn handle_alter_streaming_enable_unaligned_join(
         let job_id = {
             let mut binder = Binder::new_for_system(&session);
             Binder::validate_cross_db_reference(&session.database(), &name)?;
-            let not_found_err = CatalogError::NotFound("stream job", name.to_string());
+            let not_found_err = CatalogError::not_found("stream job", name.to_string());
 
             if let Ok(relation) = binder.bind_catalog_relation_by_object_name(&name, true) {
                 match relation {
                     Relation::Source(s) => {
                         if s.is_shared() {
-                            s.catalog.id
+                            s.catalog.id.as_share_source_job_id()
                         } else {
                             bail!(ErrorCode::NotSupported(
                                 "source has no unaligned_join".to_owned(),
@@ -45,7 +45,7 @@ pub async fn handle_alter_streaming_enable_unaligned_join(
                             ));
                         }
                     }
-                    Relation::BaseTable(t) => t.table_catalog.id.as_raw_id(),
+                    Relation::BaseTable(t) => t.table_catalog.id.as_job_id(),
                     Relation::SystemTable(_t) => {
                         bail!(ErrorCode::NotSupported(
                             "system table has no unaligned_join".to_owned(),
@@ -64,7 +64,7 @@ pub async fn handle_alter_streaming_enable_unaligned_join(
                     }
                 }
             } else if let Ok(sink) = binder.bind_sink_by_name(name.clone()) {
-                sink.sink_catalog.id.sink_id
+                sink.sink_catalog.id.as_job_id()
             } else {
                 return Err(not_found_err.into());
             }

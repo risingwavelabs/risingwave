@@ -307,7 +307,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let mut curr_epoch = test_epoch(11);
     let mut splits = HashMap::new();
     splits.insert(
-        actor_id,
+        actor_id.into(),
         vec![SplitImpl::MysqlCdc(DebeziumCdcSplit::new(0, None, None))],
     );
     let init_barrier =
@@ -495,7 +495,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         table_pk_order_types,
         table_pk_indices.clone(),
     );
-    let actor_id = 0x1a;
+    let actor_id = 0x1a.into();
 
     // create state table
     let state_schema = Schema::new(vec![

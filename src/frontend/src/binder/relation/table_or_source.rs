@@ -187,11 +187,7 @@ impl Binder {
                             as_of,
                         )?
                     } else {
-                        return Err(CatalogError::NotFound(
-                            "table or source",
-                            table_name.to_owned(),
-                        )
-                        .into());
+                        return Err(CatalogError::not_found("table or source", table_name).into());
                     }
                 }
                 None => (|| {
@@ -266,7 +262,7 @@ impl Binder {
                         }
                     }
 
-                    Err(CatalogError::NotFound("table or source", table_name.to_owned()).into())
+                    Err(CatalogError::not_found("table or source", table_name).into())
                 })()?,
             }
         };
@@ -350,7 +346,7 @@ impl Binder {
             ),
             table_catalog.database_id,
         )?;
-        self.included_relations.insert(table_id);
+        self.included_relations.insert(table_id.as_object_id());
 
         let table_indexes = self.resolve_table_indexes(db_name, schema_name, table_id)?;
 
@@ -377,12 +373,13 @@ impl Binder {
                     source_catalog.owner,
                     AclMode::Select,
                     source_catalog.name.clone(),
-                    PbObject::SourceId(source_catalog.id),
+                    source_catalog.id,
                 ),
                 source_catalog.database_id,
             )?;
         }
-        self.included_relations.insert(source_catalog.id.into());
+        self.included_relations
+            .insert(source_catalog.id.as_object_id());
         Ok((
             Relation::Source(Box::new(BoundSource {
                 catalog: source_catalog.clone(),
@@ -406,7 +403,7 @@ impl Binder {
                     view_catalog.owner,
                     AclMode::Select,
                     view_catalog.name.clone(),
-                    PbObject::ViewId(view_catalog.id),
+                    view_catalog.id,
                 ),
                 view_catalog.database_id,
             )?;
@@ -447,7 +444,8 @@ impl Binder {
             None => {
                 let share_id = self.next_share_id();
                 self.shared_views.insert(view_catalog.id, share_id);
-                self.included_relations.insert(view_catalog.id.into());
+                self.included_relations
+                    .insert(view_catalog.id.as_object_id());
                 share_id
             }
         };
@@ -469,11 +467,11 @@ impl Binder {
     ) -> Result<Vec<Arc<IndexCatalog>>> {
         let schema = self.catalog.get_schema_by_name(db_name, schema_name)?;
         assert!(
-            schema.get_table_by_id(&table_id).is_some() || table_id.is_placeholder(),
+            schema.get_table_by_id(table_id).is_some() || table_id.is_placeholder(),
             "table {table_id} not found in {db_name}.{schema_name}"
         );
 
-        Ok(schema.get_created_indexes_by_table_id(&table_id))
+        Ok(schema.get_created_indexes_by_table_id(table_id))
     }
 
     pub(crate) fn bind_table(

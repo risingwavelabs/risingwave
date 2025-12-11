@@ -45,6 +45,18 @@ explain(verbose) select * from non_cover_index_query_view;
 <slt:ignore>      └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: query_vector, lookup_output: [("text", Varchar), ("items.id", Int32)], include_distance: true, as_of: ProcessTimeWithInterval(("3", Second)) }
 <slt:ignore>        └─BatchValues { rows: [[OpenaiEmbedding('{"api_base": "http://127.0.0.1:8088/v1", "model": "model"}':Jsonb, 'query':Varchar)::Vector(3)]] }
 
+statement ok
+create view vector_index_lookup_query_view as with input as (select '[3,2,1]'::vector(3) as embedding) select array(select row(id, text) from items FOR SYSTEM_TIME AS OF now() - '3' second order by input.embedding <-> items.embedding limit 2) as related_info from input;
+
+# ensure that vector index is used
+query T
+explain(verbose) select * from vector_index_lookup_query_view;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchProject { exprs: [vector_info] }
+  └─BatchVectorSearch { top_n: 2, distance_type: L2Sqr, index_name: "i", vector: '[3,2,1]':Vector(3), lookup_output: [("items.id", Int32), ("text", Varchar)], include_distance: false, as_of: ProcessTimeWithInterval(("3", Second)) }
+    └─BatchValues { rows: [['[3,2,1]':Vector(3)]] }
+
 sleep 5s
 
 statement ok
@@ -72,6 +84,11 @@ select * from non_cover_index_query_view order by distance;
 2 second extra2 35
 3 third extra3 116
 
+query T
+select * from vector_index_lookup_query_view;
+----
+{"(2,second)","(3,third)"}
+
 sleep 5s
 
 query T
@@ -85,6 +102,14 @@ select * from non_cover_index_query_view order by distance;
 ----
 1 first extra1 8
 2 second extra2 35
+
+query T
+select * from vector_index_lookup_query_view;
+----
+{"(1,first)","(2,second)"}
+
+statement ok
+drop view vector_index_lookup_query_view;
 
 statement ok
 drop view non_cover_index_query_view;

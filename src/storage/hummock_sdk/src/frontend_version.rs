@@ -72,7 +72,7 @@ impl FrontendHummockVersion {
                 .iter()
                 .map(|(table_id, change_log)| {
                     (
-                        table_id.as_raw_id(),
+                        *table_id,
                         PbTableChangeLog {
                             change_logs: change_log
                                 .iter()
@@ -92,7 +92,7 @@ impl FrontendHummockVersion {
                     )
                 })
                 .collect(),
-            state_table_info: self.state_table_info.to_protobuf(),
+            state_table_info: self.state_table_info.info().clone(),
             vector_indexes: Default::default(),
         }
     }
@@ -106,7 +106,7 @@ impl FrontendHummockVersion {
                 .into_iter()
                 .map(|(table_id, change_log)| {
                     (
-                        TableId::new(table_id),
+                        table_id,
                         TableChangeLogCommon::new(change_log.change_logs.into_iter().map(
                             |change_log| {
                                 let (non_checkpoint_epochs, checkpoint_epoch) =
@@ -193,17 +193,13 @@ impl FrontendHummockVersionDelta {
             max_committed_epoch: INVALID_EPOCH,
             trivial_move: false,
             new_table_watermarks: Default::default(),
-            removed_table_ids: self
-                .removed_table_id
-                .iter()
-                .map(|table_id| table_id.as_raw_id())
-                .collect(),
+            removed_table_ids: self.removed_table_id.iter().copied().collect(),
             change_log_delta: self
                 .change_log_delta
                 .iter()
                 .map(|(table_id, delta)| {
                     (
-                        table_id.as_raw_id(),
+                        *table_id,
                         PbChangeLogDelta {
                             new_log: Some(PbEpochNewChangeLog {
                                 // Here we need to determine if value is null but don't care what the value is, so we fill him in using `PbSstableInfo::default()`
@@ -225,7 +221,7 @@ impl FrontendHummockVersionDelta {
             state_table_info_delta: self
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.as_raw_id(), *delta))
+                .map(|(table_id, delta)| (*table_id, *delta))
                 .collect(),
             vector_index_delta: Default::default(),
         }
@@ -235,22 +231,14 @@ impl FrontendHummockVersionDelta {
         Self {
             prev_id: HummockVersionId::new(delta.prev_id),
             id: HummockVersionId::new(delta.id),
-            removed_table_id: delta
-                .removed_table_ids
-                .iter()
-                .map(|table_id| TableId::new(*table_id))
-                .collect(),
-            state_table_info_delta: delta
-                .state_table_info_delta
-                .into_iter()
-                .map(|(table_id, delta)| (TableId::new(table_id), delta))
-                .collect(),
+            removed_table_id: delta.removed_table_ids.into_iter().collect(),
+            state_table_info_delta: delta.state_table_info_delta.clone(),
             change_log_delta: delta
                 .change_log_delta
                 .iter()
                 .map(|(table_id, change_log_delta)| {
                     (
-                        TableId::new(*table_id),
+                        *table_id,
                         ChangeLogDeltaCommon {
                             truncate_epoch: change_log_delta.truncate_epoch,
                             new_log: change_log_delta

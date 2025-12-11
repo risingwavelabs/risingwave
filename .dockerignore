@@ -28,6 +28,7 @@ target/
 src/proto/
 src/prost/src/*.rs
 !src/prost/src/lib.rs
+!src/prost/src/id.rs
 !src/prost/src/imp.rs
 **/file_descriptor_set.bin
 # runtime log

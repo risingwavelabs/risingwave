@@ -12,6 +12,7 @@ members = [
     "src/common/estimate_size",
     "src/common/fields-derive",
     "src/common/heap_profiling",
+    "src/common/log",
     "src/common/metrics",
     "src/common/telemetry_event",
     "src/compute",
@@ -149,12 +150,13 @@ axum = "=0.7.4" # TODO: 0.7.5+ does not work with current toolchain
 axum-extra = "0.9"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
-criterion = { version = "0.7", features = ["async_futures"] }
+criterion = { version = "0.8", features = ["async_futures"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
 deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
-foyer = { version = "0.20.0", features = ["serde", "tracing", "nightly"] }
+# TODO(MrCroxx): Switch to a release version.
+foyer = { version = "0.21.0", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.9"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.16", features = [
@@ -165,27 +167,33 @@ hashbrown = { version = "0.16", features = [
 hashbrown0_14 = { package = "hashbrown", version = "0.14", features = [
     "nightly",
 ] }
+hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
+    "nightly",
+] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0b5d05b20e8a5277a47585141082a7a638238ae1" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
 
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
-jsonbb = { version = "0.2.2", features = ["float_roundtrip"] }
+jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
 madsim = "0.2.34"
 mixtrics = { version = "0.2", features = ["prometheus"] }
-mysql_async = { version = "0.36", features = ["native-tls-tls", "rust_decimal"] }
+mysql_async = { version = "0.36", features = [
+    "native-tls-tls",
+    "rust_decimal",
+] }
 opendal = "0.53"
 opentelemetry = "0.29"
 opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
@@ -276,8 +284,8 @@ sqlx = { version = "0.8.2", default-features = false, features = [
     "time",
     "uuid",
 ] }
-thiserror = { git = "https://github.com/BugenZhao/thiserror.git", tag = "bz-provide-3" }
-thiserror-ext = { version = "0.3", features = ["backtrace"] }
+thiserror = "2"
+thiserror-ext = { version = "0.3.1-alpha.2", features = ["provide"] }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",
@@ -288,6 +296,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
     "fs",
 ] }
 tokio-util = "0.7"
+toml = "0.9"
 tonic = { package = "madsim-tonic", version = "0.5.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.5" }
 tracing-opentelemetry = "0.30"
@@ -420,3 +429,8 @@ bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.14.0-jso
 # why this patch work with zstd-sys < 2.0.15?
 # in the last release v4.8.0+2.3.0, the zstd-sys requirement is 2.0.6 < 2.0.13, and the release does not contain zstd related changes
 rdkafka-sys = { git = "https://github.com/risingwavelabs/rust-rdkafka", package = "rdkafka-sys", branch = "downgrade-zstd" }
+
+prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
+prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
+prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }
+prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "4a442caf7c0a43feb4aea64bde6aea4488d9917f" }

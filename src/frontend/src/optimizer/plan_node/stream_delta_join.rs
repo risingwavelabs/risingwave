@@ -188,8 +188,8 @@ impl TryToStreamPb for StreamDeltaJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table_id: left_table_catalog.id.as_raw_id(),
-            right_table_id: right_table_catalog.id.as_raw_id(),
+            left_table_id: left_table_catalog.id,
+            right_table_id: right_table_catalog.id,
             left_info: Some(ArrangementInfo {
                 // TODO: remove it
                 arrange_key_orders: left_table_catalog.arrange_key_orders_protobuf(),

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_pb::ddl_service::alter_set_schema_request::Object;
 use risingwave_sqlparser::ast::{ObjectName, OperateFunctionArg};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -61,7 +60,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     table.name(),
                 )?;
-                Object::TableId(table.id.as_raw_id())
+                table.id.into()
             }
             StatementType::ALTER_VIEW => {
                 let (view, old_schema_name) =
@@ -75,7 +74,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     view.name(),
                 )?;
-                Object::ViewId(view.id)
+                view.id.into()
             }
             StatementType::ALTER_SOURCE => {
                 let (source, old_schema_name) =
@@ -89,7 +88,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &source.name,
                 )?;
-                Object::SourceId(source.id)
+                source.id.into()
             }
             StatementType::ALTER_SINK => {
                 let (sink, old_schema_name) = catalog_reader.get_created_sink_by_name(
@@ -106,7 +105,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &sink.name,
                 )?;
-                Object::SinkId(sink.id.sink_id)
+                sink.id.into()
             }
             StatementType::ALTER_SUBSCRIPTION => {
                 let (subscription, old_schema_name) = catalog_reader.get_subscription_by_name(
@@ -123,7 +122,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &subscription.name,
                 )?;
-                Object::SubscriptionId(subscription.id.subscription_id)
+                subscription.id.into()
             }
             StatementType::ALTER_CONNECTION => {
                 let (connection, old_schema_name) =
@@ -137,7 +136,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &connection.name,
                 )?;
-                Object::ConnectionId(connection.id)
+                connection.id.into()
             }
             StatementType::ALTER_FUNCTION => {
                 let (function, old_schema_name) = if let Some(args) = func_args {
@@ -175,7 +174,7 @@ pub async fn handle_alter_set_schema(
                     &function.name,
                     &function.arg_types,
                 )?;
-                Object::FunctionId(function.id.function_id())
+                function.id.into()
             }
             _ => unreachable!(),
         }

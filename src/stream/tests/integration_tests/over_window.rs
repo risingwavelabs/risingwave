@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::session_config::OverWindowCachePolicy;
+use risingwave_common::config::streaming::OverWindowCachePolicy;
 use risingwave_expr::aggregate::{AggArgs, PbAggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,

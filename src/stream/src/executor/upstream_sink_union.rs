@@ -514,8 +514,13 @@ impl UpstreamSinkBarrierManager {
             .try_insert(upstream_fragment_id, barrier_tx)
             .expect("non-duplicate");
 
-        let upstreams =
-            MergeExecutor::new_select_receiver(inputs, &ctx.executor_stats, &ctx.actor_context);
+        let upstreams = MergeExecutor::new_merge_upstream(
+            inputs,
+            &ctx.executor_stats,
+            &ctx.actor_context,
+            ctx.chunk_size,
+            schema,
+        );
 
         Ok(MergeExecutor::new(
             ctx.actor_context.clone(),
@@ -525,8 +530,6 @@ impl UpstreamSinkBarrierManager {
             ctx.local_barrier_manager.clone(),
             ctx.executor_stats.clone(),
             barrier_rx,
-            ctx.chunk_size,
-            schema,
         ))
     }
 }
@@ -558,7 +561,7 @@ mod tests {
 
         let b1 = Barrier::with_prev_epoch_for_test(2, 1);
 
-        test_env.inject_barrier(&b1, [actor_id]);
+        test_env.inject_barrier(&b1, [actor_id.into()]);
         test_env.flush_all_events().await;
 
         let schema = Schema {
@@ -583,7 +586,7 @@ mod tests {
         let test_expr = build_from_pretty("$1:int8");
 
         let mut input = SinkHandlerInput::new(
-            1919, // from MergeExecutor::for_test()
+            1919.into(), // from MergeExecutor::for_test()
             Box::new(merge),
             vec![test_expr],
         )
@@ -632,7 +635,12 @@ mod tests {
             10,
             Some(barrier_rx),
         );
-        let input = SinkHandlerInput::new(actor_id, Box::new(merge), vec![]).boxed_input();
+        let input = SinkHandlerInput::new(
+            FragmentId::new(actor_id.as_raw_id()),
+            Box::new(merge),
+            vec![],
+        )
+        .boxed_input();
         (input, tx, barrier_tx)
     }
 
@@ -645,7 +653,7 @@ mod tests {
     async fn test_fixed_upstreams() {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
-        let actor_id = 2;
+        let actor_id = 2.into();
 
         let b1 = Barrier::with_prev_epoch_for_test(2, 1);
 
@@ -708,10 +716,10 @@ mod tests {
     async fn test_dynamic_upstreams() {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
-        let actor_id = 2;
-        let fragment_id = 0; // from ActorContext::for_test
-        let upstream_fragment_id = 11;
-        let upstream_actor_id = 101;
+        let actor_id = 2.into();
+        let fragment_id = 0.into(); // from ActorContext::for_test
+        let upstream_fragment_id = 11.into();
+        let upstream_actor_id = 101.into();
 
         let upstream_actor = helper_make_local_actor(upstream_actor_id);
 

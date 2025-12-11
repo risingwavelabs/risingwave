@@ -24,7 +24,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ConnectionId, ObjectId, Schema, UserId};
+use risingwave_common::catalog::{ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, Schema, UserId};
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -61,7 +61,11 @@ use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
+use crate::handler::util::{
+    LongRunningNotificationAction, check_connector_match_connection_type,
+    ensure_connection_type_allowed, execute_with_long_running_notification,
+};
+use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
     IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
     StreamProject, generic,
@@ -70,7 +74,7 @@ use crate::optimizer::{OptimizerContext, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
-use crate::stream_fragmenter::{GraphJobType, build_graph};
+use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
@@ -415,19 +419,14 @@ pub async fn gen_sink_plan(
     let dependencies =
         RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
             .into_iter()
-            .map(|id| id.as_raw_id() as ObjectId)
-            .chain(
-                dependent_udfs
-                    .into_iter()
-                    .map(|id| id.function_id() as ObjectId),
-            )
+            .chain(dependent_udfs.iter().copied().map_into())
             .collect();
 
     let sink_catalog = sink_desc.into_catalog(
         sink_schema_id,
         sink_database_id,
         UserId::new(session.user_id()),
-        connector_conn_ref.map(ConnectionId::from),
+        connector_conn_ref,
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -577,7 +576,16 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
+    if stmt.sink_name.base_name().starts_with(ICEBERG_SINK_PREFIX) {
+        return Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+            "Sink name cannot start with reserved prefix '{}'",
+            ICEBERG_SINK_PREFIX
+        ))));
+    }
+
     let (mut sink, graph, target_table_catalog, dependencies) = {
+        let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
+
         let SinkPlanContext {
             query,
             sink_plan: plan,
@@ -594,7 +602,11 @@ pub async fn handle_create_sink(
             );
         }
 
-        let graph = build_graph(plan, Some(GraphJobType::Sink))?;
+        let backfill_order =
+            plan_backfill_order(session.as_ref(), backfill_order_strategy, plan.clone())?;
+
+        let graph =
+            build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
         (sink, graph, target_table_catalog, dependencies)
     };
@@ -615,9 +627,13 @@ pub async fn handle_create_sink(
             ));
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_sink(sink.to_proto(), graph, dependencies, if_not_exists)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.create_sink(sink.to_proto(), graph, dependencies, if_not_exists),
+        &session,
+        "CREATE SINK",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
@@ -635,7 +651,7 @@ pub fn fetch_incoming_sinks(
     for sink_id in incoming_sinks {
         sinks.push(
             schema
-                .get_sink_by_id(sink_id)
+                .get_sink_by_id(*sink_id)
                 .expect("should exist")
                 .clone(),
         );
@@ -650,7 +666,7 @@ fn derive_sink_to_table_expr(
 ) -> Result<ExprImpl> {
     let input_type = &sink_schema.fields()[idx].data_type;
 
-    if target_type != input_type {
+    if !target_type.equals_datatype(input_type) {
         bail!(
             "column type mismatch: {:?} vs {:?}, column name: {:?}",
             target_type,
@@ -748,7 +764,8 @@ fn bind_sink_format_desc(
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
         E::Parquet => SinkEncode::Parquet,
-        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
+        E::Bytes => SinkEncode::Bytes,
+        e @ (E::Native | E::Csv | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -814,7 +831,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                 ),
                 KafkaSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
+                    Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf, Encode::Bytes],
                     Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Debezium => vec![Encode::Json],
                 ),

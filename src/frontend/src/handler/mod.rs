@@ -54,6 +54,7 @@ mod alter_sink_props;
 mod alter_source_column;
 mod alter_source_props;
 mod alter_source_with_sr;
+mod alter_streaming_config;
 mod alter_streaming_enable_unaligned_join;
 mod alter_streaming_rate_limit;
 mod alter_swap_rename;
@@ -63,6 +64,7 @@ pub mod alter_table_drop_connector;
 pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
+mod alter_utils;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
@@ -488,7 +490,7 @@ pub async fn handle(
             DescribeKind::Plain => describe::handle_describe(handler_args, name),
         },
         Statement::DescribeFragment { fragment_id } => {
-            describe::handle_describe_fragment(handler_args, fragment_id).await
+            describe::handle_describe_fragment(handler_args, fragment_id.into()).await
         }
         Statement::Discard(..) => discard::handle_discard(handler_args),
         Statement::ShowObjects {
@@ -866,6 +868,24 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_TABLE,
+                )
+                .await
+            }
+            AlterTableOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_TABLE,
+                )
+                .await
+            }
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
@@ -912,6 +932,24 @@ pub async fn handle(
                     parallelism,
                     StatementType::ALTER_INDEX,
                     deferred,
+                )
+                .await
+            }
+            AlterIndexOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_INDEX,
+                )
+                .await
+            }
+            AlterIndexOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_INDEX,
                 )
                 .await
             }
@@ -1030,6 +1068,30 @@ pub async fn handle(
                     }
                     alter_mv::handle_alter_mv(handler_args, name, query).await
                 }
+                AlterViewOperation::SetConfig { entries } => {
+                    if !materialized {
+                        bail!("SET CONFIG is only supported for materialized views");
+                    }
+                    alter_streaming_config::handle_alter_streaming_set_config(
+                        handler_args,
+                        name,
+                        entries,
+                        statement_type,
+                    )
+                    .await
+                }
+                AlterViewOperation::ResetConfig { keys } => {
+                    if !materialized {
+                        bail!("RESET CONFIG is only supported for materialized views");
+                    }
+                    alter_streaming_config::handle_alter_streaming_reset_config(
+                        handler_args,
+                        name,
+                        keys,
+                        statement_type,
+                    )
+                    .await
+                }
             }
         }
 
@@ -1069,6 +1131,24 @@ pub async fn handle(
                     parallelism,
                     StatementType::ALTER_SINK,
                     deferred,
+                )
+                .await
+            }
+            AlterSinkOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_SINK,
+                )
+                .await
+            }
+            AlterSinkOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_SINK,
                 )
                 .await
             }
@@ -1207,6 +1287,24 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSourceOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_SOURCE,
+                )
+                .await
+            }
+            AlterSourceOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_SOURCE,
+                )
+                .await
+            }
         },
         Statement::AlterFunction {
             name,
@@ -1277,7 +1375,7 @@ pub async fn handle(
             AlterFragmentOperation::SetParallelism { parallelism } => {
                 alter_parallelism::handle_alter_fragment_parallelism(
                     handler_args,
-                    fragment_ids,
+                    fragment_ids.into_iter().map_into().collect(),
                     parallelism,
                 )
                 .await
@@ -1358,20 +1456,6 @@ fn check_ban_ddl_for_iceberg_engine_table(
             if table.is_iceberg_engine_table() {
                 bail!(
                     "ALTER TABLE RENAME is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
-        }
-
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::ChangeOwner { .. },
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE CHANGE OWNER is not supported for iceberg table: {}.{}",
                     schema_name,
                     name
                 );

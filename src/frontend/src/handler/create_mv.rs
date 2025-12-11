@@ -15,8 +15,9 @@
 use std::collections::HashSet;
 
 use either::Either;
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
+use risingwave_common::catalog::{FunctionId, ObjectId};
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
@@ -30,6 +31,7 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
@@ -217,7 +219,7 @@ pub async fn handle_create_mv_bound(
     if_not_exists: bool,
     name: ObjectName,
     query: BoundQuery,
-    dependent_relations: HashSet<TableId>,
+    dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
@@ -261,15 +263,19 @@ pub async fn handle_create_mv_bound(
             ));
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_materialized_view(
+    execute_with_long_running_notification(
+        catalog_writer.create_materialized_view(
             table.to_prost(),
             graph,
             dependencies,
             resource_group,
             if_not_exists,
-        )
-        .await?;
+        ),
+        &session,
+        "CREATE MATERIALIZED VIEW",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
@@ -280,14 +286,14 @@ pub(crate) async fn gen_create_mv_graph(
     handler_args: HandlerArgs,
     name: ObjectName,
     query: BoundQuery,
-    dependent_relations: HashSet<TableId>,
+    dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(
     TableCatalog,
     PbStreamFragmentGraph,
-    HashSet<u32>,
+    HashSet<ObjectId>,
     Option<String>,
 )> {
     let mut with_options = get_with_options(handler_args.clone());
@@ -378,12 +384,7 @@ It only indicates the physical clustering of the data, which may improve the per
     // during binding instead of visiting the optimized plan.
     let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
         .into_iter()
-        .map(|id| id.as_raw_id() as ObjectId)
-        .chain(
-            dependent_udfs
-                .into_iter()
-                .map(|id| id.function_id() as ObjectId),
-        )
+        .chain(dependent_udfs.iter().copied().map_into())
         .collect();
 
     let graph = build_graph_with_strategy(

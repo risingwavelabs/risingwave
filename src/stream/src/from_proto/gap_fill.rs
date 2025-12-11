@@ -75,7 +75,7 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             ctx: params.actor_context,
             input,
             schema: params.info.schema.clone(),
-            chunk_size: params.env.config().developer.chunk_size,
+            chunk_size: params.config.developer.chunk_size,
             time_column_index,
             fill_columns: fill_columns_with_strategies,
             gap_interval: interval_expr,

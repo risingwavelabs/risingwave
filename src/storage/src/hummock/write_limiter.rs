@@ -39,8 +39,8 @@ impl WriteLimiter {
     pub fn update_write_limits(&self, limits: HashMap<CompactionGroupId, WriteLimit>) {
         let mut index: HashMap<TableId, CompactionGroupId> = HashMap::new();
         for (group_id, limit) in &limits {
-            for table_id in &limit.table_ids {
-                index.insert(table_id.into(), *group_id);
+            for &table_id in &limit.table_ids {
+                index.insert(table_id, *group_id);
             }
         }
         self.limits.store(Arc::new((limits, index)));

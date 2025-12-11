@@ -90,7 +90,7 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
             schema: params.info.schema.clone(),
             buffer_table,
             prev_row_table,
-            chunk_size: params.env.config().developer.chunk_size,
+            chunk_size: params.config.developer.chunk_size,
             time_column_index,
             fill_columns: fill_columns_with_strategies,
             gap_interval,

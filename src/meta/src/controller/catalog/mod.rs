@@ -25,10 +25,10 @@ use std::iter;
 use std::mem::take;
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, SYSTEM_SCHEMAS, TableOption,
+    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableOption,
 };
 use risingwave_common::current_cluster_version;
 use risingwave_common::id::JobId;
@@ -38,13 +38,14 @@ use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
-use risingwave_meta_model::table::{RefreshState, TableType};
+use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
     ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
     IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
-    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId, ViewId,
-    connection, database, fragment, function, index, object, object_dependency, schema, secret,
-    sink, source, streaming_job, subscription, table, user_privilege, view,
+    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, TableIdArray,
+    UserId, ViewId, connection, database, fragment, function, index, object, object_dependency,
+    pending_sink_state, schema, secret, sink, source, streaming_job, subscription, table,
+    user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -80,6 +81,7 @@ use super::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::controller::catalog::util::update_internal_tables;
+use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::*;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, MetaSrvEnv, NotificationVersion,
@@ -139,6 +141,9 @@ pub struct ReleaseContext {
 
     /// Removed sink fragment by target fragment.
     pub(crate) removed_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
+
+    /// Dropped iceberg table sinks
+    pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 }
 
 impl CatalogController {
@@ -210,10 +215,12 @@ impl CatalogController {
 }
 
 impl CatalogController {
-    pub async fn finish_create_subscription_catalog(&self, subscription_id: u32) -> MetaResult<()> {
+    pub async fn finish_create_subscription_catalog(
+        &self,
+        subscription_id: SubscriptionId,
+    ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        let job_id = subscription_id as i32;
 
         // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
         let res = Object::update_many()
@@ -222,22 +229,25 @@ impl CatalogController {
                 object::Column::CreatedAtClusterVersion,
                 current_cluster_version().into(),
             )
-            .filter(object::Column::Oid.eq(job_id))
+            .filter(object::Column::Oid.eq(subscription_id))
             .exec(&txn)
             .await?;
         if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("subscription", job_id));
+            return Err(MetaError::catalog_id_not_found(
+                "subscription",
+                subscription_id,
+            ));
         }
 
         // mark the target subscription as `Create`.
         let job = subscription::ActiveModel {
-            subscription_id: Set(job_id),
+            subscription_id: Set(subscription_id),
             subscription_state: Set(SubscriptionState::Created.into()),
             ..Default::default()
         };
         job.update(&txn).await?;
 
-        let _ = grant_default_privileges_automatically(&txn, job_id).await?;
+        let _ = grant_default_privileges_automatically(&txn, subscription_id).await?;
 
         txn.commit().await?;
 
@@ -246,16 +256,15 @@ impl CatalogController {
 
     pub async fn notify_create_subscription(
         &self,
-        subscription_id: u32,
+        subscription_id: SubscriptionId,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.read().await;
-        let job_id = subscription_id as i32;
-        let (subscription, obj) = Subscription::find_by_id(job_id)
+        let (subscription, obj) = Subscription::find_by_id(subscription_id)
             .find_also_related(Object)
             .filter(subscription::Column::SubscriptionState.eq(SubscriptionState::Created as i32))
             .one(&inner.db)
             .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", job_id))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
 
         let mut version = self
             .notify_frontend(
@@ -276,7 +285,7 @@ impl CatalogController {
             .select_only()
             .distinct()
             .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Oid.eq(subscription_id as ObjectId))
+            .filter(user_privilege::Column::Oid.eq(subscription_id.as_object_id()))
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -438,7 +447,7 @@ impl CatalogController {
             filter_condition
         };
 
-        let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
+        let mut dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .columns([
@@ -452,6 +461,12 @@ impl CatalogController {
             .into_partial_model()
             .all(&txn)
             .await?;
+
+        // Check if there are any pending iceberg table jobs.
+        let dirty_iceberg_jobs = find_dirty_iceberg_table_jobs(&txn, database_id).await?;
+        if !dirty_iceberg_jobs.is_empty() {
+            dirty_job_objs.extend(dirty_iceberg_jobs);
+        }
 
         Self::clean_dirty_sink_downstreams(&txn).await?;
 
@@ -548,9 +563,13 @@ impl CatalogController {
             .chain(
                 dirty_state_table_ids
                     .into_iter()
-                    .map(|table_id| table_id.as_raw_id() as _),
+                    .map(|table_id| table_id.as_object_id()),
             )
-            .chain(dirty_associated_source_ids.clone().into_iter())
+            .chain(
+                dirty_associated_source_ids
+                    .iter()
+                    .map(|source_id| source_id.as_object_id()),
+            )
             .collect();
 
         let res = Object::delete_many()
@@ -575,61 +594,18 @@ impl CatalogController {
         Ok(dirty_associated_source_ids)
     }
 
-    /// On recovery, reset refreshable table's `refresh_state` to a reasonable state.
-    pub async fn reset_refreshing_tables(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-
-        // IDLE: no change
-        // REFRESHING: reset to IDLE (give up refresh for allowing re-trigger)
-        // FINISHING: no change (materialize executor will recover from state table and continue)
-        let filter_condition = table::Column::RefreshState.eq(RefreshState::Refreshing);
-
-        let filter_condition = if let Some(database_id) = database_id {
-            filter_condition.and(object::Column::DatabaseId.eq(database_id))
-        } else {
-            filter_condition
-        };
-
-        let table_ids: Vec<TableId> = Table::find()
-            .find_also_related(Object)
-            .filter(filter_condition)
-            .all(&txn)
-            .await
-            .context("reset_refreshing_tables: finding table ids")?
-            .into_iter()
-            .map(|(t, _)| t.table_id)
-            .collect();
-
-        let res = Table::update_many()
-            .col_expr(table::Column::RefreshState, Expr::value(RefreshState::Idle))
-            .filter(table::Column::TableId.is_in(table_ids))
-            .exec(&txn)
-            .await
-            .context("reset_refreshing_tables: update refresh state")?;
-
-        txn.commit().await?;
-
-        tracing::debug!(
-            "reset refreshing tables: {} tables updated",
-            res.rows_affected
-        );
-
-        Ok(())
-    }
-
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        ensure_object_id(ObjectType::Database, comment.database_id as _, &txn).await?;
-        ensure_object_id(ObjectType::Schema, comment.schema_id as _, &txn).await?;
-        let table_obj = Object::find_by_id(comment.table_id as ObjectId)
+        ensure_object_id(ObjectType::Database, comment.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, comment.schema_id, &txn).await?;
+        let table_obj = Object::find_by_id(comment.table_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
 
         let table = if let Some(col_idx) = comment.column_index {
-            let columns: ColumnCatalogArray = Table::find_by_id(TableId::new(comment.table_id))
+            let columns: ColumnCatalogArray = Table::find_by_id(comment.table_id)
                 .select_only()
                 .column(table::Column::Columns)
                 .into_tuple()
@@ -650,7 +626,7 @@ impl CatalogController {
             })?;
             column_desc.description = comment.description;
             table::ActiveModel {
-                table_id: Set(comment.table_id.into()),
+                table_id: Set(comment.table_id),
                 columns: Set(pb_columns.into()),
                 ..Default::default()
             }
@@ -658,7 +634,7 @@ impl CatalogController {
             .await?
         } else {
             table::ActiveModel {
-                table_id: Set(comment.table_id.into()),
+                table_id: Set(comment.table_id),
                 description: Set(comment.description),
                 ..Default::default()
             }
@@ -751,6 +727,87 @@ impl CatalogController {
             streaming_job_num,
             actor_num,
         })
+    }
+
+    pub async fn fetch_sink_with_state_table_ids(
+        &self,
+        sink_ids: HashSet<SinkId>,
+    ) -> MetaResult<HashMap<SinkId, Vec<TableId>>> {
+        let inner = self.inner.read().await;
+
+        let query = Fragment::find()
+            .select_only()
+            .columns([fragment::Column::JobId, fragment::Column::StateTableIds])
+            .filter(
+                fragment::Column::JobId
+                    .is_in(sink_ids)
+                    .and(FragmentTypeMask::intersects(FragmentTypeFlag::Sink)),
+            );
+
+        let rows: Vec<(JobId, TableIdArray)> = query.into_tuple().all(&inner.db).await?;
+
+        debug_assert!(rows.iter().map(|(job_id, _)| job_id).all_unique());
+
+        let result = rows
+            .into_iter()
+            .map(|(job_id, table_id_array)| (job_id.as_sink_id(), table_id_array.0))
+            .collect::<HashMap<_, _>>();
+
+        Ok(result)
+    }
+
+    pub async fn list_all_pending_sinks(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<HashSet<SinkId>> {
+        let inner = self.inner.read().await;
+
+        let mut query = pending_sink_state::Entity::find()
+            .select_only()
+            .columns([pending_sink_state::Column::SinkId])
+            .filter(
+                pending_sink_state::Column::SinkState.eq(pending_sink_state::SinkState::Pending),
+            )
+            .distinct();
+
+        if let Some(db_id) = database_id {
+            query = query
+                .join(
+                    JoinType::InnerJoin,
+                    pending_sink_state::Relation::Object.def(),
+                )
+                .filter(object::Column::DatabaseId.eq(db_id));
+        }
+
+        let result: Vec<SinkId> = query.into_tuple().all(&inner.db).await?;
+
+        Ok(result.into_iter().collect())
+    }
+
+    pub async fn abort_pending_sink_epochs(
+        &self,
+        sink_committed_epoch: HashMap<SinkId, u64>,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        for (sink_id, committed_epoch) in sink_committed_epoch {
+            pending_sink_state::Entity::update_many()
+                .col_expr(
+                    pending_sink_state::Column::SinkState,
+                    Expr::value(pending_sink_state::SinkState::Aborted),
+                )
+                .filter(
+                    pending_sink_state::Column::SinkId
+                        .eq(sink_id)
+                        .and(pending_sink_state::Column::Epoch.gt(committed_epoch as i64)),
+                )
+                .exec(&txn)
+                .await?;
+        }
+
+        txn.commit().await?;
+        Ok(())
     }
 }
 
@@ -1153,16 +1210,6 @@ impl CatalogControllerInner {
                 .flat_map(|(_, txs)| txs.into_iter())
             {
                 let _ = tx.send(Err(err.clone()));
-            }
-        }
-    }
-
-    pub(crate) fn notify_cancelled(&mut self, database_id: DatabaseId, job_id: JobId) {
-        if let Some(creating_tables) = self.creating_table_finish_notifier.get_mut(&database_id)
-            && let Some(tx_list) = creating_tables.remove(&job_id)
-        {
-            for tx in tx_list {
-                let _ = tx.send(Err("Cancelled".to_owned()));
             }
         }
     }

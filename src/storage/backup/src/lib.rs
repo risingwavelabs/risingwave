@@ -34,6 +34,7 @@ use risingwave_hummock_sdk::state_table_info::StateTableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
+use risingwave_pb::id::TableId;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{BackupError, BackupResult};
@@ -53,7 +54,7 @@ pub struct MetaSnapshotMetadata {
     pub format_version: u32,
     pub remarks: Option<String>,
     #[serde(default)]
-    pub state_table_info: HashMap<u32, StateTableInfo>,
+    pub state_table_info: HashMap<TableId, StateTableInfo>,
     pub rw_version: Option<String>,
 }
 
@@ -77,7 +78,7 @@ impl MetaSnapshotMetadata {
                 .state_table_info
                 .info()
                 .iter()
-                .map(|(id, info)| (id.as_raw_id(), info.into()))
+                .map(|(id, info)| (*id, info.into()))
                 .collect(),
             rw_version: Some(RW_VERSION.to_owned()),
         }
@@ -116,7 +117,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             state_table_info: m
                 .state_table_info
                 .iter()
-                .map(|(t, i)| (*t, i.into()))
+                .map(|(t, i)| ((*t), i.into()))
                 .collect(),
             rw_version: m.rw_version.clone(),
         }

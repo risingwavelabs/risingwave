@@ -62,9 +62,9 @@ pub async fn handle_comment(
                 let column = binder.bind_column(object_name.0.as_slice())?;
 
                 PbComment {
-                    table_id: table.table_id.into(),
-                    schema_id: schema_id.into(),
-                    database_id: database_id.into(),
+                    table_id: table.table_id,
+                    schema_id,
+                    database_id,
                     column_index: column.as_input_ref().map(|input_ref| input_ref.index as _),
                     description: comment,
                 }
@@ -84,9 +84,9 @@ pub async fn handle_comment(
                 }
 
                 PbComment {
-                    table_id: table.table_id.into(),
-                    schema_id: schema_id.into(),
-                    database_id: database_id.into(),
+                    table_id: table.table_id,
+                    schema_id,
+                    database_id,
                     column_index: None,
                     description: comment,
                 }

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common_proc_macro::serde_prefix_all;
+
 use super::*;
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
@@ -158,6 +160,16 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether meta should request pausing all data sources on the next bootstrap.
+    /// This allows us to pause the cluster on next bootstrap in an offline way.
+    /// It's important for standalone or single node deployments.
+    /// In those cases, meta node, frontend and compute may all be co-located.
+    /// If the compute node enters an inconsistent state, and continuously crashloops,
+    /// we may not be able to connect to the cluster to run `alter system set pause_on_next_bootstrap = true;`.
+    /// By providing it in the static config, we can have an offline way to trigger the pause on bootstrap.
+    #[serde(default = "default::meta::pause_on_next_bootstrap_offline")]
+    pub pause_on_next_bootstrap_offline: bool,
+
     /// Whether to disable adaptive-scaling feature.
     #[serde(default)]
     pub disable_automatic_parallelism_control: bool,
@@ -285,7 +297,7 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::event_log_channel_max_size")]
     pub event_log_channel_max_size: u32,
 
-    #[serde(default, with = "meta_prefix")]
+    #[serde(default)]
     #[config_doc(omitted)]
     pub developer: MetaDeveloperConfig,
     /// Whether compactor should rewrite row to remove dropped column.
@@ -355,12 +367,14 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::cdc_table_split_init_insert_batch_size")]
     pub cdc_table_split_init_insert_batch_size: u64,
 
+    /// Whether to automatically migrate legacy table fragments when meta starts.
+    #[serde(default = "default::meta::enable_legacy_table_migration")]
+    pub enable_legacy_table_migration: bool,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub meta_store_config: MetaStoreConfig,
 }
-
-serde_with::with_prefix!(meta_prefix "meta_");
 
 /// Note: only applies to meta store backends other than `SQLite`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -385,6 +399,7 @@ pub struct MetaStoreConfig {
 /// The subsections `[meta.developer]`.
 ///
 /// It is put at [`MetaConfig::developer`].
+#[serde_prefix_all("meta_", mode = "alias")]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaDeveloperConfig {
     /// The number of traces to be cached in-memory by the tracing collector
@@ -590,6 +605,10 @@ pub mod default {
             DefaultParallelism::Full
         }
 
+        pub fn pause_on_next_bootstrap_offline() -> bool {
+            false
+        }
+
         pub fn node_num_monitor_interval_sec() -> u64 {
             10
         }
@@ -726,6 +745,10 @@ pub mod default {
 
         pub fn cdc_table_split_init_insert_batch_size() -> u64 {
             100
+        }
+
+        pub fn enable_legacy_table_migration() -> bool {
+            true
         }
     }
 

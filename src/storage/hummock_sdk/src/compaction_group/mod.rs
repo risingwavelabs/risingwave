@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn test_split_table_ids() {
         let table_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-            .iter()
+            .into_iter()
             .map(Into::<TableId>::into)
             .collect();
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
@@ -512,12 +512,15 @@ mod tests {
         );
         assert_eq!(
             left,
-            [1, 2, 3, 4].iter().map(Into::<TableId>::into).collect_vec()
+            [1, 2, 3, 4]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
         );
         assert_eq!(
             right,
             [5, 6, 7, 8, 9]
-                .iter()
+                .into_iter()
                 .map(Into::<TableId>::into)
                 .collect_vec()
         );
@@ -532,7 +535,7 @@ mod tests {
         assert_eq!(
             left,
             [1, 2, 3, 4, 5, 6, 7, 8, 9]
-                .iter()
+                .into_iter()
                 .map(Into::<TableId>::into)
                 .collect_vec()
         );
@@ -548,7 +551,7 @@ mod tests {
         assert_eq!(
             right,
             [1, 2, 3, 4, 5, 6, 7, 8, 9]
-                .iter()
+                .into_iter()
                 .map(Into::<TableId>::into)
                 .collect_vec()
         );
@@ -556,14 +559,26 @@ mod tests {
 
     #[test]
     fn test_split_table_ids_with_split_key() {
-        let table_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(Into::into).collect();
+        let table_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            .into_iter()
+            .map(Into::<TableId>::into)
+            .collect();
         let split_key = super::group_split::build_split_key(5.into(), VirtualNode::ZERO);
         let (left, right) =
             super::group_split::split_table_ids_with_split_key(&table_ids, split_key);
         assert_eq!(
             left,
-            [1, 2, 3, 4].iter().map(Into::<TableId>::into).collect_vec()
+            [1, 2, 3, 4]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
         );
-        assert_eq!(right, [5, 6, 7, 8, 9].iter().map(Into::into).collect_vec());
+        assert_eq!(
+            right,
+            [5, 6, 7, 8, 9]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
     }
 }

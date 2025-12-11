@@ -1285,7 +1285,7 @@ mod tests {
 
         let mut version = HummockVersion::from_rpc_protobuf(&PbHummockVersion {
             state_table_info: HashMap::from_iter([(
-                test_table_id.as_raw_id(),
+                test_table_id,
                 StateTableInfo {
                     committed_epoch: EPOCH1,
                     compaction_group_id: StaticCompactionGroupId::StateDefault as _,

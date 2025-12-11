@@ -20,7 +20,8 @@ use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
 
 use crate::utils::{
-    kill_cn_and_meta_and_wait_recover, kill_cn_and_wait_recover, kill_random_and_wait_recover,
+    kill_cn_and_meta_and_wait_recover, kill_cn_and_wait_recover,
+    kill_cn_meta_and_wait_full_recovery, kill_random_and_wait_recover,
 };
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
@@ -466,7 +467,7 @@ async fn test_background_sink_create() -> Result<()> {
     // Wait for job to start
     sleep(Duration::from_secs(2)).await;
 
-    kill_cn_and_meta_and_wait_recover(&cluster).await;
+    kill_cn_meta_and_wait_full_recovery(&mut cluster).await;
 
     // Sink job should still be present, and we can drop it.
     session.run("DROP SINK s;").await?;

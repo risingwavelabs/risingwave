@@ -46,7 +46,7 @@ impl ExecutorBuilder for UpstreamSinkUnionExecutorBuilder {
             params.actor_context,
             params.local_barrier_manager,
             params.executor_stats,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             init_upstreams,
             params.eval_error_report,
         )

@@ -18,7 +18,7 @@ use std::mem::replace;
 use std::sync::Arc;
 
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::catalog::TableOption;
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
@@ -211,7 +211,7 @@ impl KvLogStoreMetrics {
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
-        let id = sink_param.sink_id.sink_id;
+        let id = sink_param.sink_id.as_raw_id();
         let name = &sink_param.sink_name;
         Self::new_inner(metrics, actor_id, id, name, connector)
     }
@@ -531,7 +531,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
     const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = true;
 
     async fn build(self) -> (Self::Reader, Self::Writer) {
-        let table_id = TableId::new(self.table_catalog.id);
+        let table_id = self.table_catalog.id;
         let (pause_tx, pause_rx) = watch::channel(false);
         let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes, self.pk_info);
         let local_state_store = self
@@ -596,7 +596,6 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, EpochPair};
     use risingwave_connector::sink::log_store::{
@@ -653,12 +652,12 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
+            .table_committed_epoch(table.id)
             .unwrap()
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -667,7 +666,7 @@ mod tests {
         let epoch2 = epoch1.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
         writer
             .flush_current_epoch_for_test(epoch2, false)
             .await
@@ -681,7 +680,7 @@ mod tests {
 
         let sync_result = test_env
             .storage
-            .seal_and_sync_epoch(epoch2, HashSet::from_iter([table.id.into()]))
+            .seal_and_sync_epoch(epoch2, HashSet::from_iter([table.id]))
             .await
             .unwrap();
         assert!(!sync_result.uncommitted_ssts.is_empty());
@@ -771,12 +770,12 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
+            .table_committed_epoch(table.id)
             .unwrap()
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -785,7 +784,7 @@ mod tests {
         let epoch2 = epoch1.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
         writer
             .flush_current_epoch_for_test(epoch2, false)
             .await
@@ -865,7 +864,7 @@ mod tests {
         let (mut reader, mut writer) = factory.build().await;
         test_env
             .storage
-            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch3, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch3), false)
             .await
@@ -963,12 +962,12 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
+            .table_committed_epoch(table.id)
             .unwrap()
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -978,7 +977,7 @@ mod tests {
         let epoch2 = epoch1.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
         writer
             .flush_current_epoch_for_test(epoch2, true)
             .await
@@ -1084,7 +1083,7 @@ mod tests {
 
         test_env
             .storage
-            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch3, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch3), false)
             .await
@@ -1195,12 +1194,12 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
+            .table_committed_epoch(table.id)
             .unwrap()
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
         writer1
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1219,7 +1218,7 @@ mod tests {
         let epoch2 = epoch1.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
         writer1
             .flush_current_epoch_for_test(epoch2, false)
             .await
@@ -1330,7 +1329,7 @@ mod tests {
         let (mut reader, mut writer) = factory.build().await;
         test_env
             .storage
-            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch3, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new(epoch3, epoch2), false)
             .await
@@ -1404,12 +1403,12 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
+            .table_committed_epoch(table.id)
             .unwrap()
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1553,12 +1552,12 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
+            .table_committed_epoch(table.id)
             .unwrap()
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1567,7 +1566,7 @@ mod tests {
         let epoch2 = epoch1.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
         writer
             .flush_current_epoch_for_test(epoch2, true)
             .await
@@ -1576,7 +1575,7 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch3, HashSet::from_iter([table.id]));
         writer
             .flush_current_epoch_for_test(epoch3, true)
             .await
@@ -1672,7 +1671,7 @@ mod tests {
         let epoch4 = epoch3.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch4, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new(epoch4, epoch3), false)
             .await
@@ -1747,7 +1746,7 @@ mod tests {
         let epoch5 = epoch4 + 1;
         test_env
             .storage
-            .start_epoch(epoch5, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch5, HashSet::from_iter([table.id]));
         writer
             .flush_current_epoch_for_test(epoch5, true)
             .await
@@ -1915,12 +1914,12 @@ mod tests {
         let epoch1 = test_env
             .storage
             .get_pinned_version()
-            .table_committed_epoch(TableId::new(table.id))
+            .table_committed_epoch(table.id)
             .unwrap()
             .next_epoch();
         test_env
             .storage
-            .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch1, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch1), false)
             .await
@@ -1929,7 +1928,7 @@ mod tests {
         let epoch2 = epoch1.next_epoch();
         test_env
             .storage
-            .start_epoch(epoch2, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch2, HashSet::from_iter([table.id]));
         writer
             .flush_current_epoch_for_test(epoch2, false)
             .await
@@ -2003,7 +2002,7 @@ mod tests {
         let (mut reader, mut writer) = factory.build().await;
         test_env
             .storage
-            .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch3, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch3), false)
             .await
@@ -2078,7 +2077,7 @@ mod tests {
         let (mut reader, mut writer) = factory.build().await;
         test_env
             .storage
-            .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
+            .start_epoch(epoch4, HashSet::from_iter([table.id]));
         writer
             .init(EpochPair::new_test_epoch(epoch4), false)
             .await

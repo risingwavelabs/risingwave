@@ -42,6 +42,7 @@
 #![feature(iter_array_chunks)]
 #![feature(exact_size_is_empty)]
 #![feature(debug_closure_helpers)]
+#![feature(iter_from_coroutine)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
@@ -86,8 +87,9 @@ pub mod field_generator;
 pub mod gap_fill;
 pub mod global_jvm;
 pub mod hash;
-pub mod id;
-pub mod log;
+pub mod id {
+    pub use risingwave_pb::id::*;
+}
 pub mod memory;
 pub mod metrics_reader;
 pub mod telemetry;
@@ -108,8 +110,8 @@ pub use risingwave_common_metrics::{
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
 pub use {
-    risingwave_common_metrics as metrics, risingwave_common_secret as secret,
-    risingwave_license as license,
+    risingwave_common_log as log, risingwave_common_metrics as metrics,
+    risingwave_common_secret as secret, risingwave_license as license,
 };
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");

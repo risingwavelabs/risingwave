@@ -20,6 +20,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::id::TableId;
 
 use crate::CtlContext;
 
@@ -161,7 +162,7 @@ pub fn build_compaction_config_vec(
 pub async fn split_compaction_group(
     context: &CtlContext,
     group_id: CompactionGroupId,
-    table_ids_to_new_group: &[u32],
+    table_ids_to_new_group: &[TableId],
     partition_vnode_count: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;

@@ -74,7 +74,7 @@ struct WorkerInfo(
 impl From<WorkerInfo> for PbWorkerNode {
     fn from(info: WorkerInfo) -> Self {
         Self {
-            id: info.0.worker_id as _,
+            id: info.0.worker_id,
             r#type: PbWorkerType::from(info.0.worker_type) as _,
             host: Some(PbHostAddress {
                 host: info.0.host,
@@ -88,6 +88,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
                 resource_group: p.resource_group.clone(),
                 parallelism: info.1.as_ref().map(|p| p.parallelism).unwrap_or_default() as u32,
+                is_iceberg_compactor: p.is_iceberg_compactor,
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: Some(info.2.resource),
@@ -228,7 +229,7 @@ impl ClusterController {
 
     /// Invoked when it receives a heartbeat from a worker node.
     pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
-        tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
+        tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
         self.inner
             .write()
             .await
@@ -298,7 +299,7 @@ impl ClusterController {
                     match cluster_controller.delete_worker(host_addr.clone()).await {
                         Ok(_) => {
                             tracing::warn!(
-                                worker_id,
+                                %worker_id,
                                 ?host_addr,
                                 %now,
                                 "Deleted expired worker"
@@ -414,13 +415,13 @@ impl ClusterController {
 #[derive(Debug, Clone)]
 pub struct StreamingClusterInfo {
     /// All **active** compute nodes in the cluster.
-    pub worker_nodes: HashMap<u32, WorkerNode>,
+    pub worker_nodes: HashMap<WorkerId, WorkerNode>,
 
     /// All schedulable compute nodes in the cluster. Normally for resource group based scheduling.
-    pub schedulable_workers: HashSet<u32>,
+    pub schedulable_workers: HashSet<WorkerId>,
 
     /// All unschedulable compute nodes in the cluster.
-    pub unschedulable_workers: HashSet<u32>,
+    pub unschedulable_workers: HashSet<WorkerId>,
 }
 
 // Encapsulating the use of parallelism
@@ -431,7 +432,7 @@ impl StreamingClusterInfo {
 
         self.worker_nodes
             .values()
-            .filter(|worker| available_worker_ids.contains(&(worker.id as WorkerId)))
+            .filter(|worker| available_worker_ids.contains(&(worker.id)))
             .map(|worker| worker.compute_node_parallelism())
             .sum()
     }
@@ -439,11 +440,11 @@ impl StreamingClusterInfo {
     pub fn filter_schedulable_workers_by_resource_group(
         &self,
         resource_group: &str,
-    ) -> HashMap<u32, WorkerNode> {
+    ) -> HashMap<WorkerId, WorkerNode> {
         let worker_ids = filter_workers_by_resource_group(&self.worker_nodes, resource_group);
         self.worker_nodes
             .iter()
-            .filter(|(id, _)| worker_ids.contains(&(**id as WorkerId)))
+            .filter(|(id, _)| worker_ids.contains(*id))
             .map(|(id, worker)| (*id, worker.clone()))
             .collect()
     }
@@ -725,8 +726,38 @@ impl ClusterControllerInner {
                     is_unschedulable: Set(add_property.is_unschedulable),
                     internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
                     resource_group: Set(None),
+                    is_iceberg_compactor: Set(false),
                 };
                 WorkerProperty::insert(worker_property).exec(&txn).await?;
+                txn.commit().await?;
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                Ok(worker.worker_id)
+            } else if worker.worker_type == WorkerType::Compactor {
+                if let Some(property) = property {
+                    let mut property: worker_property::ActiveModel = property.into();
+                    property.is_iceberg_compactor = Set(add_property.is_iceberg_compactor);
+                    property.internal_rpc_host_addr =
+                        Set(Some(add_property.internal_rpc_host_addr));
+
+                    WorkerProperty::update(property).exec(&txn).await?;
+                } else {
+                    let property = worker_property::ActiveModel {
+                        worker_id: Set(worker.worker_id),
+                        parallelism: Set(add_property
+                            .parallelism
+                            .try_into()
+                            .expect("invalid parallelism")),
+                        is_streaming: Set(false),
+                        is_serving: Set(false),
+                        is_unschedulable: Set(false),
+                        internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                        resource_group: Set(None),
+                        is_iceberg_compactor: Set(add_property.is_iceberg_compactor),
+                    };
+
+                    WorkerProperty::insert(property).exec(&txn).await?;
+                }
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
@@ -737,6 +768,7 @@ impl ClusterControllerInner {
                 Ok(worker.worker_id)
             };
         }
+
         let txn_id = self.apply_transaction_id(r#type)?;
 
         let worker = worker::ActiveModel {
@@ -749,22 +781,44 @@ impl ClusterControllerInner {
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
-        if r#type == PbWorkerType::ComputeNode || r#type == PbWorkerType::Frontend {
+        if r#type == PbWorkerType::ComputeNode
+            || r#type == PbWorkerType::Frontend
+            || r#type == PbWorkerType::Compactor
+        {
+            let (is_serving, is_streaming, is_unschedulable, is_iceberg_compactor, resource_group) =
+                match r#type {
+                    PbWorkerType::ComputeNode => (
+                        add_property.is_serving,
+                        add_property.is_streaming,
+                        add_property.is_unschedulable,
+                        false,
+                        add_property.resource_group.clone(),
+                    ),
+                    PbWorkerType::Frontend => (
+                        add_property.is_serving,
+                        add_property.is_streaming,
+                        add_property.is_unschedulable,
+                        false,
+                        None,
+                    ),
+                    PbWorkerType::Compactor => {
+                        (false, false, false, add_property.is_iceberg_compactor, None)
+                    }
+                    _ => unreachable!(),
+                };
+
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
                 parallelism: Set(add_property
                     .parallelism
                     .try_into()
                     .expect("invalid parallelism")),
-                is_streaming: Set(add_property.is_streaming),
-                is_serving: Set(add_property.is_serving),
-                is_unschedulable: Set(add_property.is_unschedulable),
+                is_streaming: Set(is_streaming),
+                is_serving: Set(is_serving),
+                is_unschedulable: Set(is_unschedulable),
                 internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
-                resource_group: if r#type == PbWorkerType::ComputeNode {
-                    Set(add_property.resource_group.clone())
-                } else {
-                    Set(None)
-                },
+                resource_group: Set(resource_group),
+                is_iceberg_compactor: Set(is_iceberg_compactor),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -912,7 +966,7 @@ impl ClusterControllerInner {
         Ok(worker_parallelisms
             .into_iter()
             .flat_map(|(worker_id, parallelism)| {
-                (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id as u32, idx as usize))
+                (0..parallelism).map(move |idx| WorkerSlotId::new(worker_id, idx as usize))
             })
             .collect_vec())
     }

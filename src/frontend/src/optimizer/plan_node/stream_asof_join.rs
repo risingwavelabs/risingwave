@@ -14,11 +14,11 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::session_config::join_encoding_type::JoinEncodingType;
+use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType};
-use risingwave_pb::stream_plan::AsOfJoinNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{AsOfJoinNode, PbJoinEncodingType};
 
 use super::stream::prelude::*;
 use super::utils::{
@@ -53,9 +53,6 @@ pub struct StreamAsOfJoin {
 
     /// inequality description
     inequality_desc: AsOfJoinDesc,
-
-    /// Determine which encoding will be used to encode join rows in operator cache.
-    join_encoding_type: JoinEncodingType,
 }
 
 impl StreamAsOfJoin {
@@ -64,8 +61,6 @@ impl StreamAsOfJoin {
         eq_join_predicate: EqJoinPredicate,
         inequality_desc: AsOfJoinDesc,
     ) -> Result<Self> {
-        let ctx = core.ctx();
-
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
         let stream_kind = core.stream_kind()?;
@@ -76,8 +71,42 @@ impl StreamAsOfJoin {
             &core,
         );
 
-        // TODO: derive watermarks
-        let watermark_columns = WatermarkColumns::new();
+        let watermark_columns = {
+            let l2i = core.l2i_col_mapping();
+            let r2i = core.r2i_col_mapping();
+            let mut watermark_columns = WatermarkColumns::new();
+            for (left_idx, right_idx) in
+                eq_join_predicate
+                    .eq_indexes()
+                    .into_iter()
+                    .chain(std::iter::once((
+                        inequality_desc.left_idx as usize,
+                        inequality_desc.right_idx as usize,
+                    )))
+            {
+                if let Some(l_wtmk_group) = core.left.watermark_columns().get_group(left_idx)
+                    && let Some(r_wtmk_group) = core.right.watermark_columns().get_group(right_idx)
+                {
+                    if let Some(internal) = l2i.try_map(left_idx) {
+                        watermark_columns.insert(
+                            internal,
+                            l_wtmk_group.same_or_else(r_wtmk_group, || {
+                                core.ctx().next_watermark_group_id()
+                            }),
+                        );
+                    }
+                    if let Some(internal) = r2i.try_map(right_idx) {
+                        watermark_columns.insert(
+                            internal,
+                            l_wtmk_group.same_or_else(r_wtmk_group, || {
+                                core.ctx().next_watermark_group_id()
+                            }),
+                        );
+                    }
+                }
+            }
+            watermark_columns.map_clone(&core.i2o_col_mapping())
+        };
 
         // TODO: derive from input
         let base = PlanBase::new_stream_with_core(
@@ -95,7 +124,6 @@ impl StreamAsOfJoin {
             eq_join_predicate,
             is_append_only: stream_kind.is_append_only(),
             inequality_desc,
-            join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
         })
     }
 
@@ -284,7 +312,9 @@ impl StreamNode for StreamAsOfJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             asof_desc: Some(self.inequality_desc),
-            join_encoding_type: self.join_encoding_type as i32,
+            // Join encoding type should now be read from per-job config override.
+            #[allow(deprecated)]
+            join_encoding_type: PbJoinEncodingType::Unspecified as _,
         }))
     }
 }

@@ -151,14 +151,14 @@ impl UserService for UserServiceImpl {
         let req = request.into_inner();
         let operation = req.get_operation()?;
         let user_ids: Vec<_> = req.get_user_ids().iter().map(|id| *id as UserId).collect();
-        let schema_ids: Vec<_> = req.schema_ids.iter().map(|id| id.into()).collect();
+        let schema_ids: Vec<_> = req.schema_ids.clone();
         match operation {
             Operation::GrantPrivilege(grant_privilege) => {
                 self.metadata_manager
                     .catalog_controller
                     .grant_default_privileges(
                         user_ids,
-                        req.database_id.into(),
+                        req.database_id,
                         schema_ids,
                         req.granted_by as _,
                         grant_privilege.actions().collect(),
@@ -177,7 +177,7 @@ impl UserService for UserServiceImpl {
                     .catalog_controller
                     .revoke_default_privileges(
                         user_ids,
-                        req.database_id.into(),
+                        req.database_id,
                         schema_ids,
                         revoke_privilege.actions().collect(),
                         revoke_privilege.get_object_type()?,

@@ -50,8 +50,8 @@ impl FrontendService for FrontendServiceImpl {
         let req = request.into_inner();
 
         let replace_plan = get_new_table_plan(
-            req.table_id.into(),
-            req.database_id.into(),
+            req.table_id,
+            req.database_id,
             req.owner,
             req.cdc_table_change,
         )
@@ -108,11 +108,24 @@ async fn get_new_table_plan(
     // get a session object for the corresponding user and database
     let session = session_mgr.create_dummy_session(database_id, owner)?;
 
+    let _guard = scopeguard::guard((), |_| {
+        session_mgr.end_session(&session);
+    });
+
     let table_catalog = {
         let reader = session.env().catalog_reader().read_guard();
-        reader.get_any_table_by_id(&table_id)?.clone()
+        reader.get_any_table_by_id(table_id)?.clone()
     };
-    let table_name = ObjectName::from(vec![table_catalog.name.as_str().into()]);
+
+    let schema_name = {
+        let reader = session.env().catalog_reader().read_guard();
+        let schema = reader.get_schema_by_id(table_catalog.database_id, table_catalog.schema_id)?;
+        schema.name.clone()
+    };
+    let table_name = ObjectName::from(vec![
+        schema_name.as_str().into(),
+        table_catalog.name.as_str().into(),
+    ]);
 
     let definition = if let Some(cdc_table_change) = cdc_table_change {
         let new_version_columns = cdc_table_change

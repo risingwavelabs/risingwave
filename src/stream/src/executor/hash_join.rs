@@ -286,11 +286,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         entry_state_max_rows: Option<usize>,
     ) -> Self {
         let entry_state_max_rows = match entry_state_max_rows {
-            None => {
-                ctx.streaming_config
-                    .developer
-                    .hash_join_entry_state_max_rows
-            }
+            None => ctx.config.developer.hash_join_entry_state_max_rows,
             Some(entry_state_max_rows) => entry_state_max_rows,
         };
         let side_l_column_n = input_l.schema().len();
@@ -968,8 +964,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     update_table_id = %side_update.ht.table_id(),
                     match_table_id = %side_match.ht.table_id(),
                     join_key = ?key,
-                    actor_id = ctx.id,
-                    fragment_id = ctx.fragment_id,
+                    actor_id = %ctx.id,
+                    fragment_id = %ctx.fragment_id,
                     "large rows matched for join key"
                 );
             }

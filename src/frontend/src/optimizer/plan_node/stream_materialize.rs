@@ -19,10 +19,10 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Engine, OBJECT_ID_PLACEHOLDER, StreamJobStatus,
-    TableId,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, StreamJobStatus, TableId,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::id::FragmentId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -252,7 +252,10 @@ impl StreamMaterialize {
             Distribution::Single => RequiredDist::single(),
             _ => match table_type {
                 TableType::Table => {
-                    assert_matches!(user_distributed_by, RequiredDist::ShardByKey(_));
+                    assert_matches!(
+                        user_distributed_by,
+                        RequiredDist::ShardByKey(_) | RequiredDist::ShardByExactKey(_)
+                    );
                     user_distributed_by
                 }
                 TableType::MaterializedView => {
@@ -354,7 +357,7 @@ impl StreamMaterialize {
             table_type,
             append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            fragment_id: OBJECT_ID_PLACEHOLDER,
+            fragment_id: FragmentId::placeholder(),
             dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index,
@@ -391,6 +394,7 @@ impl StreamMaterialize {
                 }
             },
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            clean_watermark_indices: vec![],   // TODO: fill this field
             refreshable,
             vector_index_info: None,
             cdc_table_type: None,
@@ -440,6 +444,7 @@ impl StreamMaterialize {
             job_id,
             engine,
             clean_watermark_index_in_pk,
+            clean_watermark_indices,
             refreshable,
             vector_index_info,
             cdc_table_type,
@@ -509,6 +514,7 @@ impl StreamMaterialize {
             job_id,
             engine,
             clean_watermark_index_in_pk,
+            clean_watermark_indices,
             refreshable: false,
             vector_index_info,
             cdc_table_type,
@@ -700,7 +706,7 @@ impl StreamNode for StreamMaterialize {
         PbNodeBody::Materialize(Box::new(MaterializeNode {
             // Do not fill `table` and `table_id` here to avoid duplication. It will be filled by
             // meta service after global information is generated.
-            table_id: 0,
+            table_id: 0.into(),
             table: None,
             // Pass staging table catalog if available for refreshable tables
             staging_table: staging_table_prost,

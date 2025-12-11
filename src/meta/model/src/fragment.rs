@@ -17,7 +17,7 @@ use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{FragmentId, I32Array, StreamNode, StreamingParallelism};
+use crate::{FragmentId, I32Array, StreamNode, StreamingParallelism, TableIdArray};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "fragment")]
@@ -30,7 +30,7 @@ pub struct Model {
     /// Note: the `StreamNode` is different from the final plan node used by actors.
     /// Specifically, `Merge` nodes' `upstream_actor_id` will be filled. (See `compose_fragment`)
     pub stream_node: StreamNode,
-    pub state_table_ids: I32Array,
+    pub state_table_ids: TableIdArray,
     #[deprecated]
     pub upstream_fragment_id: I32Array,
     pub vnode_count: i32,

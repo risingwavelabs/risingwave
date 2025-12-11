@@ -76,7 +76,7 @@ impl ReadSnapshot {
     pub fn fill_batch_query_epoch(&self, query: &mut Query) -> SchedulerResult<()> {
         fn on_node(
             execution_plan_node: &mut ExecutionPlanNode,
-            f: &mut impl FnMut(&mut Option<BatchQueryEpoch>, u32),
+            f: &mut impl FnMut(&mut Option<BatchQueryEpoch>, TableId),
         ) {
             for node in &mut execution_plan_node.children {
                 on_node(node, f);
@@ -105,7 +105,7 @@ impl ReadSnapshot {
             f(query_epoch, table_id);
         }
 
-        fn on_query(query: &mut Query, mut f: impl FnMut(&mut Option<BatchQueryEpoch>, u32)) {
+        fn on_query(query: &mut Query, mut f: impl FnMut(&mut Option<BatchQueryEpoch>, TableId)) {
             for stage in query.stage_graph.stages.values_mut() {
                 on_node(&mut stage.root, &mut f);
             }
@@ -114,7 +114,7 @@ impl ReadSnapshot {
         let mut unspecified_epoch_table_ids = HashSet::new();
         on_query(query, |query_epoch, table_id| {
             if query_epoch.is_none() {
-                unspecified_epoch_table_ids.insert(table_id.into());
+                unspecified_epoch_table_ids.insert(table_id);
             }
         });
 
@@ -304,7 +304,7 @@ impl HummockSnapshotManager {
                     let new_value_empty = new_log.new_value.is_empty();
                     let old_value_empty = new_log.old_value.is_empty();
                     if !new_value_empty || !old_value_empty {
-                        Some(TableId::new(*table_id))
+                        Some(*table_id)
                     } else {
                         None
                     }
@@ -315,12 +315,7 @@ impl HummockSnapshotManager {
         let deleted_table_ids: HashSet<_> = deltas
             .version_deltas
             .iter()
-            .flat_map(|version_deltas| {
-                version_deltas
-                    .removed_table_ids
-                    .iter()
-                    .map(|table_id| table_id.into())
-            })
+            .flat_map(|version_deltas| version_deltas.removed_table_ids.iter().copied())
             .collect();
         self.table_change_log_notification_sender
             .send(TableChangeLogNotificationMsg {

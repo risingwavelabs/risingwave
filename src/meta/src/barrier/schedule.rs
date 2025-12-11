@@ -15,7 +15,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 use assert_matches::assert_matches;
@@ -31,6 +30,7 @@ use risingwave_pb::catalog::Database;
 use rw_futures_util::pending_on_none;
 use tokio::select;
 use tokio::sync::{oneshot, watch};
+use tokio::time::{Duration, Instant};
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::{info, warn};
@@ -374,7 +374,7 @@ impl PeriodicBarriers {
         let mut databases = HashMap::with_capacity(database_infos.len());
         let mut timer_streams = StreamMap::with_capacity(database_infos.len());
         database_infos.into_iter().for_each(|database| {
-            let database_id: DatabaseId = database.id.into();
+            let database_id: DatabaseId = database.id;
             let barrier_interval_ms = database.barrier_interval_ms;
             let checkpoint_frequency = database.checkpoint_frequency;
             databases.insert(
@@ -785,7 +785,7 @@ mod tests {
         checkpoint_frequency: Option<u64>,
     ) -> Database {
         Database {
-            id,
+            id: id.into(),
             name: format!("test_db_{}", id),
             barrier_interval_ms,
             checkpoint_frequency,
@@ -875,14 +875,18 @@ mod tests {
 
         async fn handle_list_finished_source_ids(
             &self,
-            _list_finished_source_ids: Vec<u32>,
+            _list_finished_source_ids: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbListFinishedSource,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }
 
         async fn handle_load_finished_source_ids(
             &self,
-            _load_finished_source_ids: Vec<u32>,
+            _load_finished_source_ids: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbLoadFinishedSource,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }
@@ -899,7 +903,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_next_barrier_with_different_intervals() {
         // Create databases with different intervals
         let databases = vec![
@@ -927,23 +931,40 @@ mod tests {
         // the first barrier should come from database 1 (50ms interval)
         let start_time = Instant::now();
         let barrier = periodic.next_barrier(&context).await;
-        let _elapsed = start_time.elapsed();
+        let mut elapsed = start_time.elapsed();
 
         // Verify the barrier properties
         assert_eq!(barrier.database_id, DatabaseId::from(1));
         assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
         assert!(barrier.checkpoint); // Second barrier should be checkpoint for database 1
-        // TODO(zyx): unstable in ci, temporarily commented out
-        // assert!(
-        //     elapsed <= Duration::from_millis(100),
-        //     "Elapsed time exceeded: {:?}",
-        //     elapsed
-        // ); // Should be around 50ms
+        // Use tokio's time pause mechanism, so it will be exactly 50ms here.
+        assert_eq!(
+            elapsed,
+            Duration::from_millis(50),
+            "Elapsed time exceeded: {:?}",
+            elapsed
+        );
 
         // Verify that the checkpoint frequency works
         let db1_id = DatabaseId::from(1);
         let db1_state = periodic.databases.get_mut(&db1_id).unwrap();
         assert_eq!(db1_state.num_uncheckpointed_barrier, 0); // Should reset after checkpoint
+
+        // Next barrier should come from database 1 and database 2 at 100ms
+        for _ in 0..2 {
+            let barrier = periodic.next_barrier(&context).await;
+            assert!(barrier.command.is_none()); // Should be a periodic barrier, not a scheduled command
+            assert!(!barrier.checkpoint); // Next two barriers shouldn't be checkpoints
+        }
+
+        elapsed = start_time.elapsed();
+
+        assert_eq!(
+            elapsed,
+            Duration::from_millis(100),
+            "Elapsed time exceeded: {:?}",
+            elapsed
+        );
     }
 
     #[tokio::test]
@@ -985,7 +1006,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_next_barrier_multiple_databases_timing() {
         let databases = vec![
             create_test_database(1, Some(30), Some(10)), // Fast interval
@@ -1020,7 +1041,8 @@ mod tests {
         let db2_count = barrier_counts.get(&DatabaseId::from(2)).unwrap_or(&0);
 
         // Due to timing, db1 should generally have more barriers, but allow for some variance
-        assert!(*db1_count >= *db2_count);
+        assert_eq!(*db1_count, 4);
+        assert_eq!(*db2_count, 1);
     }
 
     #[tokio::test]

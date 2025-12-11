@@ -19,20 +19,21 @@ use risingwave_expr::{ExprError, Result, capture_context, function};
 use serde_json::json;
 
 use super::context::META_CLIENT;
+use crate::catalog::FragmentId;
 use crate::meta_client::FrontendMetaClient;
 
 #[function("rw_fragment_vnodes(int4) -> jsonb", volatile)]
 async fn rw_fragment_vnodes(fragment_id: i32) -> Result<JsonbVal> {
-    rw_fragment_vnodes_impl_captured(fragment_id).await
+    rw_fragment_vnodes_impl_captured((fragment_id as u32).into()).await
 }
 
 #[capture_context(META_CLIENT)]
 async fn rw_fragment_vnodes_impl(
     meta_client: &Arc<dyn FrontendMetaClient>,
-    fragment_id: i32,
+    fragment_id: FragmentId,
 ) -> Result<JsonbVal> {
     let actors = meta_client
-        .get_fragment_vnodes(fragment_id as u32)
+        .get_fragment_vnodes(fragment_id)
         .await
         .map_err(|e| ExprError::Internal(e.into()))?;
 

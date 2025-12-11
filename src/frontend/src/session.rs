@@ -52,6 +52,7 @@ use risingwave_common::config::{
     AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
     StreamingConfig, UdfConfig, load_config,
 };
+use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::{ConfigReporter, SessionConfig, VisibilityMode};
@@ -76,7 +77,6 @@ use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
 };
@@ -100,7 +100,8 @@ use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId, check_schema_writable,
+    CatalogError, CatalogErrorInner, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
+    check_schema_writable,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::describe::infer_describe;
@@ -1032,30 +1033,39 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
-                // If relation is created, return directly.
-                // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, We can't
-                // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
-                // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
-                if !is_creating {
-                    Ok(Either::Right(
-                        PgResponse::builder(stmt_type)
-                            .notice(format!("relation \"{}\" already exists, skipping", name))
-                            .into(),
-                    ))
-                } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
-                    // For now, when a Subscription is creating, we return directly with an additional message.
-                    // TODO: Subscription should also be processed in the same way as StreamingJob.
-                    Ok(Either::Right(
-                        PgResponse::builder(stmt_type)
-                            .notice(format!(
-                                "relation \"{}\" already exists but still creating, skipping",
-                                name
-                            ))
-                            .into(),
-                    ))
+            Err(e) if if_not_exists => {
+                if let CatalogErrorInner::Duplicated {
+                    name,
+                    under_creation,
+                    ..
+                } = e.inner()
+                {
+                    // If relation is created, return directly.
+                    // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, we can't
+                    // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
+                    // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
+                    if !*under_creation {
+                        Ok(Either::Right(
+                            PgResponse::builder(stmt_type)
+                                .notice(format!("relation \"{}\" already exists, skipping", name))
+                                .into(),
+                        ))
+                    } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
+                        // For now, when a Subscription is creating, we return directly with an additional message.
+                        // TODO: Subscription should also be processed in the same way as StreamingJob.
+                        Ok(Either::Right(
+                            PgResponse::builder(stmt_type)
+                                .notice(format!(
+                                    "relation \"{}\" already exists but still creating, skipping",
+                                    name
+                                ))
+                                .into(),
+                        ))
+                    } else {
+                        Ok(Either::Left(()))
+                    }
                 } else {
-                    Ok(Either::Left(()))
+                    Err(e.into())
                 }
             }
             Err(e) => Err(e.into()),
@@ -1189,7 +1199,7 @@ impl SessionImpl {
             connection.owner(),
             AclMode::Usage,
             connection.name.clone(),
-            Object::ConnectionId(connection.id),
+            connection.id,
         )])?;
 
         Ok(connection.clone())
@@ -1232,7 +1242,7 @@ impl SessionImpl {
         Ok(subscription.clone())
     }
 
-    pub fn get_table_by_id(&self, table_id: &TableId) -> Result<Arc<TableCatalog>> {
+    pub fn get_table_by_id(&self, table_id: TableId) -> Result<Arc<TableCatalog>> {
         let catalog_reader = self.env().catalog_reader().read_guard();
         Ok(catalog_reader.get_any_table_by_id(table_id)?.clone())
     }
@@ -1281,7 +1291,7 @@ impl SessionImpl {
             secret.owner(),
             AclMode::Usage,
             secret.name.clone(),
-            Object::SecretId(secret.id.secret_id()),
+            secret.id,
         )])?;
 
         Ok(secret.clone())
@@ -1942,12 +1952,12 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
 }
 
 pub struct WorkerProcessId {
-    pub worker_id: u32,
+    pub worker_id: WorkerId,
     pub process_id: i32,
 }
 
 impl WorkerProcessId {
-    pub fn new(worker_id: u32, process_id: i32) -> Self {
+    pub fn new(worker_id: WorkerId, process_id: i32) -> Self {
         Self {
             worker_id,
             process_id,
@@ -1976,7 +1986,7 @@ impl TryFrom<String> for WorkerProcessId {
         let Ok(process_id) = splits[1].parse::<i32>() else {
             return Err(INVALID.to_owned());
         };
-        Ok(WorkerProcessId::new(worker_id, process_id))
+        Ok(WorkerProcessId::new(worker_id.into(), process_id))
     }
 }
 

@@ -43,7 +43,7 @@ impl FastInsertExecutor {
         dml_manager: DmlManagerRef,
         insert_req: FastInsertRequest,
     ) -> Result<(FastInsertExecutor, DataChunk)> {
-        let table_id = TableId::new(insert_req.table_id);
+        let table_id = insert_req.table_id;
         let column_indices = insert_req
             .column_indices
             .iter()

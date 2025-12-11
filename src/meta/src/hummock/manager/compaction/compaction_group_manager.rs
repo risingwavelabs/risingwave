@@ -420,7 +420,7 @@ impl HummockManager {
                     .state_table_info
                     .compaction_group_member_table_ids(levels.group_id)
                     .iter()
-                    .map(|table_id| table_id.as_raw_id())
+                    .copied()
                     .collect_vec(),
                 compaction_config: Some(compaction_config),
             };
@@ -447,7 +447,7 @@ impl HummockManager {
                     let stats_size = versioning_guard
                         .version_stats
                         .table_stats
-                        .get(&table_id.as_raw_id())
+                        .get(table_id)
                         .map(|stats| stats.total_key_size + stats.total_value_size)
                         .unwrap_or(0);
                     let table_size = std::cmp::max(stats_size, 0) as u64;
@@ -786,9 +786,9 @@ mod tests {
         let table_fragment_1 = StreamJobFragments::for_test(
             JobId::new(10),
             BTreeMap::from([(
-                1,
+                1.into(),
                 Fragment {
-                    fragment_id: 1,
+                    fragment_id: 1.into(),
                     state_table_ids: vec![10.into(), 11.into(), 12.into(), 13.into()],
                     ..Default::default()
                 },
@@ -797,9 +797,9 @@ mod tests {
         let table_fragment_2 = StreamJobFragments::for_test(
             JobId::new(20),
             BTreeMap::from([(
-                2,
+                2.into(),
                 Fragment {
-                    fragment_id: 2,
+                    fragment_id: 2.into(),
                     state_table_ids: vec![20.into(), 21.into(), 22.into(), 23.into()],
                     ..Default::default()
                 },

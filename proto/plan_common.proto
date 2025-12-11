@@ -304,3 +304,15 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
   ADDITIONAL_COLUMN_TYPE_PULSAR_MESSAGE_ID_DATA = 9; // for pulsar source, used for ack message
 }
+
+message SourceRefreshMode {
+  message SourceRefreshModeStreaming {}
+  message SourceRefreshModeFullReload {
+    optional int64 refresh_interval_sec = 1;
+  }
+
+  oneof refresh_mode {
+    SourceRefreshModeStreaming streaming = 1;
+    SourceRefreshModeFullReload full_reload = 2;
+  }
+}

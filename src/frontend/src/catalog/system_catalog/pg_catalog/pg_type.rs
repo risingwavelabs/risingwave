@@ -78,7 +78,7 @@ fn read_pg_type(reader: &SysCatalogReaderImpl) -> Result<Vec<PgType>> {
     let pg_catalog_id = catalog_reader
         .get_schema_by_name(&reader.auth_context.database, "pg_catalog")?
         .id()
-        .as_raw_id() as i32;
+        .as_i32_id();
 
     let rw_types = read_rw_types(reader)?;
 

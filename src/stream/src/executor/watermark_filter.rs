@@ -415,7 +415,7 @@ mod tests {
         table_id: u32,
     ) -> (BatchTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let table = Table {
-            id: table_id,
+            id: table_id.into(),
             columns: data_types
                 .iter()
                 .enumerate()

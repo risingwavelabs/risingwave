@@ -41,7 +41,7 @@ impl ConfigService for ConfigServiceImpl {
     ) -> Result<Response<ShowConfigResponse>, Status> {
         let batch_config = serde_json::to_string(self.batch_mgr.config())
             .map_err(|e| e.to_status(Code::Internal, "compute"))?;
-        let stream_config = serde_json::to_string(&self.stream_mgr.env.config())
+        let stream_config = serde_json::to_string(&self.stream_mgr.env.global_config())
             .map_err(|e| e.to_status(Code::Internal, "compute"))?;
 
         let show_config_response = ShowConfigResponse {

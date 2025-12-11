@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{Field, SYS_CATALOG_START_ID};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbView;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
@@ -32,6 +33,8 @@ pub struct ViewCatalog {
     pub properties: WithOptions,
     pub sql: String,
     pub columns: Vec<Field>,
+    pub created_at_epoch: Option<Epoch>,
+    pub created_at_cluster_version: Option<String>,
 }
 
 impl From<&PbView> for ViewCatalog {
@@ -39,12 +42,14 @@ impl From<&PbView> for ViewCatalog {
         ViewCatalog {
             id: view.id,
             name: view.name.clone(),
-            schema_id: view.schema_id.into(),
-            database_id: view.database_id.into(),
+            schema_id: view.schema_id,
+            database_id: view.database_id,
             owner: view.owner,
             properties: WithOptions::new_with_options(view.properties.clone()),
             sql: view.sql.clone(),
             columns: view.columns.iter().map(|f| f.into()).collect(),
+            created_at_epoch: view.created_at_epoch.map(Epoch::from),
+            created_at_cluster_version: view.created_at_cluster_version.clone(),
         }
     }
 }
@@ -77,7 +82,7 @@ impl ViewCatalog {
 
     /// Returns true if this view is a system view.
     pub fn is_system_view(&self) -> bool {
-        self.id >= SYS_CATALOG_START_ID as u32
+        self.id.as_raw_id() >= SYS_CATALOG_START_ID as u32
     }
 }
 

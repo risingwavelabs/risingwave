@@ -44,6 +44,8 @@ pub async fn extract_iceberg_columns(
             .collect();
         columns.extend(ColumnCatalog::iceberg_hidden_cols());
 
+        tracing::info!("iceberg columns: {:?}", columns);
+
         Ok(columns)
     } else {
         Err(anyhow!(format!(

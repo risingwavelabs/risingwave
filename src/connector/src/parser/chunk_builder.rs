@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 use risingwave_common::array::stream_record::RecordType;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::types::{Datum, DatumCow, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::{AccessError, AccessResult};
@@ -283,9 +283,9 @@ impl SourceStreamChunkRowWriter<'_> {
                     // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
                     // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                     //       see #13105
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                        LazyLock::new(LogSuppresser::default);
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                        LazyLock::new(LogSuppressor::default);
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         tracing::warn!(
                             error = %error.as_report(),
                             split_id = self.row_meta.as_ref().map(|m| m.split_id),

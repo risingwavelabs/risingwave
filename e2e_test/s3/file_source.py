@@ -258,7 +258,9 @@ def upload_to_s3_bucket(config, minio_client, run_id, files, start_bias, dir):
             os.fsync(f.fileno())
 
         minio_client.fput_object(
-            "hummock001", _s3(idx, start_bias), _local(idx, start_bias)
+            bucket_name="hummock001",
+            object_name=_s3(idx, start_bias),
+            file_path=_local(idx, start_bias),
         )
 
 
@@ -298,9 +300,9 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        "127.0.0.1:9301",
-        "hummockadmin",
-        "hummockadmin",
+        endpoint="127.0.0.1:9301",
+        access_key="hummockadmin",
+        secret_key="hummockadmin",
         secure=False,
     )
     run_id = str(random.randint(1000, 9999))
@@ -315,9 +317,9 @@ if __name__ == "__main__":
                     os.fsync(f.fileno())
 
             client.fput_object(
-                "hummock001",
-                _s3(idx),
-                _local(idx) + '.gz'
+                bucket_name="hummock001",
+                object_name=_s3(idx),
+                file_path=_local(idx) + '.gz',
             )
     else:
         _s3 = lambda idx: f"{run_id}_data_{idx}.{fmt}"
@@ -327,9 +329,9 @@ if __name__ == "__main__":
                 os.fsync(f.fileno())
 
             client.fput_object(
-                "hummock001",
-                _s3(idx),
-                _local(idx)
+                bucket_name="hummock001",
+                object_name=_s3(idx),
+                file_path=_local(idx),
             )
 
     # do test
@@ -346,7 +348,7 @@ if __name__ == "__main__":
     )
     # clean up s3 files
     for idx, _ in enumerate(formatted_files):
-        client.remove_object("hummock001", _s3(idx, 0))
+        client.remove_object(bucket_name="hummock001", object_name=_s3(idx, 0))
 
     # test file source handle incremental files
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
@@ -378,4 +380,4 @@ if __name__ == "__main__":
     _s3 = lambda idx, start_bias: f"test_incremental/{run_id}_data_{idx + start_bias}.{fmt}"
     # clean up s3 files in test_incremental dir
     for idx, _ in enumerate(formatted_files):
-        client.remove_object("hummock001", _s3(idx, 0))
+        client.remove_object(bucket_name="hummock001", object_name=_s3(idx, 0))

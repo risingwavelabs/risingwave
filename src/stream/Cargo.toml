@@ -37,6 +37,7 @@ itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
+moka = { version = "0.12.0", features = ["sync"] }
 multimap = "0.10"
 parking_lot = { workspace = true }
 pin-project = "1"

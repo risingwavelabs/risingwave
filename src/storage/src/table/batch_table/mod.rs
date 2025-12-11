@@ -137,7 +137,7 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
         vnodes: Option<Arc<Bitmap>>,
         table_desc: &StorageTableDesc,
     ) -> Self {
-        let table_id = table_desc.table_id.into();
+        let table_id = table_desc.table_id;
         let column_descs = table_desc
             .columns
             .iter()

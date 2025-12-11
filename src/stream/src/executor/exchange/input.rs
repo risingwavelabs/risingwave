@@ -23,8 +23,7 @@ use risingwave_common::util::addr::{HostAddr, is_local_address};
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
-    BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageBatch,
-    DispatcherMessageStreamItem,
+    BarrierInner, DispatcherMessage, DispatcherMessageBatch, DispatcherMessageStreamItem,
 };
 use crate::task::{FragmentId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
 
@@ -75,16 +74,6 @@ pub(crate) fn assert_equal_dispatcher_barrier<M1, M2>(
 ) {
     assert_eq!(first.epoch, second.epoch);
     assert_eq!(first.kind, second.kind);
-}
-
-pub(crate) fn apply_dispatcher_barrier(
-    recv_barrier: &mut Barrier,
-    dispatcher_barrier: DispatcherBarrier,
-) {
-    assert_equal_dispatcher_barrier(recv_barrier, &dispatcher_barrier);
-    recv_barrier
-        .passed_actors
-        .extend(dispatcher_barrier.passed_actors);
 }
 
 impl LocalInput {
@@ -201,7 +190,7 @@ impl RemoteInput {
                 metrics,
                 local_barrier_manager
                     .env
-                    .config()
+                    .global_config()
                     .developer
                     .exchange_batched_permits,
             ),
