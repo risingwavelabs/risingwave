@@ -90,6 +90,7 @@ impl CompactionConfigBuilder {
                 enable_optimize_l0_interval_selection: Some(
                     compaction_config::enable_optimize_l0_interval_selection(),
                 ),
+                small_file_size_threshold: None,
             },
         }
     }

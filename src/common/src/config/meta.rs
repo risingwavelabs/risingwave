@@ -227,6 +227,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
+    /// Schedule `small_file` compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_small_file_compaction_interval_sec")]
+    pub periodic_small_file_compaction_interval_sec: u64,
+
     #[serde(default = "default::meta::move_table_size_limit")]
     #[deprecated]
     pub move_table_size_limit: u64,
@@ -631,6 +635,10 @@ pub mod default {
 
         pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
             600
+        }
+
+        pub fn periodic_small_file_compaction_interval_sec() -> u64 {
+            300
         }
 
         // limit the size of state table to trigger split by high throughput

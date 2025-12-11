@@ -75,8 +75,8 @@ use tracing::warn;
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
-    ManualCompactionSelector, SpaceReclaimCompactionSelector, TombstoneCompactionSelector,
-    TtlCompactionSelector, VnodeWatermarkCompactionSelector,
+    ManualCompactionSelector, SmallFileCompactionSelector, SpaceReclaimCompactionSelector,
+    TombstoneCompactionSelector, TtlCompactionSelector, VnodeWatermarkCompactionSelector,
 };
 use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
 use crate::hummock::error::{Error, Result};
@@ -137,6 +137,10 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
     compaction_selectors.insert(
         compact_task::TaskType::VnodeWatermark,
         Box::<VnodeWatermarkCompactionSelector>::default(),
+    );
+    compaction_selectors.insert(
+        compact_task::TaskType::SmallFile,
+        Box::<SmallFileCompactionSelector>::default(),
     );
     compaction_selectors
 }
@@ -1332,6 +1336,8 @@ impl CompactionState {
             Some(compact_task::TaskType::Ttl)
         } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
             Some(compact_task::TaskType::Tombstone)
+        } else if guard.contains(&(group, compact_task::TaskType::SmallFile)) {
+            Some(compact_task::TaskType::SmallFile)
         } else if guard.contains(&(group, compact_task::TaskType::VnodeWatermark)) {
             Some(compact_task::TaskType::VnodeWatermark)
         } else {

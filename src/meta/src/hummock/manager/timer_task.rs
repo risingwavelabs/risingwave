@@ -55,6 +55,7 @@ impl HummockManager {
                 SpaceReclaimCompactionTrigger,
                 TtlCompactionTrigger,
                 TombstoneCompactionTrigger,
+                SmallFileCompactionTrigger,
 
                 FullGc,
 
@@ -139,6 +140,20 @@ impl HummockManager {
             let tombstone_reclaim_trigger = IntervalStream::new(tombstone_reclaim_trigger_interval)
                 .map(|_| HummockTimerEvent::TombstoneCompactionTrigger);
 
+            let mut small_file_reclaim_trigger_interval =
+                tokio::time::interval(Duration::from_secs(
+                    hummock_manager
+                        .env
+                        .opts
+                        .periodic_small_file_compaction_interval_sec,
+                ));
+            small_file_reclaim_trigger_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            small_file_reclaim_trigger_interval.reset();
+            let small_file_reclaim_trigger =
+                IntervalStream::new(small_file_reclaim_trigger_interval)
+                    .map(|_| HummockTimerEvent::SmallFileCompactionTrigger);
+
             let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
                 Box::pin(check_compact_trigger),
                 Box::pin(stat_report_trigger),
@@ -148,6 +163,7 @@ impl HummockManager {
                 Box::pin(ttl_reclaim_trigger),
                 Box::pin(full_gc_trigger),
                 Box::pin(tombstone_reclaim_trigger),
+                Box::pin(small_file_reclaim_trigger),
             ];
 
             let periodic_scheduling_compaction_group_split_interval_sec = hummock_manager
@@ -446,6 +462,19 @@ impl HummockManager {
                                     hummock_manager
                                         .on_handle_trigger_multi_group(
                                             compact_task::TaskType::Tombstone,
+                                        )
+                                        .await;
+                                }
+
+                                HummockTimerEvent::SmallFileCompactionTrigger => {
+                                    // Disable periodic trigger for compaction_deterministic_test.
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager
+                                        .on_handle_trigger_multi_group(
+                                            compact_task::TaskType::SmallFile,
                                         )
                                         .await;
                                 }

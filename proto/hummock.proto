@@ -463,6 +463,7 @@ message CompactTask {
     TOMBSTONE = 6;
     EMERGENCY = 7;
     VNODE_WATERMARK = 8;
+    SMALL_FILE = 9;
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
@@ -1006,6 +1007,10 @@ message CompactionConfig {
 
   // Enable the optimization of the interval selection for the level0 compaction
   optional bool enable_optimize_l0_interval_selection = 30;
+
+  // The threshold to identify small files for small file compaction (in bytes)
+  // Files smaller than this threshold will be candidates for small file compaction
+  optional uint64 small_file_size_threshold = 31;
 }
 
 message TableStats {
