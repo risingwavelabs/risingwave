@@ -106,7 +106,7 @@ createdb
 psql < ./e2e_test/source_legacy/cdc/postgres_cdc.sql
 
 echo "--- starting risingwave cluster"
-RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,jni=info" \
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
 
