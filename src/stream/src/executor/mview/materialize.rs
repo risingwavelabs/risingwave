@@ -323,7 +323,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         && b.has_more_downstream_fragments(self.actor_context.id)
                     {
                         self.may_have_downstream = true;
-                        self.materialize_cache.vnode_max_keys.clear();
                     }
                     Self::may_update_depended_subscriptions(
                         &mut self.depended_subscription_ids,
