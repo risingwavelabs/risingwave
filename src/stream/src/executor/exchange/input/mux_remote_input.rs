@@ -18,10 +18,11 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use futures::StreamExt;
 use futures::future::Either;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::task_service::get_mux_stream_request::{self, AddPermits, Value};
-use risingwave_pb::task_service::{GetMuxStreamRequest, GetMuxStreamResponse};
+use risingwave_pb::task_service::{GetMuxStreamRequest, GetMuxStreamResponse, PbPermits, permits};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{ComputeClient, ComputeClientPoolRef};
 use tokio::sync::mpsc;
@@ -51,12 +52,20 @@ impl Worker {
     async fn new(
         client: ComputeClient,
         init: get_mux_stream_request::Init,
+        config: &StreamingConfig,
     ) -> Result<Self, RpcError> {
         let up_fragment_id = init.up_fragment_id;
+        let batched_permits_limit = config.developer.exchange_batched_permits as u32;
         let (stream, req_tx) = client.get_mux_stream(init).await?;
         let (register_tx, register_rx) = mpsc::unbounded_channel();
 
-        let join_handle = tokio::spawn(Self::run(up_fragment_id, stream, req_tx, register_rx));
+        let join_handle = tokio::spawn(Self::run(
+            up_fragment_id,
+            stream,
+            req_tx,
+            register_rx,
+            batched_permits_limit,
+        ));
 
         Ok(Self {
             register_tx,
@@ -69,6 +78,7 @@ impl Worker {
         stream: Streaming<GetMuxStreamResponse>,
         req_tx: mpsc::UnboundedSender<GetMuxStreamRequest>,
         register_rx: mpsc::UnboundedReceiver<RegisterReq>,
+        batched_permits_limit: u32,
     ) {
         enum Event {
             Register(RegisterReq),
@@ -81,8 +91,45 @@ impl Worker {
             stream.map(Event::Response),
         );
 
-        // All registered message channels.
-        let mut msg_txs: HashMap<(ActorId, ActorId), mpsc::UnboundedSender<_>> = HashMap::new();
+        type MsgTx = mpsc::UnboundedSender<StreamExecutorResult<DispatcherMessage>>;
+        struct ActorEntry {
+            msg_tx: MsgTx,
+            batched_record_permits: u32,
+        }
+
+        impl ActorEntry {
+            fn new(msg_tx: MsgTx) -> Self {
+                Self {
+                    msg_tx,
+                    batched_record_permits: 0,
+                }
+            }
+
+            fn accumulate_permits(
+                &mut self,
+                permits: permits::Value,
+                batched_permits_limit: u32,
+            ) -> Option<permits::Value> {
+                match permits {
+                    // For records, batch the permits we received to reduce the backward
+                    // `AddPermits` messages.
+                    permits::Value::Record(p) => {
+                        self.batched_record_permits += p;
+                        if self.batched_record_permits >= batched_permits_limit {
+                            let permits = std::mem::take(&mut self.batched_record_permits);
+                            Some(permits::Value::Record(permits))
+                        } else {
+                            None
+                        }
+                    }
+                    // For barriers, always send it back immediately.
+                    permits::Value::Barrier(p) => Some(permits::Value::Barrier(p)),
+                }
+            }
+        }
+
+        // All registered actor pairs.
+        let mut entries: HashMap<(ActorId, ActorId), ActorEntry> = HashMap::new();
 
         let result: Result<(), ExchangeChannelClosed> = try {
             while let Some(event) = stream.next().await {
@@ -97,7 +144,10 @@ impl Worker {
                                 ExchangeChannelClosed::remote_input_fragment(up_fragment_id, None)
                             })?;
 
-                        msg_txs.insert((register.up_actor_id, register.down_actor_id), msg_tx);
+                        entries.insert(
+                            (register.up_actor_id, register.down_actor_id),
+                            ActorEntry::new(msg_tx),
+                        );
                     }
 
                     // Exchange message from the upstream.
@@ -112,7 +162,7 @@ impl Worker {
                         })?;
 
                         let actor_pair = (up_actor_id, down_actor_id);
-                        let Some(msg_tx) = msg_txs.get(&actor_pair) else {
+                        let Some(entry) = entries.get_mut(&actor_pair) else {
                             tracing::warn!(
                                 %up_actor_id,
                                 %down_actor_id,
@@ -121,18 +171,30 @@ impl Worker {
                             continue;
                         };
 
-                        // TODO(mux): batch putting back permits
-                        req_tx
-                            .send(GetMuxStreamRequest {
-                                value: Some(Value::AddPermits(AddPermits {
-                                    up_actor_id,
-                                    down_actor_id,
-                                    permits,
-                                })),
-                            })
-                            .map_err(|_| {
-                                ExchangeChannelClosed::remote_input_fragment(up_fragment_id, None)
-                            })?;
+                        let add_permits = permits.and_then(|p| p.value).and_then(|permits| {
+                            entry.accumulate_permits(permits, batched_permits_limit)
+                        });
+                        let msg_tx = &entry.msg_tx;
+
+                        // Put permits back to the upstream if accumulated enough.
+                        if let Some(permits) = add_permits {
+                            req_tx
+                                .send(GetMuxStreamRequest {
+                                    value: Some(Value::AddPermits(AddPermits {
+                                        up_actor_id,
+                                        down_actor_id,
+                                        permits: Some(PbPermits {
+                                            value: Some(permits),
+                                        }),
+                                    })),
+                                })
+                                .map_err(|_| {
+                                    ExchangeChannelClosed::remote_input_fragment(
+                                        up_fragment_id,
+                                        None,
+                                    )
+                                })?;
+                        }
 
                         // Any error occurred during sending the message to the specific actor should be
                         // treated as the actor disconnected. We should gracefully remove the actor from
@@ -158,7 +220,7 @@ impl Worker {
                                 %down_actor_id,
                                 "downstream actor disconnected, removing from mux worker",
                             );
-                            msg_txs.remove(&actor_pair);
+                            entries.remove(&actor_pair);
                         }
                     }
                 }
@@ -168,8 +230,8 @@ impl Worker {
         // Forward worker error to all registered actors.
         // Although we always emit an error in `MuxRemoteInputStream`, this can be more accurate.
         if let Err(e) = result {
-            for (_, msg_tx) in msg_txs {
-                msg_tx.send(Err(e.clone().into())).ok();
+            for (_, entry) in entries {
+                entry.msg_tx.send(Err(e.clone().into())).ok();
             }
         }
     }
@@ -215,6 +277,7 @@ impl MuxExchangeWorkers {
         init: get_mux_stream_request::Init,
         upstream_addr: HostAddr,
         client_pool: ComputeClientPoolRef,
+        config: &StreamingConfig,
     ) -> StreamExecutorResult<Worker> {
         self.cache
             .entry(WorkerKey {
@@ -224,7 +287,7 @@ impl MuxExchangeWorkers {
             .or_insert_with_if(
                 async move {
                     let client = client_pool.get_by_addr(upstream_addr).await?;
-                    let worker = Worker::new(client, init).await?;
+                    let worker = Worker::new(client, init, config).await?;
                     Ok(worker)
                 },
                 |w| match w {
@@ -262,7 +325,7 @@ impl RemoteInput {
 
         let worker = env
             .mux_exchange_workers()
-            .get(init, upstream_addr, env.client_pool())
+            .get(init, upstream_addr, env.client_pool(), env.global_config())
             .await?;
 
         let (msg_tx, msg_rx) = mpsc::unbounded_channel();
