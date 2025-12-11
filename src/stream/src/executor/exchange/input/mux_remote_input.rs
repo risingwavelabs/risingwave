@@ -53,14 +53,18 @@ impl Worker {
         client: ComputeClient,
         init: get_mux_stream_request::Init,
         config: &StreamingConfig,
+        metrics: Arc<StreamingMetrics>,
     ) -> Result<Self, RpcError> {
         let up_fragment_id = init.up_fragment_id;
+        let down_fragment_id = init.down_fragment_id;
         let batched_permits_limit = config.developer.exchange_batched_permits as u32;
         let (stream, req_tx) = client.get_mux_stream(init).await?;
         let (register_tx, register_rx) = mpsc::unbounded_channel();
 
         let join_handle = tokio::spawn(Self::run(
             up_fragment_id,
+            down_fragment_id,
+            metrics,
             stream,
             req_tx,
             register_rx,
@@ -75,11 +79,19 @@ impl Worker {
 
     async fn run(
         up_fragment_id: FragmentId,
+        down_fragment_id: FragmentId,
+        metrics: Arc<StreamingMetrics>,
         stream: Streaming<GetMuxStreamResponse>,
         req_tx: mpsc::UnboundedSender<GetMuxStreamRequest>,
         register_rx: mpsc::UnboundedReceiver<RegisterReq>,
         batched_permits_limit: u32,
     ) {
+        let up_fragment_id_str = up_fragment_id.to_string();
+        let down_fragment_id_str = down_fragment_id.to_string();
+        let exchange_frag_recv_size = metrics
+            .exchange_frag_recv_size
+            .with_guarded_label_values(&[&up_fragment_id_str, &down_fragment_id_str]);
+
         enum Event {
             Register(RegisterReq),
             Response(Result<GetMuxStreamResponse, tonic::Status>),
@@ -202,6 +214,9 @@ impl Worker {
                         let send_result: Result<(), ()> = try {
                             let msg = message.unwrap();
 
+                            let bytes = DispatcherMessageBatch::get_encoded_len(&msg);
+                            exchange_frag_recv_size.inc_by(bytes as u64);
+
                             match DispatcherMessageBatch::from_protobuf(&msg) {
                                 Ok(msg) => {
                                     for msg in msg.into_messages() {
@@ -278,6 +293,7 @@ impl MuxExchangeWorkers {
         upstream_addr: HostAddr,
         client_pool: ComputeClientPoolRef,
         config: &StreamingConfig,
+        metrics: Arc<StreamingMetrics>,
     ) -> StreamExecutorResult<Worker> {
         self.cache
             .entry(WorkerKey {
@@ -287,7 +303,7 @@ impl MuxExchangeWorkers {
             .or_insert_with_if(
                 async move {
                     let client = client_pool.get_by_addr(upstream_addr).await?;
-                    let worker = Worker::new(client, init, config).await?;
+                    let worker = Worker::new(client, init, config, metrics).await?;
                     Ok(worker)
                 },
                 |w| match w {
@@ -311,7 +327,7 @@ impl RemoteInput {
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
-        _metrics: Arc<StreamingMetrics>,
+        metrics: Arc<StreamingMetrics>,
     ) -> StreamExecutorResult<Self> {
         let env = &local_barrier_manager.env;
         let actor_id = up_down_ids.0;
@@ -325,7 +341,13 @@ impl RemoteInput {
 
         let worker = env
             .mux_exchange_workers()
-            .get(init, upstream_addr, env.client_pool(), env.global_config())
+            .get(
+                init,
+                upstream_addr,
+                env.client_pool(),
+                env.global_config(),
+                metrics.clone(),
+            )
             .await?;
 
         let (msg_tx, msg_rx) = mpsc::unbounded_channel();

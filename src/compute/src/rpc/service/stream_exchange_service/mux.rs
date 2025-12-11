@@ -25,11 +25,14 @@ use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Permits}
 use risingwave_stream::task::LocalStreamManager;
 use tonic::{Status, Streaming};
 
-use crate::rpc::service::stream_exchange_service::StreamExchangeServiceImpl;
+use crate::rpc::service::stream_exchange_service::{
+    StreamExchangeServiceImpl, StreamExchangeServiceMetrics,
+};
 
 impl StreamExchangeServiceImpl {
     #[try_stream(ok = GetMuxStreamResponse, error = Status)]
     pub(super) async fn get_mux_stream_impl(
+        metrics: Arc<StreamExchangeServiceMetrics>,
         stream_mgr: LocalStreamManager,
         mut request_stream: Streaming<GetMuxStreamRequest>,
     ) {
@@ -37,8 +40,8 @@ impl StreamExchangeServiceImpl {
 
         // Extract the first `Init` request from the stream.
         let Init {
-            up_fragment_id: _,
-            down_fragment_id: _,
+            up_fragment_id,
+            down_fragment_id,
             database_id,
             term_id,
         } = {
@@ -53,6 +56,12 @@ impl StreamExchangeServiceImpl {
                 }
             }
         };
+
+        let up_fragment_id_str = up_fragment_id.to_string();
+        let down_fragment_id_str = down_fragment_id.to_string();
+        let stream_fragment_exchange_bytes = metrics
+            .stream_fragment_exchange_bytes
+            .with_label_values(&[&up_fragment_id_str, &down_fragment_id_str]);
 
         enum Event {
             Request(Result<GetMuxStreamRequest, Status>),
@@ -150,6 +159,9 @@ impl StreamExchangeServiceImpl {
                         up_actor_id,
                         down_actor_id,
                     };
+
+                    let bytes = DispatcherMessageBatch::get_encoded_len(&response);
+                    stream_fragment_exchange_bytes.inc_by(bytes as u64);
 
                     yield response;
                 }

@@ -108,6 +108,7 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
         let request_stream = request.into_inner();
 
         Ok(Response::new(Self::get_mux_stream_impl(
+            self.metrics.clone(),
             self.stream_mgr.clone(),
             request_stream,
         )))
