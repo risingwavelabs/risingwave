@@ -42,6 +42,7 @@ use risingwave_common::catalog::{
 use risingwave_common::types::{Datum, DatumRef, JsonbVal, ToDatumRef, ToOwnedDatum};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
+use rumqttc::matches;
 use serde::{Deserialize, Serialize};
 
 pub use self::metrics::{GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics};
@@ -574,27 +575,27 @@ impl IcebergSplitEnumerator {
         iceberg_scan_type: IcebergScanType,
         predicate: IcebergPredicate,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
-        let schema_names = schema.names();
-        let require_names = schema_names
-            .iter()
-            .filter(|name| {
-                name.ne(&ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
-                    && name.ne(&ICEBERG_FILE_PATH_COLUMN_NAME)
-                    && name.ne(&ICEBERG_FILE_POS_COLUMN_NAME)
-            })
-            .cloned()
-            .collect_vec();
-
         let table_schema = table.metadata().current_schema();
         tracing::debug!("iceberg_table_schema: {:?}", table_schema);
-        let scan = table
+        let mut scan_builder = table
             .scan()
             .with_filter(predicate)
             .snapshot_id(snapshot_id)
-            .with_delete_file_processing_enabled(true)
-            .select(require_names)
-            .build()
-            .map_err(|e| anyhow!(e))?;
+            .with_delete_file_processing_enabled(true);
+        if !matches!(iceberg_scan_type, IcebergScanType::CountStar) {
+            let schema_names = schema.names();
+            let require_names = schema_names
+                .iter()
+                .filter(|name| {
+                    name.ne(&ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
+                        && name.ne(&ICEBERG_FILE_PATH_COLUMN_NAME)
+                        && name.ne(&ICEBERG_FILE_POS_COLUMN_NAME)
+                })
+                .cloned()
+                .collect_vec();
+            scan_builder = scan_builder.select(require_names);
+        }
+        let scan = scan_builder.build().map_err(|e| anyhow!(e))?;
 
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
 
