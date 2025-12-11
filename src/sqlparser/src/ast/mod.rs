@@ -1586,6 +1586,28 @@ pub enum Statement {
         local: bool,
         value: SetTimeZoneValue,
     },
+    /// `SET [ SESSION | LOCAL ] ROLE role_name`
+    ///
+    /// SingleQuotedString is not supported in role_name for simplicity. See the PostgreSQL quoting bug below:
+    /// ```
+    /// test=# set role 'no"ne';
+    /// ERROR:  role "no"ne" does not exist
+    /// ```
+    /// (expected: "no""ne" or 'no"ne')
+    ///
+    /// `none` is just a reserved/builtin role rather than a special syntax.
+    /// ```
+    /// test=# create role "none";
+    /// ERROR:  role name "none" is reserved
+    /// LINE 1: create role "none";
+    ///                     ^
+    /// test=# set role "none";
+    /// SET
+    /// ```
+    SetRole {
+        local: bool,
+        role: Ident,
+    },
     /// `COMMENT ON ...`
     ///
     /// Note: this is a PostgreSQL-specific statement.
@@ -2322,6 +2344,14 @@ impl Statement {
                     write!(f, " LOCAL")?;
                 }
                 write!(f, " TIME ZONE {}", value)?;
+                Ok(())
+            }
+            Statement::SetRole { local, role } => {
+                write!(f, "SET")?;
+                if *local {
+                    write!(f, " LOCAL")?;
+                }
+                write!(f, " ROLE {}", role)?;
                 Ok(())
             }
             Statement::Commit { chain } => {
