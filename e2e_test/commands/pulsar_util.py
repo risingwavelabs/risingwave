@@ -279,8 +279,8 @@ class PulsarCat:
         print(f"Compacting topic: {topic}")
 
         # Use admin API to compact topic
-        encoded_topic = topic.replace('://', '/').replace('/', '%2F')
-        url = f"{self.admin_url}/admin/v2/{encoded_topic}/compact"
+        encoded_topic = topic.replace('://', '/')
+        url = f"{self.admin_url}/admin/v2/{encoded_topic}/compaction"
         response = requests.post(url)
         if response.status_code == 200:
             print(f"Topic {topic} compacted successfully")
