@@ -719,7 +719,7 @@ pub async fn scan_task_to_chunk_with_deletes(
         if need_seq_num {
             let (mut columns, visibility) = chunk.into_parts();
             columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
-                std::iter::repeat(data_sequence_number).take(row_count),
+                std::iter::repeat_n(data_sequence_number, row_count),
             ))));
             chunk = DataChunk::from_parts(columns.into(), visibility);
         }
@@ -727,7 +727,7 @@ pub async fn scan_task_to_chunk_with_deletes(
         if need_file_path_and_pos {
             let (mut columns, visibility) = chunk.into_parts();
             columns.push(Arc::new(ArrayImpl::Utf8(Utf8Array::from_iter(
-                std::iter::repeat(data_file_path.as_str()).take(row_count),
+                std::iter::repeat_n(data_file_path.as_str(), row_count),
             ))));
 
             // Generate position values for each row in the batch
