@@ -281,11 +281,69 @@ class PulsarCat:
         # Use admin API to compact topic
         encoded_topic = topic.replace('://', '/')
         url = f"{self.admin_url}/admin/v2/{encoded_topic}/compaction"
-        response = requests.post(url)
-        if response.status_code == 200:
-            print(f"Topic {topic} compacted successfully")
-        else:
-            print(f"Failed to compact topic: {response.status_code} - {response.text}")
+        for method_name, method in (("PUT", requests.put), ("POST", requests.post)):
+            response = method(url)
+            if response.status_code in [200, 204]:
+                print(f"Topic {topic} compacted successfully via {method_name}")
+                return
+            if response.status_code not in [404, 405]:
+                print(f"Failed to compact topic with {method_name}: {response.status_code} - {response.text}")
+                sys.exit(1)
+
+        print(f"Failed to compact topic: {response.status_code} - {response.text}")
+        sys.exit(1)
+
+    def check_compaction_status(self, topic: str):
+        """Check compaction status for a topic"""
+        topic = self._normalize_topic(topic)
+        print(f"Checking compaction status for topic: {topic}")
+
+        # Use admin API to get compaction status
+        encoded_topic = topic.replace('://', '/')
+        url = f"{self.admin_url}/admin/v2/{encoded_topic}/compaction"
+
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                status = response.json()
+                print("\nCompaction Status:")
+                print(f"  Status: {status.get('status', 'N/A')}")
+
+                if 'lastCompactionRemovedEventCount' in status:
+                    print(f"  Last Compaction Removed Event Count: {status['lastCompactionRemovedEventCount']}")
+                if 'lastCompactionSucceedTimestamp' in status:
+                    print(f"  Last Compaction Succeed Timestamp: {status['lastCompactionSucceedTimestamp']}")
+                if 'lastCompactionFailedTimestamp' in status:
+                    print(f"  Last Compaction Failed Timestamp: {status['lastCompactionFailedTimestamp']}")
+                if 'lastCompactionDurationTimeInMills' in status:
+                    print(f"  Last Compaction Duration (ms): {status['lastCompactionDurationTimeInMills']}")
+
+                # Exit with code 0 if SUCCESS, 1 if RUNNING or ERROR
+                status_str = status.get('status', '').upper()
+                if status_str == 'SUCCESS':
+                    return 0
+                elif status_str == 'RUNNING':
+                    print("\nCompaction is still running...")
+                    sys.exit(1)
+                elif status_str in ['ERROR', 'FAILED']:
+                    print("\nCompaction failed!")
+                    sys.exit(1)
+                else:
+                    print(f"\nUnknown status: {status_str}")
+                    sys.exit(1)
+
+            elif response.status_code == 204:
+                print("Compaction has not been run on this topic yet")
+                sys.exit(1)
+            elif response.status_code == 404:
+                print(f"Topic {topic} not found")
+                sys.exit(1)
+            else:
+                print(f"Failed to get compaction status: {response.status_code} - {response.text}")
+                sys.exit(1)
+
+        except Exception as e:
+            print(f"Error checking compaction status: {e}")
             sys.exit(1)
 
     def check_unacked(self, topic: str, subscription: str):
@@ -369,6 +427,10 @@ def main():
     compact_parser = subparsers.add_parser('compact', help='Compact a topic')
     compact_parser.add_argument('--topic', '-t', required=True, help='Topic name')
 
+    # Check compaction status command
+    compaction_status_parser = subparsers.add_parser('check-compaction-status', help='Check compaction status of a topic')
+    compaction_status_parser.add_argument('--topic', '-t', required=True, help='Topic name')
+
     # Unacked command
     unacked_parser = subparsers.add_parser('unacked', help='Check unacknowledged messages')
     unacked_parser.add_argument('--topic', '-t', required=True, help='Topic name')
@@ -396,6 +458,8 @@ def main():
             pulsar_cat.check_unacked(args.topic, args.subscription)
         elif args.command == 'compact':
             pulsar_cat.compact(args.topic)
+        elif args.command == 'check-compaction-status':
+            pulsar_cat.check_compaction_status(args.topic)
     finally:
         pulsar_cat.close()
 

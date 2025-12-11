@@ -183,42 +183,30 @@ impl SplitReader for PulsarBrokerReader {
                 source_ctx.actor_id
             ));
 
-        if let Some(delay) = props.subscription_unacked_resend_delay {
-            builder = builder.with_unacked_message_resend_delay(Some(delay));
-        }
-
         let mut already_read_offset = None;
 
-        let builder = match split.start_offset.clone() {
+        let mut consumer_option = match split.start_offset.clone() {
             PulsarEnumeratorOffset::Earliest => {
                 if topic.starts_with("non-persistent://") {
                     tracing::warn!(
                         "Earliest offset is not supported for non-persistent topic, use Latest instead"
                     );
-                    builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
-                    )
+                    ConsumerOptions::default().with_initial_position(InitialPosition::Latest)
                 } else {
-                    builder.with_options(
-                        ConsumerOptions::default()
-                            .with_initial_position(InitialPosition::Earliest)
-                            .durable(false),
-                    )
+                    ConsumerOptions::default()
+                        .with_initial_position(InitialPosition::Earliest)
+                        .durable(false)
                 }
             }
-            PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default()
-                    .with_initial_position(InitialPosition::Latest)
-                    .durable(false),
-            ),
+            PulsarEnumeratorOffset::Latest => ConsumerOptions::default()
+                .with_initial_position(InitialPosition::Latest)
+                .durable(false),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
                     tracing::warn!(
                         "MessageId offset is not supported for non-persistent topic, use Latest instead"
                     );
-                    builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
-                    )
+                    ConsumerOptions::default().with_initial_position(InitialPosition::Latest)
                 } else {
                     let start_message_id = parse_message_id(m.as_str())?;
                     already_read_offset = Some(PulsarFilterOffset {
@@ -226,17 +214,23 @@ impl SplitReader for PulsarBrokerReader {
                         entry_id: start_message_id.entry_id,
                         batch_index: start_message_id.batch_index,
                     });
-                    builder.with_options(pulsar::ConsumerOptions {
+                    pulsar::ConsumerOptions {
                         durable: Some(false),
                         start_message_id: Some(start_message_id),
-                        read_compacted: props.consumer_options.read_compacted,
                         ..Default::default()
-                    })
+                    }
                 }
             }
 
-            PulsarEnumeratorOffset::Timestamp(_) => builder,
+            PulsarEnumeratorOffset::Timestamp(_) => ConsumerOptions::default(),
         };
+        consumer_option.read_compacted = props.consumer_options.read_compacted;
+
+        builder = builder.with_options(consumer_option);
+
+        if let Some(delay) = props.subscription_unacked_resend_delay {
+            builder = builder.with_unacked_message_resend_delay(Some(delay));
+        }
 
         let consumer: Consumer<Vec<u8>, _> = builder.build().await?;
         if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
