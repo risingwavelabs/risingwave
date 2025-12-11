@@ -665,6 +665,8 @@ impl TableWatermarks {
 pub fn proto_to_watermark_serde_type(pb: &PbTableWatermarks) -> WatermarkSerdeType {
     match pb.watermark_serde_type() {
         PbWatermarkSerdeType::TypeUnspecified => {
+            // For backward compatibility.
+            #[expect(deprecated)]
             if pb.is_non_pk_prefix {
                 WatermarkSerdeType::NonPkPrefix
             } else {
@@ -734,6 +736,7 @@ impl From<&TableWatermarks> for PbTableWatermarks {
                 WatermarkDirection::Ascending => true,
                 WatermarkDirection::Descending => false,
             },
+            #[expect(deprecated)]
             is_non_pk_prefix,
             watermark_serde_type: PbWatermarkSerdeType::from(table_watermarks.watermark_type)
                 as i32,
@@ -783,6 +786,7 @@ impl From<TableWatermarks> for PbTableWatermarks {
                 WatermarkDirection::Ascending => true,
                 WatermarkDirection::Descending => false,
             },
+            #[expect(deprecated)]
             is_non_pk_prefix: match table_watermarks.watermark_type {
                 WatermarkSerdeType::NonPkPrefix => true,
                 WatermarkSerdeType::PkPrefix => false,

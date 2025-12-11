@@ -161,7 +161,7 @@ message TableWatermarks {
   bool is_ascending = 2;
 
   // The table watermark is non-pk prefix table watermark.
-  bool is_non_pk_prefix = 3;
+  bool is_non_pk_prefix = 3 [deprecated = true];
 
   WatermarkSerdeType watermark_serde_type = 4;
 }
