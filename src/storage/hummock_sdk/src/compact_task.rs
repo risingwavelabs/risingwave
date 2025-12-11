@@ -224,6 +224,37 @@ impl CompactTask {
     }
 }
 
+fn split_watermark_serde_types(
+    pb_compact_task: &PbCompactTask,
+) -> (
+    BTreeMap<TableId, TableWatermarks>,
+    BTreeMap<TableId, TableWatermarks>,
+    BTreeMap<TableId, TableWatermarks>,
+) {
+    let mut pk_prefix_table_watermarks = BTreeMap::default();
+    let mut non_pk_prefix_table_watermarks = BTreeMap::default();
+    let mut value_table_watermarks = BTreeMap::default();
+    for (table_id, pbwatermark) in &pb_compact_task.table_watermarks {
+        let watermark = TableWatermarks::from(pbwatermark);
+        match watermark.watermark_type {
+            WatermarkSerdeType::PkPrefix => {
+                pk_prefix_table_watermarks.insert(*table_id, watermark);
+            }
+            WatermarkSerdeType::NonPkPrefix => {
+                non_pk_prefix_table_watermarks.insert(*table_id, watermark);
+            }
+            WatermarkSerdeType::Value => {
+                value_table_watermarks.insert(*table_id, watermark);
+            }
+        }
+    }
+    (
+        pk_prefix_table_watermarks,
+        non_pk_prefix_table_watermarks,
+        value_table_watermarks,
+    )
+}
+
 pub fn is_compaction_task_expired(
     compaction_group_version_id_in_task: u64,
     compaction_group_version_id_expected: u64,
@@ -233,24 +264,8 @@ pub fn is_compaction_task_expired(
 
 impl From<PbCompactTask> for CompactTask {
     fn from(pb_compact_task: PbCompactTask) -> Self {
-        let mut pk_prefix_table_watermarks = BTreeMap::default();
-        let mut non_pk_prefix_table_watermarks = BTreeMap::default();
-        let mut value_table_watermarks = BTreeMap::default();
-        for (table_id, pbwatermark) in pb_compact_task.table_watermarks {
-            let watermark = TableWatermarks::from(pbwatermark);
-            match watermark.watermark_type {
-                WatermarkSerdeType::PkPrefix => {
-                    pk_prefix_table_watermarks.insert(table_id, watermark);
-                }
-                WatermarkSerdeType::NonPkPrefix => {
-                    non_pk_prefix_table_watermarks.insert(table_id, watermark);
-                }
-                WatermarkSerdeType::Value => {
-                    value_table_watermarks.insert(table_id, watermark);
-                }
-            }
-        }
-
+        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks, value_table_watermarks) =
+            split_watermark_serde_types(&pb_compact_task);
         #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
@@ -313,24 +328,8 @@ impl From<PbCompactTask> for CompactTask {
 
 impl From<&PbCompactTask> for CompactTask {
     fn from(pb_compact_task: &PbCompactTask) -> Self {
-        let mut pk_prefix_table_watermarks = BTreeMap::default();
-        let mut non_pk_prefix_table_watermarks = BTreeMap::default();
-        let mut value_table_watermarks = BTreeMap::default();
-        for (table_id, pbwatermark) in &pb_compact_task.table_watermarks {
-            let watermark = TableWatermarks::from(pbwatermark);
-            match watermark.watermark_type {
-                WatermarkSerdeType::PkPrefix => {
-                    pk_prefix_table_watermarks.insert(*table_id, watermark);
-                }
-                WatermarkSerdeType::NonPkPrefix => {
-                    non_pk_prefix_table_watermarks.insert(*table_id, watermark);
-                }
-                WatermarkSerdeType::Value => {
-                    value_table_watermarks.insert(*table_id, watermark);
-                }
-            }
-        }
-
+        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks, value_table_watermarks) =
+            split_watermark_serde_types(pb_compact_task);
         #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
