@@ -241,7 +241,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("opendal", Level::INFO)
             .with_target("reqsign", Level::INFO)
             .with_target("jni", Level::INFO)
-            .with_target("async_nats", Level::INFO);
+            .with_target("async_nats", Level::WARN);
 
         // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
         let default_level = match deployment {
