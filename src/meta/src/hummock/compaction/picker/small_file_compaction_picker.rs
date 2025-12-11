@@ -509,7 +509,7 @@ pub mod tests {
         };
 
         // Pattern: small, small, LARGE, small, small, small, LARGE, small
-        let sizes = vec![20, 30, 100, 25, 30, 20, 80, 15];
+        let sizes = [20, 30, 100, 25, 30, 20, 80, 15];
         for (i, &size) in sizes.iter().enumerate() {
             let mut sst = generate_table_impl((i + 1) as u64, 1, i * 100 + 1, (i + 1) * 100, 1);
             sst.sst_size = size * 1024 * 1024;
