@@ -90,6 +90,8 @@ impl CompactionConfigBuilder {
                 enable_optimize_l0_interval_selection: Some(
                     compaction_config::enable_optimize_l0_interval_selection(),
                 ),
+                vnode_aligned_level_size_threshold:
+                    compaction_config::vnode_aligned_level_size_threshold(),
             },
         }
     }
@@ -129,6 +131,7 @@ impl CompactionConfigBuilder {
             ))
             .level0_stop_write_threshold_max_size(Some(opt.level0_stop_write_threshold_max_size))
             .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
+            .vnode_aligned_level_size_threshold(opt.vnode_aligned_level_size_threshold)
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -198,4 +201,5 @@ builder_field! {
     level0_stop_write_threshold_max_sst_count: Option<u32>,
     level0_stop_write_threshold_max_size: Option<u64>,
     enable_optimize_l0_interval_selection: Option<bool>,
+    vnode_aligned_level_size_threshold: Option<u64>,
 }
