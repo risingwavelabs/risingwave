@@ -1701,7 +1701,7 @@ const DATA_FILES: &str = "data_files";
 /// This prevents metadata from ballooning to gigabytes when dealing with large
 /// JSONB, TEXT, or BINARY fields, while still preserving statistics for small fields
 /// that benefit from query optimization.
-const MAX_COLUMN_STAT_SIZE: usize = 1024; // 1KB
+const MAX_COLUMN_STAT_SIZE: usize = 10240; // 10KB
 
 /// Truncate large column statistics from `DataFile` BEFORE serialization.
 ///
@@ -1716,8 +1716,8 @@ const MAX_COLUMN_STAT_SIZE: usize = 1024; // 1KB
 fn truncate_datafile(mut data_file: DataFile) -> DataFile {
     // Process lower_bounds - remove entries with large values
     data_file.lower_bounds.retain(|field_id, datum| {
-        // Get the size of the datum when serialized
-        let size = match serde_json::to_vec(datum) {
+        // Use to_bytes() to get the actual binary size without JSON serialization overhead
+        let size = match datum.to_bytes() {
             Ok(bytes) => bytes.len(),
             Err(_) => 0,
         };
@@ -1735,8 +1735,8 @@ fn truncate_datafile(mut data_file: DataFile) -> DataFile {
 
     // Process upper_bounds - remove entries with large values
     data_file.upper_bounds.retain(|field_id, datum| {
-        // Get the size of the datum when serialized
-        let size = match serde_json::to_vec(datum) {
+        // Use to_bytes() to get the actual binary size without JSON serialization overhead
+        let size = match datum.to_bytes() {
             Ok(bytes) => bytes.len(),
             Err(_) => 0,
         };
@@ -1754,8 +1754,6 @@ fn truncate_datafile(mut data_file: DataFile) -> DataFile {
 
     data_file
 }
-
-
 
 #[derive(Default, Clone)]
 struct IcebergCommitResult {
