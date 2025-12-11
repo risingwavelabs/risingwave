@@ -470,7 +470,7 @@ impl CoordinationHandleManager {
 }
 
 /// Represents the coordinator worker's state machine for handling schema changes.
-/// 
+///
 /// - `Running`: Normal operation, handles can be started immediately
 /// - `WaitingForFlushed`: Waiting for all pending two-phase commits to complete before starting new handles. This
 ///   ensures new sink executors load the correct schema.
