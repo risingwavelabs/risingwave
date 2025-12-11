@@ -1,7 +1,7 @@
 services:
   # TODO: Rename this to `postgres`
   db:
-    image: postgres:18-alpine
+    image: postgres:15-alpine
     environment:
       - POSTGRES_USER=postgres
       # Test with a password containing special characters #21943, for example 0x5c.
