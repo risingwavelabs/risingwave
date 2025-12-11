@@ -20,7 +20,7 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::enforce_secret::EnforceSecretError;
-use crate::parser::AccessError;
+use crate::parser::{AccessError, CanalMaxwellUnsupported};
 use crate::schema::InvalidOptionError;
 use crate::schema::schema_registry::{ConcurrentRequestError, WireFormatError};
 use crate::sink::SinkError;
@@ -41,6 +41,7 @@ def_anyhow_newtype! {
     InvalidOptionError => transparent,
     SinkError => transparent,
     PbFieldNotFound => transparent,
+    CanalMaxwellUnsupported => transparent,
 
     // TODO(error-handling): Remove implicit contexts below and specify ad-hoc context for each conversion.
 

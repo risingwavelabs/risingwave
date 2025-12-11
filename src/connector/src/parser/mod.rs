@@ -431,6 +431,10 @@ impl ByteStreamSourceParserImpl {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Canal/Maxwell no longer supported")]
+pub struct CanalMaxwellUnsupported;
+
 impl ByteStreamSourceParserImpl {
     pub async fn create(
         parser_config: ParserConfig,
@@ -447,9 +451,9 @@ impl ByteStreamSourceParserImpl {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx, props.clone())
                     .map(Self::DebeziumMongoJson)
             }
-            (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
-                CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)
-            }
+            // (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
+            //     CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)
+            // }
             (ProtocolProperties::Native, _) => unreachable!("Native parser should not be created"),
             (ProtocolProperties::Upsert, _) => {
                 let parser =
@@ -466,10 +470,13 @@ impl ByteStreamSourceParserImpl {
                     DebeziumParser::new(parser_config.specific, rw_columns, source_ctx).await?;
                 Ok(Self::Debezium(parser))
             }
-            (ProtocolProperties::Maxwell, _) => {
-                let parser =
-                    MaxwellParser::new(parser_config.specific, rw_columns, source_ctx).await?;
-                Ok(Self::Maxwell(parser))
+            // (ProtocolProperties::Maxwell, _) => {
+            //     let parser =
+            //         MaxwellParser::new(parser_config.specific, rw_columns, source_ctx).await?;
+            //     Ok(Self::Maxwell(parser))
+            // }
+            (ProtocolProperties::Canal | ProtocolProperties::Maxwell, _) => {
+                Err(CanalMaxwellUnsupported.into())
             }
             _ => unreachable!(),
         }
