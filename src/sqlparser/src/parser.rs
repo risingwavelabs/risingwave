@@ -4843,6 +4843,12 @@ impl Parser<'_> {
                 snapshot: None,
                 session: false,
             })
+        } else if self.parse_keyword(Keyword::ROLE) {
+            let new_role = self.parse_identifier()?;
+            Ok(Statement::SetRole {
+                local: modifier == Some(Keyword::LOCAL),
+                role: new_role,
+            })
         } else {
             let config_param = self.parse_config_param()?;
             Ok(Statement::SetVariable {

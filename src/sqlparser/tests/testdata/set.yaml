@@ -25,3 +25,21 @@
     sql parser error: expected parameter list value, found: default
     LINE 1: set search_path to 'my_path', default;
                                           ^
+- input: set role none;
+  formatted_sql: SET ROLE none
+- input: set role noNe;
+  formatted_sql: SET ROLE noNe
+- input: set role "none";
+  formatted_sql: SET ROLE "none"
+- input: set role "noNe";
+  formatted_sql: SET ROLE "noNe"
+- input: set role "no""ne";
+  error_msg: |-
+    sql parser error: expected end of statement, found: "ne"
+    LINE 1: set role "no""ne";
+                         ^
+- input: set role 'no"ne';
+  error_msg: |-
+    sql parser error: expected identifier, found: 'no"ne'
+    LINE 1: set role 'no"ne';
+                     ^
