@@ -72,6 +72,8 @@ pub use kinesis::KINESIS_CONNECTOR;
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 use utils::feature_gated_source_mod;
+
+pub use self::adbc_snowflake::ADBC_SNOWFLAKE_CONNECTOR;
 mod common;
 pub mod iceberg;
 mod manager;

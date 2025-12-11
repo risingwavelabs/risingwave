@@ -10,6 +10,8 @@ repository = { workspace = true }
 [features]
 default = []
 datafusion = ["dep:datafusion", "dep:datafusion-common"]
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
 [dependencies]
 anyhow = "1"

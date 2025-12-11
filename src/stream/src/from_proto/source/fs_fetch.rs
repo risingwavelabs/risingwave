@@ -25,8 +25,8 @@ use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
 use crate::executor::source::{
-    BatchIcebergFetchExecutor, BatchPosixFsFetchExecutor, FsFetchExecutor, IcebergFetchExecutor,
-    SourceStateTableHandler, StreamSourceCore,
+    BatchAdbcSnowflakeFetchExecutor, BatchIcebergFetchExecutor, BatchPosixFsFetchExecutor,
+    FsFetchExecutor, IcebergFetchExecutor, SourceStateTableHandler, StreamSourceCore,
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
@@ -158,6 +158,20 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     source.associated_table_id,
                 )
                 .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::AdbcSnowflake(_) => {
+                if is_full_reload_refresh {
+                    BatchAdbcSnowflakeFetchExecutor::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        params.local_barrier_manager.clone(),
+                        source.associated_table_id,
+                    )
+                    .boxed()
+                } else {
+                    unreachable!("AdbcSnowflake connector only supports FULL_RELOAD refresh mode")
+                }
             }
             _ => unreachable!(),
         };
