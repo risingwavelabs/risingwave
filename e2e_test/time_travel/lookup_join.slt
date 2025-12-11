@@ -10,10 +10,10 @@ CREATE TABLE t2 (k2 INT PRIMARY KEY);
 sleep 5s
 
 statement ok
-INSERT INTO t1 VALUES (1);
+INSERT INTO t2 VALUES (1);
 
 statement ok
-INSERT INTO t2 VALUES (1);
+INSERT INTO t1 VALUES (1);
 
 query I
 SELECT count(*) FROM t1 join t2 on t1.k1=t2.k2;
@@ -35,8 +35,9 @@ SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() join t2  FOR SYSTEM_TIME AS 
 ----
 0
 
+sleep 5s
 
-query I retry 6 backoff 1s
+query I
 SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() - '5' second join t2  FOR SYSTEM_TIME AS OF now() on t1.k1=t2.k2;
 ----
 1
