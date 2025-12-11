@@ -298,7 +298,7 @@ pub mod tests {
         levels.levels[0].table_infos.push(sst3.into());
 
         let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, 0)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
 
         // Should greedily select all 3 consecutive small files
@@ -348,7 +348,7 @@ pub mod tests {
         let picker = SmallFileCompactionPicker::new(50 * 1024 * 1024);
 
         // Should return None because less than 3 files
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut state, 0);
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut state);
         assert!(ret.is_none());
 
         // Verify state is completely cleared (regression test for incorrect order bug)
@@ -362,7 +362,7 @@ pub mod tests {
         );
 
         // Second call should start from beginning (not skip any files)
-        let ret2 = picker.pick_compaction(&levels, &levels_handler, &mut state, 0);
+        let ret2 = picker.pick_compaction(&levels, &levels_handler, &mut state);
         assert!(ret2.is_none());
     }
 
@@ -413,10 +413,9 @@ pub mod tests {
 
         let mut state = SmallFilePickerState::default();
         let picker = SmallFileCompactionPicker::new(50 * 1024 * 1024);
-        let target_file_size = 60 * 1024 * 1024;
 
         let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, target_file_size)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
 
         // Should select files 2, 3, 4 (skipping pending file 1)
@@ -483,7 +482,7 @@ pub mod tests {
         let picker = SmallFileCompactionPicker::new(50 * 1024 * 1024);
 
         let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, 0)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
 
         // Should skip files 1, 2 (insufficient, interrupted by pending file 3)
@@ -530,7 +529,7 @@ pub mod tests {
         let picker = SmallFileCompactionPicker::new(50 * 1024 * 1024);
 
         let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, 0)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
 
         // Should skip first 2 small files (< MIN_FILE_COUNT before large file #3)
@@ -541,7 +540,7 @@ pub mod tests {
         assert_eq!(6, ret.input_levels[0].table_infos[2].sst_id);
 
         // Second call should skip the large file and find no more valid groups
-        let ret2 = picker.pick_compaction(&levels, &levels_handler, &mut state, 0);
+        let ret2 = picker.pick_compaction(&levels, &levels_handler, &mut state);
         assert!(ret2.is_none()); // Only 1 small file left after large file #7
     }
 
@@ -579,11 +578,10 @@ pub mod tests {
         ];
         let mut state = SmallFilePickerState::default();
         let picker = SmallFileCompactionPicker::new(50 * 1024 * 1024);
-        let target_file_size = 60 * 1024 * 1024;
 
         // First round: greedy strategy selects ALL 6 consecutive small files
         let ret1 = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, target_file_size)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(6, ret1.input_levels[0].table_infos.len());
         assert_eq!(1, ret1.input_levels[0].table_infos[0].sst_id);
@@ -594,12 +592,12 @@ pub mod tests {
         assert_eq!(6, ret1.input_levels[0].table_infos[5].sst_id);
 
         // Second round: no more files
-        let ret2 = picker.pick_compaction(&levels, &levels_handler, &mut state, target_file_size);
+        let ret2 = picker.pick_compaction(&levels, &levels_handler, &mut state);
         assert!(ret2.is_none());
 
         // Third round: state should reset, pick from beginning again
         let ret3 = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, target_file_size)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(6, ret3.input_levels[0].table_infos.len());
         assert_eq!(1, ret3.input_levels[0].table_infos[0].sst_id);
@@ -708,7 +706,7 @@ pub mod tests {
 
         // First call: should select files 1-3 (vnode 10)
         let ret1 = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, 0)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(3, ret1.input_levels[0].table_infos.len());
         assert_eq!(1, ret1.input_levels[0].table_infos[0].sst_id);
@@ -740,7 +738,7 @@ pub mod tests {
 
         // Second call: should select files 4-6 (same vnode from table_prefix=2)
         let ret2 = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, 0)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(3, ret2.input_levels[0].table_infos.len());
         assert_eq!(4, ret2.input_levels[0].table_infos[0].sst_id);
@@ -827,7 +825,7 @@ pub mod tests {
 
         // First call: should skip files 1-2 (insufficient) and select files 3-5 (vnode 20)
         let ret1 = picker
-            .pick_compaction(&levels, &levels_handler, &mut state, 0)
+            .pick_compaction(&levels, &levels_handler, &mut state)
             .unwrap();
         assert_eq!(3, ret1.input_levels[0].table_infos.len());
         assert_eq!(3, ret1.input_levels[0].table_infos[0].sst_id);
@@ -845,7 +843,7 @@ pub mod tests {
         }
 
         // Second call: no more sufficient groups
-        let ret2 = picker.pick_compaction(&levels, &levels_handler, &mut state, 0);
+        let ret2 = picker.pick_compaction(&levels, &levels_handler, &mut state);
         assert!(ret2.is_none());
     }
 }
