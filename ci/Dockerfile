@@ -10,7 +10,7 @@ ENV LANG=en_US.utf8
 # Use AWS ubuntu mirror
 RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
 RUN apt-get update -yy && \
-    DEBIAN_FRONTEND=noninteractive apt-get -y install sudo make build-essential cmake clang libclang-dev protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc jq \
+    DEBIAN_FRONTEND=noninteractive apt-get -y install sudo make build-essential cmake protobuf-compiler curl parallel python3 python3-pip python3-venv software-properties-common psmisc jq \
     openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-17-jdk wget unzip git tmux lld postgresql-client kcat netcat-openbsd mysql-client sqlite3 \
     maven zstd libzstd-dev locales \
     python3.12 python3.12-dev \
@@ -40,15 +40,6 @@ COPY rust-toolchain rust-toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 
 ENV PATH=/root/.cargo/bin/:$PATH
-
-# Install newer zstd (Ubuntu 24.04 ships 1.5.5 without ZSTD_c_targetCBlockSize)
-RUN curl -L "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz" \
-    | tar -xz && \
-    cd zstd-1.5.7 && \
-    make -j"$(nproc)" && \
-    make install && \
-    ldconfig && \
-    cd / && rm -rf /zstd-1.5.7
 
 RUN rustup toolchain install --profile minimal && \
     rustup show && \
