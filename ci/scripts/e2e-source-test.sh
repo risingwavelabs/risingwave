@@ -127,7 +127,11 @@ risedev slt './e2e_test/source_inline/cdc/mongodb/**/*.slt'
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 
+echo "--- Starting MySQL CDC offline schema change test for OpendalSchemaHistory ---"
 source ci/scripts/e2e-source-mysql-offline-schema-change.sh
+
+echo "--- Starting MySQL CDC binlog expire and ALTER SOURCE RESET test ---"
+source ci/scripts/e2e-source-mysql-cdc-reset.sh
 
 echo "--- mysql offline schema change test done --- \n\n"
 
