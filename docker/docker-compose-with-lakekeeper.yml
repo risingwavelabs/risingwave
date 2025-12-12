@@ -1,6 +1,6 @@
 ---
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.7.0-rc.1}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.7.0}
 
 x-lakekeeper-image: &lakekeeper-image
   image: ${LAKEKEEPER__SERVER_IMAGE:-quay.io/lakekeeper/catalog:latest-main}
