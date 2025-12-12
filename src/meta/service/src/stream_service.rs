@@ -142,10 +142,8 @@ impl StreamManagerService for StreamServiceImpl {
         let request = request.into_inner();
 
         // Decode enums from raw i32 fields to handle decoupled target/type.
-        let throttle_target = ThrottleTarget::try_from(request.throttle_target)
-            .unwrap_or(ThrottleTarget::Unspecified);
-        let throttle_type =
-            ThrottleType::try_from(request.throttle_type).unwrap_or(ThrottleType::Unspecified);
+        let throttle_target = request.throttle_target();
+        let throttle_type = request.throttle_type();
 
         let actor_to_apply = match (throttle_type, throttle_target) {
             (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
