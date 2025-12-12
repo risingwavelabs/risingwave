@@ -20,6 +20,7 @@
 mod emergency_selector;
 pub(crate) mod level_selector;
 mod manual_selector;
+mod small_file_compaction_selector;
 mod space_reclaim_selector;
 mod tombstone_compaction_selector;
 mod ttl_selector;
@@ -37,6 +38,7 @@ use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_pb::hummock::compact_task;
+pub use small_file_compaction_selector::SmallFileCompactionSelector;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;

@@ -452,6 +452,9 @@ pub fn start(
                 periodic_tombstone_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_tombstone_reclaim_compaction_interval_sec,
+                periodic_small_file_compaction_interval_sec: config
+                    .meta
+                    .periodic_small_file_compaction_interval_sec,
                 periodic_scheduling_compaction_group_split_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_split_interval_sec,

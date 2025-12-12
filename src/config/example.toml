@@ -43,6 +43,7 @@ backend = "Mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_tombstone_reclaim_compaction_interval_sec = 600
+periodic_small_file_compaction_interval_sec = 300
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824

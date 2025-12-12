@@ -227,6 +227,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
+    /// Schedule `small_file` compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_small_file_compaction_interval_sec")]
+    pub periodic_small_file_compaction_interval_sec: u64,
+
     #[serde(default = "default::meta::move_table_size_limit")]
     #[deprecated]
     pub move_table_size_limit: u64,
@@ -535,6 +539,8 @@ pub struct CompactionConfig {
     pub enable_optimize_l0_interval_selection: bool,
     #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
     pub vnode_aligned_level_size_threshold: Option<u64>,
+    #[serde(default = "default::compaction_config::small_file_size_threshold")]
+    pub small_file_size_threshold: Option<u64>,
 }
 
 pub mod default {
@@ -633,6 +639,10 @@ pub mod default {
 
         pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
             600
+        }
+
+        pub fn periodic_small_file_compaction_interval_sec() -> u64 {
+            300
         }
 
         // limit the size of state table to trigger split by high throughput
@@ -811,6 +821,7 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
         const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
+        const DEFAULT_SMALL_FILE_SIZE_THRESHOLD: Option<u64> = None;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -920,6 +931,10 @@ pub mod default {
 
         pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
             DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
+        }
+
+        pub fn small_file_size_threshold() -> Option<u64> {
+            DEFAULT_SMALL_FILE_SIZE_THRESHOLD
         }
     }
 }

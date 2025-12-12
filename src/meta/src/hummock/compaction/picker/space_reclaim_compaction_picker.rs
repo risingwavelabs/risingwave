@@ -24,9 +24,6 @@ use crate::hummock::level_handler::LevelHandler;
 // The execution model of SpaceReclaimCompactionPicker scans through the last level of files by
 // key_range and selects the appropriate files to generate compaction
 pub struct SpaceReclaimCompactionPicker {
-    // config
-    pub _max_space_reclaim_bytes: u64,
-
     // for filter
     pub all_table_ids: HashSet<TableId>,
 }
@@ -39,11 +36,8 @@ pub struct SpaceReclaimPickerState {
 }
 
 impl SpaceReclaimCompactionPicker {
-    pub fn new(max_space_reclaim_bytes: u64, all_table_ids: HashSet<TableId>) -> Self {
-        Self {
-            _max_space_reclaim_bytes: max_space_reclaim_bytes,
-            all_table_ids,
-        }
+    pub fn new(all_table_ids: HashSet<TableId>) -> Self {
+        Self { all_table_ids }
     }
 
     fn exist_table_count(&self, sst: &SstableInfo) -> usize {
