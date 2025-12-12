@@ -592,7 +592,7 @@ impl IcebergSplitEnumerator {
     /// The time complexity is O(n log k), where n is the number of file scan tasks and k is the number of splits.
     /// The space complexity is O(k), where k is the number of splits.
     /// The algorithm is stable, so the order of the file scan tasks will be preserved.
-    fn split_n_vecs(
+    pub fn split_n_vecs(
         file_scan_tasks: Vec<FileScanTask>,
         split_num: usize,
     ) -> Vec<Vec<FileScanTask>> {

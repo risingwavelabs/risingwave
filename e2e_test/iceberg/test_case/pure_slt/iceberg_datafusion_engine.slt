@@ -33,6 +33,7 @@ statement ok
 FLUSH;
 
 sleep 5s
+
 query ??
 select * from t;
 ----
@@ -42,6 +43,44 @@ query ??
 select * from t for system_time as of '2222-12-10 11:48:06';
 ----
 1 xxx
+
+statement ok
+insert into t select i, repeat('x', i + 2) from generate_series(2,5) as s(i);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+statement ok
+delete from t where id = 1;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?? rowsort
+select * from t;
+----
+2 xxxx
+3 xxxxx
+4 xxxxxx
+5 xxxxxxx
+
+statement ok
+delete from t where id >= 4;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?? rowsort
+select * from t;
+----
+2 xxxx
+3 xxxxx
 
 statement ok
 DROP TABLE t;
