@@ -500,21 +500,18 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle {
-                                                actor_throttle: actor_to_apply,
-                                                throttle_type,
-                                            } => {
-                                                if *throttle_type == ThrottleType::Source
-                                                    && let Some(new_rate_limit) =
-                                                        actor_to_apply.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                            Mutation::Throttle { actor_throttle } => {
+                                                if let Some(entry) =
+                                                    actor_throttle.get(&self.actor_ctx.id)
+                                                    && entry.throttle_type == ThrottleType::Source
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::debug!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
-                                                        *new_rate_limit
+                                                        entry.rate_limit
                                                     );
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     need_rebuild_reader = true;
                                                 }
                                             }

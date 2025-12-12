@@ -359,7 +359,7 @@ pub enum Command {
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
-    Throttle(ThrottleConfig, risingwave_pb::common::ThrottleType),
+    Throttle(ThrottleConfig),
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
     /// materialize executor to start storing old value for subscription.
@@ -427,7 +427,7 @@ impl std::fmt::Display for Command {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
             Command::SourceChangeSplit { .. } => write!(f, "SourceChangeSplit"),
-            Command::Throttle(_, _) => write!(f, "Throttle"),
+            Command::Throttle(_) => write!(f, "Throttle"),
             Command::CreateSubscription {
                 subscription_id, ..
             } => write!(f, "CreateSubscription: {subscription_id}"),
@@ -619,7 +619,7 @@ impl Command {
                     })
                     .collect(),
             )),
-            Command::Throttle(_, _) => None,
+            Command::Throttle(_) => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
             Command::ConnectorPropsChange(_) => None,
@@ -899,20 +899,22 @@ impl Command {
                 }))
             }
 
-            Command::Throttle(config, throttle_type) => {
-                let mut actor_to_apply = HashMap::new();
-                for per_fragment in config.values() {
-                    actor_to_apply.extend(
-                        per_fragment
-                            .iter()
-                            .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit })),
-                    );
+            Command::Throttle(config) => {
+                // Flatten to actor -> RateLimit as required by proto.
+                let mut actor_throttle: HashMap<risingwave_pb::id::ActorId, RateLimit> =
+                    HashMap::new();
+                for per_fragment in config.limits.values() {
+                    for (actor_id, entry) in per_fragment {
+                        actor_throttle.insert(
+                            risingwave_pb::id::ActorId::new(actor_id.as_raw_id()),
+                            RateLimit {
+                                rate_limit: entry.rate_limit,
+                                throttle_type: config.throttle_type as i32,
+                            },
+                        );
+                    }
                 }
-
-                Some(Mutation::Throttle(ThrottleMutation {
-                    actor_throttle: actor_to_apply,
-                    throttle_type: *throttle_type as i32,
-                }))
+                Some(Mutation::Throttle(ThrottleMutation { actor_throttle }))
             }
 
             Command::DropStreamingJobs {

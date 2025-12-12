@@ -487,18 +487,15 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 log_writer.resume()?;
                                 is_paused = false;
                             }
-                            Mutation::Throttle {
-                                actor_throttle: actor_to_apply,
-                                throttle_type,
-                            } => {
-                                if *throttle_type == ThrottleType::Sink
-                                    && let Some(new_rate_limit) = actor_to_apply.get(&actor_id)
+                            Mutation::Throttle { actor_throttle } => {
+                                if let Some(entry) = actor_throttle.get(&actor_id)
+                                    && entry.throttle_type == ThrottleType::Sink
                                 {
                                     tracing::info!(
-                                        rate_limit = new_rate_limit,
+                                        rate_limit = entry.rate_limit,
                                         "received sink rate limit on actor {actor_id}"
                                     );
-                                    if let Err(e) = rate_limit_tx.send((*new_rate_limit).into()) {
+                                    if let Err(e) = rate_limit_tx.send(entry.rate_limit.into()) {
                                         error!(
                                             error = %e.as_report(),
                                             "fail to send sink ate limit update"

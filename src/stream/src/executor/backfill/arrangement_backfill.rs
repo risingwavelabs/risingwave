@@ -560,13 +560,12 @@ where
                         }
                         Mutation::Throttle {
                             actor_throttle: actor_to_apply,
-                            throttle_type,
                         } => {
-                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
-                            if *throttle_type == ThrottleType::Backfill
-                                && let Some(new_rate_limit) = new_rate_limit_entry
+                            let entry = actor_to_apply.get(&self.actor_id);
+                            if let Some(entry) = entry
+                                && entry.throttle_type == ThrottleType::Backfill
                             {
-                                let new_rate_limit = (*new_rate_limit).into();
+                                let new_rate_limit = entry.rate_limit.into();
                                 let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                                 if old_rate_limit != new_rate_limit {
                                     tracing::info!(
