@@ -2088,8 +2088,73 @@ fn parse_window_functions() {
 #[test]
 fn parse_aggregate_with_group_by() {
     let sql = "SELECT a, COUNT(1), MIN(b), MAX(b) FROM foo GROUP BY a";
-    let _ast = verified_only_select(sql);
-    // TODO: assertions
+    let select = verified_only_select(sql);
+    assert_eq!(select.projection.len(), 4);
+    assert_eq!(
+        &Expr::Identifier(Ident::new_unchecked("a")),
+        expr_from_projection(&select.projection[0])
+    );
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: false,
+            name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
+            arg_list: FunctionArgList {
+                distinct: false,
+                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(
+                    Value::Number("1".to_owned())
+                )))],
+                variadic: false,
+                order_by: vec![],
+                ignore_nulls: false
+            },
+            within_group: None,
+            filter: None,
+            over: None,
+        }),
+        expr_from_projection(&select.projection[1])
+    );
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: false,
+            name: ObjectName(vec![Ident::new_unchecked("MIN")]),
+            arg_list: FunctionArgList {
+                distinct: false,
+                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                    Expr::Identifier(Ident::new_unchecked("b"))
+                ))],
+                variadic: false,
+                order_by: vec![],
+                ignore_nulls: false
+            },
+            within_group: None,
+            filter: None,
+            over: None,
+        }),
+        expr_from_projection(&select.projection[2])
+    );
+    assert_eq!(
+        &Expr::Function(Function {
+            scalar_as_agg: false,
+            name: ObjectName(vec![Ident::new_unchecked("MAX")]),
+            arg_list: FunctionArgList {
+                distinct: false,
+                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                    Expr::Identifier(Ident::new_unchecked("b"))
+                ))],
+                variadic: false,
+                order_by: vec![],
+                ignore_nulls: false
+            },
+            within_group: None,
+            filter: None,
+            over: None,
+        }),
+        expr_from_projection(&select.projection[3])
+    );
+    assert_eq!(
+        vec![Expr::Identifier(Ident::new_unchecked("a")),],
+        select.group_by
+    );
 }
 
 #[test]
@@ -2954,48 +3019,110 @@ fn parse_recursive_cte() {
 
 #[test]
 fn parse_derived_tables() {
-    let sql = "SELECT a.x, b.y FROM (SELECT x FROM foo) AS a CROSS JOIN (SELECT y FROM bar) AS b";
-    let _ = verified_only_select(sql);
-    // TODO: add assertions
-
-    let sql = "SELECT a.x, b.y \
-               FROM (SELECT x FROM foo) AS a (x) \
-               CROSS JOIN (SELECT y FROM bar) AS b (y)";
-    let _ = verified_only_select(sql);
-    // TODO: add assertions
-
-    let sql = "SELECT * FROM (SELECT 1)";
-    let _ = verified_only_select(sql);
-    // TODO: add assertions
-
-    let sql = "SELECT * FROM t NATURAL JOIN (SELECT 1)";
-    let _ = verified_only_select(sql);
-    // TODO: add assertions
-
-    let sql = "SELECT * FROM (((SELECT 1) UNION (SELECT 2)) AS t1 NATURAL JOIN t2)";
-    let select = verified_only_select(sql);
-    let from = only(select.from);
-    assert_eq!(
-        from.relation,
-        TableFactor::NestedJoin(Box::new(TableWithJoins {
-            relation: TableFactor::Derived {
+    {
+        let sql =
+            "SELECT a.x, b.y FROM (SELECT x FROM foo) AS a CROSS JOIN (SELECT y FROM bar) AS b";
+        let select = verified_only_select(sql);
+        let from = only(select.from);
+        assert_eq!(
+            from.relation,
+            TableFactor::Derived {
                 lateral: false,
-                subquery: Box::new(verified_query("(SELECT 1) UNION (SELECT 2)")),
+                subquery: Box::new(verified_query("SELECT x FROM foo")),
                 alias: Some(TableAlias {
-                    name: "t1".into(),
+                    name: "a".into(),
                     columns: vec![],
                 })
-            },
-            joins: vec![Join {
-                relation: TableFactor::Table {
-                    name: ObjectName(vec!["t2".into()]),
-                    alias: None,
-                    as_of: None,
+            }
+        );
+        assert_eq!(from.joins.len(), 1);
+        let join = &from.joins[0];
+        assert_eq!(join.join_operator, JoinOperator::CrossJoin);
+    }
+
+    {
+        let sql = "SELECT a.x, b.y \
+               FROM (SELECT x FROM foo) AS a (x) \
+               CROSS JOIN (SELECT y FROM bar) AS b (y)";
+        let select = verified_only_select(sql);
+        let from = only(select.from);
+        assert_eq!(
+            from.relation,
+            TableFactor::Derived {
+                lateral: false,
+                subquery: Box::new(verified_query("SELECT x FROM foo")),
+                alias: Some(TableAlias {
+                    name: "a".into(),
+                    columns: vec![Ident::new_unchecked("x")],
+                })
+            }
+        );
+        assert_eq!(from.joins.len(), 1);
+        let join = &from.joins[0];
+        assert_eq!(join.join_operator, JoinOperator::CrossJoin);
+    }
+
+    {
+        let sql = "SELECT * FROM (SELECT 1)";
+        let select = verified_only_select(sql);
+        let from = only(select.from);
+        assert_eq!(
+            from.relation,
+            TableFactor::Derived {
+                lateral: false,
+                subquery: Box::new(verified_query("SELECT 1")),
+                alias: None
+            }
+        );
+        assert_eq!(from.joins.len(), 0);
+    }
+
+    {
+        let sql = "SELECT * FROM t NATURAL JOIN (SELECT 1)";
+        let select = verified_only_select(sql);
+        let from = only(select.from);
+        assert_eq!(
+            from.relation,
+            TableFactor::Table {
+                name: ObjectName(vec![Ident::new_unchecked("t")]),
+                alias: None,
+                as_of: None
+            }
+        );
+        assert_eq!(from.joins.len(), 1);
+        let join = &from.joins[0];
+        assert_eq!(
+            join.join_operator,
+            JoinOperator::Inner(JoinConstraint::Natural)
+        );
+    }
+
+    {
+        let sql = "SELECT * FROM (((SELECT 1) UNION (SELECT 2)) AS t1 NATURAL JOIN t2)";
+        let select = verified_only_select(sql);
+        let from = only(select.from);
+        assert_eq!(
+            from.relation,
+            TableFactor::NestedJoin(Box::new(TableWithJoins {
+                relation: TableFactor::Derived {
+                    lateral: false,
+                    subquery: Box::new(verified_query("(SELECT 1) UNION (SELECT 2)")),
+                    alias: Some(TableAlias {
+                        name: "t1".into(),
+                        columns: vec![],
+                    })
                 },
-                join_operator: JoinOperator::Inner(JoinConstraint::Natural),
-            }],
-        }))
-    );
+                joins: vec![Join {
+                    relation: TableFactor::Table {
+                        name: ObjectName(vec!["t2".into()]),
+                        alias: None,
+                        as_of: None,
+                    },
+                    join_operator: JoinOperator::Inner(JoinConstraint::Natural),
+                }],
+            }))
+        );
+    }
 }
 
 #[test]
