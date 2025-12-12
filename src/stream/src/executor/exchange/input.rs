@@ -160,18 +160,14 @@ impl RemoteInput {
         metrics: Arc<StreamingMetrics>,
         actor_config: Arc<StreamingConfig>,
     ) -> StreamExecutorResult<Self> {
-        if local_barrier_manager
-            .env
-            .global_config()
-            .developer
-            .exchange_remote_use_multiplexing
-        {
+        if actor_config.developer.exchange_remote_use_multiplexing {
             RemoteInput::new_mux(
                 local_barrier_manager,
                 upstream_addr,
                 up_down_ids,
                 up_down_frag,
                 metrics,
+                actor_config,
             )
             .await
         } else {
@@ -181,6 +177,7 @@ impl RemoteInput {
                 up_down_ids,
                 up_down_frag,
                 metrics,
+                actor_config,
             )
             .await
         }
@@ -193,6 +190,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
+        actor_config: Arc<StreamingConfig>,
     ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
@@ -221,11 +219,7 @@ impl RemoteInput {
                 up_down_ids,
                 up_down_frag,
                 metrics,
-                local_barrier_manager
-                    .env
-                    .global_config()
-                    .developer
-                    .exchange_batched_permits,
+                actor_config.developer.exchange_batched_permits,
             )),
         })
     }
@@ -362,11 +356,7 @@ pub(crate) async fn new_input(
     upstream_fragment_id: FragmentId,
     actor_config: Arc<StreamingConfig>,
 ) -> StreamExecutorResult<BoxedActorInput> {
-    let force_remote = local_barrier_manager
-        .env
-        .global_config()
-        .developer
-        .exchange_force_remote;
+    let force_remote = actor_config.developer.exchange_force_remote;
 
     let upstream_actor_id = upstream_actor_info.actor_id;
     let upstream_addr = upstream_actor_info.get_host()?.into();

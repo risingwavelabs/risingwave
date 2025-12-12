@@ -328,6 +328,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
+        actor_config: Arc<StreamingConfig>,
     ) -> StreamExecutorResult<Self> {
         let env = &local_barrier_manager.env;
         let actor_id = up_down_ids.0;
@@ -345,7 +346,7 @@ impl RemoteInput {
                 init,
                 upstream_addr,
                 env.client_pool(),
-                env.global_config(),
+                &actor_config,
                 metrics.clone(),
             )
             .await?;
