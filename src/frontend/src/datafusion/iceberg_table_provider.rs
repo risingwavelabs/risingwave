@@ -60,12 +60,13 @@ impl TableProvider for IcebergTableProvider {
 
     async fn scan(
         &self,
-        _state: &dyn Session,
+        state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        let scan = IcebergScan::new(self, projection, filters, limit).await?;
+        let batch_parallelism = state.config().target_partitions();
+        let scan = IcebergScan::new(self, projection, filters, limit, batch_parallelism).await?;
         Ok(Arc::new(scan))
     }
 

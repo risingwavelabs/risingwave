@@ -36,6 +36,7 @@ use risingwave_common::catalog::{
     ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::source::prelude::IcebergSplitEnumerator;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::{IcebergTableProvider, to_datafusion_error};
@@ -48,18 +49,17 @@ pub struct IcebergScan {
     inner: Arc<IcebergScanInner>,
 }
 
-#[derive(Debug)]
+#[derive(educe::Educe)]
+#[educe(Debug)]
 struct IcebergScanInner {
+    #[educe(Debug(ignore))]
     table: Table,
     snapshot_id: Option<i64>,
-    tasks: Vec<FileScanTask>,
-    #[allow(dead_code)]
+    tasks: Vec<Vec<FileScanTask>>,
     iceberg_scan_type: IcebergScanType,
     arrow_schema: SchemaRef,
     column_names: Vec<String>,
-    #[allow(dead_code)]
     need_seq_num: bool,
-    #[allow(dead_code)]
     need_file_path_and_pos: bool,
     plan_properties: PlanProperties,
 }
@@ -126,6 +126,7 @@ impl IcebergScan {
         _projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
+        batch_parallelism: usize,
     ) -> DFResult<Self> {
         let plan_properties = PlanProperties::new(
             EquivalenceProperties::new(provider.schema()),
@@ -172,7 +173,8 @@ impl IcebergScan {
             need_file_path_and_pos,
             plan_properties,
         };
-        inner.tasks = inner.list_iceberg_scan_task().try_collect().await?;
+        let scan_tasks = inner.list_iceberg_scan_task().try_collect().await?;
+        inner.tasks = IcebergSplitEnumerator::split_n_vecs(scan_tasks, batch_parallelism);
         inner.plan_properties.partitioning = Partitioning::UnknownPartitioning(inner.tasks.len());
 
         Ok(Self {
@@ -249,26 +251,29 @@ impl IcebergScanInner {
             .reader_builder()
             .with_batch_size(chunk_size)
             .build();
-        let task = self.tasks[partition].clone();
-        let stream = reader
-            .read(tokio_stream::once(Ok(task)).boxed())
-            .await
-            .map_err(to_datafusion_error)?;
-        let mut pos_start: i64 = 0;
 
-        #[for_await]
-        for batch in stream {
-            let batch = batch.map_err(to_datafusion_error)?;
-            let batch = append_metadata(
-                batch,
-                self.need_seq_num,
-                self.need_file_path_and_pos,
-                &self.tasks[partition],
-                pos_start,
-            )?;
-            let batch = cast_batch(self.arrow_schema.clone(), batch)?;
-            pos_start += i64::try_from(batch.num_rows()).unwrap();
-            yield batch;
+        for task in &self.tasks[partition] {
+            let stream = reader
+                .clone()
+                .read(tokio_stream::once(Ok(task.clone())).boxed())
+                .await
+                .map_err(to_datafusion_error)?;
+            let mut pos_start: i64 = 0;
+
+            #[for_await]
+            for batch in stream {
+                let batch = batch.map_err(to_datafusion_error)?;
+                let batch = append_metadata(
+                    batch,
+                    self.need_seq_num,
+                    self.need_file_path_and_pos,
+                    task,
+                    pos_start,
+                )?;
+                let batch = cast_batch(self.arrow_schema.clone(), batch)?;
+                pos_start += i64::try_from(batch.num_rows()).unwrap();
+                yield batch;
+            }
         }
     }
 }
