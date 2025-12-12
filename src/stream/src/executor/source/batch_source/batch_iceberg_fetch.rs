@@ -39,18 +39,6 @@ use crate::task::LocalBarrierManager;
 /// Type alias for file entries in the queue: (`file_name`, `scan_task_json`)
 type FileEntry = (String, JsonbVal);
 
-// ============================================================================
-// Fetch State Management
-// ============================================================================
-
-/// Tracks the state of the fetch executor during its lifecycle.
-///
-/// The fetch executor goes through a refresh cycle:
-/// 1. `RefreshStart` mutation triggers a new refresh cycle
-/// 2. Files are received from upstream list executor and queued
-/// 3. Files are batched and read concurrently
-/// 4. `ListFinish` mutation signals no more files coming
-/// 5. Once all files are processed, report load finished
 struct FetchState {
     /// Whether we are in a refresh cycle (started by `RefreshStart`, ended by load finished report)
     is_refreshing: bool,
@@ -521,10 +509,6 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
         *batch_finished.write() = true;
     }
 }
-
-// ============================================================================
-// Trait Implementations
-// ============================================================================
 
 impl<S: StateStore> Execute for BatchIcebergFetchExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
