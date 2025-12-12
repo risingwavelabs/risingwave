@@ -346,14 +346,6 @@ message ListObjectDependenciesResponse {
   repeated ObjectDependencies dependencies = 1;
 }
 
-enum ThrottleType {
-  THROTTLE_TYPE_UNSPECIFIED = 0;
-  THROTTLE_TYPE_DML = 1;
-  THROTTLE_TYPE_BACKFILL = 2;
-  THROTTLE_TYPE_SOURCE = 3;
-  THROTTLE_TYPE_SINK = 4;
-}
-
 enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
@@ -365,7 +357,7 @@ enum ThrottleTarget {
 
 message ApplyThrottleRequest {
   ThrottleTarget throttle_target = 1;
-  ThrottleType throttle_type = 2;
+  common.ThrottleType throttle_type = 2;
   uint32 id = 3;
   optional uint32 rate = 4;
 }
