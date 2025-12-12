@@ -130,7 +130,7 @@ mod state {
         /// sequence number
         pub sequence_number: i64,
         /// equality ids
-        pub equality_ids: Vec<i32>,
+        pub equality_ids: Option<Vec<i32>>,
 
         pub file_size_in_bytes: u64,
     }

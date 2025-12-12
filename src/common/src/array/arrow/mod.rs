@@ -17,6 +17,7 @@
 
 mod arrow_54;
 mod arrow_55;
+mod arrow_56;
 // These mods import mods above and may override some methods.
 mod arrow_deltalake;
 mod arrow_iceberg;

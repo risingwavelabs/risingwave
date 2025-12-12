@@ -225,10 +225,7 @@ fn fallback_rw_expr_builder(
         .collect::<Vec<_>>();
 
     let func = RwScalarFunction {
-        name: format!(
-            "RisingWave Scalar Function (type: {})",
-            func_call.func_type().as_str_name()
-        ),
+        name: format!("RisingWave Scalar Function ({:?})", func_call),
         expr: boxed_expr,
         input_columns: column_vec,
         signature: Signature {
@@ -245,11 +242,15 @@ fn fallback_rw_expr_builder(
     }))
 }
 
-#[derive(Debug)]
+#[derive(Debug, educe::Educe)]
+#[educe(PartialEq, Eq, Hash)]
 struct RwScalarFunction {
+    // Datafusion uses function name as column identifier, so we need to keep unique names for different functions to avoid conflicts
     name: String,
-    expr: BoxedExpression,
     input_columns: Vec<Column>,
+    #[educe(PartialEq(ignore), Hash(ignore))]
+    expr: BoxedExpression,
+    #[educe(PartialEq(ignore), Hash(ignore))]
     signature: Signature,
 }
 
@@ -273,7 +274,7 @@ impl ScalarUDFImpl for RwScalarFunction {
         Ok(field.data_type().clone())
     }
 
-    fn invoke_with_args(&self, args: ScalarFunctionArgs<'_>) -> DFResult<ColumnarValue> {
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DFResult<ColumnarValue> {
         let opts = RecordBatchOptions::new()
             .with_match_field_names(false)
             .with_row_count(Some(args.number_rows));
@@ -299,7 +300,7 @@ impl ScalarUDFImpl for RwScalarFunction {
         let res = match value {
             ValueImpl::Array(array_impl) => {
                 let array = IcebergArrowConvert
-                    .to_arrow_array(args.return_type, &array_impl)
+                    .to_arrow_array(args.return_field.data_type(), &array_impl)
                     .map_err(boxed)?;
                 ColumnarValue::Array(array)
             }

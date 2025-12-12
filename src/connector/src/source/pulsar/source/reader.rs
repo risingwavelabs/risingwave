@@ -21,10 +21,10 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use moka::future::Cache as MokaCache;
+use prost_011::Message as _;
 use pulsar::consumer::{InitialPosition, Message};
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use pulsar_prost::Message as PulsarProstMessage;
 use risingwave_common::{bail, ensure};
 use thiserror_ext::AsReport;
 
@@ -373,7 +373,7 @@ impl PulsarConsumeStream {
 }
 
 impl futures::Stream for PulsarConsumeStream {
-    type Item = Result<pulsar::consumer::Message<Vec<u8>>, pulsar::error::Error>;
+    type Item = Result<Message<Vec<u8>>, pulsar::error::Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
