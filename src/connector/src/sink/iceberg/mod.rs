@@ -96,6 +96,101 @@ use crate::sink::{
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+
+// ============ Helper functions for schema change ============
+
+/// Convert Arrow `DataType` to Iceberg `Type`
+fn arrow_type_to_iceberg_type(arrow_type: &ArrowDataType) -> Result<iceberg::spec::Type> {
+    use iceberg::spec::{PrimitiveType, Type};
+
+    let iceberg_type = match arrow_type {
+        ArrowDataType::Boolean => Type::Primitive(PrimitiveType::Boolean),
+        ArrowDataType::Int32 => Type::Primitive(PrimitiveType::Int),
+        ArrowDataType::Int64 => Type::Primitive(PrimitiveType::Long),
+        ArrowDataType::Float32 => Type::Primitive(PrimitiveType::Float),
+        ArrowDataType::Float64 => Type::Primitive(PrimitiveType::Double),
+        ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => Type::Primitive(PrimitiveType::String),
+        ArrowDataType::Binary | ArrowDataType::LargeBinary => {
+            Type::Primitive(PrimitiveType::Binary)
+        }
+        ArrowDataType::Date32 => Type::Primitive(PrimitiveType::Date),
+        ArrowDataType::Timestamp(_, _) => Type::Primitive(PrimitiveType::Timestamptz),
+        ArrowDataType::Decimal128(precision, scale) => Type::Primitive(PrimitiveType::Decimal {
+            precision: *precision as u32,
+            scale: *scale as u32,
+        }),
+        ArrowDataType::List(field) | ArrowDataType::LargeList(field) => {
+            let element_type = arrow_type_to_iceberg_type(field.data_type())?;
+            Type::List(iceberg::spec::ListType {
+                element_field: Arc::new(iceberg::spec::NestedField::list_element(
+                    0, // Will be assigned by Iceberg
+                    element_type,
+                    !field.is_nullable(),
+                )),
+            })
+        }
+        ArrowDataType::Struct(fields) => {
+            let mut iceberg_fields = Vec::new();
+            for (idx, field) in fields.iter().enumerate() {
+                let field_type = arrow_type_to_iceberg_type(field.data_type())?;
+                iceberg_fields.push(Arc::new(iceberg::spec::NestedField {
+                    id: idx as i32, // Temporary ID
+                    name: field.name().clone(),
+                    required: !field.is_nullable(),
+                    field_type: Box::new(field_type),
+                    doc: None,
+                    initial_default: None,
+                    write_default: None,
+                }));
+            }
+            Type::Struct(iceberg::spec::StructType::new(iceberg_fields))
+        }
+        _ => {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Unsupported Arrow type for Iceberg: {:?}",
+                arrow_type
+            )));
+        }
+    };
+
+    Ok(iceberg_type)
+}
+
+/// Serialize `add_columns` information to bytes for storage in metadata
+fn serialize_add_columns(fields: Vec<Field>) -> Result<Vec<u8>> {
+    use prost::Message;
+    use risingwave_pb::plan_common::PbField;
+
+    // Convert Fields to protobuf format
+    let pb_fields: Vec<PbField> = fields.iter().map(|f| f.to_prost()).collect();
+
+    // Use protobuf encoding
+    let mut buf = Vec::new();
+    for pb_field in pb_fields {
+        pb_field
+            .encode_length_delimited(&mut buf)
+            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to encode add_columns: {}", e)))?;
+    }
+    Ok(buf)
+}
+
+/// Deserialize `add_columns` information from bytes
+fn deserialize_add_columns(mut bytes: &[u8]) -> Result<Vec<Field>> {
+    use prost::Message;
+    use risingwave_pb::plan_common::PbField;
+
+    let mut pb_fields = Vec::new();
+    while !bytes.is_empty() {
+        let pb_field = PbField::decode_length_delimited(&mut bytes)
+            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to decode add_columns: {}", e)))?;
+        pb_fields.push(pb_field);
+    }
+
+    // Convert protobuf format back to Fields
+    let fields: Vec<Field> = pb_fields.iter().map(Field::from_prost).collect();
+    Ok(fields)
+}
+
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
 pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
@@ -842,6 +937,10 @@ impl Sink for IcebergSink {
 
         let _ = self.create_and_validate_table().await?;
         Ok(())
+    }
+
+    fn support_schema_change() -> bool {
+        true
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
@@ -1914,6 +2013,22 @@ pub struct IcebergSinkCommitter {
     pub(crate) iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
 }
 
+struct ParsedCommitMetadata {
+    add_columns: Option<Vec<Field>>,
+    write_results: Vec<IcebergCommitResult>,
+    snapshot_id: Option<i64>,
+}
+
+impl ParsedCommitMetadata {
+    fn has_data(&self) -> bool {
+        self.snapshot_id.is_some()
+    }
+
+    fn has_schema_change(&self) -> bool {
+        self.add_columns.is_some()
+    }
+}
+
 impl IcebergSinkCommitter {
     // Reload table and guarantee current schema_id and partition_spec_id matches
     // given `schema_id` and `partition_spec_id`
@@ -1963,18 +2078,32 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
-
+        // Commit data if present
         let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns)? {
+            match self.pre_commit_inner(epoch, metadata, add_columns.clone())? {
                 Some((write_results, snapshot_id)) => (write_results, snapshot_id),
                 None => {
-                    tracing::debug!(?epoch, "no data to commit");
+                    // No data to commit, but may have schema change
+                    if let Some(add_columns) = add_columns {
+                        tracing::info!(?epoch, "No data to commit, but committing schema change");
+                        self.commit_schema_change(add_columns).await?;
+                    } else {
+                        tracing::debug!(?epoch, "no data to commit");
+                    }
                     return Ok(());
                 }
             };
 
-        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
-            .await
+        self.commit_datafile(epoch, write_results, snapshot_id)
+            .await?;
+
+        // Commit schema change if present
+        if let Some(add_columns) = add_columns {
+            tracing::info!(?epoch, "Committing schema change after data commit");
+            self.commit_schema_change(add_columns).await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -1996,25 +2125,68 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<Vec<u8>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
+        tracing::info!(
+            "add_columns in pre_commit: {:?}",
+            add_columns
+                .as_ref()
+                .map(|cols| cols.iter().map(|c| &c.name).collect::<Vec<_>>())
+        );
 
+        let has_schema_change = add_columns.is_some();
+
+        // Try to get write_results and snapshot_id
         let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns)? {
-                Some((write_results, snapshot_id)) => (write_results, snapshot_id),
+            match self.pre_commit_inner(epoch, metadata, add_columns.clone())? {
+                Some((write_results, snapshot_id)) => (Some(write_results), Some(snapshot_id)),
                 None => {
-                    tracing::debug!(?epoch, "no data to commit");
-                    return Ok(vec![]);
+                    // No data to commit
+                    // If there's schema change, we still need to return metadata with only schema change info
+                    if !has_schema_change {
+                        tracing::debug!(?epoch, "no data to commit and no schema change");
+                        return Ok(vec![]);
+                    }
+                    tracing::info!(
+                        ?epoch,
+                        "no data to commit but has schema change, will commit schema only"
+                    );
+                    (None, None)
                 }
             };
 
         let mut write_results_bytes = Vec::new();
-        for each_parallelism_write_result in write_results {
-            let each_parallelism_write_result_bytes: Vec<u8> =
-                each_parallelism_write_result.try_into()?;
-            write_results_bytes.push(each_parallelism_write_result_bytes);
+
+        // Serialize write_results if present
+        if let Some(write_results) = write_results {
+            for each_parallelism_write_result in write_results {
+                let each_parallelism_write_result_bytes: Vec<u8> =
+                    each_parallelism_write_result.try_into()?;
+                write_results_bytes.push(each_parallelism_write_result_bytes);
+            }
         }
 
-        let snapshot_id_bytes: Vec<u8> = snapshot_id.to_le_bytes().to_vec();
-        write_results_bytes.push(snapshot_id_bytes);
+        // Serialize snapshot_id if present
+        if let Some(snapshot_id) = snapshot_id {
+            let snapshot_id_bytes: Vec<u8> = snapshot_id.to_le_bytes().to_vec();
+            write_results_bytes.push(snapshot_id_bytes);
+        }
+
+        // Add flag byte to indicate whether add_columns is present
+        // Format: [flag_byte, write_results..., snapshot_id (if has data), add_columns (if flag=1)]
+        let flag_byte: Vec<u8> = vec![if has_schema_change { 1u8 } else { 0u8 }];
+        tracing::debug!(
+            "flag_byte: {:?}, has_schema_change: {}",
+            flag_byte,
+            has_schema_change
+        );
+
+        // Insert flag at the beginning
+        write_results_bytes.insert(0, flag_byte);
+
+        // Serialize and append add_columns if present
+        if let Some(add_columns) = add_columns {
+            let add_columns_bytes = serialize_add_columns(add_columns)?;
+            write_results_bytes.push(add_columns_bytes);
+        }
 
         let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(write_results_bytes);
         Ok(pre_commit_metadata_bytes)
@@ -2023,38 +2195,54 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
     async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}");
         if commit_metadata.is_empty() {
-            tracing::debug!(?epoch, "no data to commit");
+            tracing::info!(?epoch, "no datafile and schema change to commit");
             return Ok(());
         }
 
-        let mut write_results_bytes = deserialize_metadata(commit_metadata);
-
-        let snapshot_id_bytes = write_results_bytes.pop().unwrap();
-        let snapshot_id = i64::from_le_bytes(
-            snapshot_id_bytes
-                .try_into()
-                .map_err(|_| SinkError::Iceberg(anyhow!("Invalid snapshot id bytes")))?,
+        let parsed_commit_metadata = Self::parse_commit_metadata(commit_metadata)?;
+        tracing::info!(
+            "Commit metadata has_schema_change: {}, add_columns: {:?}",
+            parsed_commit_metadata.has_schema_change(),
+            parsed_commit_metadata
+                .add_columns
+                .as_ref()
+                .map(|cols| cols.iter().map(|c| &c.name).collect::<Vec<_>>())
         );
 
-        if self
-            .is_snapshot_id_in_iceberg(&self.config, snapshot_id)
-            .await?
-        {
-            tracing::info!(
-                "Snapshot id {} already committed in iceberg table, skip committing again.",
-                snapshot_id
-            );
+        if !parsed_commit_metadata.has_data() && !parsed_commit_metadata.has_schema_change() {
+            tracing::debug!(?epoch, "no data and no schema change to commit");
             return Ok(());
         }
 
-        let mut write_results = vec![];
-        for each in write_results_bytes {
-            let write_result = IcebergCommitResult::try_from_serialized_bytes(each)?;
-            write_results.push(write_result);
+        let data_file_need_committed = parsed_commit_metadata.has_data();
+        let schema_change_need_commit = parsed_commit_metadata.has_schema_change();
+        let write_results = parsed_commit_metadata.write_results;
+        let snapshot_id = parsed_commit_metadata.snapshot_id;
+        let add_columns = parsed_commit_metadata.add_columns;
+
+        if data_file_need_committed && !schema_change_need_commit {
+            let snapshot_id =
+                snapshot_id.ok_or_else(|| SinkError::Iceberg(anyhow!("Snapshot id missing")))?;
+            return self
+                .commit_data_only(epoch, write_results, snapshot_id)
+                .await;
         }
 
-        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
-            .await?;
+        if !data_file_need_committed && schema_change_need_commit {
+            let add_columns = add_columns
+                .ok_or_else(|| SinkError::Iceberg(anyhow!("Schema metadata missing")))?;
+            return self.commit_schema_only(epoch, add_columns).await;
+        }
+
+        if data_file_need_committed && schema_change_need_commit {
+            let snapshot_id =
+                snapshot_id.ok_or_else(|| SinkError::Iceberg(anyhow!("Snapshot id missing")))?;
+            let add_columns = add_columns
+                .ok_or_else(|| SinkError::Iceberg(anyhow!("Schema metadata missing")))?;
+            return self
+                .commit_data_and_schema(epoch, write_results, snapshot_id, add_columns)
+                .await;
+        }
 
         Ok(())
     }
@@ -2065,21 +2253,167 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
     }
 }
 
+impl IcebergSinkCommitter {
+    fn parse_commit_metadata(commit_metadata: Vec<u8>) -> Result<ParsedCommitMetadata> {
+        let mut payload = deserialize_metadata(commit_metadata);
+        if payload.is_empty() {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Invalid commit metadata: missing flag byte"
+            )));
+        }
+
+        let flag_byte = payload.remove(0);
+        let has_schema_change = flag_byte.get(0).copied().unwrap_or(0) == 1;
+
+        let add_columns = if has_schema_change {
+            let add_columns_bytes = payload.pop().ok_or_else(|| {
+                SinkError::Iceberg(anyhow!(
+                    "Schema change flag set but metadata is missing column definitions"
+                ))
+            })?;
+            Some(deserialize_add_columns(&add_columns_bytes)?)
+        } else {
+            None
+        };
+
+        let snapshot_id = if payload.is_empty() {
+            None
+        } else {
+            let snapshot_id_bytes = payload.pop().unwrap();
+            Some(i64::from_le_bytes(snapshot_id_bytes.try_into().map_err(
+                |_| SinkError::Iceberg(anyhow!("Invalid snapshot id bytes")),
+            )?))
+        };
+
+        let write_results = payload
+            .into_iter()
+            .map(IcebergCommitResult::try_from_serialized_bytes)
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(ParsedCommitMetadata {
+            add_columns,
+            write_results,
+            snapshot_id,
+        })
+    }
+
+    async fn commit_data_only(
+        &mut self,
+        epoch: u64,
+        write_results: Vec<IcebergCommitResult>,
+        snapshot_id: i64,
+    ) -> Result<()> {
+        let snapshot_committed = self
+            .is_snapshot_id_in_iceberg(&self.config, snapshot_id)
+            .await?;
+
+        if snapshot_committed {
+            tracing::info!(
+                "Snapshot id {} already committed in iceberg table, skip committing again.",
+                snapshot_id
+            );
+            return Ok(());
+        }
+
+        self.commit_datafile(epoch, write_results, snapshot_id)
+            .await
+    }
+
+    async fn commit_schema_only(&mut self, epoch: u64, add_columns: Vec<Field>) -> Result<()> {
+        let schema_updated = self.check_columns_exist(&add_columns)?;
+        if schema_updated {
+            tracing::info!("Schema change already committed in epoch {}, skip", epoch);
+            return Ok(());
+        }
+
+        tracing::info!("Committing schema change only in epoch {}", epoch);
+        self.commit_schema_change(add_columns).await?;
+        tracing::info!("Successfully committed schema change in epoch {}", epoch);
+
+        Ok(())
+    }
+
+    async fn commit_data_and_schema(
+        &mut self,
+        epoch: u64,
+        write_results: Vec<IcebergCommitResult>,
+        snapshot_id: i64,
+        add_columns: Vec<Field>,
+    ) -> Result<()> {
+        let schema_updated = self.check_columns_exist(&add_columns)?;
+        let snapshot_committed = self
+            .is_snapshot_id_in_iceberg(&self.config, snapshot_id)
+            .await?;
+
+        match (snapshot_committed, schema_updated) {
+            // Case 1: Both data and schema are already committed - skip everything
+            (true, true) => {
+                tracing::info!(
+                    "Snapshot {} and schema change already committed in epoch {}, skip",
+                    snapshot_id,
+                    epoch
+                );
+                return Ok(());
+            }
+
+            // Case 4: Schema updated but data not committed - this should never happen
+            // because we always commit data before schema
+            (false, true) => {
+                return Err(SinkError::Iceberg(anyhow!(
+                    "Invalid state in epoch {}: schema updated but snapshot {} not committed. \
+                     This violates the principle of committing data before metadata.",
+                    epoch,
+                    snapshot_id
+                )));
+            }
+
+            // Case 2: Neither data nor schema committed - commit both
+            (false, false) => {
+                tracing::info!(
+                    "Snapshot {} and schema not committed in epoch {}, committing both",
+                    snapshot_id,
+                    epoch
+                );
+
+                self.commit_datafile(epoch, write_results, snapshot_id)
+                    .await?;
+
+                self.commit_schema_change(add_columns).await?;
+
+                tracing::info!(
+                    "Successfully committed both data and schema change in epoch {}",
+                    epoch
+                );
+            }
+
+            // Case 3: Data committed but schema not - only commit schema
+            (true, false) => {
+                tracing::info!(
+                    "Snapshot {} already committed but schema not updated in epoch {}, \
+                     committing schema change only",
+                    snapshot_id,
+                    epoch
+                );
+
+                self.commit_schema_change(add_columns).await?;
+
+                tracing::info!("Successfully committed schema change in epoch {}", epoch);
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Methods Required to Achieve Exactly Once Semantics
 impl IcebergSinkCommitter {
     fn pre_commit_inner(
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        _add_columns: Option<Vec<Field>>,
     ) -> Result<Option<(Vec<IcebergCommitResult>, i64)>> {
-        if let Some(add_columns) = add_columns {
-            return Err(anyhow!(
-                "Iceberg sink not support add columns, but got: {:?}",
-                add_columns
-            )
-            .into());
-        }
+        // Note: add_columns will be handled in the pre_commit function for serialization
 
         let write_results: Vec<IcebergCommitResult> = metadata
             .iter()
@@ -2113,7 +2447,7 @@ impl IcebergSinkCommitter {
         Ok(Some((write_results, snapshot_id)))
     }
 
-    async fn commit_iceberg_inner(
+    async fn commit_datafile(
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
@@ -2252,6 +2586,141 @@ impl IcebergSinkCommitter {
         } else {
             Ok(false)
         }
+    }
+
+    /// Check if the specified columns already exist in the iceberg table's current schema.
+    /// Returns true if ALL columns in `add_columns` already exist in the table.
+    /// This is used to determine if schema change has already been applied.
+    fn check_columns_exist(&self, add_columns: &[Field]) -> Result<bool> {
+        let current_schema = self.table.metadata().current_schema();
+        let current_arrow_schema = schema_to_arrow_schema(current_schema.as_ref())
+            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to convert schema: {}", e)))?;
+
+        let iceberg_arrow_convert = IcebergArrowConvert;
+
+        // Check if all columns in add_columns exist in current schema
+        for field in add_columns {
+            let arrow_field = iceberg_arrow_convert
+                .to_arrow_field(&field.name, &field.data_type)
+                .map_err(|e| {
+                    SinkError::Iceberg(anyhow!("Failed to convert field to arrow: {}", e))
+                })?;
+
+            // Check if this field exists in current schema
+            let found = current_arrow_schema.fields().iter().any(|current_field| {
+                current_field.name() == arrow_field.name()
+                    && current_field.data_type() == arrow_field.data_type()
+            });
+
+            if !found {
+                tracing::debug!("Column '{}' not found in iceberg table", field.name);
+                return Ok(false);
+            }
+        }
+
+        tracing::debug!(
+            "All {} columns already exist in iceberg table",
+            add_columns.len()
+        );
+        Ok(true)
+    }
+
+    /// Commit schema changes (e.g., add columns) to the iceberg table.
+    /// This function uses `catalog.update_table()` API to atomically update the table schema
+    /// with optimistic locking to prevent concurrent conflicts.
+    async fn commit_schema_change(&mut self, add_columns: Vec<Field>) -> Result<()> {
+        use iceberg::spec::NestedField;
+        use iceberg::{TableCommit, TableRequirement, TableUpdate};
+
+        tracing::info!(
+            "Starting to commit schema change with {} columns",
+            add_columns.len()
+        );
+
+        // Step 1: Get current table metadata
+        let metadata = self.table.metadata();
+        let current_schema = metadata.current_schema().as_ref().clone();
+        let mut next_field_id = metadata.last_column_id + 1;
+        tracing::debug!("Starting schema change, next_field_id: {}", next_field_id);
+
+        // Step 2: Build new schema with added columns
+        let mut builder = current_schema.into_builder();
+        let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+
+        for field in &add_columns {
+            // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
+            let arrow_field = iceberg_create_table_arrow_convert
+                .to_arrow_field(&field.name, &field.data_type)
+                .map_err(|e| {
+                    SinkError::Iceberg(anyhow!(
+                        "Failed to convert field '{}' to arrow: {}",
+                        field.name,
+                        e
+                    ))
+                })?;
+
+            // Convert Arrow DataType to Iceberg Type
+            let iceberg_type = arrow_type_to_iceberg_type(arrow_field.data_type())?;
+
+            // Create NestedField with the next available field ID
+            let nested_field = Arc::new(NestedField::optional(
+                next_field_id,
+                &field.name,
+                iceberg_type,
+            ));
+
+            builder = builder.with_fields(vec![nested_field]);
+            next_field_id += 1;
+
+            tracing::info!("Added field '{}' with ID {}", field.name, next_field_id - 1);
+        }
+
+        let new_schema = builder
+            .build()
+            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to build new schema: {}", e)))?;
+
+        tracing::info!("Successfully built new schema for table");
+        // Step 3: Create TableCommit with optimistic locking
+        let updates = vec![
+            TableUpdate::AddSchema { schema: new_schema },
+            TableUpdate::SetCurrentSchema { schema_id: -1 }, // -1 means use the last added schema
+        ];
+
+        let requirements = vec![
+            TableRequirement::LastAssignedFieldIdMatch {
+                last_assigned_field_id: metadata.last_column_id,
+            },
+            TableRequirement::CurrentSchemaIdMatch {
+                current_schema_id: metadata.current_schema_id(),
+            },
+        ];
+
+        let commit = TableCommit::builder()
+            .ident(self.table.identifier().clone())
+            .updates(updates)
+            .requirements(requirements)
+            .build();
+
+        // Step 4: Commit to catalog
+        tracing::info!(
+            "Committing schema change to catalog for table {}",
+            self.table.identifier()
+        );
+
+        let updated_table = self
+            .catalog
+            .update_table(commit)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to update table schema: {}", e)))?;
+
+        self.table = updated_table;
+
+        tracing::info!(
+            "Successfully committed schema change, added {} columns to iceberg table",
+            add_columns.len()
+        );
+
+        Ok(())
     }
 
     /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
