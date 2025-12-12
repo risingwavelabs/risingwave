@@ -212,7 +212,7 @@ rand = { version = "0.9", features = ["small_rng"] }
 rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
     "cmake-build",
 ] }
-redis = { version = "0.32" }
+redis = { version = "1.0" }
 regex = "1.12"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
 risingwave_backup = { path = "./src/storage/backup" }
