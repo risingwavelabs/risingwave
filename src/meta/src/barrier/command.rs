@@ -367,7 +367,7 @@ pub enum Command {
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
-    Throttle(ThrottleConfig, risingwave_pb::meta::ThrottleType),
+    Throttle(ThrottleConfig, risingwave_pb::common::ThrottleType),
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
     /// materialize executor to start storing old value for subscription.
