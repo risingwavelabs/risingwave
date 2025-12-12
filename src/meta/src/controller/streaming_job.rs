@@ -652,6 +652,10 @@ impl CatalogController {
             }
         }
 
+        // Record original job info before any potential job id rewrite (e.g. iceberg sink).
+        let original_job_id = job_id;
+        let original_obj_type = obj.obj_type;
+
         let iceberg_table_id =
             try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_sink_id()).await?;
         if let Some(iceberg_table_id) = iceberg_table_id {
@@ -678,9 +682,10 @@ impl CatalogController {
         let mut need_notify =
             streaming_job.is_some_and(|job| job.create_type == CreateType::Background);
         if !need_notify {
-            // If the job is not created in the background, we only need to notify the frontend if the job is a materialized view.
             if let Some(table) = &table_obj {
                 need_notify = table.table_type == TableType::MaterializedView;
+            } else if original_obj_type == ObjectType::Sink {
+                need_notify = true;
             }
         }
 
@@ -705,6 +710,25 @@ impl CatalogController {
         }
 
         if need_notify {
+            // Special handling for iceberg sinks: the `job_id` may have been rewritten to the table id.
+            // Ensure we still notify the frontend to delete the original sink object.
+            if original_obj_type == ObjectType::Sink && original_job_id != job_id {
+                let orig_obj: Option<PartialObject> = Object::find_by_id(original_job_id)
+                    .select_only()
+                    .columns([
+                        object::Column::Oid,
+                        object::Column::ObjType,
+                        object::Column::SchemaId,
+                        object::Column::DatabaseId,
+                    ])
+                    .into_partial_model()
+                    .one(&txn)
+                    .await?;
+                if let Some(orig_obj) = orig_obj {
+                    objs.push(orig_obj);
+                }
+            }
+
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
                 .columns([
@@ -1108,6 +1132,9 @@ impl CatalogController {
                 if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
                     need_grant_default_privileges = false;
                 }
+                // If sinks were pre-notified during CREATING, we should use Update at finish
+                // to avoid duplicate Add notifications (align with MV behavior).
+                notification_op = NotificationOperation::Update;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
                 });
