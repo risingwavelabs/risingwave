@@ -116,12 +116,11 @@ message ResumeMutation {}
 message ThrottleMutation {
   message RateLimit {
     optional uint32 rate_limit = 1;
+    common.ThrottleType throttle_type = 2;
   }
 
   // Actor -> RateLimit
   map<uint32, RateLimit> actor_throttle = 1;
-  // Which kind of executors should honor this rate limit.
-  common.ThrottleType throttle_type = 2;
 }
 
 message SubscriptionUpstreamInfo {

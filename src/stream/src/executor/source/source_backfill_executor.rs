@@ -594,21 +594,18 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 );
                                             }
                                         }
-                                        Mutation::Throttle {
-                                            actor_throttle: actor_to_apply,
-                                            throttle_type,
-                                        } => {
-                                            if *throttle_type == ThrottleType::Backfill
-                                                && let Some(new_rate_limit) =
-                                                    actor_to_apply.get(&self.actor_ctx.id)
-                                                && *new_rate_limit != self.rate_limit_rps
+                                        Mutation::Throttle { actor_throttle } => {
+                                            if let Some(entry) =
+                                                actor_throttle.get(&self.actor_ctx.id)
+                                                && entry.throttle_type == ThrottleType::Backfill
+                                                && entry.rate_limit != self.rate_limit_rps
                                             {
                                                 tracing::info!(
                                                     "updating rate limit from {:?} to {:?}",
                                                     self.rate_limit_rps,
-                                                    *new_rate_limit
+                                                    entry.rate_limit
                                                 );
-                                                self.rate_limit_rps = *new_rate_limit;
+                                                self.rate_limit_rps = entry.rate_limit;
                                                 // rebuild reader
                                                 let (reader, _backfill_info) = self
                                                     .build_stream_source_reader(

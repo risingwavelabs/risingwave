@@ -423,18 +423,16 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             }
                                             Mutation::Throttle {
                                                 actor_throttle: some,
-                                                throttle_type,
                                             } => {
                                                 // TODO(zw): optimization: improve throttle.
                                                 // 1. Handle rate limit 0. Currently, to resume the process, the actor must be rebuilt.
                                                 // 2. Apply new rate limit immediately.
-                                                if *throttle_type == ThrottleType::Backfill
-                                                    && let Some(new_rate_limit) =
-                                                        some.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                if let Some(entry) = some.get(&self.actor_ctx.id)
+                                                    && entry.throttle_type == ThrottleType::Backfill
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     // The new rate limit will take effect since next split.
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                 }
                                             }
                                             Mutation::Update(UpdateMutation {

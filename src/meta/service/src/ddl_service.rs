@@ -31,7 +31,7 @@ use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_comp
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta::stream::{
-    ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy, ThrottleConfig,
+    ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy, ThrottleActorConfig, ThrottleConfig,
 };
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
@@ -1585,24 +1585,30 @@ impl DdlService for DdlServiceImpl {
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
-            let mutation: ThrottleConfig = actors_to_apply
+            let limits = actors_to_apply
                 .into_iter()
                 .map(|(fragment_id, actors)| {
-                    (
-                        fragment_id,
-                        actors
-                            .into_iter()
-                            .map(|actor_id| (actor_id, source_rate_limit))
-                            .collect::<HashMap<_, _>>(),
-                    )
+                    let per_actor = actors
+                        .into_iter()
+                        .map(|actor_id| {
+                            (
+                                actor_id,
+                                ThrottleActorConfig {
+                                    rate_limit: source_rate_limit,
+                                },
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+                    (fragment_id, per_actor)
                 })
-                .collect();
+                .collect::<HashMap<_, HashMap<_, _>>>();
+            let mutation = ThrottleConfig {
+                throttle_type: risingwave_pb::common::ThrottleType::Source,
+                limits,
+            };
             let _ = self
                 .barrier_scheduler
-                .run_command(
-                    database_id,
-                    Command::Throttle(mutation, risingwave_pb::common::ThrottleType::Source),
-                )
+                .run_command(database_id, Command::Throttle(mutation))
                 .await?;
         }
 
