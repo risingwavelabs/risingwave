@@ -1,7 +1,22 @@
 from ..common import *
 from . import section
 
+def _sum_fragment_metric_by_mv(expr: str) -> str:
+    return (
+        f"sum(({expr})"
+        f" * on(fragment_id) group_left(materialized_view_id)"
+        f" max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
+        f" by (materialized_view_id)"
+        f" / sum(sum({metric('stream_actor_count')}) by (fragment_id)"
+        f" * on(fragment_id) group_left(materialized_view_id) table_info)"
+        f" by (materialized_view_id)"
+    )
 
+def _sum_actors_by_mv(expr: str) -> str:
+    return (
+        f" sum(sum(stream_actor_count) by (fragment_id)"
+        f" "
+    )
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
@@ -14,10 +29,9 @@ def _(outer_panels: Panels):
                     "This can be used to estimate the CPU usage of an actor",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
-                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f"{_sum_fragment_metric_by_mv(f'sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)')}"
                             f" / 1000000000",
-                            "fragment {{fragment_id}}",
+                            "job {{materialized_view_id}}",
                         ),
                     ],
                 ),
@@ -26,19 +40,23 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "fragment {{fragment_id}}",
-                        ),
+                            _sum_fragment_metric_by_mv(f'rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0'),
+                            "job {{materialized_view_id}}",
+                        )
                     ],
                 ),
                 panels.timeseries_percentage(
                     "Tokio: Actor Poll Avg Rate Per Poll",
                     "",
                     [
+                        # panels.target(
+                        #     f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
+                        #     "fragment {{fragment_id}}",
+                        # ),
                         panels.target(
-                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / (rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0) / 1000000000",
-                            "fragment {{fragment_id}}",
-                        ),
+                            f"{_sum_fragment_metric_by_mv()}"
+                        )
+                        
                     ],
                 ),
                 panels.timeseries_percentage(
