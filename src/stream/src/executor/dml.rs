@@ -162,13 +162,11 @@ impl DmlExecutor {
                                 Mutation::Resume => stream.resume_stream(),
                                 Mutation::Throttle {
                                     actor_throttle: actor_to_apply,
-                                    throttle_type,
                                 } => {
-                                    if *throttle_type == ThrottleType::Dml
-                                        && let Some(new_rate_limit) =
-                                            actor_to_apply.get(&self.actor_ctx.id)
+                                    if let Some(entry) = actor_to_apply.get(&self.actor_ctx.id)
+                                        && entry.throttle_type == ThrottleType::Dml
                                     {
-                                        let new_rate_limit = (*new_rate_limit).into();
+                                        let new_rate_limit = entry.rate_limit.into();
                                         let old_rate_limit =
                                             self.rate_limiter.update(new_rate_limit);
 

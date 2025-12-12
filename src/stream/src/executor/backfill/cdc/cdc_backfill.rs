@@ -450,14 +450,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             }
                                             Mutation::Throttle {
                                                 actor_throttle: some,
-                                                throttle_type,
                                             } => {
-                                                if *throttle_type == ThrottleType::Backfill
-                                                    && let Some(new_rate_limit) =
-                                                        some.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                if let Some(entry) = some.get(&self.actor_ctx.id)
+                                                    && entry.throttle_type == ThrottleType::Backfill
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     rate_limit_to_zero = self
                                                         .rate_limit_rps
                                                         .is_some_and(|val| val == 0);
