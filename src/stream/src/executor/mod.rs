@@ -45,7 +45,6 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::{Expression, NonStrictExpression};
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
-use risingwave_pb::meta::ThrottleType;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
@@ -193,6 +192,7 @@ pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
+pub use risingwave_pb::common::ThrottleType;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,

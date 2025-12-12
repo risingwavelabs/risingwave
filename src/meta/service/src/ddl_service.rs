@@ -1601,7 +1601,7 @@ impl DdlService for DdlServiceImpl {
                 .barrier_scheduler
                 .run_command(
                     database_id,
-                    Command::Throttle(mutation, risingwave_pb::meta::ThrottleType::Source),
+                    Command::Throttle(mutation, risingwave_pb::common::ThrottleType::Source),
                 )
                 .await?;
         }
