@@ -25,11 +25,14 @@ impl Binder {
         let (_schema_name, table_name, column_name) = match idents {
             [column] => (None, None, column.real_value()),
             [table, column] => (None, Some(table.real_value()), column.real_value()),
-            [schema, table, column] => (
-                Some(schema.real_value()),
-                Some(table.real_value()),
-                column.real_value(),
-            ),
+            [schema, table, column] => {
+                let schema_name = schema.real_value();
+                let schema_path = self.bind_schema_path(Some(&schema_name));
+                let table_name = table.real_value();
+                self.catalog
+                    .get_created_table_by_name(&self.db_name, schema_path, &table_name)?;
+                (Some(schema_name), Some(table_name), column.real_value())
+            }
             _ => {
                 return Err(
                     ErrorCode::InternalError(format!("Too many idents: {:?}", idents)).into(),
