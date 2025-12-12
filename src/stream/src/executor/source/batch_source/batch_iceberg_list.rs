@@ -19,6 +19,7 @@ use parking_lot::RwLock;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::id::TableId;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::IcebergProperties;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
@@ -120,6 +121,30 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
             match msg {
                 Err(e) => {
                     tracing::warn!(error = %e.as_report(), "encountered an error in batch iceberg list");
+
+                    GLOBAL_ERROR_METRICS.user_source_error.report([
+                        e.variant_name().to_owned(),
+                        self.stream_source_core.source_id.to_string(),
+                        self.actor_ctx.fragment_id.to_string(),
+                        self.associated_table_id.to_string(),
+                    ]);
+
+                    if is_refreshing {
+                        tracing::info!(
+                            source_id = %self.stream_source_core.source_id,
+                            table_id = %self.associated_table_id,
+                            "re-listing iceberg scan tasks due to error"
+                        );
+                        let iceberg_list_stream = Self::list_iceberg_scan_task(
+                            *iceberg_properties.clone(),
+                            downstream_columns.clone(),
+                            is_list_finished.clone(),
+                        )
+                        .boxed();
+                        stream.replace_data_stream(iceberg_list_stream);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
                     return Err(e);
                 }
                 Ok(msg) => match msg {
