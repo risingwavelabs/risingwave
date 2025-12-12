@@ -28,6 +28,7 @@ use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo, ThrottleConfig};
 use risingwave_meta::{MetaError, model};
 use risingwave_meta_model::{ConnectionId, FragmentId, StreamingParallelism};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
