@@ -253,8 +253,8 @@ message VectorIndex {
   common.DistanceType distance_type = 2;
   oneof variant {
     // reserve 64 general configs
-    FlatIndex flat = 65;
-    HnswFlatIndex hnsw_flat = 66;
+    FlatIndex flat = 3;
+    HnswFlatIndex hnsw_flat = 4;
   }
 }
 
@@ -266,8 +266,8 @@ message VectorIndexDelta {
   message VectorIndexAdd {
     oneof add {
       // reserve 64 general configs
-      FlatIndexAdd flat = 65;
-      HnswFlatIndexAdd hnsw_flat = 66;
+      FlatIndexAdd flat = 1;
+      HnswFlatIndexAdd hnsw_flat = 2;
     }
   }
 
@@ -419,11 +419,11 @@ message CompactTask {
     TRACK_SST_OBJECT_ID_FAILED = 12;
     NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
     HEARTBEAT_PROGRESS_CANCELED = 14;
-    RETENTION_TIME_REJECTED = 17;
+    RETENTION_TIME_REJECTED = 15;
 
     // for serverless compaction
-    SERVERLESS_SEND_FAIL_CANCELED = 15;
-    SERVERLESS_TABLE_NOT_FOUND_CANCELED = 16;
+    SERVERLESS_SEND_FAIL_CANCELED = 16;
+    SERVERLESS_TABLE_NOT_FOUND_CANCELED = 17;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -443,15 +443,15 @@ message CompactTask {
   uint32 base_level = 8;
   TaskStatus task_status = 9;
   // compaction group the task belongs to
-  uint64 compaction_group_id = 12;
+  uint64 compaction_group_id = 10;
   // existing_table_ids for compaction drop key
-  repeated uint32 existing_table_ids = 13;
-  uint32 compression_algorithm = 14;
-  uint64 target_file_size = 15;
-  uint32 compaction_filter_mask = 16;
-  map<uint32, TableOption> table_options = 17;
-  uint64 current_epoch_time = 18;
-  uint64 target_sub_level_id = 19;
+  repeated uint32 existing_table_ids = 11;
+  uint32 compression_algorithm = 12;
+  uint64 target_file_size = 13;
+  uint32 compaction_filter_mask = 14;
+  map<uint32, TableOption> table_options = 15;
+  uint64 current_epoch_time = 16;
+  uint64 target_sub_level_id = 17;
 
   enum TaskType {
     TYPE_UNSPECIFIED = 0;
@@ -467,23 +467,23 @@ message CompactTask {
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
-  TaskType task_type = 20;
+  TaskType task_type = 18;
 
   // Deprecated. use table_vnode_partition instead;
-  bool split_by_state_table = 21 [deprecated = true];
+  bool split_by_state_table = 19 [deprecated = true];
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
   // Deprecated. use table_vnode_partition instead;
-  uint32 split_weight_by_vnode = 22;
-  map<uint32, uint32> table_vnode_partition = 23;
+  uint32 split_weight_by_vnode = 20;
+  map<uint32, uint32> table_vnode_partition = 21;
   // The table watermark of any table id. In compaction we only use the table watermarks on safe epoch,
   // so we only need to include the table watermarks on safe epoch to reduce the size of metadata.
-  map<uint32, TableWatermarks> table_watermarks = 24;
+  map<uint32, TableWatermarks> table_watermarks = 22;
   // The table schemas that are at least as new as the one used to create `input_ssts`.
-  map<uint32, TableSchema> table_schemas = 25;
+  map<uint32, TableSchema> table_schemas = 23;
   // Max sub compaction task numbers
-  uint32 max_sub_compaction = 26;
+  uint32 max_sub_compaction = 24;
   // The compaction group id when the compaction task is created.
-  uint64 compaction_group_version_id = 27;
+  uint64 compaction_group_version_id = 25;
 }
 
 message LevelHandler {
@@ -494,7 +494,7 @@ message LevelHandler {
     uint32 target_level = 4;
   }
   uint32 level = 1;
-  repeated RunningCompactTask tasks = 3;
+  repeated RunningCompactTask tasks = 2;
 }
 
 message CompactStatus {
@@ -505,7 +505,7 @@ message CompactStatus {
 // Config info of compaction group.
 message CompactionGroup {
   uint64 id = 1;
-  CompactionConfig compaction_config = 4;
+  CompactionConfig compaction_config = 2;
 }
 
 // Complete info of compaction group.
@@ -565,24 +565,24 @@ message SubscribeCompactionEventRequest {
 
   // PullTask provides the number of tasks needed for the Compactor.
   message PullTask {
-    uint32 pull_task_count = 4;
+    uint32 pull_task_count = 1;
   }
 
   // ReportTask provides the compact task to report to the meta.
   message ReportTask {
     reserved 2;
     reserved "compact_task";
-    map<uint32, TableStats> table_stats_change = 3;
+    map<uint32, TableStats> table_stats_change = 1;
 
-    uint64 task_id = 4;
-    CompactTask.TaskStatus task_status = 5;
-    repeated SstableInfo sorted_output_ssts = 6;
-    map<uint64, uint64> object_timestamps = 7;
+    uint64 task_id = 3;
+    CompactTask.TaskStatus task_status = 4;
+    repeated SstableInfo sorted_output_ssts = 5;
+    map<uint64, uint64> object_timestamps = 6;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.
   message HeartBeat {
-    repeated CompactTaskProgress progress = 2;
+    repeated CompactTaskProgress progress = 1;
   }
 
   oneof event {
@@ -599,7 +599,7 @@ message SubscribeCompactionEventRequest {
     HeartBeat heart_beat = 4;
   }
 
-  uint64 create_at = 7;
+  uint64 create_at = 5;
 }
 
 message SubscribeCompactionEventResponse {
@@ -623,13 +623,13 @@ message SubscribeCompactionEventResponse {
 message ReportCompactionTaskRequest {
   // ReportTask provides the compact task to report to the meta.
   message ReportTask {
-    CompactTask compact_task = 2;
-    map<uint32, TableStats> table_stats_change = 3;
-    map<uint64, uint64> object_timestamps = 4;
+    CompactTask compact_task = 1;
+    map<uint32, TableStats> table_stats_change = 2;
+    map<uint64, uint64> object_timestamps = 3;
   }
   // HeartBeat provides the progress status of all tasks on the Compactor.
   message HeartBeat {
-    repeated CompactTaskProgress progress = 2;
+    repeated CompactTaskProgress progress = 1;
   }
   oneof event {
     ReportTask report_task = 1;
@@ -755,35 +755,37 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 max_bytes_for_level_multiplier = 2;
       uint64 max_compaction_bytes = 3;
       uint64 sub_level_max_compaction_bytes = 4;
-      uint64 level0_tier_compact_file_number = 6;
-      uint64 target_file_size_base = 7;
-      uint32 compaction_filter_mask = 8;
-      uint32 max_sub_compaction = 9;
-      uint64 level0_stop_write_threshold_sub_level_number = 10;
-      uint32 level0_sub_level_compact_level_count = 11;
-      uint32 level0_overlapping_sub_level_compact_level_count = 12;
-      uint64 max_space_reclaim_bytes = 13;
-      uint64 level0_max_compact_file_number = 14;
-      bool enable_emergency_picker = 15;
-      uint32 tombstone_reclaim_ratio = 16;
-      CompressionAlgorithm compression_algorithm = 17;
-      uint32 max_l0_compact_level_count = 18;
-      uint64 sst_allowed_trivial_move_min_size = 19;
-      uint32 split_weight_by_vnode = 20;
-      bool disable_auto_group_scheduling = 21;
-      uint64 max_overlapping_level_size = 22;
+      uint64 level0_tier_compact_file_number = 5;
+      uint64 target_file_size_base = 6;
+      uint32 compaction_filter_mask = 7;
+      uint32 max_sub_compaction = 8;
+      uint64 level0_stop_write_threshold_sub_level_number = 9;
+      uint32 level0_sub_level_compact_level_count = 10;
+      uint32 level0_overlapping_sub_level_compact_level_count = 11;
+      uint64 max_space_reclaim_bytes = 12;
+      uint64 level0_max_compact_file_number = 13;
+      bool enable_emergency_picker = 14;
+      uint32 tombstone_reclaim_ratio = 15;
+      CompressionAlgorithm compression_algorithm = 16;
+      uint32 max_l0_compact_level_count = 17;
+      uint64 sst_allowed_trivial_move_min_size = 18;
+      uint32 split_weight_by_vnode = 19;
+      bool disable_auto_group_scheduling = 20;
+      uint64 max_overlapping_level_size = 21;
       // The emergency compaction limitations for the level0 sstables file count
-      uint32 emergency_level0_sst_file_count = 25;
+      uint32 emergency_level0_sst_file_count = 22;
       // The emergency compaction limitations for the level0 sub level partition
-      uint32 emergency_level0_sub_level_partition = 26;
+      uint32 emergency_level0_sub_level_partition = 23;
       // The limitation of the max sst size of the level0 to trigger the write stop
-      uint32 level0_stop_write_threshold_max_sst_count = 27;
+      uint32 level0_stop_write_threshold_max_sst_count = 24;
       // The limitation of the max sst size of the level0 to trigger the write stop
-      uint64 level0_stop_write_threshold_max_size = 28;
+      uint64 level0_stop_write_threshold_max_size = 25;
       // The limitation of the max sst count of the trivial move task
-      uint32 sst_allowed_trivial_move_max_count = 29;
+      uint32 sst_allowed_trivial_move_max_count = 26;
       // Enable the optimization of the interval selection for the level0 compaction
-      bool enable_optimize_l0_interval_selection = 30;
+      bool enable_optimize_l0_interval_selection = 27;
+      uint64 vnode_aligned_level_size_threshold = 28;
+      uint64 small_file_size_threshold = 29;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -957,16 +959,16 @@ message CompactionConfig {
   uint64 max_bytes_for_level_multiplier = 3;
   uint64 max_compaction_bytes = 4;
   uint64 sub_level_max_compaction_bytes = 5;
-  uint64 level0_tier_compact_file_number = 7;
-  CompactionMode compaction_mode = 8;
-  repeated string compression_algorithm = 9;
-  uint64 target_file_size_base = 10;
-  uint32 compaction_filter_mask = 11;
-  uint32 max_sub_compaction = 12;
-  uint64 max_space_reclaim_bytes = 13;
-  bool split_by_state_table = 14;
+  uint64 level0_tier_compact_file_number = 6;
+  CompactionMode compaction_mode = 7;
+  repeated string compression_algorithm = 8;
+  uint64 target_file_size_base = 9;
+  uint32 compaction_filter_mask = 10;
+  uint32 max_sub_compaction = 11;
+  uint64 max_space_reclaim_bytes = 12;
+  bool split_by_state_table = 13;
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
-  uint32 split_weight_by_vnode = 6;
+  uint32 split_weight_by_vnode = 14;
   // soft limit for max number of sub level number
   uint64 level0_stop_write_threshold_sub_level_number = 15;
   uint64 level0_max_compact_file_number = 16;
@@ -1008,9 +1010,20 @@ message CompactionConfig {
   // Enable the optimization of the interval selection for the level0 compaction
   optional bool enable_optimize_l0_interval_selection = 30;
 
-  // The threshold to identify small files for small file compaction (in bytes)
+  // Enable strict one-vnode-per-SST for levels that meet the size threshold.
+  // Only effective when both conditions are met:
+  //   1. target_level > base_level (deeper levels only)
+  //   2. level.total_file_size >= this threshold
+  //
+  // This prevents generating too many small SSTs when level size is small.
+  // Each SST will contain exactly one vnode, enabling precise query pruning.
+  //
+  // Typical value: 50GB.
+  optional uint64 vnode_aligned_level_size_threshold = 31;
+
+    // The threshold to identify small files for small file compaction (in bytes)
   // Files smaller than this threshold will be candidates for small file compaction
-  optional uint64 small_file_size_threshold = 31;
+  optional uint64 small_file_size_threshold = 32;
 }
 
 message TableStats {
