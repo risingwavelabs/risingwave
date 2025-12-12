@@ -209,7 +209,7 @@ pin-project-lite = "0.2"
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { git = "https://github.com/tabVersion/madsim", package = "madsim-rdkafka", rev = "9dcdc3be3b4b8e64501552de4b62204c7e5e367c", features = ["cmake-build"] }
+rdkafka = { git = "https://github.com/tabVersion/madsim", package = "madsim-rdkafka", rev = "c0c7936686aab8ae887e9131f6259484d29583e5", features = ["cmake-build"] }
 redis = { version = "0.32" }
 regex = "1.12"
 reqwest = { version = "0.12.2", features = ["json", "stream"] }
@@ -410,6 +410,10 @@ opt-level = 2
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Patch third-party crates for deterministic simulation.
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
+# Unify `madsim` sources to avoid linking two copies (which export `#[no_mangle]` libc shim symbols).
+# We already depend on `madsim-rdkafka` from this fork, so patch crates.io `madsim` to the same rev.
+madsim = { git = "https://github.com/tabVersion/madsim", rev = "c0c7936686aab8ae887e9131f6259484d29583e5" }
+madsim-macros = { git = "https://github.com/tabVersion/madsim", rev = "c0c7936686aab8ae887e9131f6259484d29583e5" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
 # Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.
 # tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }
