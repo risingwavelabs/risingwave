@@ -73,7 +73,7 @@ impl TableProvider for IcebergTableProvider {
     fn supports_filters_pushdown(
         &self,
         filters: &[&Expr],
-    ) -> Result<Vec<TableProviderFilterPushDown>, datafusion::error::DataFusionError> {
+    ) -> DFResult<Vec<TableProviderFilterPushDown>> {
         Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
     }
 }
