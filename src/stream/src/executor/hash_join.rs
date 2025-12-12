@@ -183,6 +183,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// watermarks from both sides. It will be used to generate watermark into downstream
     /// and do state cleaning based on `clean_left_state`/`clean_right_state` fields.
     inequality_watermarks: Vec<Option<Watermark>>,
+    /// Join-key positions and cleaning flags for watermark handling.
+    /// Each entry: (join-key position, `do_state_cleaning`).
+    watermark_indices_in_jk: Vec<(usize, bool)>,
 
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
@@ -267,6 +270,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         high_join_amplification_threshold: usize,
+        watermark_indices_in_jk: Vec<(usize, bool)>,
     ) -> Self {
         Self::new_with_cache_size(
             ctx,
@@ -289,6 +293,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             chunk_size,
             high_join_amplification_threshold,
             None,
+            watermark_indices_in_jk,
         )
     }
 
@@ -314,6 +319,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         chunk_size: usize,
         high_join_amplification_threshold: usize,
         entry_state_max_rows: Option<usize>,
+        watermark_indices_in_jk: Vec<(usize, bool)>,
     ) -> Self {
         let entry_state_max_rows = match entry_state_max_rows {
             None => ctx.config.developer.hash_join_entry_state_max_rows,
@@ -544,6 +550,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             cond,
             inequality_pairs,
             inequality_watermarks,
+            watermark_indices_in_jk,
             append_only_optimize,
             metrics,
             chunk_size,
@@ -772,12 +779,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             (&mut self.side_r, &mut self.side_l)
         };
 
-        // State cleaning
-        if side_update.join_key_indices[0] == watermark.col_idx {
+        // State cleaning: align watermarks for configured join-key positions.
+        if let Some(pos) = side_update
+            .join_key_indices
+            .iter()
+            .position(|idx| *idx == watermark.col_idx)
+            && self
+                .watermark_indices_in_jk
+                .iter()
+                .any(|(jk_pos, do_clean)| *jk_pos == pos && *do_clean)
+        {
             side_match.ht.update_watermark(watermark.val.clone());
         }
 
-        // Select watermarks to yield.
+        // Process join-key watermarks
         let wm_in_jk = side_update
             .join_key_indices
             .iter()
@@ -789,6 +804,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 .entry(idx)
                 .or_insert_with(|| BufferedWatermarks::with_ids([SideType::Left, SideType::Right]));
             if let Some(selected_watermark) = buffers.handle_watermark(side, watermark.clone()) {
+                if self
+                    .watermark_indices_in_jk
+                    .iter()
+                    .any(|(jk_pos, do_clean)| *jk_pos == idx && *do_clean)
+                {
+                    side_match.ht.update_watermark(watermark.val.clone());
+                }
+
                 let empty_indices = vec![];
                 let output_indices = side_update
                     .i2o_mapping_indexed
@@ -806,6 +829,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 }
             };
         }
+
         // Process inequality watermarks
         // We can only yield the LARGER side's watermark downstream.
         // For `left >= right`: left is larger, emit for left output columns
@@ -841,13 +865,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     }
                 }
             }
-            // Do state cleaning by update_watermark on the larger side (after the loop to avoid borrow issues)
+            // Do state cleaning by `update_state_table_watermark` on the larger side.
+            // We can not clean the degree table by inequality watermarks because
+            // it does not have those inequality columns.
             // TODO(yuhao-su): implement state cleaning
             if let Some(_val) = update_left_watermark {
-                // self.side_l.ht.update_watermark(val);
+                // self.side_l.ht.update_state_table_watermark(val);
             }
             if let Some(_val) = update_right_watermark {
-                // self.side_r.ht.update_watermark(val);
+                // self.side_r.ht.update_state_table_watermark(val);
             }
         }
         Ok(watermarks_to_emit)
@@ -1489,6 +1515,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
             2048,
+            vec![(0, true)],
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
@@ -1578,6 +1605,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
             2048,
+            vec![(0, true)],
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
