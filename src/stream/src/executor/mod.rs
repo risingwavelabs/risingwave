@@ -197,6 +197,7 @@ use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
 };
+pub use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::SubscriberId;
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 
@@ -363,7 +364,10 @@ pub enum Mutation {
     SourceChangeSplit(SplitAssignments),
     Pause,
     Resume,
-    Throttle(HashMap<ActorId, Option<u32>>),
+    Throttle {
+        actor_throttle: HashMap<ActorId, Option<u32>>,
+        throttle_type: ThrottleType,
+    },
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
@@ -554,7 +558,7 @@ impl Barrier {
             | Mutation::Pause
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
-            | Mutation::Throttle(_)
+            | Mutation::Throttle { .. }
             | Mutation::DropSubscriptions { .. }
             | Mutation::ConnectorPropsChange(_)
             | Mutation::StartFragmentBackfill { .. }
@@ -855,11 +859,15 @@ impl Mutation {
             }
             Mutation::Pause => PbMutation::Pause(PbPauseMutation {}),
             Mutation::Resume => PbMutation::Resume(PbResumeMutation {}),
-            Mutation::Throttle(changes) => PbMutation::Throttle(PbThrottleMutation {
-                actor_throttle: changes
+            Mutation::Throttle {
+                actor_throttle,
+                throttle_type,
+            } => PbMutation::Throttle(PbThrottleMutation {
+                actor_throttle: actor_throttle
                     .iter()
                     .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
                     .collect(),
+                throttle_type: *throttle_type as i32,
             }),
             Mutation::DropSubscriptions {
                 subscriptions_to_drop,
@@ -1046,13 +1054,21 @@ impl Mutation {
             }
             PbMutation::Pause(_) => Mutation::Pause,
             PbMutation::Resume(_) => Mutation::Resume,
-            PbMutation::Throttle(changes) => Mutation::Throttle(
-                changes
+            PbMutation::Throttle(changes) => {
+                let actor_throttle = changes
                     .actor_throttle
                     .iter()
                     .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
-                    .collect(),
-            ),
+                    .collect();
+                let throttle_type = changes
+                    .throttle_type
+                    .try_into()
+                    .unwrap_or(ThrottleType::Unspecified);
+                Mutation::Throttle {
+                    actor_throttle,
+                    throttle_type,
+                }
+            }
             PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {
                 subscriptions_to_drop: drop
                     .info

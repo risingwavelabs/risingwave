@@ -48,6 +48,7 @@ use crate::common::change_buffer::{OutputKind, output_kind};
 use crate::common::compact_chunk::{
     InconsistencyBehavior, StreamChunkCompactor, compact_chunk_inline,
 };
+use crate::executor::ThrottleType;
 use crate::executor::prelude::*;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -486,8 +487,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 log_writer.resume()?;
                                 is_paused = false;
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
+                            Mutation::Throttle {
+                                actor_throttle: actor_to_apply,
+                                throttle_type,
+                            } => {
+                                if *throttle_type == ThrottleType::Sink
+                                    && let Some(new_rate_limit) = actor_to_apply.get(&actor_id)
+                                {
                                     tracing::info!(
                                         rate_limit = new_rate_limit,
                                         "received sink rate limit on actor {actor_id}"

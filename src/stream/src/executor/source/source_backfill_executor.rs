@@ -42,9 +42,9 @@ use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
 use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
-use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
+use crate::executor::{ThrottleType, UpdateMutation};
 use crate::task::CreateMviewProgressReporter;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -594,9 +594,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 );
                                             }
                                         }
-                                        Mutation::Throttle(actor_to_apply) => {
-                                            if let Some(new_rate_limit) =
-                                                actor_to_apply.get(&self.actor_ctx.id)
+                                        Mutation::Throttle {
+                                            actor_throttle: actor_to_apply,
+                                            throttle_type,
+                                        } => {
+                                            if *throttle_type == ThrottleType::Backfill
+                                                && let Some(new_rate_limit) =
+                                                    actor_to_apply.get(&self.actor_ctx.id)
                                                 && *new_rate_limit != self.rate_limit_rps
                                             {
                                                 tracing::info!(
