@@ -22,6 +22,7 @@ use std::task::{Context, Poll};
 use futures::future::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_pb::common::ActorInfo;
 
@@ -157,6 +158,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
+        actor_config: Arc<StreamingConfig>,
     ) -> StreamExecutorResult<Self> {
         if local_barrier_manager
             .env
@@ -358,6 +360,7 @@ pub(crate) async fn new_input(
     fragment_id: FragmentId,
     upstream_actor_info: &ActorInfo,
     upstream_fragment_id: FragmentId,
+    actor_config: Arc<StreamingConfig>,
 ) -> StreamExecutorResult<BoxedActorInput> {
     let force_remote = local_barrier_manager
         .env
@@ -383,6 +386,7 @@ pub(crate) async fn new_input(
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
             metrics,
+            actor_config,
         )
         .await?
         .boxed_input()
