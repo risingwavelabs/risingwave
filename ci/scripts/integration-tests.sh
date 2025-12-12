@@ -67,7 +67,7 @@ if [ "${case}" == "client-library" ]; then
 fi
 
 echo "~~~ install postgresql"
-sudo yum install -y postgresql15
+sudo yum install -y postgresql
 
 echo "~~~ install poetry"
 curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.8.0 python3 -
