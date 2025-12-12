@@ -35,7 +35,6 @@ use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
-use crate::executor::{ThrottleType, UpdateMutation};
 use crate::executor::backfill::cdc::cdc_backfill::{
     build_reader_and_poll_upstream, transform_upstream,
 };
@@ -47,6 +46,7 @@ use crate::executor::backfill::cdc::upstream_table::snapshot::{
 use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
+use crate::executor::{ThrottleType, UpdateMutation};
 use crate::task::cdc_progress::CdcProgressReporter;
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,

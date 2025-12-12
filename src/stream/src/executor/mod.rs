@@ -191,12 +191,12 @@ pub type DispatcherMessageStreamItem = StreamExecutorResult<DispatcherMessage>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
-pub use risingwave_pb::common::ThrottleType;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
 };
+pub use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::SubscriberId;
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 
