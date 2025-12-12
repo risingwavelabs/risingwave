@@ -415,9 +415,17 @@ fn parse_collate() {
 
 #[test]
 fn parse_projection_nested_type() {
-    let sql = "SELECT customer.address.state FROM foo";
-    let _ast = verified_only_select(sql);
-    // TODO: add assertions
+    let sql = "SELECT customer.address.address FROM foo";
+    let select = verified_only_select(sql);
+    assert_eq!(select.projection.len(), 1);
+    assert_eq!(
+        &Expr::CompoundIdentifier(vec![
+            Ident::new_unchecked("customer"),
+            Ident::new_unchecked("address"),
+            Ident::new_unchecked("address")
+        ]),
+        expr_from_projection(only(&select.projection))
+    )
 }
 
 #[test]
