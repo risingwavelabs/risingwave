@@ -7893,8 +7893,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18351aac4194337d6ea9ffbd25b3d1540ecc0754142af1bff5ba7392d1f6f771"
+source = "git+https://github.com/tabVersion/madsim?rev=c0c7936686aab8ae887e9131f6259484d29583e5#c0c7936686aab8ae887e9131f6259484d29583e5"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.2.1",
@@ -7943,8 +7942,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+source = "git+https://github.com/tabVersion/madsim?rev=c0c7936686aab8ae887e9131f6259484d29583e5#c0c7936686aab8ae887e9131f6259484d29583e5"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -7954,9 +7952,8 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.4.4+0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2490d64ab39a227e00ea40aa9eec250061f282a3c95e5a8528b3f19881d9f12e"
+version = "0.4.5+0.38.0"
+source = "git+https://github.com/tabVersion/madsim?rev=c0c7936686aab8ae887e9131f6259484d29583e5#c0c7936686aab8ae887e9131f6259484d29583e5"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
