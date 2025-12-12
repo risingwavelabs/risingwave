@@ -434,10 +434,8 @@ impl StreamActorManager {
         node: Arc<StreamNode>,
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        actor_config: Arc<StreamingConfig>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
-        let actor_id = actor.actor_id;
-        let actor_config = self.get_overridden_config(&actor.config_override, actor_id);
-
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -465,12 +463,10 @@ impl StreamActorManager {
             executor,
             new_output_request_rx,
             actor.dispatchers,
-            actor_id,
-            fragment_id,
-            local_barrier_manager.clone(),
-            self.streaming_metrics.clone(),
+            &actor_context,
         )
         .await?;
+
         let actor = Actor::new(
             dispatcher,
             subtasks,
@@ -490,9 +486,15 @@ impl StreamActorManager {
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
-        let monitor = tokio_metrics::TaskMonitor::new();
         let stream_actor_ref = &actor;
         let actor_id = stream_actor_ref.actor_id;
+        let actor_config = self.get_overridden_config(&actor.config_override, actor_id);
+
+        let monitor = actor_config
+            .developer
+            .enable_actor_tokio_metrics
+            .then(tokio_metrics::TaskMonitor::new);
+
         let handle = {
             let trace_span = format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
             let barrier_manager = local_barrier_manager;
@@ -505,6 +507,7 @@ impl StreamActorManager {
                     node,
                     barrier_manager.clone(),
                     new_output_request_rx,
+                    actor_config,
                 )
                 .boxed()
                 .and_then(|actor| actor.run())
@@ -523,7 +526,10 @@ impl StreamActorManager {
                     .left_future(),
                 None => actor.right_future(),
             };
-            let instrumented = monitor.instrument(traced);
+            let instrumented = match &monitor {
+                Some(m) => m.instrument(traced).left_future(),
+                None => traced.right_future(),
+            };
             // If hummock tracing is not enabled, it directly returns wrapped future.
             let may_track_hummock = instrumented.may_trace_hummock();
 
@@ -531,13 +537,7 @@ impl StreamActorManager {
         };
 
         let enable_count_metrics = self.streaming_metrics.level >= MetricLevel::Debug;
-        let monitor_handle = if self
-            .env
-            .global_config()
-            .developer
-            .enable_actor_tokio_metrics
-        {
-            tracing::info!("Tokio metrics are enabled.");
+        let monitor_handle = if let Some(monitor) = monitor {
             let streaming_metrics = self.streaming_metrics.clone();
             let actor_monitor_task = self.runtime.spawn(async move {
                 let metrics = streaming_metrics.new_actor_metrics(actor_id, fragment_id);

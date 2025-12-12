@@ -60,14 +60,14 @@ impl TableProvider for IcebergTableProvider {
 
     async fn scan(
         &self,
-        _state: &dyn Session,
+        state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(IcebergScan::new(
-            self, projection, filters, limit,
-        )?))
+        let batch_parallelism = state.config().target_partitions();
+        let scan = IcebergScan::new(self, projection, filters, limit, batch_parallelism).await?;
+        Ok(Arc::new(scan))
     }
 
     fn supports_filters_pushdown(
@@ -97,7 +97,6 @@ impl IcebergTableProvider {
             .core
             .column_catalog
             .iter()
-            .filter(|column| !column.is_hidden())
             .map(|column| {
                 let column_desc = &column.column_desc;
                 let field = IcebergArrowConvert

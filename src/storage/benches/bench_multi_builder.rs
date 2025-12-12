@@ -164,6 +164,7 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
+        skip_bloom_filter_in_serde: false,
         meta_cache,
         block_cache,
         vector_meta_cache: CacheBuilder::new(1 << 10).build(),

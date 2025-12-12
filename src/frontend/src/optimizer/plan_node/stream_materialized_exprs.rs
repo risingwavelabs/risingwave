@@ -208,6 +208,12 @@ impl StreamMaterializedExprs {
             catalog.cleaned_by_watermark = true;
         }
 
+        // Also populate the new clean_watermark_indices field
+        if let Some(col_idx) = self.state_clean_col_idx {
+            catalog.clean_watermark_indices = vec![col_idx];
+            catalog.cleaned_by_watermark = true;
+        }
+
         catalog
     }
 }

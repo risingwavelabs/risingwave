@@ -28,10 +28,10 @@ use with_options::WithOptions;
 
 use self::source::reader::PulsarSplitReader;
 use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
-use crate::deserialize_optional_duration_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorError;
 use crate::source::SourceProperties;
+use crate::{deserialize_optional_bool_from_string, deserialize_optional_duration_from_string};
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
@@ -56,6 +56,19 @@ impl EnforceSecret for PulsarProperties {
         }
         Ok(())
     }
+}
+
+impl EnforceSecret for PulsarConsumerOptions {}
+
+#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[serde_as]
+pub struct PulsarConsumerOptions {
+    #[serde(
+        rename = "pulsar.read_compacted",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub read_compacted: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
@@ -103,6 +116,9 @@ pub struct PulsarProperties {
         default
     )]
     pub subscription_unacked_resend_delay: Option<Duration>,
+
+    #[serde(flatten)]
+    pub consumer_options: PulsarConsumerOptions,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,

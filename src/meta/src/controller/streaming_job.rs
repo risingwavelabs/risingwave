@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use anyhow::anyhow;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
@@ -1070,6 +1070,7 @@ impl CatalogController {
             NotificationOperation::Add
         };
         let mut updated_user_info = vec![];
+        let mut need_grant_default_privileges = true;
 
         match job_type {
             ObjectType::Table => {
@@ -1104,11 +1105,15 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
+                if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
+                    need_grant_default_privileges = false;
+                }
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
                 });
             }
             ObjectType::Index => {
+                need_grant_default_privileges = false;
                 let (index, obj) = Index::find_by_id(job_id.as_index_id())
                     .find_also_related(Object)
                     .one(txn)
@@ -1193,7 +1198,7 @@ impl CatalogController {
             _ => unreachable!("invalid job type: {:?}", job_type),
         }
 
-        if job_type != ObjectType::Index {
+        if need_grant_default_privileges {
             updated_user_info = grant_default_privileges_automatically(txn, job_id).await?;
         }
 

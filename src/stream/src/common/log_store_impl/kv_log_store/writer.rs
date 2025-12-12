@@ -29,7 +29,7 @@ use tokio::sync::{oneshot, watch};
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
 use crate::common::log_store_impl::kv_log_store::{
-    FIRST_SEQ_ID, KvLogStoreMetrics, LogStoreVnodeProgress, SeqId,
+    FIRST_SEQ_ID, KvLogStoreMetrics, LogStoreVnodeProgress, ReaderTruncationOffsetType, SeqId,
 };
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
@@ -48,6 +48,8 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     is_paused: bool,
 
     identity: String,
+
+    last_truncate_offset: Option<ReaderTruncationOffsetType>,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
@@ -70,6 +72,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             paused_notifier,
             identity,
             is_paused: false,
+            last_truncate_offset: None,
         }
     }
 }
@@ -135,12 +138,6 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
     ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
-        if let Some(add_columns) = options.add_columns {
-            return Err(anyhow!(
-                "alter column not supported for kv log store: {:?}",
-                add_columns
-            ));
-        }
         let epoch = self.state.epoch().curr;
         let mut writer = self.state.start_writer(false);
 
@@ -165,16 +162,29 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         }
         flush_info.report(&self.metrics);
 
-        let truncate_offset = self.tx.pop_truncation(epoch);
+        if let Some(truncate_offset) = self.tx.pop_truncation(epoch) {
+            self.last_truncate_offset = Some(truncate_offset);
+        }
         let post_seal_epoch = self.state.seal_current_epoch(
             next_epoch,
-            truncate_offset
+            self.last_truncate_offset
                 .map(|(epoch, seq_id)| {
                     LogStoreVnodeProgress::Aligned(self.state.vnodes().clone(), epoch, seq_id)
                 })
                 .unwrap_or(LogStoreVnodeProgress::None),
         );
-        self.tx.barrier(epoch, options.is_checkpoint, next_epoch);
+        let has_schema_change = options.add_columns.is_some();
+        self.tx.barrier(
+            epoch,
+            options.is_checkpoint,
+            next_epoch,
+            options.add_columns,
+        );
+        if has_schema_change {
+            let truncate_offset = self.tx.wait_for_barrier_truncation(epoch).await?;
+            assert_eq!(truncate_offset, (epoch, None));
+            self.last_truncate_offset = Some(truncate_offset);
+        }
         let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
         let tx = &mut self.tx;
         self.seq_id = FIRST_SEQ_ID;
