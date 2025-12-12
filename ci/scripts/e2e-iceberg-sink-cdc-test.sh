@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+
+# Exits as soon as any line fails.
+set -euo pipefail
+
+# CI environment: Connect to db service (PostgreSQL with CDC support)
+export PGHOST="db"
+export PGPORT="5432"
+export PGUSER="postgres"
+export PGPASSWORD='post\tgres'
+export PGDATABASE="postgres"
+
+echo "--- Testing Iceberg Sink with PostgreSQL CDC Schema Change"
+
+verify_iceberg_source() {
+    local source="$1"
+    local expected
+    local expected_file
+    local actual_file
+    local retry_count=0
+    local max_retries=3
+
+    shift
+    expected=$(cat)
+
+    # 创建临时文件
+    expected_file=$(mktemp)
+    actual_file=$(mktemp)
+
+    # 写入期望结果
+    echo "$expected" > "$expected_file"
+
+    while [ $retry_count -lt $max_retries ]; do
+        # 如果不是第一次尝试，先等待2秒
+        if [ $retry_count -gt 0 ]; then
+            echo "⚠️  ${source} verification failed (attempt $retry_count/$max_retries), retrying in 2 seconds..."
+            sleep 2
+        fi
+
+        # 获取实际结果（使用 -t 去掉表头，-A 使用无对齐格式，用空格分隔）
+        # 过滤掉 cargo-make 的日志行，只保留查询结果
+        risedev psql -t -A -F ' ' -c "SELECT * FROM ${source} ORDER BY id;" 2>&1 | grep -v '\[cargo-make\]' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' > "$actual_file"
+
+        # 检查是否有ERROR（查询执行失败）
+        if grep -q "ERROR:" "$actual_file"; then
+            retry_count=$((retry_count + 1))
+            if [ $retry_count -ge $max_retries ]; then
+                echo "❌ ${source} query failed after $max_retries attempts"
+                echo ""
+                echo "Query error:"
+                cat "$actual_file"
+                rm -f "$expected_file" "$actual_file"
+                exit 1
+            fi
+            continue
+        fi
+
+        # 比较结果
+        if diff -u "$expected_file" "$actual_file" > /dev/null 2>&1; then
+            echo "✅ ${source} matches expected results"
+            rm -f "$expected_file" "$actual_file"
+            return 0
+        fi
+
+        retry_count=$((retry_count + 1))
+    done
+
+    # 所有重试都失败了
+    echo "❌ ${source} does NOT match expected results after $max_retries attempts"
+    echo ""
+    echo "Expected:"
+    cat "$expected_file"
+    echo ""
+    echo "Actual:"
+    cat "$actual_file"
+    echo ""
+    echo "Diff:"
+    diff -u "$expected_file" "$actual_file" || true
+    rm -f "$expected_file" "$actual_file"
+    exit 1
+}
+
+# Create simple table with id and v1
+psql -c "
+    DROP TABLE IF EXISTS t;
+    CREATE TABLE t (
+        id INT PRIMARY KEY,
+        v1 INT NOT NULL
+    );
+"
+
+# Insert initial data
+psql -c "INSERT INTO t (id, v1) VALUES (1, 10), (2, 20);"
+
+# Create CDC source (connect to db service)
+echo "Creating PostgreSQL CDC source..."
+risedev psql -c "create source s with (
+  username = 'postgres',
+  connector='postgres-cdc',
+  hostname='db',
+  port='5432',
+  password = 'post\\tgres',
+  database.name = 'postgres',
+  schema.name = 'public',
+  slot.name = 'rw_cdc_test_slot',
+  auto.schema.change = 'true'
+);"
+
+sleep 5
+
+# Create CDC table in RisingWave
+echo "Creating CDC table..."
+risedev psql -c "create table t (
+  id int primary key,
+  v1 int
+) from s table 'public.t';"
+
+sleep 3
+
+echo "Creating Iceberg sink with auto schema change..."
+risedev psql -c "
+set sink_decouple = false;
+CREATE SINK s1 from t WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    database.name = 'public',
+    table.name = 't',
+    catalog.name = 'iceberg',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'custom',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1,
+    primary_key = 'id',
+    force_append_only='true',
+    auto.schema.change = 'true',
+    is_exactly_once = 'true',
+);"
+
+
+risedev psql -c "
+CREATE SOURCE iceberg_s1
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    database.name = 'public',
+    table.name = 't',
+);"
+
+
+echo "Verifying initial data in iceberg_s1..."
+risedev psql -c "select * from iceberg_s1 ORDER BY id;"
+verify_iceberg_source iceberg_s1 <<'EOF'
+1 10
+2 20
+EOF
+
+# Insert more data before schema change
+echo "Inserting more initial data..."
+psql -c "INSERT INTO t (id, v1) VALUES (3, 30);"
+sleep 3
+
+echo "Performing schema change: ADD COLUMN v2 INT..."
+psql -c "
+    ALTER TABLE t ADD COLUMN v2 INT DEFAULT 0;
+    INSERT INTO t (id, v1, v2) VALUES (4, 40, 100);
+"
+sleep 5
+
+echo "Inserting more data with new column..."
+psql -c "INSERT INTO t (id, v1, v2) VALUES (5, 50, 200);"
+sleep 3
+
+
+
+echo "Creating iceberg_s2 to verify schema change..."
+risedev psql -c "
+CREATE SOURCE iceberg_s2
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    database.name = 'public',
+    table.name = 't',
+);"
+
+echo "Verifying data after first schema change..."
+risedev psql -c "select * from iceberg_s2 ORDER BY id;"
+verify_iceberg_source iceberg_s2 <<'EOF'
+1 10
+2 20
+3 30
+4 40 100
+5 50 200
+EOF
+
+echo "Performing second schema change: ADD COLUMN v3 INT..."
+psql -c "
+    INSERT INTO t (id, v1, v2) VALUES (6, 60, 600);
+    ALTER TABLE t ADD COLUMN v3 INT DEFAULT 10;
+    INSERT INTO t (id, v1, v2, v3) VALUES (7, 70, 700, 700);
+"
+sleep 5
+
+echo "Creating iceberg_s3 to verify second schema change..."
+risedev psql -c "
+CREATE SOURCE iceberg_s3
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    database.name = 'public',
+    table.name = 't',
+);"
+sleep 5
+
+echo "Verifying data after second schema change..."
+risedev psql -c "select * from iceberg_s3 ORDER BY id";
+verify_iceberg_source iceberg_s3 <<'EOF'
+1 10
+2 20
+3 30
+4 40 100
+5 50 200
+6 60 600
+7 70 700 700
+EOF
+echo "✅ PostgreSQL CDC with Iceberg sink schema change test completed successfully!"
