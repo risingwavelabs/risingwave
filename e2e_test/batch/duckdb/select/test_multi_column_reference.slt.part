@@ -230,9 +230,8 @@ SELECT s1.t1.t FROM s1.t1, s2.t1
 
 # test various failures
 
-# TODO: https://github.com/risingwavelabs/risingwave/issues/6774
-# statement error
-# SELECT testX.tbl.col FROM test.tbl;
+statement error
+SELECT testX.tbl.col FROM test.tbl;
 
 statement error
 SELECT test.tblX.col FROM test.tbl;
