@@ -74,7 +74,7 @@ enable_legacy_table_migration = true
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
-max_bytes_for_level_multiplier = 5
+max_bytes_for_level_multiplier = 10
 max_compaction_bytes = 2147483648
 sub_level_max_compaction_bytes = 134217728
 level0_tier_compact_file_number = 12
@@ -98,8 +98,8 @@ emergency_level0_sst_file_count = 2000
 emergency_level0_sub_level_partition = 256
 level0_stop_write_threshold_max_sst_count = 10000
 level0_stop_write_threshold_max_size = 322122547200
-enable_optimize_l0_interval_selection = false
-enable_score_v2 = false
+enable_optimize_l0_interval_selection = true
+enable_score_v2 = true
 
 [meta.developer]
 cached_traces_num = 256
