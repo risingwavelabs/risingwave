@@ -85,7 +85,7 @@ impl CompactionSelector for ManualCompactionSelector {
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let ctx = dynamic_level_core.calculate_level_base_size(levels, level_handlers);
         let (mut picker, base_level) = {
             let target_level = if self.option.level == 0 {
                 ctx.base_level

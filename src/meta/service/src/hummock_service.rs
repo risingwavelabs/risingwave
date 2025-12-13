@@ -593,7 +593,7 @@ impl HummockManagerService for HummockServiceImpl {
             .await
             .into_iter()
             .map(|s| PickerInfo {
-                score: s.score,
+                score: (s.score * 100.0) as u64,
                 select_level: s.select_level as _,
                 target_level: s.target_level as _,
                 picker_type: s.picker_type.to_string(),
