@@ -524,6 +524,28 @@ impl InflightDatabaseInfo {
                 }
             }
         }
+        if let Some(Command::RescheduleFragment { reschedules, .. }) = command {
+            // During reschedule we expect fragments to be rebuilt with new actors and no vnode bitmap update.
+            debug_assert!(
+                reschedules
+                    .values()
+                    .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
+                "RescheduleFragment should not carry vnode bitmap updates when actors are rebuilt"
+            );
+
+            let touched_jobs = reschedules
+                .keys()
+                .filter_map(|fragment_id| self.fragment_location.get(fragment_id))
+                .cloned()
+                .collect::<HashSet<_>>();
+            for job_id in touched_jobs {
+                if let Some(job) = self.jobs.get_mut(&job_id)
+                    && let CreateStreamingJobStatus::Creating(tracker) = &mut job.status
+                {
+                    tracker.refresh_after_reschedule(&job.fragment_infos, version_stats);
+                }
+            }
+        }
         for progress in resps.flat_map(|resp| &resp.create_mview_progress) {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
                 warn!(

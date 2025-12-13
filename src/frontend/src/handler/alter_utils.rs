@@ -46,7 +46,7 @@ pub(super) fn resolve_streaming_job_id_for_alter(
         | StatementType::ALTER_MATERIALIZED_VIEW
         | StatementType::ALTER_INDEX => {
             let (table, schema_name) =
-                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+                reader.get_table_by_name(db_name, schema_path, &real_table_name, true)?;
 
             match (table.table_type(), alter_stmt_type) {
                 (TableType::Internal, _) => {
