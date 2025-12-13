@@ -367,13 +367,13 @@ impl DynamicLevelSelectorCore {
         let non_overlapping_size_score =
             total_size as f64 / self.config.max_bytes_for_level_base as f64;
 
-        let non_overlapping_level_count = levels
+        let non_overlapping_level_count = 2 * levels
             .l0
             .sub_levels
             .iter()
             .filter(|level| level.level_type == LevelType::Nonoverlapping)
             .filter(|level| !handlers[0].is_level_pending_compact(level))
-            .count() as u64;
+            .count();
 
         let non_overlapping_level_score = non_overlapping_level_count as f64
             / self.config.level0_sub_level_compact_level_count as f64;
@@ -423,20 +423,18 @@ impl DynamicLevelSelectorCore {
             let base_level_score = level_scores[ctx.base_level];
             let base_level_denominator = f64::max(0.01, base_level_score);
 
-            let (mut non_overlapping_size_score, mut non_overlapping_level_score) =
+            let (non_overlapping_size_score, non_overlapping_level_score) =
                 self.calculate_l0_non_overlap_score(levels, handlers);
 
             let non_overlapping_raw_score =
                 f64::max(non_overlapping_size_score, non_overlapping_level_score);
 
-            // Apply boost to non-overlapping scores as well
-            non_overlapping_size_score /= base_level_denominator;
-            non_overlapping_level_score /= base_level_denominator;
+            // Apply boost/suppress to raw score based on base level pressure
+            let non_overlapping_score = non_overlapping_raw_score / base_level_denominator;
 
-            let non_overlapping_score =
-                f64::max(non_overlapping_size_score, non_overlapping_level_score);
-
-            if non_overlapping_score > 1.0 {
+            // Add L0 candidates if raw score exceeds threshold (before boost/suppress)
+            // This ensures L0 compaction happens even when base level is over-target
+            if non_overlapping_raw_score > 1.0 {
                 // Try ToBase first, if failed, degrade to Intra.
                 ctx.score_levels.push(PickerInfo {
                     score: non_overlapping_score + 0.01,
@@ -461,7 +459,9 @@ impl DynamicLevelSelectorCore {
             let l0_overlap_denominator = f64::max(0.01, non_overlapping_raw_score);
             l0_overlap_score /= l0_overlap_denominator;
 
-            if l0_overlap_score > 1.0 {
+            // Add Tier compaction candidates if raw score exceeds threshold (before backpressure adjustment)
+            // This ensures overlapping L0 files get compacted even when non-overlapping levels have pressure
+            if l0_overlap_raw_score > 1.0 {
                 ctx.score_levels.push(PickerInfo {
                     score: l0_overlap_score,
                     select_level: 0,
@@ -1513,7 +1513,10 @@ pub mod tests {
 
         // Scenario 4: L0 Backpressure
         // L0 Tier: 5 files (Threshold 2) -> Raw 2.5
-        // L0 NonOverlap: 4 levels (Threshold 2) -> Raw 2.0
+        // L0 NonOverlap: 4 levels, 40MB total (Threshold 2, Target 100MB)
+        //   level_score = (2 * 4) / 2 = 4.0 (note: calculate_l0_non_overlap_score multiplies count by 2)
+        //   size_score = 40 / 100 = 0.4
+        //   raw = max(0.4, 4.0) = 4.0
         // Base Level (L2): 50 (Target 100) -> Raw 0.5
         {
             println!("--- Scenario 4: L0 Backpressure ---");
@@ -1559,10 +1562,10 @@ pub mod tests {
                         || matches!(p.picker_type, PickerType::ToBase)
                 })
                 .expect("NonOverlap should be selected");
-            assert_score(non_overlap.raw_score, 2.0, "NonOverlap Raw");
+            assert_score(non_overlap.raw_score, 4.0, "NonOverlap Raw");
 
-            // NonOverlap Score = Raw(2.0) / BaseLevelScore(0.5) = 4.0
-            let expected_non_overlap_score = 2.0 / 0.5;
+            // NonOverlap Score = Raw(4.0) / BaseLevelScore(0.5) = 8.0
+            let expected_non_overlap_score = 4.0 / 0.5;
             if matches!(non_overlap.picker_type, PickerType::ToBase) {
                 assert_score(
                     non_overlap.score,
@@ -1585,9 +1588,9 @@ pub mod tests {
                 .expect("Tier should be selected");
             assert_score(tier.raw_score, 2.5, "Tier Raw");
 
-            // Tier Score = Raw(2.5) / NonOverlapRaw(2.0) = 1.25
-            // If it used Boosted NonOverlap (4.0), Score would be 0.625 and not selected.
-            assert_score(tier.score, 1.25, "Tier Score");
+            // Tier Score = Raw(2.5) / NonOverlapRaw(4.0) = 0.625
+            // This tests that Tier uses raw NonOverlap score (4.0), not boosted score (8.0)
+            assert_score(tier.score, 0.625, "Tier Score");
         }
 
         // Scenario 5: Pending Compaction (Score Reduction)
@@ -1948,8 +1951,9 @@ pub mod tests {
                     .count() as f64;
 
                 let size_score = total_size as f64 / config.max_bytes_for_level_base as f64;
+                // Note: calculate_l0_non_overlap_score multiplies level count by 2
                 let level_score =
-                    sublevel_count / config.level0_sub_level_compact_level_count as f64;
+                    (2.0 * sublevel_count) / config.level0_sub_level_compact_level_count as f64;
                 let expected_raw = f64::max(size_score, level_score);
 
                 println!(
@@ -2268,8 +2272,9 @@ pub mod tests {
                     .count() as f64;
 
                 let size_score = total_size as f64 / config.max_bytes_for_level_base as f64;
+                // Note: calculate_l0_non_overlap_score multiplies level count by 2
                 let level_score =
-                    sublevel_count / config.level0_sub_level_compact_level_count as f64;
+                    (2.0 * sublevel_count) / config.level0_sub_level_compact_level_count as f64;
                 let expected_raw = f64::max(size_score, level_score);
 
                 assert!(
@@ -2488,6 +2493,310 @@ pub mod tests {
             "✅ enable_score_v2 config controls algorithm: L3 target V1={}MB vs V2={}MB",
             ctx_v1.level_max_bytes[3] / mb,
             ctx_v2.level_max_bytes[3] / mb
+        );
+    }
+
+    #[test]
+    fn test_v2_l0_not_filtered_when_base_level_over_target() {
+        use super::PickerType;
+        // Regression test for Bug #1: L0 ToBase/Intra should not be filtered out when base level is over-target
+        //
+        // Scenario:
+        // - L0 has real pressure (raw_score = 1.5)
+        // - Base level (L2) is 2.0x over-target (common in high-load production)
+        //
+        // Bug: Using boosted score for filtering → L0 gets boosted_score = 1.5 / 2.0 = 0.75 → FILTERED OUT
+        // Fix: Use raw score for filtering → L0 gets raw_score = 1.5 > 1.0 → INCLUDED (but with lower priority)
+        //
+        // This is critical because:
+        // 1. L0 accumulation can eventually block writes (level0_stop_write_threshold)
+        // 2. Backpressure should affect PRIORITY, not FILTERING
+        let config = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(100)
+            .max_level(4)
+            .max_bytes_for_level_multiplier(5)
+            .level0_sub_level_compact_level_count(3)
+            .compaction_mode(CompactionMode::Range as i32)
+            .enable_score_v2(Some(true))
+            .build();
+
+        let selector = DynamicLevelSelectorCore::new(
+            Arc::new(config.clone()),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+
+        // Setup to trigger the bug:
+        // Create a large DB so base_level stays at L2, and L2 is over-target
+        // Total DB = 250 + 250 + 1250 = 1750MB
+        // bottom_level_size = 1750 * (1 - 1/5) = 1400MB
+        // Divide back: 1400/5=280, 280/5=56 < 100 → stop at L2
+        // So base_level = L2, and L2 target ≈ 100MB, but actual size = 250MB → over-target!
+        //
+        // - L0: 2 sublevels (threshold=3), ~120MB → raw_score = max(1.2, 1.33) = 1.33
+        // - L2 (base): 250MB (target ~100MB) → score = 2.5 (over-target!)
+        // - L3: 250MB (target ~500MB) → score = 0.5 (under-target)
+        // - L4: 1250MB (target ~2500MB) → score = 0.5 (under-target)
+        //
+        // Bug scenario: L0 raw_score=1.33 > 1.0 (needs compaction)
+        //               When base_level (L2) is over-target (score=2.5), L0 gets suppressed
+        //               adjusted_score = 1.33 / 2.5 = 0.53 < 1.0
+        //               If using adjusted_score for filtering → L0 FILTERED OUT (BUG!)
+        //               Fix: Use raw_score for filtering → L0 INCLUDED (even with low priority)
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, vec![]),
+                generate_level(2, generate_tables(100..125, 0..1000, 1, 10)), /* 250MB - base level, over-target */
+                generate_level(3, generate_tables(125..150, 0..1000, 1, 10)), // 250MB
+                generate_level(4, generate_tables(150..275, 0..1000, 1, 10)), // 1250MB
+            ],
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![
+                // 2 sublevels, total 120MB
+                generate_tables(0..12, 0..100000, 1, 5), // 60MB
+                generate_tables(12..24, 100000..200000, 1, 5), // 60MB
+            ]),
+            ..Default::default()
+        };
+
+        let handlers = (0..5).map(LevelHandler::new).collect::<Vec<_>>();
+        let ctx = selector.get_priority_levels_v2(&levels, &handlers);
+
+        // Verify base_level is L2 and over-target
+        assert_eq!(ctx.base_level, 2, "base_level should be L2");
+        let base_level_score =
+            levels.levels[1].total_file_size as f64 / ctx.level_max_bytes[2] as f64;
+        assert!(
+            base_level_score > 1.0,
+            "L2 (base level) should be over-target, got score={:.2}",
+            base_level_score
+        );
+
+        // Calculate expected L0 scores
+        let l0_size_score =
+            levels.l0.total_file_size as f64 / config.max_bytes_for_level_base as f64;
+        let l0_level_score = (2 * levels.l0.sub_levels.len()) as f64
+            / config.level0_sub_level_compact_level_count as f64;
+        let l0_raw_score = f64::max(l0_size_score, l0_level_score);
+
+        // L0 raw score should be > 1.0 (needs compaction)
+        assert!(
+            l0_raw_score > 1.0,
+            "L0 raw_score should be > 1.0, got {:.2}",
+            l0_raw_score
+        );
+
+        // CRITICAL ASSERTION: L0 must not be filtered out even though base level is over-target
+        let l0_candidates: Vec<_> = ctx
+            .score_levels
+            .iter()
+            .filter(|p| p.select_level == 0)
+            .collect();
+
+        assert!(
+            !l0_candidates.is_empty(),
+            "❌ BUG: L0 was filtered out! L0 raw_score={:.2} > 1.0 should be INCLUDED \
+             even though base level is over-target (score={:.2}). \
+             This happens when using adjusted_score for filtering instead of raw_score.",
+            l0_raw_score,
+            base_level_score
+        );
+
+        // Verify ToBase or Intra exists
+        let has_tobase = l0_candidates
+            .iter()
+            .any(|p| matches!(p.picker_type, PickerType::ToBase));
+        let has_intra = l0_candidates
+            .iter()
+            .any(|p| matches!(p.picker_type, PickerType::Intra));
+        assert!(
+            has_tobase || has_intra,
+            "L0 should have ToBase or Intra compaction candidate"
+        );
+
+        // Verify raw_score is used for filtering (all L0 candidates should have raw_score > 1.0)
+        for candidate in &l0_candidates {
+            if matches!(
+                candidate.picker_type,
+                PickerType::ToBase | PickerType::Intra
+            ) {
+                assert!(
+                    (candidate.raw_score - l0_raw_score).abs() < 0.01,
+                    "L0 raw_score should be {:.2}, got {:.2}",
+                    l0_raw_score,
+                    candidate.raw_score
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_v2_l0_tier_not_filtered_when_nonoverlapping_has_pressure() {
+        use super::PickerType;
+        // Regression test for Bug #2: L0 Tier compaction should not be filtered by backpressure
+        //
+        // Scenario:
+        // - L0 has overlapping files (need Tier compaction, raw_score = 2.5)
+        // - L0 non-overlapping levels also have pressure (raw_score = 2.0)
+        //
+        // Bug: Using backpressured score for filtering → tier_score = 2.5 / 2.0 = 1.25, but if threshold
+        //      check uses backpressured score, it might be suppressed incorrectly
+        // Fix: Use raw score for filtering → tier_raw_score = 2.5 > 1.0 → INCLUDED
+        //
+        // This is critical because:
+        // 1. Overlapping files severely hurt read performance (need to merge all SSTs)
+        // 2. Backpressure from non-overlapping should affect PRIORITY, not FILTERING
+        let config = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(100)
+            .max_level(4)
+            .max_bytes_for_level_multiplier(5)
+            .level0_tier_compact_file_number(2)
+            .level0_sub_level_compact_level_count(3)
+            .compaction_mode(CompactionMode::Range as i32)
+            .enable_score_v2(Some(true))
+            .build();
+
+        let selector = DynamicLevelSelectorCore::new(
+            Arc::new(config.clone()),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+
+        use risingwave_hummock_sdk::level::Level;
+        use risingwave_pb::hummock::LevelType;
+
+        // Setup:
+        // - L0 Overlapping: 5 files (threshold=2) → raw_score = 2.5
+        // - L0 NonOverlapping: 6 sublevels (threshold=3) → raw_score = 2.0
+        // - L2 (base): 100MB (balanced)
+        let mut l0 = generate_l0_nonoverlapping_sublevels(vec![]);
+
+        // Add 6 non-overlapping sublevels
+        for i in 0..6 {
+            l0.sub_levels.push(Level {
+                level_idx: 0,
+                level_type: LevelType::Nonoverlapping,
+                table_infos: generate_tables(
+                    i * 5..(i + 1) * 5,
+                    (i * 100000) as usize..((i + 1) * 100000) as usize,
+                    1,
+                    4,
+                ),
+                total_file_size: 20,
+                sub_level_id: i as u64,
+                uncompressed_file_size: 20,
+                ..Default::default()
+            });
+        }
+
+        // Add 1 overlapping sublevel with 5 files
+        l0.sub_levels.push(Level {
+            level_idx: 0,
+            level_type: LevelType::Overlapping,
+            table_infos: generate_tables(100..105, 0..1000000, 1, 2),
+            total_file_size: 10,
+            sub_level_id: 100,
+            uncompressed_file_size: 10,
+            ..Default::default()
+        });
+
+        l0.total_file_size = l0.sub_levels.iter().map(|l| l.total_file_size).sum();
+
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, vec![]),
+                generate_level(2, generate_tables(200..210, 0..1000, 1, 10)), // 100MB (balanced)
+                generate_level(3, generate_tables(210..260, 0..1000, 1, 10)), // 500MB
+                generate_level(4, generate_tables(260..510, 0..1000, 1, 10)), // 2500MB
+            ],
+            l0,
+            ..Default::default()
+        };
+
+        let handlers = (0..5).map(LevelHandler::new).collect::<Vec<_>>();
+        let ctx = selector.get_priority_levels_v2(&levels, &handlers);
+
+        println!("\n=== Bug Regression Test: L0 Tier Filtering with NonOverlapping Pressure ===");
+
+        let overlapping_file_count = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|l| l.level_type == LevelType::Overlapping)
+            .flat_map(|l| &l.table_infos)
+            .count();
+        let nonoverlapping_sublevel_count = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|l| l.level_type == LevelType::Nonoverlapping)
+            .count();
+
+        let tier_raw_score =
+            overlapping_file_count as f64 / config.level0_tier_compact_file_number as f64;
+        let nonoverlapping_level_score = nonoverlapping_sublevel_count as f64
+            / config.level0_sub_level_compact_level_count as f64;
+
+        println!(
+            "L0 Overlapping: {} files (threshold={}) → raw_score={:.2}",
+            overlapping_file_count, config.level0_tier_compact_file_number, tier_raw_score
+        );
+        println!(
+            "L0 NonOverlapping: {} sublevels (threshold={}) → level_score={:.2}",
+            nonoverlapping_sublevel_count,
+            config.level0_sub_level_compact_level_count,
+            nonoverlapping_level_score
+        );
+
+        let tier_backpressured = tier_raw_score / f64::max(0.01, nonoverlapping_level_score);
+        println!(
+            "L0 Tier backpressured_score: {:.2} (= {:.2} / {:.2})",
+            tier_backpressured, tier_raw_score, nonoverlapping_level_score
+        );
+
+        // CRITICAL ASSERTION: Tier compaction must not be filtered out
+        let tier_candidate = ctx
+            .score_levels
+            .iter()
+            .find(|p| matches!(p.picker_type, PickerType::Tier));
+
+        assert!(
+            tier_candidate.is_some(),
+            "❌ BUG DETECTED: L0 Tier compaction was filtered out! This happens when using \
+             backpressured_score ({:.2}) instead of raw_score ({:.2}) for filtering. \
+             Overlapping files have real pressure (raw={:.2} > 1.0) and MUST be compacted \
+             even when non-overlapping levels have pressure (score={:.2})",
+            tier_backpressured,
+            tier_raw_score,
+            tier_raw_score,
+            nonoverlapping_level_score
+        );
+
+        let tier = tier_candidate.unwrap();
+        println!("✅ L0 Tier is included in candidates (using raw_score for filtering)");
+
+        // Verify scores
+        assert!(
+            (tier.raw_score - tier_raw_score).abs() < 0.01,
+            "Tier raw_score should be {:.2}, got {:.2}",
+            tier_raw_score,
+            tier.raw_score
+        );
+
+        // Verify backpressure affects priority (score might be suppressed)
+        if nonoverlapping_level_score > 1.0 {
+            assert!(
+                tier.score < tier.raw_score,
+                "Tier score ({:.2}) should be backpressured below raw score ({:.2}) \
+                 when non-overlapping has pressure",
+                tier.score,
+                tier.raw_score
+            );
+            println!(
+                "✅ L0 Tier: raw_score={:.2} > 1.0 (included), backpressured_score={:.2} (adjusted priority)",
+                tier.raw_score, tier.score
+            );
+        }
+
+        println!(
+            "\n✅ Test passed: L0 Tier uses raw_score for filtering, backpressured_score only affects priority"
         );
     }
 }
