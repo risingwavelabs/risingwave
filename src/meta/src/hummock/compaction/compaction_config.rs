@@ -93,6 +93,15 @@ impl CompactionConfigBuilder {
                 vnode_aligned_level_size_threshold:
                     compaction_config::vnode_aligned_level_size_threshold(),
                 enable_score_v2: Some(compaction_config::enable_score_v2()),
+                level0_non_overlapping_file_size_threshold: Some(
+                    compaction_config::level0_non_overlapping_file_size_threshold(),
+                ),
+                level0_non_overlapping_file_count_threshold: Some(
+                    compaction_config::level0_non_overlapping_file_count_threshold(),
+                ),
+                level0_non_overlapping_level_count_threshold: Some(
+                    compaction_config::level0_non_overlapping_level_count_threshold(),
+                ),
             },
         }
     }
@@ -134,6 +143,15 @@ impl CompactionConfigBuilder {
             .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
             .vnode_aligned_level_size_threshold(opt.vnode_aligned_level_size_threshold)
             .enable_score_v2(Some(opt.enable_score_v2))
+            .level0_non_overlapping_file_size_threshold(Some(
+                opt.level0_non_overlapping_file_size_threshold,
+            ))
+            .level0_non_overlapping_file_count_threshold(Some(
+                opt.level0_non_overlapping_file_count_threshold,
+            ))
+            .level0_non_overlapping_level_count_threshold(Some(
+                opt.level0_non_overlapping_level_count_threshold,
+            ))
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -205,4 +223,7 @@ builder_field! {
     enable_optimize_l0_interval_selection: Option<bool>,
     vnode_aligned_level_size_threshold: Option<u64>,
     enable_score_v2: Option<bool>,
+    level0_non_overlapping_file_size_threshold: Option<u64>,
+    level0_non_overlapping_file_count_threshold: Option<u32>,
+    level0_non_overlapping_level_count_threshold: Option<u32>,
 }

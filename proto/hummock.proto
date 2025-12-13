@@ -786,6 +786,10 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 vnode_aligned_level_size_threshold = 31;
       // Enable V2 scoring algorithm (Pebble-style with backpressure and anti-starvation)
       bool enable_score_v2 = 32;
+      // L0 non-overlapping thresholds (for v2 algorithm)
+      uint64 level0_non_overlapping_file_size_threshold = 33;
+      uint32 level0_non_overlapping_file_count_threshold = 34;
+      uint32 level0_non_overlapping_level_count_threshold = 35;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1022,6 +1026,22 @@ message CompactionConfig {
   optional uint64 vnode_aligned_level_size_threshold = 31;
 
   optional bool enable_score_v2 = 32;
+
+  // L0 non-overlapping score thresholds (for v2 algorithm)
+  // Total size threshold for calculating non-overlapping size score.
+  // score = total_size / level0_non_overlapping_file_size_threshold
+  // If None, falls back to max_bytes_for_level_base.
+  optional uint64 level0_non_overlapping_file_size_threshold = 33;
+
+  // File count threshold for calculating non-overlapping file count score.
+  // score = file_count / level0_non_overlapping_file_count_threshold
+  // If None, disabled (only use size and level count).
+  optional uint32 level0_non_overlapping_file_count_threshold = 34;
+
+  // Layer count threshold for calculating non-overlapping level score.
+  // score = (layer_count * 2) / level0_non_overlapping_level_count_threshold
+  // If None, falls back to level0_sub_level_compact_level_count.
+  optional uint32 level0_non_overlapping_level_count_threshold = 35;
 }
 
 message TableStats {

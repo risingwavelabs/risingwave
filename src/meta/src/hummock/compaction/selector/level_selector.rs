@@ -18,6 +18,10 @@
 // (found in the LICENSE.Apache file in the root directory).
 use std::sync::Arc;
 
+use risingwave_common::config::meta::default::compaction_config::{
+    level0_non_overlapping_file_count_threshold, level0_non_overlapping_file_size_threshold,
+    level0_non_overlapping_level_count_threshold,
+};
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_pb::hummock::compact_task::PbTaskType;
@@ -343,42 +347,101 @@ impl DynamicLevelSelectorCore {
             .filter(|sst| !handlers[0].is_pending_compact(&sst.sst_id))
             .count();
 
-        if idle_overlapping_file_count > 0 {
-            idle_overlapping_file_count as f64 / self.config.level0_tier_compact_file_number as f64
-        } else {
-            0.0
-        }
-    }
-
-    fn calculate_l0_non_overlap_score(
-        &self,
-        levels: &Levels,
-        handlers: &[LevelHandler],
-    ) -> (f64, f64) {
-        let total_size = levels
+        // Count all overlapping levels (regardless of pending status)
+        // High overlapping level count increases write-stop risk
+        let overlapping_level_count = levels
             .l0
             .sub_levels
             .iter()
-            .filter(|level| level.level_type == LevelType::Nonoverlapping)
-            .filter(|level| !handlers[0].is_level_pending_compact(level))
-            .map(|level| level.total_file_size)
-            .sum::<u64>();
-
-        let non_overlapping_size_score =
-            total_size as f64 / self.config.max_bytes_for_level_base as f64;
-
-        let non_overlapping_level_count = 2 * levels
-            .l0
-            .sub_levels
-            .iter()
-            .filter(|level| level.level_type == LevelType::Nonoverlapping)
-            .filter(|level| !handlers[0].is_level_pending_compact(level))
+            .filter(|level| level.level_type == LevelType::Overlapping)
             .count();
 
-        let non_overlapping_level_score = non_overlapping_level_count as f64
-            / self.config.level0_sub_level_compact_level_count as f64;
+        let mut max_score = 0.0f64;
 
-        (non_overlapping_size_score, non_overlapping_level_score)
+        // 1. File count score
+        if self.config.level0_tier_compact_file_number > 0 && idle_overlapping_file_count > 0 {
+            let file_count_score = idle_overlapping_file_count as f64
+                / self.config.level0_tier_compact_file_number as f64;
+            max_score = max_score.max(file_count_score);
+        }
+
+        // 2. Level count score (multiplied by 2 like non-overlapping)
+        // This detects write-stop risk from accumulated overlapping sublevels
+        // Uses level0_overlapping_sub_level_compact_level_count as threshold
+        if self.config.level0_overlapping_sub_level_compact_level_count > 0 {
+            let level_count_score = (2 * overlapping_level_count) as f64
+                / self.config.level0_overlapping_sub_level_compact_level_count as f64;
+            max_score = max_score.max(level_count_score);
+        }
+
+        max_score
+    }
+
+    fn calculate_l0_non_overlap_score(&self, levels: &Levels, handlers: &[LevelHandler]) -> f64 {
+        let mut total_size = 0u64;
+        let mut idle_file_count = 0usize;
+
+        // Collect size and file count from non-pending files
+        for level in levels.l0.sub_levels.iter() {
+            if level.level_type != LevelType::Nonoverlapping {
+                continue;
+            }
+
+            for sst in &level.table_infos {
+                if !handlers[0].is_pending_compact(&sst.sst_id) {
+                    total_size += sst.sst_size;
+                    idle_file_count += 1;
+                }
+            }
+        }
+
+        // Count all non-overlapping levels (regardless of pending status)
+        let non_overlapping_level_count = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|level| level.level_type == LevelType::Nonoverlapping)
+            .count();
+
+        let mut max_score = 0.0f64;
+
+        // 1. Size score
+        if let Some(threshold) = self
+            .config
+            .level0_non_overlapping_file_size_threshold
+            .or_else(|| Some(level0_non_overlapping_file_size_threshold()))
+        {
+            if threshold > 0 {
+                let score = total_size as f64 / threshold as f64;
+                max_score = max_score.max(score);
+            }
+        }
+
+        // 2. File count score
+        if let Some(threshold) = self
+            .config
+            .level0_non_overlapping_file_count_threshold
+            .or_else(|| Some(level0_non_overlapping_file_count_threshold()))
+        {
+            if threshold > 0 {
+                let score = idle_file_count as f64 / threshold as f64;
+                max_score = max_score.max(score);
+            }
+        }
+
+        // 3. Level count score
+        if let Some(threshold) = self
+            .config
+            .level0_non_overlapping_level_count_threshold
+            .or_else(|| Some(level0_non_overlapping_level_count_threshold()))
+        {
+            if threshold > 0 {
+                let score = (2 * non_overlapping_level_count) as f64 / threshold as f64;
+                max_score = max_score.max(score);
+            }
+        }
+
+        max_score
     }
 
     fn calculate_level_score_v2(
@@ -421,13 +484,9 @@ impl DynamicLevelSelectorCore {
         // L0 scores
         {
             let base_level_score = level_scores[ctx.base_level];
-            let base_level_denominator = f64::max(0.01, base_level_score);
+            let base_level_denominator = base_level_score.max(0.01);
 
-            let (non_overlapping_size_score, non_overlapping_level_score) =
-                self.calculate_l0_non_overlap_score(levels, handlers);
-
-            let non_overlapping_raw_score =
-                f64::max(non_overlapping_size_score, non_overlapping_level_score);
+            let non_overlapping_raw_score = self.calculate_l0_non_overlap_score(levels, handlers);
 
             // Apply boost/suppress to raw score based on base level pressure
             let non_overlapping_score = non_overlapping_raw_score / base_level_denominator;
@@ -454,10 +513,9 @@ impl DynamicLevelSelectorCore {
             }
 
             // Tier compaction score is backpressured by non-overlapping score
-            let mut l0_overlap_score = self.calculate_l0_overlap_score(levels, handlers);
-            let l0_overlap_raw_score = l0_overlap_score;
-            let l0_overlap_denominator = f64::max(0.01, non_overlapping_raw_score);
-            l0_overlap_score /= l0_overlap_denominator;
+            let l0_overlap_raw_score = self.calculate_l0_overlap_score(levels, handlers);
+            let l0_overlap_denominator = non_overlapping_raw_score.max(0.01);
+            let l0_overlap_score = l0_overlap_raw_score / l0_overlap_denominator;
 
             // Add Tier compaction candidates if raw score exceeds threshold (before backpressure adjustment)
             // This ensures overlapping L0 files get compacted even when non-overlapping levels have pressure
@@ -1380,6 +1438,9 @@ pub mod tests {
             .level0_sub_level_compact_level_count(2)
             .compaction_mode(CompactionMode::Range as i32)
             .enable_score_v2(Some(true))
+            .level0_non_overlapping_file_size_threshold(Some(100))
+            .level0_non_overlapping_file_count_threshold(Some(10))
+            .level0_non_overlapping_level_count_threshold(Some(2))
             .build();
 
         let selector = DynamicLevelSelectorCore::new(
@@ -1952,8 +2013,10 @@ pub mod tests {
 
                 let size_score = total_size as f64 / config.max_bytes_for_level_base as f64;
                 // Note: calculate_l0_non_overlap_score multiplies level count by 2
-                let level_score =
-                    (2.0 * sublevel_count) / config.level0_sub_level_compact_level_count as f64;
+                // Use level0_non_overlapping_level_count_threshold (default: 8) instead of level0_sub_level_compact_level_count
+                let level_count_threshold = config.level0_non_overlapping_level_count_threshold
+                    .unwrap_or(risingwave_common::config::meta::default::compaction_config::level0_non_overlapping_level_count_threshold());
+                let level_score = (2.0 * sublevel_count) / level_count_threshold as f64;
                 let expected_raw = f64::max(size_score, level_score);
 
                 println!(
@@ -2131,6 +2194,373 @@ pub mod tests {
     }
 
     #[test]
+    fn test_v2_production_scenario_with_heavy_l0() {
+        // Test case based on real production data:
+        // L0: 224 overlapping sublevels (~35GB) + 25 non-overlapping sublevels (~27GB)
+        // L3: 5.8GB, L4: 13.4GB, L5: 29.3GB, L6: 66.2GB
+        // Total: ~114GB with severe L0 backlog
+        //
+        // This tests whether default thresholds are reasonable for production workloads
+        let config = CompactionConfigBuilder::new()
+            .enable_score_v2(Some(true))
+            .build();
+
+        let mb = 1024 * 1024u64;
+        let gb = 1024 * mb;
+
+        use risingwave_hummock_sdk::level::Level;
+        use risingwave_pb::hummock::LevelType;
+
+        // Simulate L0 state - strictly following production data
+        let mut l0 = generate_l0_nonoverlapping_sublevels(vec![]);
+
+        // Add 25 non-overlapping sublevels with exact sizes from production
+        // sub_level_id, sst_num, size (in bytes)
+        let non_overlapping_data = vec![
+            (705, 65, 1871579609),
+            (695, 63, 1637417615),
+            (685, 61, 1600402097),
+            (675, 60, 1596711753),
+            (665, 60, 1621336053),
+            (657, 53, 1534993286),
+            (648, 52, 1609504103),
+            (638, 54, 1443638283),
+            (629, 55, 1587889721),
+            (617, 49, 1250541664),
+            (608, 45, 1140778076),
+            (599, 40, 1154532135),
+            (590, 39, 1096704216),
+            (580, 34, 919126565),
+            (571, 34, 928150285),
+            (563, 24, 676381747),
+            (554, 18, 557074190),
+            (545, 17, 450520552),
+            (535, 8, 175011067),
+            (526, 1, 11950900),
+            (479, 2, 13394821),
+            (443, 1, 5093290),
+            (434, 1, 4331289),
+            (397, 1, 6777613),
+            (245, 3, 8743049),
+        ];
+
+        for (sub_level_id, sst_num, total_size) in non_overlapping_data {
+            l0.sub_levels.push(Level {
+                level_idx: 0,
+                level_type: LevelType::Nonoverlapping,
+                total_file_size: total_size,
+                sub_level_id,
+                table_infos: generate_tables(
+                    (sub_level_id * 100)..(sub_level_id * 100 + sst_num),
+                    0..100000,
+                    1,
+                    total_size / sst_num,
+                ),
+                ..Default::default()
+            });
+        }
+
+        // Add 224 overlapping sublevels (sub_level_id 715-938)
+        // Each has 1 SST, sizes from production data
+        let overlapping_sizes = vec![
+            133616835, 200556239, 200515709, 268610926, 98974598, 200555380, 167069957, 100232723,
+            267367849, 200476068, 268610219, 132460975, 100192590, 133577417, 268610958, 32242961,
+            268610963, 98974369, 200515336, 200556054, 267368000, 268610584, 32162890, 100192548,
+            268611024, 32203110, 33384404, 200475573, 268610163, 65569021, 133657395, 268610999,
+            98974776, 200595650, 167069666, 200555821, 167069762, 267287235, 200595543, 200515473,
+            234001688, 233921573, 268610685, 32203105, 268610310, 132420146, 268610507, 65608745,
+            167069215, 66768435, 268610564, 266244115, 233881307, 167070097, 167109496, 267367115,
+            268611006, 99014879, 233962089, 233921952, 200556465, 233922232, 200516537, 268610132,
+            32162804, 66808453, 267367483, 133616891, 200515452, 268609903, 268610494, 30919674,
+            66808496, 267407318, 268610299, 99054614, 200475640, 167069474, 268610223, 132420348,
+            200556004, 268610219, 99095082, 268610169, 98974277, 268610681, 99015070, 268610186,
+            165866015, 33384314, 133617690, 268610519, 32122835, 268610214, 99054573, 133656993,
+            267286645, 268611299, 32243079, 200435093, 268610146, 199352714, 133616889, 268611349,
+            32203121, 33384215, 268610819, 32162746, 167149506, 66808496, 267368300, 233961801,
+            100193130, 267367853, 200555445, 33384242, 267327811, 167109759, 267327356, 100192734,
+            267447978, 100152782, 167109465, 268610933, 165826524, 200555476, 66808676, 233921265,
+            267447445, 133536603, 233921541, 133616937, 167149732, 268610974, 98974296, 167069527,
+            268610333, 199312062, 100233263, 100153073, 268610869, 32203110, 268610160, 32162746,
+            167110215, 33384413, 200595419, 268611387, 32162858, 200475987, 268610990, 132420730,
+            234042301, 33384197, 133576751, 267326692, 268611153, 99095163, 167069229, 233922106,
+            267326860, 268611074, 65608699, 267407122, 133536852, 234001562, 267326926, 100233020,
+            167109736, 167069417, 200515194, 33424227, 200555928, 233880889, 268610665, 32122885,
+            167110019, 133616957, 268610381, 99054726, 200475930, 233961094, 268611107, 32203105,
+            233961039, 66768435, 268610942, 65609048, 233962222, 267367491, 268610450, 98974277,
+            167030001, 268610447, 65769153, 100152848, 200435138, 268610304, 32162888, 200596287,
+            200595383, 133577507, 268610255, 132340285, 233961527, 66808532, 233962201, 267367642,
+            268610830, 65568981, 200555601, 267327017, 267448190, 233921256, 200515349, 33384206,
+            268610858, 65568956, 268609983, 99054962, 167149423, 100153190, 200555994, 133617127,
+        ];
+
+        for (i, size) in overlapping_sizes.iter().enumerate() {
+            let sub_level_id = 715 + i as u64;
+            l0.sub_levels.push(Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping,
+                total_file_size: *size,
+                sub_level_id,
+                table_infos: generate_tables(
+                    (sub_level_id * 100)..(sub_level_id * 100 + 1),
+                    0..100000,
+                    1,
+                    *size,
+                ),
+                ..Default::default()
+            });
+        }
+
+        l0.total_file_size = l0.sub_levels.iter().map(|l| l.total_file_size).sum();
+
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, vec![]),
+                generate_level(2, vec![]),
+                generate_level(3, generate_tables(200..377, 0..6000000, 1, 33 * mb)), /* 177 ssts, 5.8GB */
+                generate_level(4, generate_tables(377..794, 0..12000000, 1, 32 * mb)), /* 417 ssts, 13.4GB */
+                generate_level(5, generate_tables(794..1442, 0..24000000, 1, 45 * mb)), /* 648 ssts, 29.3GB */
+                generate_level(6, generate_tables(1442..2722, 0..48000000, 1, 52 * mb)), /* 1280 ssts, 66.2GB */
+            ],
+            l0,
+            ..Default::default()
+        };
+
+        let selector = DynamicLevelSelectorCore::new(
+            Arc::new(config.clone()),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+
+        let handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
+        let ctx = selector.get_priority_levels(&levels, &handlers);
+
+        println!("\n=== Production Scenario Analysis ===");
+        println!("Total DB size: ~114GB");
+        println!("L0 overlapping: 224 sublevels, each with 1 SST");
+        println!("L0 non-overlapping: 25 sublevels with varying SST counts");
+        println!("L3: 5.8GB, L4: 13.4GB, L5: 29.3GB, L6: 66.2GB");
+        println!("\nBase level: {}", ctx.base_level);
+        for i in 3..=6 {
+            println!(
+                "L{} target: {:.2}GB, actual: {:.2}GB, ratio: {:.2}x",
+                i,
+                ctx.level_max_bytes[i] as f64 / gb as f64,
+                levels.levels[i - 1].total_file_size as f64 / gb as f64,
+                levels.levels[i - 1].total_file_size as f64 / ctx.level_max_bytes[i] as f64
+            );
+        }
+
+        println!("\n=== Score Calculations ===");
+
+        // Calculate L0 scores
+        let overlapping_count = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|l| l.level_type == LevelType::Overlapping)
+            .flat_map(|l| l.table_infos.iter())
+            .count();
+        let overlapping_score =
+            overlapping_count as f64 / config.level0_tier_compact_file_number as f64;
+
+        let non_overlapping_count = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|l| l.level_type == LevelType::Nonoverlapping)
+            .count();
+        let non_overlapping_size: u64 = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|l| l.level_type == LevelType::Nonoverlapping)
+            .map(|l| l.total_file_size)
+            .sum();
+        let non_overlapping_file_count: usize = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|l| l.level_type == LevelType::Nonoverlapping)
+            .flat_map(|l| l.table_infos.iter())
+            .count();
+
+        let size_threshold = config
+            .level0_non_overlapping_file_size_threshold
+            .unwrap_or(risingwave_common::config::meta::default::compaction_config::level0_non_overlapping_file_size_threshold());
+        let count_threshold = config
+            .level0_non_overlapping_file_count_threshold
+            .unwrap_or(risingwave_common::config::meta::default::compaction_config::level0_non_overlapping_file_count_threshold());
+        let level_threshold = config
+            .level0_non_overlapping_level_count_threshold
+            .unwrap_or(risingwave_common::config::meta::default::compaction_config::level0_non_overlapping_level_count_threshold());
+
+        let size_score = non_overlapping_size as f64 / size_threshold as f64;
+        let file_count_score = non_overlapping_file_count as f64 / count_threshold as f64;
+        let level_count_score = (2 * non_overlapping_count) as f64 / level_threshold as f64;
+        let non_overlapping_raw_score = size_score.max(file_count_score).max(level_count_score);
+
+        println!("L0 Overlapping:");
+        println!(
+            "  File count: {} (threshold: {})",
+            overlapping_count, config.level0_tier_compact_file_number
+        );
+        println!("  Raw score: {:.2}", overlapping_score);
+
+        println!("\nL0 Non-overlapping:");
+        println!(
+            "  Size: {:.2}GB (threshold: {:.2}GB)",
+            non_overlapping_size as f64 / gb as f64,
+            size_threshold as f64 / gb as f64
+        );
+        println!(
+            "  File count: {} (threshold: {})",
+            non_overlapping_file_count, count_threshold
+        );
+        println!(
+            "  Level count: {} (threshold: {})",
+            non_overlapping_count, level_threshold
+        );
+        println!("  Size score: {:.2}", size_score);
+        println!("  File count score: {:.2}", file_count_score);
+        println!("  Level count score: {:.2}", level_count_score);
+        println!("  Raw score: {:.2}", non_overlapping_raw_score);
+
+        // Calculate Tier score (with level count score)
+        let tier_file_count_score =
+            overlapping_count as f64 / config.level0_tier_compact_file_number as f64;
+        let tier_level_count_score = if config.level0_overlapping_sub_level_compact_level_count > 0
+        {
+            (2 * overlapping_count) as f64
+                / config.level0_overlapping_sub_level_compact_level_count as f64
+        } else {
+            0.0
+        };
+        let tier_raw_score = tier_file_count_score.max(tier_level_count_score);
+        let tier_backpressure_denominator = non_overlapping_raw_score.max(0.01);
+        let tier_score = tier_raw_score / tier_backpressure_denominator;
+
+        println!("\nL0 Tier (calculated):");
+        println!(
+            "  File count: {} (threshold: {})",
+            overlapping_count, config.level0_tier_compact_file_number
+        );
+        println!(
+            "  Level count: {} sublevels (threshold: {})",
+            overlapping_count, config.level0_overlapping_sub_level_compact_level_count
+        );
+        println!("  File count score: {:.2}", tier_file_count_score);
+        println!("  Level count score: {:.2}", tier_level_count_score);
+        println!("  Raw score: {:.2}", tier_raw_score);
+        println!(
+            "  Backpressure denominator: {:.2} (non-overlapping raw score)",
+            tier_backpressure_denominator
+        );
+        println!(
+            "  Final score: {:.2} / {:.2} = {:.2}",
+            tier_raw_score, tier_backpressure_denominator, tier_score
+        );
+
+        println!(
+            "\n=== All Candidates (Total: {}) ===",
+            ctx.score_levels.len()
+        );
+        for (i, picker) in ctx.score_levels.iter().enumerate() {
+            println!(
+                "#{}: L{}->{} score={:.2} raw={:.2} type={}",
+                i + 1,
+                picker.select_level,
+                picker.target_level,
+                picker.score,
+                picker.raw_score,
+                picker.picker_type
+            );
+        }
+
+        println!("\n=== Top 5 Candidates ===");
+        for (i, picker) in ctx.score_levels.iter().take(5).enumerate() {
+            println!(
+                "#{}: L{}->{} score={:.2} raw={:.2} type={}",
+                i + 1,
+                picker.select_level,
+                picker.target_level,
+                picker.score,
+                picker.raw_score,
+                picker.picker_type
+            );
+        }
+
+        // Verify L0 has highest priority given the severe backlog
+        assert!(
+            !ctx.score_levels.is_empty(),
+            "Should have compaction candidates"
+        );
+
+        let top_pick = &ctx.score_levels[0];
+        println!("\n=== Analysis ===");
+
+        // With default config:
+        // - overlapping_score = 56 / 12 = 4.67
+        // - level_count_score = (2 * 25) / 8 = 6.25 → actual 16.67
+        // - BUT L3 is 11.41x over-target, so L0 gets suppressed
+
+        if top_pick.select_level == 0 {
+            println!("✓ L0 correctly prioritized (score={:.2})", top_pick.score);
+            println!("  This is expected given:");
+            println!("    - 224 overlapping files (18.67x threshold)");
+            println!("    - 25 non-overlapping levels (6.25x threshold)");
+        } else {
+            println!(
+                "⚠ L0 not top priority, picked L{}->{}",
+                top_pick.select_level, top_pick.target_level
+            );
+            println!(
+                "  Reason: L0 raw_score={:.2}, but base_level (L{}) score={:.2}",
+                non_overlapping_raw_score,
+                ctx.base_level,
+                levels.levels[ctx.base_level - 1].total_file_size as f64
+                    / ctx.level_max_bytes[ctx.base_level] as f64
+            );
+            println!(
+                "  L0 suppressed_score = {:.2} / {:.2} = {:.2}",
+                non_overlapping_raw_score,
+                levels.levels[ctx.base_level - 1].total_file_size as f64
+                    / ctx.level_max_bytes[ctx.base_level] as f64,
+                non_overlapping_raw_score
+                    / (levels.levels[ctx.base_level - 1].total_file_size as f64
+                        / ctx.level_max_bytes[ctx.base_level] as f64)
+                        .max(0.01)
+            );
+            println!("  This reveals a design tradeoff:");
+            println!("    - Pro: Prevents L0 compaction from making L3 worse");
+            println!("    - Con: L0 can accumulate to level0_stop_write_threshold");
+            println!("  Possible solutions:");
+            println!("    1. Increase level_count_threshold from 8 to 16-32");
+            println!("    2. Add L0 raw_score cap (e.g., force top priority if raw > 10)");
+            println!("    3. Use separate backpressure logic for extreme L0 cases");
+        }
+
+        // Check if thresholds are reasonable
+        println!("\n=== Threshold Evaluation ===");
+
+        if overlapping_score > 3.0 {
+            println!("✓ Overlapping threshold (12) is reasonable - detects severe backlog");
+        } else {
+            println!("⚠ Overlapping threshold might be too high for this workload");
+        }
+
+        if level_count_score > 3.0 {
+            println!("✓ Level count threshold (8) is reasonable - detects severe fragmentation");
+        } else {
+            println!("⚠ Level count threshold might be too high");
+        }
+
+        if size_score > 1.0 {
+            println!("✓ Size threshold (8GB) is reasonable - detects size pressure");
+        } else {
+            println!("ℹ Size threshold (8GB) is conservative - prioritizes level count over size");
+        }
+    }
+
+    #[test]
     fn test_v2_anti_starvation_complex_scenario() {
         // Complex scenario that simulates real production behavior:
         // 1. Continuous L0 writes: L0 has 12 sublevels, each compaction only removes 4 (simulating ongoing writes)
@@ -2273,8 +2703,10 @@ pub mod tests {
 
                 let size_score = total_size as f64 / config.max_bytes_for_level_base as f64;
                 // Note: calculate_l0_non_overlap_score multiplies level count by 2
-                let level_score =
-                    (2.0 * sublevel_count) / config.level0_sub_level_compact_level_count as f64;
+                // Use level0_non_overlapping_level_count_threshold (default: 8) instead of level0_sub_level_compact_level_count
+                let level_count_threshold = config.level0_non_overlapping_level_count_threshold
+                    .unwrap_or(risingwave_common::config::meta::default::compaction_config::level0_non_overlapping_level_count_threshold());
+                let level_score = (2.0 * sublevel_count) / level_count_threshold as f64;
                 let expected_raw = f64::max(size_score, level_score);
 
                 assert!(
@@ -2573,8 +3005,10 @@ pub mod tests {
         // Calculate expected L0 scores
         let l0_size_score =
             levels.l0.total_file_size as f64 / config.max_bytes_for_level_base as f64;
-        let l0_level_score = (2 * levels.l0.sub_levels.len()) as f64
-            / config.level0_sub_level_compact_level_count as f64;
+        // Use level0_non_overlapping_level_count_threshold (default: 8) instead of level0_sub_level_compact_level_count
+        let level_count_threshold = config.level0_non_overlapping_level_count_threshold
+            .unwrap_or(risingwave_common::config::meta::default::compaction_config::level0_non_overlapping_level_count_threshold());
+        let l0_level_score = (2 * levels.l0.sub_levels.len()) as f64 / level_count_threshold as f64;
         let l0_raw_score = f64::max(l0_size_score, l0_level_score);
 
         // L0 raw score should be > 1.0 (needs compaction)

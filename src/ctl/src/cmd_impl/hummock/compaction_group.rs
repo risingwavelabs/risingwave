@@ -77,6 +77,9 @@ pub fn build_compaction_config_vec(
     enable_optimize_l0_interval_selection: Option<bool>,
     vnode_aligned_level_size_threshold: Option<u64>,
     enable_score_v2: Option<bool>,
+    level0_non_overlapping_file_size_threshold: Option<u64>,
+    level0_non_overlapping_file_count_threshold: Option<u32>,
+    level0_non_overlapping_level_count_threshold: Option<u32>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -162,6 +165,15 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = enable_score_v2 {
         configs.push(MutableConfig::EnableScoreV2(c))
+    }
+    if let Some(c) = level0_non_overlapping_file_size_threshold {
+        configs.push(MutableConfig::Level0NonOverlappingFileSizeThreshold(c))
+    }
+    if let Some(c) = level0_non_overlapping_file_count_threshold {
+        configs.push(MutableConfig::Level0NonOverlappingFileCountThreshold(c))
+    }
+    if let Some(c) = level0_non_overlapping_level_count_threshold {
+        configs.push(MutableConfig::Level0NonOverlappingLevelCountThreshold(c))
     }
 
     configs
