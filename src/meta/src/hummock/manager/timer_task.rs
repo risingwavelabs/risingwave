@@ -260,23 +260,52 @@ impl HummockManager {
                                         );
                                     }
 
-                                    for compaction_group_id in
-                                        get_compaction_group_ids(&current_version)
                                     {
-                                        let compaction_group_config =
-                                            &id_to_config[&compaction_group_id];
+                                        // Clone level_handlers outside the lock to minimize critical section
+                                        let level_handlers_snapshot: std::collections::HashMap<
+                                            _,
+                                            _,
+                                        > = {
+                                            let compaction_guard =
+                                                hummock_manager.compaction.read().await;
+                                            get_compaction_group_ids(&current_version)
+                                                .filter_map(|group_id| {
+                                                    compaction_guard
+                                                        .compaction_statuses
+                                                        .get(&group_id)
+                                                        .map(|status| {
+                                                            (
+                                                                group_id,
+                                                                status.level_handlers.clone(),
+                                                            )
+                                                        })
+                                                })
+                                                .collect()
+                                        };
 
-                                        let group_levels = current_version
-                                            .get_compaction_group_levels(
-                                                compaction_group_config.group_id(),
-                                            );
+                                        for compaction_group_id in
+                                            get_compaction_group_ids(&current_version)
+                                        {
+                                            let compaction_group_config =
+                                                &id_to_config[&compaction_group_id];
 
-                                        trigger_lsm_stat(
-                                            &hummock_manager.metrics,
-                                            compaction_group_config.compaction_config(),
-                                            group_levels,
-                                            compaction_group_config.group_id(),
-                                        )
+                                            let group_levels = current_version
+                                                .get_compaction_group_levels(
+                                                    compaction_group_config.group_id(),
+                                                );
+
+                                            if let Some(level_handlers) =
+                                                level_handlers_snapshot.get(&compaction_group_id)
+                                            {
+                                                trigger_lsm_stat(
+                                                    &hummock_manager.metrics,
+                                                    compaction_group_config.compaction_config(),
+                                                    group_levels,
+                                                    compaction_group_config.group_id(),
+                                                    level_handlers,
+                                                )
+                                            }
+                                        }
                                     }
 
                                     {
