@@ -921,7 +921,7 @@ pub mod default {
         }
 
         pub fn enable_score_v2() -> bool {
-            true
+            false
         }
 
         pub fn vnode_aligned_level_size_threshold() -> Option<u64> {

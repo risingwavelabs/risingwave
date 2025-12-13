@@ -511,7 +511,7 @@ impl DynamicLevelSelectorCore {
         levels: &Levels,
         handlers: &[LevelHandler],
     ) -> SelectContext {
-        let mut ctx = self.calculate_level_base_size(levels, handlers);
+        let mut ctx = self.calculate_level_base_size_v1(levels);
 
         let l0_file_count = levels
             .l0
@@ -825,8 +825,7 @@ pub mod tests {
         push_tables_level0_nonoverlapping,
     };
     use crate::hummock::compaction::selector::{
-        CompactionSelector, CompactionSelectorContext, DynamicLevelSelector,
-        DynamicLevelSelectorCore, LocalSelectorStatistic,
+        CompactionSelector, DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic,
     };
     use crate::hummock::level_handler::LevelHandler;
     use crate::hummock::model::CompactionGroup;
@@ -1309,6 +1308,7 @@ pub mod tests {
             .max_level(4)
             .max_bytes_for_level_multiplier(5)
             .compaction_mode(CompactionMode::Range as i32)
+            .enable_score_v2(Some(true))
             .build();
         let selector = DynamicLevelSelectorCore::new(
             Arc::new(config),
@@ -1333,7 +1333,7 @@ pub mod tests {
         let handlers = (0..5).map(LevelHandler::new).collect::<Vec<_>>();
 
         // V1 Logic
-        let ctx_v1 = selector.get_priority_levels(&levels, &handlers);
+        let ctx_v1 = selector.get_priority_levels_v1(&levels, &handlers);
         // Find L2 score
         let l2_score_v1 = ctx_v1
             .score_levels
@@ -1379,6 +1379,7 @@ pub mod tests {
             .level0_tier_compact_file_number(2)
             .level0_sub_level_compact_level_count(2)
             .compaction_mode(CompactionMode::Range as i32)
+            .enable_score_v2(Some(true))
             .build();
 
         let selector = DynamicLevelSelectorCore::new(
@@ -1694,204 +1695,741 @@ pub mod tests {
     }
 
     #[test]
-    fn test_v2_default_config_l0_priority() {
-        // Test with DEFAULT config: verify L0 pressure triggers compaction correctly
-        // Default: max_bytes_for_level_base = 512MB, level0_tier_compact_file_number = 12
-        let config = CompactionConfigBuilder::new().build();
+    fn test_v2_l0_priority_with_default_config() {
+        // Test V2 with default config: L0 should be prioritized when it has high pressure
+        // Default: max_bytes_for_level_base = 512MB, multiplier = 5, level0_tier = 12
+        let config = CompactionConfigBuilder::new()
+            .enable_score_v2(Some(true))
+            .build();
 
-        let group = CompactionGroup {
-            compaction_config: Arc::new(config.clone()),
-            ..Default::default()
-        };
+        let selector = DynamicLevelSelectorCore::new(
+            Arc::new(config.clone()),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
 
         let mb = 1024 * 1024u64;
 
-        // Scenario: L0 has enough files to trigger compaction (>= 12 files)
-        // Use mock file sizes to simulate real scale without huge data
+        // Simulate dynamic-level filling: L6 (bottommost) fills first
+        // L6: ~3GB (approaching target ~2.5GB after smoothing)
+        // L5: ~600MB (starting to fill, target ~512MB)
+        // L4-L1: empty (not yet reached)
+        // L0: 15 sublevels, 800MB total - HIGH PRESSURE
+        //
+        // Key: Base level will be L5 (first non-empty below L6)
+        // L0 has both level count pressure (15/12) and size pressure (800MB/512MB)
         let levels = Levels {
             levels: vec![
-                generate_level(1, generate_tables(100..110, 0..1000000, 1, 50 * mb)), // L1: 500MB
-                generate_level(2, generate_tables(110..120, 0..1000000, 1, 100 * mb)), // L2: 1GB
+                generate_level(1, vec![]),
+                generate_level(2, vec![]),
                 generate_level(3, vec![]),
                 generate_level(4, vec![]),
-                generate_level(5, vec![]),
-                generate_level(6, vec![]),
+                generate_level(5, generate_tables(100..160, 0..5000000, 1, 10 * mb)), // 600MB
+                generate_level(6, generate_tables(160..460, 0..10000000, 1, 10 * mb)), // 3GB
             ],
             l0: generate_l0_nonoverlapping_multi_sublevels(vec![
-                // 13 sublevels to exceed trigger (12)
-                generate_tables(0..1, 0..100000, 1, 32 * mb),
-                generate_tables(1..2, 100000..200000, 1, 32 * mb),
-                generate_tables(2..3, 200000..300000, 1, 32 * mb),
-                generate_tables(3..4, 300000..400000, 1, 32 * mb),
-                generate_tables(4..5, 400000..500000, 1, 32 * mb),
-                generate_tables(5..6, 500000..600000, 1, 32 * mb),
-                generate_tables(6..7, 600000..700000, 1, 32 * mb),
-                generate_tables(7..8, 700000..800000, 1, 32 * mb),
-                generate_tables(8..9, 800000..900000, 1, 32 * mb),
-                generate_tables(9..10, 900000..1000000, 1, 32 * mb),
-                generate_tables(10..11, 1000000..1100000, 1, 32 * mb),
-                generate_tables(11..12, 1100000..1200000, 1, 32 * mb),
-                generate_tables(12..13, 1200000..1300000, 1, 32 * mb),
+                // 15 sublevels, each ~53MB, total ~800MB
+                generate_tables(0..1, 0..100000, 1, 53 * mb),
+                generate_tables(1..2, 100000..200000, 1, 53 * mb),
+                generate_tables(2..3, 200000..300000, 1, 53 * mb),
+                generate_tables(3..4, 300000..400000, 1, 53 * mb),
+                generate_tables(4..5, 400000..500000, 1, 53 * mb),
+                generate_tables(5..6, 500000..600000, 1, 53 * mb),
+                generate_tables(6..7, 600000..700000, 1, 53 * mb),
+                generate_tables(7..8, 700000..800000, 1, 53 * mb),
+                generate_tables(8..9, 800000..900000, 1, 53 * mb),
+                generate_tables(9..10, 900000..1000000, 1, 53 * mb),
+                generate_tables(10..11, 1000000..1100000, 1, 53 * mb),
+                generate_tables(11..12, 1100000..1200000, 1, 53 * mb),
+                generate_tables(12..13, 1200000..1300000, 1, 53 * mb),
+                generate_tables(13..14, 1300000..1400000, 1, 53 * mb),
+                generate_tables(14..15, 1400000..1500000, 1, 53 * mb),
             ]),
             ..Default::default()
         };
 
-        let mut handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
-        let mut selector_stats = LocalSelectorStatistic::default();
-        let table_id_to_options = HashMap::new();
-        let member_table_ids = BTreeSet::new();
-        let table_watermarks = HashMap::new();
-        let state_table_info = HummockVersionStateTableInfo::empty();
+        let handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
+        let ctx = selector.get_priority_levels(&levels, &handlers);
 
-        let mut selector = DynamicLevelSelector::default();
-
-        let ctx = CompactionSelectorContext {
-            group: &group,
-            levels: &levels,
-            member_table_ids: &member_table_ids,
-            level_handlers: &mut handlers,
-            selector_stats: &mut selector_stats,
-            table_id_to_options: &table_id_to_options,
-            developer_config: Arc::new(CompactionDeveloperConfig::default()),
-            table_watermarks: &table_watermarks,
-            state_table_info: &state_table_info,
-        };
-
-        let task = selector.pick_compaction(1, ctx);
-
-        assert!(
-            task.is_some(),
-            "Should pick compaction with L0 having {} sublevels (trigger={})",
-            13,
-            config.level0_tier_compact_file_number
+        println!("\n=== V2 L0 Priority Test (Default Config) ===");
+        println!(
+            "L0 sublevels: {}, total: {}MB",
+            levels.l0.sub_levels.len(),
+            levels.l0.total_file_size / mb
         );
-        let task = task.unwrap();
+        println!(
+            "L5: {}MB (target: {}MB)",
+            levels.levels[4].total_file_size / mb,
+            ctx.level_max_bytes[5] / mb
+        );
+        println!(
+            "L6: {}MB (target: {}MB)",
+            levels.levels[5].total_file_size / mb,
+            ctx.level_max_bytes[6] / mb
+        );
+        println!("Base level: {}", ctx.base_level);
+        println!("\nTop 3 candidates:");
+        for (i, picker) in ctx.score_levels.iter().take(3).enumerate() {
+            println!(
+                "  #{}: L{}->{} type={}, score={:.2}, raw={:.2}",
+                i + 1,
+                picker.select_level,
+                picker.target_level,
+                picker.picker_type,
+                picker.score,
+                picker.raw_score
+            );
+        }
+
+        // Verify L0 is prioritized
+        assert!(
+            !ctx.score_levels.is_empty(),
+            "Should have compaction candidates"
+        );
+        let top_candidate = &ctx.score_levels[0];
+
+        // L0 should be top priority (either ToBase or Intra)
         assert_eq!(
-            task.input.input_levels[0].level_idx, 0,
-            "Should compact from L0 with default config"
+            top_candidate.select_level, 0,
+            "L0 should be top priority with 15 sublevels (trigger=12) and 800MB size (base=512MB), \
+             but got L{} with score {:.2}",
+            top_candidate.select_level, top_candidate.score
         );
     }
 
     #[test]
-    fn test_v2_default_config_anti_starvation() {
-        // Multi-round simulation with DEFAULT config to verify anti-starvation
-        // Default: max_bytes_for_level_base = 512MB, multiplier = 5, max_compaction_bytes = 2GB
-        // Expected targets: L1=512MB, L2=2.5GB, L3=12.8GB, L4=64GB, L5=320GB
-        let config = CompactionConfigBuilder::new().build();
-
-        let group = CompactionGroup {
-            compaction_config: Arc::new(config),
-            ..Default::default()
-        };
+    fn test_v2_anti_starvation_with_default_config() {
+        // Test V2's anti-starvation mechanism with default config
+        // Key: Set up MULTIPLE levels that are all over-target simultaneously
+        // Then verify through multiple compaction rounds that different levels get picked
+        let config = CompactionConfigBuilder::new()
+            .enable_score_v2(Some(true))
+            .build();
 
         let mb = 1024 * 1024u64;
 
-        // Create multiple over-target levels using mock file sizes (not real data)
-        // L1: ~800MB (target 512MB, 1.56x over)
-        // L2: ~5GB (target 2.5GB, 2x over) - highest pressure
-        // L3: ~18GB (target 12.8GB, 1.4x over)
+        // Construct a scenario with multiple over-target levels:
+        // We need to carefully design sizes so that after V2's smoothed multiplier calculation,
+        // multiple levels exceed their targets.
+        //
+        // Strategy: Start with a large DB (~10GB) and make several intermediate levels over-target
+        // L6: 6GB (will be near target after smoothing)
+        // L5: 3GB (will be over-target)
+        // L4: 1.5GB (will be over-target)
+        // L3: 800MB (will be over-target)
+        // L2: empty (base level)
+        // L0: 240MB with 12 sublevels (triggers level0_tier_compact_file_number=12 threshold)
         let mut levels = Levels {
             levels: vec![
-                generate_level(1, generate_tables(100..125, 0..1000000, 1, 32 * mb)), // 800MB
-                generate_level(2, generate_tables(125..175, 0..2000000, 1, 100 * mb)), // 5GB
-                generate_level(3, generate_tables(175..275, 0..3000000, 1, 180 * mb)), // 18GB
-                generate_level(4, vec![]),
-                generate_level(5, vec![]),
-                generate_level(6, vec![]),
+                generate_level(1, vec![]),
+                generate_level(2, vec![]), // base level
+                generate_level(3, generate_tables(100..180, 0..3000000, 1, 10 * mb)), // 800MB
+                generate_level(4, generate_tables(180..330, 0..6000000, 1, 10 * mb)), // 1.5GB
+                generate_level(5, generate_tables(330..630, 0..12000000, 1, 10 * mb)), // 3GB
+                generate_level(6, generate_tables(630..1230, 0..24000000, 1, 10 * mb)), // 6GB
             ],
             l0: generate_l0_nonoverlapping_multi_sublevels(vec![
-                // L0: small amount, not triggering
-                generate_tables(0..3, 0..100000, 1, 32 * mb),
+                // L0 with high pressure: 12 sublevels (= tier trigger), 240MB total
+                generate_tables(0..2, 0..100000, 1, 10 * mb), // 20MB
+                generate_tables(2..4, 100000..200000, 1, 10 * mb), // 20MB
+                generate_tables(4..6, 200000..300000, 1, 10 * mb), // 20MB
+                generate_tables(6..8, 300000..400000, 1, 10 * mb), // 20MB
+                generate_tables(8..10, 400000..500000, 1, 10 * mb), // 20MB
+                generate_tables(10..12, 500000..600000, 1, 10 * mb), // 20MB
+                generate_tables(12..14, 600000..700000, 1, 10 * mb), // 20MB
+                generate_tables(14..16, 700000..800000, 1, 10 * mb), // 20MB
+                generate_tables(16..18, 800000..900000, 1, 10 * mb), // 20MB
+                generate_tables(18..20, 900000..1000000, 1, 10 * mb), // 20MB
+                generate_tables(20..22, 1000000..1100000, 1, 10 * mb), // 20MB
+                generate_tables(22..24, 1100000..1200000, 1, 10 * mb), // 20MB
             ]),
             ..Default::default()
         };
 
-        let mut handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
-        let mut selector = DynamicLevelSelector::default();
+        let selector = DynamicLevelSelectorCore::new(
+            Arc::new(config.clone()),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+
+        let handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
+
+        println!("\n=== V2 Anti-Starvation Test (Default Config) ===");
+        println!("Goal: Multiple levels over-target, verify they all get compaction opportunities");
+        println!("Method: Validate scores through assertions at each round\n");
+
+        // Track which levels get picked across multiple rounds
         let mut picked_levels = std::collections::HashSet::new();
-        let mut pick_counts = std::collections::HashMap::new();
+        let mut pick_history = Vec::new();
 
-        // Simulate multiple compaction rounds
-        for round in 0..15 {
-            let mut selector_stats = LocalSelectorStatistic::default();
-            let table_id_to_options = HashMap::new();
-            let member_table_ids = BTreeSet::new();
-            let table_watermarks = HashMap::new();
-            let state_table_info = HummockVersionStateTableInfo::empty();
+        // Simulate 8 compaction rounds
+        for round in 1..=8 {
+            let ctx = selector.get_priority_levels(&levels, &handlers);
 
-            let ctx = CompactionSelectorContext {
-                group: &group,
-                levels: &levels,
-                member_table_ids: &member_table_ids,
-                level_handlers: &mut handlers,
-                selector_stats: &mut selector_stats,
-                table_id_to_options: &table_id_to_options,
-                developer_config: Arc::new(CompactionDeveloperConfig::default()),
-                table_watermarks: &table_watermarks,
-                state_table_info: &state_table_info,
+            // Print detailed state at each round
+            println!("--- Round {} ---", round);
+            println!("Current state (base level: L{}):", ctx.base_level);
+
+            // Print L0 state
+            let l0_size = levels.l0.total_file_size;
+            let l0_sublevels = levels.l0.sub_levels.len();
+            println!("  L0: {}MB ({} sublevels)", l0_size / mb, l0_sublevels);
+
+            // Print L1+ states
+            for i in 2..=6 {
+                if levels.levels[i - 1].total_file_size > 0 {
+                    let size = levels.levels[i - 1].total_file_size;
+                    let target = ctx.level_max_bytes[i];
+                    let ratio = size as f64 / target as f64;
+                    println!(
+                        "  L{}: {}MB / {}MB = {:.2}x {}",
+                        i,
+                        size / mb,
+                        target / mb,
+                        ratio,
+                        if ratio > 1.0 { "OVER ⚠" } else { "under" }
+                    );
+                }
+            }
+
+            if ctx.score_levels.is_empty() {
+                println!("No compaction needed (balanced state reached)\n");
+                break;
+            }
+
+            // Print top 3 candidates with scores
+            println!("Candidates:");
+            for (idx, pick) in ctx.score_levels.iter().take(3).enumerate() {
+                println!(
+                    "  #{}: L{}->{} score={:.2} raw={:.2} type={}",
+                    idx + 1,
+                    pick.select_level,
+                    pick.target_level,
+                    pick.score,
+                    pick.raw_score,
+                    pick.picker_type
+                );
+            }
+
+            let top_pick = &ctx.score_levels[0];
+            let select_level = top_pick.select_level;
+            let target_level = top_pick.target_level;
+
+            println!(
+                "→ Selected: L{}->{} (score={:.2})",
+                select_level, target_level, top_pick.score
+            );
+
+            // === CRITICAL: Validate score calculation ===
+            // This is the core of UT design - verify correctness through assertions
+            if select_level == 0 {
+                // L0 validation
+                let base_level_size = levels.levels[ctx.base_level - 1].total_file_size;
+                let base_level_target = ctx.level_max_bytes[ctx.base_level];
+                let base_level_score = base_level_size as f64 / base_level_target as f64;
+
+                // Calculate expected L0 raw score
+                let total_size: u64 = levels
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|level| {
+                        use risingwave_pb::hummock::LevelType;
+                        level.level_type == LevelType::Nonoverlapping
+                    })
+                    .map(|level| level.total_file_size)
+                    .sum();
+                let sublevel_count = levels
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|level| {
+                        use risingwave_pb::hummock::LevelType;
+                        level.level_type == LevelType::Nonoverlapping
+                    })
+                    .count() as f64;
+
+                let size_score = total_size as f64 / config.max_bytes_for_level_base as f64;
+                let level_score =
+                    sublevel_count / config.level0_sub_level_compact_level_count as f64;
+                let expected_raw = f64::max(size_score, level_score);
+
+                println!(
+                    "  L0 validation: size_score={:.2}, level_score={:.2}, raw={:.2}, base_level_score={:.2}",
+                    size_score, level_score, expected_raw, base_level_score
+                );
+
+                // Verify raw score
+                assert!(
+                    (top_pick.raw_score - expected_raw).abs() < 0.01,
+                    "Round {}: L0 raw score mismatch. Expected {:.2} (max({:.2}, {:.2})), got {:.2}",
+                    round,
+                    expected_raw,
+                    size_score,
+                    level_score,
+                    top_pick.raw_score
+                );
+
+                // Verify boosted score
+                let expected_boosted = expected_raw / f64::max(0.01, base_level_score);
+                assert!(
+                    (top_pick.score - expected_boosted).abs() < 0.1,
+                    "Round {}: L0 boosted score mismatch. Expected {:.2} ({:.2} / max(0.01, {:.2})), got {:.2}",
+                    round,
+                    expected_boosted,
+                    expected_raw,
+                    base_level_score,
+                    top_pick.score
+                );
+            } else if select_level <= levels.levels.len() {
+                // L1+ validation
+                let level_size = levels.levels[select_level - 1].total_file_size;
+                let level_target = ctx.level_max_bytes[select_level];
+                let expected_raw_score = level_size as f64 / level_target as f64;
+
+                // Verify raw score is correct
+                assert!(
+                    (top_pick.raw_score - expected_raw_score).abs() < 0.01,
+                    "Round {}: L{} raw score mismatch. Expected {:.2} ({}MB / {}MB), got {:.2}",
+                    round,
+                    select_level,
+                    expected_raw_score,
+                    level_size / mb,
+                    level_target / mb,
+                    top_pick.raw_score
+                );
+
+                // Verify final score includes backpressure adjustment
+                if select_level < 6 {
+                    let next_level_size = levels.levels[select_level].total_file_size;
+                    let next_level_target = ctx.level_max_bytes[select_level + 1];
+                    let next_level_score = next_level_size as f64 / next_level_target as f64;
+                    let expected_score = expected_raw_score / f64::max(0.01, next_level_score);
+
+                    assert!(
+                        (top_pick.score - expected_score).abs() < 0.1,
+                        "Round {}: L{} backpressure score mismatch. \
+                         Expected {:.2} ({:.2} / max(0.01, {:.2})), got {:.2}",
+                        round,
+                        select_level,
+                        expected_score,
+                        expected_raw_score,
+                        next_level_score,
+                        top_pick.score
+                    );
+                }
+            }
+
+            picked_levels.insert(select_level);
+            pick_history.push(select_level);
+
+            // Simulate compaction with simplified logic:
+            // - L0: Clear entire L0, move all data to base level
+            // - L1+: Remove 2/3 of data, move to target level
+            let compacted_size = if select_level == 0 {
+                // L0 compaction: Move entire L0 to base level (simplified)
+                let old_size = levels.l0.total_file_size;
+                let old_sublevels = levels.l0.sub_levels.len();
+
+                let moved_size = old_size;
+                levels.l0.total_file_size = 0;
+                levels.l0.sub_levels.clear();
+
+                println!(
+                    "  Data flow: L0 {}MB ({} sublevels) -> 0MB (0 sublevels), moved {}MB to L{}",
+                    old_size / mb,
+                    old_sublevels,
+                    moved_size / mb,
+                    target_level
+                );
+                moved_size
+            } else if select_level <= levels.levels.len() {
+                // L1+ compaction: Remove 2/3 of size, move to target level
+                let level_obj = &mut levels.levels[select_level - 1];
+                let old_size = level_obj.total_file_size;
+                let reduction = (level_obj.total_file_size * 2) / 3;
+                level_obj.total_file_size = level_obj.total_file_size.saturating_sub(reduction);
+
+                // Also remove 2/3 of tables
+                let tables_to_remove = (level_obj.table_infos.len() * 2) / 3;
+                if tables_to_remove > 0 {
+                    let new_len = level_obj.table_infos.len() - tables_to_remove;
+                    level_obj.table_infos.truncate(new_len);
+                }
+
+                println!(
+                    "  Data flow: L{} {}MB -> {}MB, moved {}MB to L{}",
+                    select_level,
+                    old_size / mb,
+                    level_obj.total_file_size / mb,
+                    reduction / mb,
+                    target_level
+                );
+                reduction
+            } else {
+                0
             };
 
-            let task = selector.pick_compaction((round + 1) as u64, ctx);
-
-            if let Some(task) = task {
-                let level_idx = task.input.input_levels[0].level_idx as usize;
-                picked_levels.insert(level_idx);
-                *pick_counts.entry(level_idx).or_insert(0) += 1;
-
-                // Simulate execution: Remove compacted files to reduce level size
-                let selected_table_ids: std::collections::HashSet<_> = task
-                    .input
-                    .input_levels
-                    .iter()
-                    .flat_map(|l| l.table_infos.iter().map(|t| t.sst_id))
-                    .collect();
-
-                if level_idx > 0 && level_idx <= levels.levels.len() {
-                    levels.levels[level_idx - 1]
-                        .table_infos
-                        .retain(|t| !selected_table_ids.contains(&t.sst_id));
-                    // Update total size
-                    levels.levels[level_idx - 1].total_file_size = levels.levels[level_idx - 1]
-                        .table_infos
-                        .iter()
-                        .map(|t| t.sst_size)
-                        .sum();
-                }
+            // Add the compacted data to target level (simulating compaction output)
+            if target_level > 0 && target_level <= levels.levels.len() && compacted_size > 0 {
+                let old_target_size = levels.levels[target_level - 1].total_file_size;
+                levels.levels[target_level - 1].total_file_size += compacted_size;
+                println!(
+                    "  Target level: L{} {}MB -> {}MB\n",
+                    target_level,
+                    old_target_size / mb,
+                    levels.levels[target_level - 1].total_file_size / mb
+                );
             } else {
-                // No more compactions available
-                break;
+                println!(); // Empty line for readability
             }
         }
 
-        // Verify anti-starvation: all over-target levels should be picked at least once
-        assert!(
-            picked_levels.contains(&2),
-            "L2 (highest pressure: 2x) should be picked with default config"
+        println!("=== Results ===");
+        println!(
+            "Picked levels: {:?}",
+            picked_levels.iter().sorted().collect::<Vec<_>>()
         );
-        assert!(
-            picked_levels.contains(&1) || picked_levels.contains(&3),
-            "At least one other over-target level (L1 or L3) should be picked (anti-starvation)"
-        );
+        println!("Pick sequence: {:?}", pick_history);
 
-        // Verify multiple levels were picked (no complete starvation)
+        // Verify anti-starvation: At least 2 different levels should be picked
+        // (proving the algorithm doesn't starve any over-target level)
         assert!(
             picked_levels.len() >= 2,
-            "Multiple levels should be picked across {} rounds with default config, got {:?}",
-            15,
-            picked_levels
+            "Anti-starvation FAILED: only {} level(s) picked. \
+             Expected multiple levels to get compaction opportunities across {} rounds. \
+             Pick history: {:?}",
+            picked_levels.len(),
+            pick_history.len(),
+            pick_history
         );
 
-        let total_picks: usize = pick_counts.values().sum();
+        // If we picked 3+ different levels, that's strong evidence of good anti-starvation
+        if picked_levels.len() >= 3 {
+            println!(
+                "✓ Strong anti-starvation: {} different levels picked",
+                picked_levels.len()
+            );
+        } else {
+            println!(
+                "✓ Basic anti-starvation: {} different levels picked",
+                picked_levels.len()
+            );
+        }
+
+        // Verify the sequence makes sense (non-L0 levels should be in the picked set)
+        let non_l0_picked = picked_levels.iter().any(|&l| l > 0);
         assert!(
-            total_picks >= 3,
-            "Should have made at least 3 compaction picks, got {}",
-            total_picks
+            non_l0_picked,
+            "Expected non-L0 levels to be picked in multi-level over-target scenario"
+        );
+
+        println!("✓ Test passed: V2 anti-starvation mechanism working correctly");
+        println!("✓ All score calculations validated through assertions");
+    }
+
+    #[test]
+    fn test_v2_anti_starvation_complex_scenario() {
+        // Complex scenario that simulates real production behavior:
+        // 1. Continuous L0 writes: L0 has 12 sublevels, each compaction only removes 4 (simulating ongoing writes)
+        // 2. Unbalanced over-target levels: L3/L4/L5 all over-target but with different pressure ratios
+        // 3. Goal: Verify algorithm balances all levels fairly over time
+        let config = CompactionConfigBuilder::new()
+            .enable_score_v2(Some(true))
+            .build();
+
+        let mb = 1024 * 1024u64;
+
+        // Initial state design (carefully crafted to create interesting dynamics):
+        // L0: 240MB, 12 sublevels (4.0x over level count threshold)
+        // L3: 1024MB (2.0x over-target ~512MB) - HIGH pressure
+        // L4: 2500MB (1.8x over-target ~1400MB) - HIGH pressure
+        // L5: 5000MB (1.3x over-target ~3800MB) - MEDIUM pressure
+        // L6: 8000MB (0.77x under-target ~10400MB) - Absorbs everything
+        //
+        // Key insight: Different over-target ratios create competing priorities
+        let mut levels = Levels {
+            levels: vec![
+                generate_level(1, vec![]),
+                generate_level(2, vec![]), // base level
+                generate_level(3, generate_tables(100..202, 0..3000000, 1, 10 * mb)), // 1024MB
+                generate_level(4, generate_tables(202..452, 0..6000000, 1, 10 * mb)), // 2500MB
+                generate_level(5, generate_tables(452..952, 0..12000000, 1, 10 * mb)), // 5000MB
+                generate_level(6, generate_tables(952..1752, 0..24000000, 1, 10 * mb)), // 8000MB
+            ],
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![
+                // 12 sublevels, 240MB total
+                generate_tables(0..2, 0..100000, 1, 10 * mb),
+                generate_tables(2..4, 100000..200000, 1, 10 * mb),
+                generate_tables(4..6, 200000..300000, 1, 10 * mb),
+                generate_tables(6..8, 300000..400000, 1, 10 * mb),
+                generate_tables(8..10, 400000..500000, 1, 10 * mb),
+                generate_tables(10..12, 500000..600000, 1, 10 * mb),
+                generate_tables(12..14, 600000..700000, 1, 10 * mb),
+                generate_tables(14..16, 700000..800000, 1, 10 * mb),
+                generate_tables(16..18, 800000..900000, 1, 10 * mb),
+                generate_tables(18..20, 900000..1000000, 1, 10 * mb),
+                generate_tables(20..22, 1000000..1100000, 1, 10 * mb),
+                generate_tables(22..24, 1100000..1200000, 1, 10 * mb),
+            ]),
+            ..Default::default()
+        };
+
+        let selector = DynamicLevelSelectorCore::new(
+            Arc::new(config.clone()),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+
+        let handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
+
+        println!("\n=== V2 Anti-Starvation Complex Scenario ===");
+        println!("Simulates continuous writes + unbalanced over-target levels");
+        println!("L0: Each compaction removes 4 sublevels (simulating ongoing writes)\n");
+
+        let mut picked_levels = std::collections::HashSet::new();
+        let mut pick_history = Vec::new();
+
+        // Simulate 12 rounds (enough to see patterns emerge)
+        for round in 1..=12 {
+            let ctx = selector.get_priority_levels(&levels, &handlers);
+
+            println!("--- Round {} ---", round);
+            println!("State (base: L{}):", ctx.base_level);
+
+            let l0_size = levels.l0.total_file_size;
+            let l0_sublevels = levels.l0.sub_levels.len();
+            println!("  L0: {}MB ({} sublevels)", l0_size / mb, l0_sublevels);
+
+            for i in 2..=6 {
+                if levels.levels[i - 1].total_file_size > 0 {
+                    let size = levels.levels[i - 1].total_file_size;
+                    let target = ctx.level_max_bytes[i];
+                    let ratio = size as f64 / target as f64;
+                    println!(
+                        "  L{}: {}MB / {}MB = {:.2}x {}",
+                        i,
+                        size / mb,
+                        target / mb,
+                        ratio,
+                        if ratio > 1.0 { "OVER ⚠" } else { "under" }
+                    );
+                }
+            }
+
+            if ctx.score_levels.is_empty() {
+                println!("Balanced state reached\n");
+                break;
+            }
+
+            println!("Top 3:");
+            for (idx, pick) in ctx.score_levels.iter().take(3).enumerate() {
+                println!(
+                    "  #{}: L{}->{} score={:.2} raw={:.2} type={}",
+                    idx + 1,
+                    pick.select_level,
+                    pick.target_level,
+                    pick.score,
+                    pick.raw_score,
+                    pick.picker_type
+                );
+            }
+
+            let top_pick = &ctx.score_levels[0];
+            let select_level = top_pick.select_level;
+            let target_level = top_pick.target_level;
+
+            println!(
+                "→ Pick: L{}->{} (score={:.2})",
+                select_level, target_level, top_pick.score
+            );
+
+            // Validate score calculation (same logic as before)
+            if select_level == 0 {
+                let base_level_size = levels.levels[ctx.base_level - 1].total_file_size;
+                let base_level_target = ctx.level_max_bytes[ctx.base_level];
+                let base_level_score = base_level_size as f64 / base_level_target as f64;
+
+                let total_size: u64 = levels
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|level| {
+                        use risingwave_pb::hummock::LevelType;
+                        level.level_type == LevelType::Nonoverlapping
+                    })
+                    .map(|level| level.total_file_size)
+                    .sum();
+                let sublevel_count = levels
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|level| {
+                        use risingwave_pb::hummock::LevelType;
+                        level.level_type == LevelType::Nonoverlapping
+                    })
+                    .count() as f64;
+
+                let size_score = total_size as f64 / config.max_bytes_for_level_base as f64;
+                let level_score =
+                    sublevel_count / config.level0_sub_level_compact_level_count as f64;
+                let expected_raw = f64::max(size_score, level_score);
+
+                assert!(
+                    (top_pick.raw_score - expected_raw).abs() < 0.01,
+                    "Round {}: L0 raw score mismatch",
+                    round
+                );
+
+                let expected_boosted = expected_raw / f64::max(0.01, base_level_score);
+                assert!(
+                    (top_pick.score - expected_boosted).abs() < 0.1,
+                    "Round {}: L0 boosted score mismatch",
+                    round
+                );
+            } else if select_level <= levels.levels.len() {
+                let level_size = levels.levels[select_level - 1].total_file_size;
+                let level_target = ctx.level_max_bytes[select_level];
+                let expected_raw_score = level_size as f64 / level_target as f64;
+
+                assert!(
+                    (top_pick.raw_score - expected_raw_score).abs() < 0.01,
+                    "Round {}: L{} raw score mismatch",
+                    round,
+                    select_level
+                );
+
+                if select_level < 6 {
+                    let next_level_size = levels.levels[select_level].total_file_size;
+                    let next_level_target = ctx.level_max_bytes[select_level + 1];
+                    let next_level_score = next_level_size as f64 / next_level_target as f64;
+                    let expected_score = expected_raw_score / f64::max(0.01, next_level_score);
+
+                    assert!(
+                        (top_pick.score - expected_score).abs() < 0.1,
+                        "Round {}: L{} backpressure mismatch",
+                        round,
+                        select_level
+                    );
+                }
+            }
+
+            picked_levels.insert(select_level);
+            pick_history.push(select_level);
+
+            // Simulate compaction with realistic behavior:
+            // - L0: Remove 4 sublevels (1/3, simulating continuous writes)
+            // - L1+: Remove 2/3 of size (aggressive cleanup)
+            let compacted_size = if select_level == 0 {
+                let old_size = levels.l0.total_file_size;
+                let old_sublevels = levels.l0.sub_levels.len();
+
+                // Only compact 4 sublevels (simulating ongoing writes)
+                let sublevels_to_compact = std::cmp::min(4, old_sublevels);
+                if sublevels_to_compact > 0 {
+                    let moved_size: u64 = levels
+                        .l0
+                        .sub_levels
+                        .iter()
+                        .take(sublevels_to_compact)
+                        .map(|l| l.total_file_size)
+                        .sum();
+                    levels.l0.total_file_size =
+                        levels.l0.total_file_size.saturating_sub(moved_size);
+                    levels.l0.sub_levels.drain(0..sublevels_to_compact);
+
+                    println!(
+                        "  Flow: L0 {}MB ({} sublevels) -> {}MB ({} sublevels), moved {}MB",
+                        old_size / mb,
+                        old_sublevels,
+                        levels.l0.total_file_size / mb,
+                        levels.l0.sub_levels.len(),
+                        moved_size / mb
+                    );
+                    moved_size
+                } else {
+                    0
+                }
+            } else if select_level <= levels.levels.len() {
+                let level_obj = &mut levels.levels[select_level - 1];
+                let old_size = level_obj.total_file_size;
+                let reduction = (level_obj.total_file_size * 2) / 3;
+                level_obj.total_file_size = level_obj.total_file_size.saturating_sub(reduction);
+
+                let tables_to_remove = (level_obj.table_infos.len() * 2) / 3;
+                if tables_to_remove > 0 {
+                    let new_len = level_obj.table_infos.len() - tables_to_remove;
+                    level_obj.table_infos.truncate(new_len);
+                }
+
+                println!(
+                    "  Flow: L{} {}MB -> {}MB, moved {}MB",
+                    select_level,
+                    old_size / mb,
+                    level_obj.total_file_size / mb,
+                    reduction / mb
+                );
+                reduction
+            } else {
+                0
+            };
+
+            if target_level > 0 && target_level <= levels.levels.len() && compacted_size > 0 {
+                let old_target_size = levels.levels[target_level - 1].total_file_size;
+                levels.levels[target_level - 1].total_file_size += compacted_size;
+                println!(
+                    "  Target: L{} {}MB -> {}MB\n",
+                    target_level,
+                    old_target_size / mb,
+                    levels.levels[target_level - 1].total_file_size / mb
+                );
+            } else {
+                println!();
+            }
+        }
+
+        println!("=== Results ===");
+        println!(
+            "Picked levels: {:?}",
+            picked_levels.iter().sorted().collect::<Vec<_>>()
+        );
+        println!("Pick sequence: {:?}", pick_history);
+
+        // Verify anti-starvation in complex scenario
+        assert!(
+            picked_levels.len() >= 3,
+            "Complex scenario FAILED: only {} level(s) picked. \
+             Expected algorithm to balance multiple unbalanced over-target levels. \
+             Pick history: {:?}",
+            picked_levels.len(),
+            pick_history
+        );
+
+        // Verify L0 was handled (continuous write pressure)
+        assert!(
+            picked_levels.contains(&0),
+            "L0 should be compacted to handle continuous write pressure"
+        );
+
+        // Verify multiple non-L0 levels were balanced
+        let non_l0_count = picked_levels.iter().filter(|&&l| l > 0).count();
+        assert!(
+            non_l0_count >= 2,
+            "Expected at least 2 non-L0 levels to be compacted, got {}. \
+             This indicates algorithm may be starving some over-target levels.",
+            non_l0_count
         );
 
         println!(
-            "Default config anti-starvation test: picked levels {:?}, distribution {:?}",
-            picked_levels, pick_counts
+            "✓ Complex scenario passed: {} different levels picked",
+            picked_levels.len()
         );
+        println!(
+            "✓ L0 handled: {} times (continuous write simulation)",
+            pick_history.iter().filter(|&&l| l == 0).count()
+        );
+        println!(
+            "✓ Non-L0 levels balanced: {} different levels",
+            non_l0_count
+        );
+        println!("✓ All score calculations validated");
     }
 
     #[test]
