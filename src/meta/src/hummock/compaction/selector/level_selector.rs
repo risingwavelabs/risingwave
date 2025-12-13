@@ -308,13 +308,28 @@ impl DynamicLevelSelectorCore {
         levels: &Levels,
         handlers: &[LevelHandler],
     ) -> SelectContext {
-        // TODO: Add configuration flag to switch between algorithms
-        let use_v2 = false;
+        let use_v2 = self.config.enable_score_v2.unwrap_or_else(
+            risingwave_common::config::meta::default::compaction_config::enable_score_v2,
+        );
 
         if use_v2 {
             self.calculate_level_base_size_v2(levels, handlers)
         } else {
             self.calculate_level_base_size_v1(levels)
+        }
+    }
+
+    /// Unified method to get priority levels with configurable algorithm version.
+    /// This ensures both base size calculation and scoring logic are consistent.
+    pub fn get_priority_levels(&self, levels: &Levels, handlers: &[LevelHandler]) -> SelectContext {
+        let use_v2 = self.config.enable_score_v2.unwrap_or_else(
+            risingwave_common::config::meta::default::compaction_config::enable_score_v2,
+        );
+
+        if use_v2 {
+            self.get_priority_levels_v2(levels, handlers)
+        } else {
+            self.get_priority_levels_v1(levels, handlers)
         }
     }
 
@@ -491,7 +506,7 @@ impl DynamicLevelSelectorCore {
         ctx
     }
 
-    pub(crate) fn get_priority_levels(
+    pub(crate) fn get_priority_levels_v1(
         &self,
         levels: &Levels,
         handlers: &[LevelHandler],
@@ -750,6 +765,9 @@ impl CompactionSelector for DynamicLevelSelector {
         let compaction_task_validator = Arc::new(CompactionTaskValidator::new(
             compaction_group.compaction_config.clone(),
         ));
+        // Note: V2 (get_priority_levels_v2) already filters scores <= 1.0 internally.
+        // V1 (get_priority_levels) doesn't filter, so this check is needed for V1.
+        // For V2, ctx.score_levels already excludes low scores, making this check redundant but harmless.
         for picker_info in &ctx.score_levels {
             if picker_info.score <= SCORE_THRESHOLD {
                 return None;
@@ -802,11 +820,13 @@ pub mod tests {
     use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::{
-        assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
-        generate_tables, push_tables_level0_nonoverlapping,
+        assert_compaction_task, generate_l0_nonoverlapping_multi_sublevels,
+        generate_l0_nonoverlapping_sublevels, generate_level, generate_tables,
+        push_tables_level0_nonoverlapping,
     };
     use crate::hummock::compaction::selector::{
-        CompactionSelector, DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic,
+        CompactionSelector, CompactionSelectorContext, DynamicLevelSelector,
+        DynamicLevelSelectorCore, LocalSelectorStatistic,
     };
     use crate::hummock::level_handler::LevelHandler;
     use crate::hummock::model::CompactionGroup;
@@ -1671,5 +1691,265 @@ pub mod tests {
                 "ToBase should have higher score"
             );
         }
+    }
+
+    #[test]
+    fn test_v2_default_config_l0_priority() {
+        // Test with DEFAULT config: verify L0 pressure triggers compaction correctly
+        // Default: max_bytes_for_level_base = 512MB, level0_tier_compact_file_number = 12
+        let config = CompactionConfigBuilder::new().build();
+
+        let group = CompactionGroup {
+            compaction_config: Arc::new(config.clone()),
+            ..Default::default()
+        };
+
+        let mb = 1024 * 1024u64;
+
+        // Scenario: L0 has enough files to trigger compaction (>= 12 files)
+        // Use mock file sizes to simulate real scale without huge data
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, generate_tables(100..110, 0..1000000, 1, 50 * mb)), // L1: 500MB
+                generate_level(2, generate_tables(110..120, 0..1000000, 1, 100 * mb)), // L2: 1GB
+                generate_level(3, vec![]),
+                generate_level(4, vec![]),
+                generate_level(5, vec![]),
+                generate_level(6, vec![]),
+            ],
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![
+                // 13 sublevels to exceed trigger (12)
+                generate_tables(0..1, 0..100000, 1, 32 * mb),
+                generate_tables(1..2, 100000..200000, 1, 32 * mb),
+                generate_tables(2..3, 200000..300000, 1, 32 * mb),
+                generate_tables(3..4, 300000..400000, 1, 32 * mb),
+                generate_tables(4..5, 400000..500000, 1, 32 * mb),
+                generate_tables(5..6, 500000..600000, 1, 32 * mb),
+                generate_tables(6..7, 600000..700000, 1, 32 * mb),
+                generate_tables(7..8, 700000..800000, 1, 32 * mb),
+                generate_tables(8..9, 800000..900000, 1, 32 * mb),
+                generate_tables(9..10, 900000..1000000, 1, 32 * mb),
+                generate_tables(10..11, 1000000..1100000, 1, 32 * mb),
+                generate_tables(11..12, 1100000..1200000, 1, 32 * mb),
+                generate_tables(12..13, 1200000..1300000, 1, 32 * mb),
+            ]),
+            ..Default::default()
+        };
+
+        let mut handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
+        let mut selector_stats = LocalSelectorStatistic::default();
+        let table_id_to_options = HashMap::new();
+        let member_table_ids = BTreeSet::new();
+        let table_watermarks = HashMap::new();
+        let state_table_info = HummockVersionStateTableInfo::empty();
+
+        let mut selector = DynamicLevelSelector::default();
+
+        let ctx = CompactionSelectorContext {
+            group: &group,
+            levels: &levels,
+            member_table_ids: &member_table_ids,
+            level_handlers: &mut handlers,
+            selector_stats: &mut selector_stats,
+            table_id_to_options: &table_id_to_options,
+            developer_config: Arc::new(CompactionDeveloperConfig::default()),
+            table_watermarks: &table_watermarks,
+            state_table_info: &state_table_info,
+        };
+
+        let task = selector.pick_compaction(1, ctx);
+
+        assert!(
+            task.is_some(),
+            "Should pick compaction with L0 having {} sublevels (trigger={})",
+            13,
+            config.level0_tier_compact_file_number
+        );
+        let task = task.unwrap();
+        assert_eq!(
+            task.input.input_levels[0].level_idx, 0,
+            "Should compact from L0 with default config"
+        );
+    }
+
+    #[test]
+    fn test_v2_default_config_anti_starvation() {
+        // Multi-round simulation with DEFAULT config to verify anti-starvation
+        // Default: max_bytes_for_level_base = 512MB, multiplier = 5, max_compaction_bytes = 2GB
+        // Expected targets: L1=512MB, L2=2.5GB, L3=12.8GB, L4=64GB, L5=320GB
+        let config = CompactionConfigBuilder::new().build();
+
+        let group = CompactionGroup {
+            compaction_config: Arc::new(config),
+            ..Default::default()
+        };
+
+        let mb = 1024 * 1024u64;
+
+        // Create multiple over-target levels using mock file sizes (not real data)
+        // L1: ~800MB (target 512MB, 1.56x over)
+        // L2: ~5GB (target 2.5GB, 2x over) - highest pressure
+        // L3: ~18GB (target 12.8GB, 1.4x over)
+        let mut levels = Levels {
+            levels: vec![
+                generate_level(1, generate_tables(100..125, 0..1000000, 1, 32 * mb)), // 800MB
+                generate_level(2, generate_tables(125..175, 0..2000000, 1, 100 * mb)), // 5GB
+                generate_level(3, generate_tables(175..275, 0..3000000, 1, 180 * mb)), // 18GB
+                generate_level(4, vec![]),
+                generate_level(5, vec![]),
+                generate_level(6, vec![]),
+            ],
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![
+                // L0: small amount, not triggering
+                generate_tables(0..3, 0..100000, 1, 32 * mb),
+            ]),
+            ..Default::default()
+        };
+
+        let mut handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
+        let mut selector = DynamicLevelSelector::default();
+        let mut picked_levels = std::collections::HashSet::new();
+        let mut pick_counts = std::collections::HashMap::new();
+
+        // Simulate multiple compaction rounds
+        for round in 0..15 {
+            let mut selector_stats = LocalSelectorStatistic::default();
+            let table_id_to_options = HashMap::new();
+            let member_table_ids = BTreeSet::new();
+            let table_watermarks = HashMap::new();
+            let state_table_info = HummockVersionStateTableInfo::empty();
+
+            let ctx = CompactionSelectorContext {
+                group: &group,
+                levels: &levels,
+                member_table_ids: &member_table_ids,
+                level_handlers: &mut handlers,
+                selector_stats: &mut selector_stats,
+                table_id_to_options: &table_id_to_options,
+                developer_config: Arc::new(CompactionDeveloperConfig::default()),
+                table_watermarks: &table_watermarks,
+                state_table_info: &state_table_info,
+            };
+
+            let task = selector.pick_compaction((round + 1) as u64, ctx);
+
+            if let Some(task) = task {
+                let level_idx = task.input.input_levels[0].level_idx as usize;
+                picked_levels.insert(level_idx);
+                *pick_counts.entry(level_idx).or_insert(0) += 1;
+
+                // Simulate execution: Remove compacted files to reduce level size
+                let selected_table_ids: std::collections::HashSet<_> = task
+                    .input
+                    .input_levels
+                    .iter()
+                    .flat_map(|l| l.table_infos.iter().map(|t| t.sst_id))
+                    .collect();
+
+                if level_idx > 0 && level_idx <= levels.levels.len() {
+                    levels.levels[level_idx - 1]
+                        .table_infos
+                        .retain(|t| !selected_table_ids.contains(&t.sst_id));
+                    // Update total size
+                    levels.levels[level_idx - 1].total_file_size = levels.levels[level_idx - 1]
+                        .table_infos
+                        .iter()
+                        .map(|t| t.sst_size)
+                        .sum();
+                }
+            } else {
+                // No more compactions available
+                break;
+            }
+        }
+
+        // Verify anti-starvation: all over-target levels should be picked at least once
+        assert!(
+            picked_levels.contains(&2),
+            "L2 (highest pressure: 2x) should be picked with default config"
+        );
+        assert!(
+            picked_levels.contains(&1) || picked_levels.contains(&3),
+            "At least one other over-target level (L1 or L3) should be picked (anti-starvation)"
+        );
+
+        // Verify multiple levels were picked (no complete starvation)
+        assert!(
+            picked_levels.len() >= 2,
+            "Multiple levels should be picked across {} rounds with default config, got {:?}",
+            15,
+            picked_levels
+        );
+
+        let total_picks: usize = pick_counts.values().sum();
+        assert!(
+            total_picks >= 3,
+            "Should have made at least 3 compaction picks, got {}",
+            total_picks
+        );
+
+        println!(
+            "Default config anti-starvation test: picked levels {:?}, distribution {:?}",
+            picked_levels, pick_counts
+        );
+    }
+
+    #[test]
+    fn test_enable_score_v2_config_actually_switches_algorithm() {
+        // Verify enable_score_v2 config actually switches between V1 and V2 algorithms.
+        let mb = 1024 * 1024u64;
+        let levels = vec![
+            generate_level(1, vec![]),
+            generate_level(2, generate_tables(0..5, 0..1000, 1, 10 * mb)),
+            generate_level(3, generate_tables(5..15, 0..1000, 1, 10 * mb)),
+            generate_level(4, generate_tables(15..65, 0..1000, 1, 10 * mb)),
+            generate_level(5, generate_tables(65..165, 0..1000, 1, 10 * mb)),
+            generate_level(6, generate_tables(165..665, 0..1000, 1, 10 * mb)),
+        ];
+        let levels = Levels {
+            levels,
+            l0: generate_l0_nonoverlapping_sublevels(vec![]),
+            ..Default::default()
+        };
+        let handlers = (0..7).map(LevelHandler::new).collect::<Vec<_>>();
+
+        let config_v1 = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(512 * mb)
+            .max_level(6)
+            .max_bytes_for_level_multiplier(10)
+            .enable_score_v2(Some(false))
+            .build();
+
+        let config_v2 = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(512 * mb)
+            .max_level(6)
+            .max_bytes_for_level_multiplier(10)
+            .enable_score_v2(Some(true))
+            .build();
+
+        let selector_v1 = DynamicLevelSelectorCore::new(
+            Arc::new(config_v1),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+        let selector_v2 = DynamicLevelSelectorCore::new(
+            Arc::new(config_v2),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+
+        // Call unified entry point - the config should control which algorithm is used
+        let ctx_v1 = selector_v1.get_priority_levels(&levels, &handlers);
+        let ctx_v2 = selector_v2.get_priority_levels(&levels, &handlers);
+
+        // V1 and V2 must produce different level_max_bytes (different base size calculation)
+        assert_ne!(
+            ctx_v1.level_max_bytes[3], ctx_v2.level_max_bytes[3],
+            "Config switch failed: V1 and V2 produced same level targets"
+        );
+
+        println!(
+            "✅ enable_score_v2 config controls algorithm: L3 target V1={}MB vs V2={}MB",
+            ctx_v1.level_max_bytes[3] / mb,
+            ctx_v2.level_max_bytes[3] / mb
+        );
     }
 }

@@ -76,6 +76,7 @@ pub fn build_compaction_config_vec(
     level0_stop_write_threshold_max_size: Option<u64>,
     enable_optimize_l0_interval_selection: Option<bool>,
     vnode_aligned_level_size_threshold: Option<u64>,
+    enable_score_v2: Option<bool>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -158,6 +159,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = vnode_aligned_level_size_threshold {
         configs.push(MutableConfig::VnodeAlignedLevelSizeThreshold(c))
+    }
+    if let Some(c) = enable_score_v2 {
+        configs.push(MutableConfig::EnableScoreV2(c))
     }
 
     configs

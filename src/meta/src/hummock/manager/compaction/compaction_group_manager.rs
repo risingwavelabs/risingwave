@@ -623,6 +623,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                 target.vnode_aligned_level_size_threshold =
                     (*c != u64::MIN && *c != u64::MAX).then_some(*c);
             }
+            MutableConfig::EnableScoreV2(c) => {
+                target.enable_score_v2 = Some(*c);
+            }
         }
     }
 }

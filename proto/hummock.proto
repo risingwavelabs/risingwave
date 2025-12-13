@@ -784,6 +784,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       // Enable the optimization of the interval selection for the level0 compaction
       bool enable_optimize_l0_interval_selection = 30;
       uint64 vnode_aligned_level_size_threshold = 31;
+      // Enable V2 scoring algorithm (Pebble-style with backpressure and anti-starvation)
+      bool enable_score_v2 = 32;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1018,6 +1020,8 @@ message CompactionConfig {
   //
   // Typical value: 50GB.
   optional uint64 vnode_aligned_level_size_threshold = 31;
+
+  optional bool enable_score_v2 = 32;
 }
 
 message TableStats {
