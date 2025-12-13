@@ -473,6 +473,7 @@ impl ScaleController {
             ensembles,
             workers,
             adaptive_parallelism_strategy,
+            &HashSet::new(),
         )
         .await?;
 
@@ -490,12 +491,14 @@ impl ScaleController {
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let empty_backfill_jobs = HashSet::new();
         let RenderedGraph { fragments, .. } = render_jobs(
             txn,
             self.env.actor_id_generator(),
             jobs,
             workers,
             adaptive_parallelism_strategy,
+            &empty_backfill_jobs,
         )
         .await?;
 
@@ -1067,7 +1070,7 @@ impl GlobalStreamManager {
                                     tracing::info!(worker = %worker.id, "worker parallelism changed");
                                     should_trigger = true;
                                 }
-                                Some(prev_worker) if  prev_worker.resource_group() != worker.resource_group()  => {
+                                Some(prev_worker) if prev_worker.resource_group() != worker.resource_group()  => {
                                     tracing::info!(worker = %worker.id, "worker label changed");
                                     should_trigger = true;
                                 }
@@ -1096,11 +1099,66 @@ impl GlobalStreamManager {
                             }
                         }
 
+                        LocalNotification::StreamingJobBackfillFinished(job_id) => {
+                            tracing::info!(job_id = %job_id, "received backfill finished notification");
+                            if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
+                                tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
+                            }
+                        }
+
                         _ => {}
                     }
                 }
             }
         }
+    }
+
+    async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
+        let (target, backfill_parallelism) = self
+            .metadata_manager
+            .catalog_controller
+            .get_job_parallelisms(job_id)
+            .await?;
+
+        match backfill_parallelism {
+            Some(backfill_parallelism) if backfill_parallelism == target => {
+                tracing::debug!(
+                    job_id = %job_id,
+                    ?backfill_parallelism,
+                    ?target,
+                    "backfill parallelism equals job parallelism, skip reschedule"
+                );
+                return Ok(());
+            }
+            Some(_) => {
+                // proceed to restore to target parallelism
+            }
+            None => {
+                tracing::debug!(
+                    job_id = %job_id,
+                    ?target,
+                    "no backfill parallelism configured, skip post-backfill reschedule"
+                );
+                return Ok(());
+            }
+        }
+
+        tracing::info!(
+            job_id = %job_id,
+            ?target,
+            ?backfill_parallelism,
+            "restoring parallelism after backfill via reschedule"
+        );
+        let policy = ReschedulePolicy::Parallelism(ParallelismPolicy {
+            parallelism: target,
+        });
+        if let Err(e) = self.reschedule_streaming_job(job_id, policy, false).await {
+            tracing::warn!(job_id = %job_id, error = %e.as_report(), "reschedule after backfill failed");
+            return Err(e);
+        }
+
+        tracing::info!(job_id = %job_id, "parallelism reschedule after backfill submitted");
+        Ok(())
     }
 
     pub fn start_auto_parallelism_monitor(
