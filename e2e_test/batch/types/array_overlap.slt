@@ -1,0 +1,67 @@
+# Test array overlap operator (&&) with type validation
+# This test ensures that the && operator validates array element types
+# and matches PostgreSQL behavior
+
+# Test with matching types - should work
+query B
+select array[1, 2, 3] && array[2, 3, 4];
+----
+t
+
+query B
+select array['a', 'b'] && array['b', 'c'];
+----
+t
+
+query B
+select array[1, 2] && array[3, 4];
+----
+f
+
+# Test with mismatched types - should error like PostgreSQL
+statement error operator does not exist
+select array['a'] && array[1];
+
+
+# Test with different integer types - should error like PostgreSQL
+statement error operator does not exist
+select array[1::bigint] && array[1::int];
+
+
+# Test with different numeric types
+statement error operator does not exist
+select array[1.5::real] && array[1.5::double];
+
+
+# Test with explicit cast - should work
+query B
+select array['1']::int[] && array[1];
+----
+t
+
+query B
+select array[1::bigint]::int[] && array[1::int];
+----
+t
+
+# Test with NULL arrays
+query B
+select array[1, 2] && NULL::int[];
+----
+NULL
+
+query B
+select NULL::int[] && array[1, 2];
+----
+NULL
+
+# Test with empty arrays
+query B
+select array[]::int[] && array[1, 2];
+----
+f
+
+query B
+select array[1, 2] && array[]::int[];
+----
+f
