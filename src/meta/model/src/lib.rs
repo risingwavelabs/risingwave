@@ -338,6 +338,14 @@ impl I32Array {
     }
 }
 
+derive_from_json_struct!(StringArray, Vec<String>);
+
+impl StringArray {
+    pub fn into_string_array(self) -> Vec<String> {
+        self.0.into_iter().map(|id| id as _).collect()
+    }
+}
+
 derive_btreemap_from_blob!(SecretRef, String, PbSecretRef, PbSecretRefMap);
 
 derive_from_blob!(StreamNode, PbStreamNode);
