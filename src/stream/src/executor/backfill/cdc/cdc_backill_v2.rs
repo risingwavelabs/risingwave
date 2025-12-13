@@ -184,22 +184,19 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         'with_cdc_table_snapshot_splits: loop {
             assert!(upstream_chunk_buffer.is_empty());
             let reset_barrier = next_reset_barrier.take().unwrap();
-            let (all_snapshot_splits, generation) = match reset_barrier.mutation.as_deref() {
-                Some(Mutation::Add(add)) => (
-                    &add.actor_cdc_table_snapshot_splits.splits,
-                    add.actor_cdc_table_snapshot_splits.generation,
-                ),
-                Some(Mutation::Update(update)) => (
-                    &update.actor_cdc_table_snapshot_splits.splits,
-                    update.actor_cdc_table_snapshot_splits.generation,
-                ),
+            let all_snapshot_splits = match reset_barrier.mutation.as_deref() {
+                Some(Mutation::Add(add)) => &add.actor_cdc_table_snapshot_splits.splits,
+
+                Some(Mutation::Update(update)) => &update.actor_cdc_table_snapshot_splits.splits,
                 _ => {
                     return Err(anyhow::anyhow!("ParallelizedCdcBackfillExecutor expects either Mutation::Add or Mutation::Update to initialize CDC table snapshot splits.").into());
                 }
             };
             let mut actor_snapshot_splits = vec![];
+            let mut generation = None;
             // TODO(zw): optimization: remove consumed splits to reduce barrier size for downstream.
-            if let Some(splits) = all_snapshot_splits.get(&self.actor_ctx.id) {
+            if let Some((splits, snapshot_generation)) = all_snapshot_splits.get(&self.actor_ctx.id)
+            {
                 actor_snapshot_splits = splits
                     .iter()
                     .map(|s: &CdcTableSnapshotSplitRaw| {
@@ -220,8 +217,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         }
                     })
                     .collect();
+                generation = Some(*snapshot_generation);
             }
-            tracing::debug!(?actor_snapshot_splits, "actor splits");
+            tracing::debug!(?actor_snapshot_splits, ?generation, "actor splits");
             assert_consecutive_splits(&actor_snapshot_splits);
 
             let mut is_snapshot_paused = reset_barrier.is_pause_on_startup();
@@ -471,7 +469,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             self.actor_ctx.fragment_id,
                                             self.actor_ctx.id,
                                             barrier.epoch,
-                                            generation,
+                                            generation.expect("should have set generation when having progress to report"),
                                             split_range,
                                         );
                                     }
@@ -609,7 +607,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                 self.actor_ctx.fragment_id,
                                 self.actor_ctx.id,
                                 barrier.epoch,
-                                generation,
+                                generation.expect(
+                                    "should have set generation when having progress to report",
+                                ),
                                 split_range,
                             );
                         }
@@ -621,7 +621,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     self.actor_ctx.fragment_id,
                                     self.actor_ctx.id,
                                     barrier.epoch,
-                                    generation,
+                                    generation.expect(
+                                        "should have set generation when having progress to report",
+                                    ),
                                     (
                                         actor_snapshot_splits[0].split_id,
                                         actor_snapshot_splits[actor_snapshot_splits.len() - 1]

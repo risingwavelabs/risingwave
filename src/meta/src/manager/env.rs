@@ -34,7 +34,6 @@ use sea_orm::EntityTrait;
 
 use crate::MetaResult;
 use crate::barrier::SharedActorInfos;
-use crate::barrier::cdc_progress::{CdcTableBackfillTracker, CdcTableBackfillTrackerRef};
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
@@ -88,8 +87,6 @@ pub struct MetaSrvEnv {
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
-
-    pub cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
 
     actor_id_generator: Arc<AtomicU32>,
 }
@@ -464,9 +461,6 @@ impl MetaSrvEnv {
             )
             .await?,
         );
-        let cdc_table_backfill_tracker = CdcTableBackfillTracker::new(meta_store_impl.clone())
-            .await?
-            .into();
         Ok(Self {
             id_gen_manager_impl: Arc::new(SqlIdGeneratorManager::new(&meta_store_impl.conn).await?),
             system_param_manager_impl: system_param_controller,
@@ -483,7 +477,6 @@ impl MetaSrvEnv {
             opts: opts.into(),
             // Await trees on the meta node is lightweight, thus always enabled.
             await_tree_reg: await_tree::Registry::new(Default::default()),
-            cdc_table_backfill_tracker,
             actor_id_generator: Arc::new(AtomicU32::new(0)),
         })
     }
@@ -558,10 +551,6 @@ impl MetaSrvEnv {
 
     pub fn shared_actor_infos(&self) -> &SharedActorInfos {
         &self.shared_actor_info
-    }
-
-    pub fn cdc_table_backfill_tracker(&self) -> CdcTableBackfillTrackerRef {
-        self.cdc_table_backfill_tracker.clone()
     }
 }
 
