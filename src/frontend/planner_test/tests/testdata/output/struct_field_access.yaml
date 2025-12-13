@@ -5,8 +5,9 @@
   binder_error: |
     Failed to bind expression: t.c.x
 
-    Caused by:
-      Item not found: Invalid column: x
+    Caused by these errors (recent errors listed first):
+      1: Catalog error
+      2: schema not found: t
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select (t.c).x from t
