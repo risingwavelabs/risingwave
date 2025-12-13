@@ -52,7 +52,7 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
             group.compaction_config.max_space_reclaim_bytes,
             member_table_ids.iter().copied().collect(),
         );
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let ctx = dynamic_level_core.calculate_level_base_size(levels, level_handlers);
         let state = self.state.entry(group.group_id).or_default();
 
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;

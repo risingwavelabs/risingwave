@@ -49,7 +49,7 @@ impl CompactionSelector for VnodeWatermarkCompactionSelector {
         } = context;
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let ctx = dynamic_level_core.calculate_level_base_size(levels, level_handlers);
         let mut picker = VnodeWatermarkCompactionPicker::new();
         let pk_table_watermarks =
             safe_epoch_read_table_watermarks(table_watermarks, member_table_ids);

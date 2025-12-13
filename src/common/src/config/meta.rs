@@ -535,6 +535,8 @@ pub struct CompactionConfig {
     pub enable_optimize_l0_interval_selection: bool,
     #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
     pub vnode_aligned_level_size_threshold: Option<u64>,
+    #[serde(default = "default::compaction_config::enable_score_v2")]
+    pub enable_score_v2: bool,
 }
 
 pub mod default {
@@ -794,7 +796,7 @@ pub mod default {
         const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
-        const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
+        const DEFAULT_LEVEL_MULTIPLIER: u64 = 10;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
@@ -915,6 +917,10 @@ pub mod default {
         }
 
         pub fn enable_optimize_l0_interval_selection() -> bool {
+            true
+        }
+
+        pub fn enable_score_v2() -> bool {
             false
         }
 
