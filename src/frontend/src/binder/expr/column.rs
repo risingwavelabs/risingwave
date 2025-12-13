@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::is_system_schema;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
@@ -29,8 +30,14 @@ impl Binder {
                 let schema_name = schema.real_value();
                 let schema_path = self.bind_schema_path(Some(&schema_name));
                 let table_name = table.real_value();
-                self.catalog
-                    .get_created_table_by_name(&self.db_name, schema_path, &table_name)?;
+                if !is_system_schema(&schema_name) {
+                    self.catalog.get_created_table_by_name(
+                        &self.db_name,
+                        schema_path,
+                        &table_name,
+                    )?;
+                }
+
                 (Some(schema_name), Some(table_name), column.real_value())
             }
             _ => {
