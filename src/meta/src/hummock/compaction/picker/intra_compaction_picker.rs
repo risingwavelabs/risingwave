@@ -245,6 +245,21 @@ impl IntraCompactionPicker {
             return None;
         }
 
+        // When L0 sub-level count is already high (close to write-stop), skip trivial-move to
+        // leave room for real merge tasks that can actually reduce pressure.
+        let stop_threshold = self.config.level0_stop_write_threshold_sub_level_number as usize;
+        if stop_threshold > 0 {
+            let l0_non_overlapping_sub_level_count = l0
+                .sub_levels
+                .iter()
+                .filter(|level| level.level_type == LevelType::Nonoverlapping)
+                .count();
+            // Use half of the write-stop threshold as a conservative backpressure gate.
+            if l0_non_overlapping_sub_level_count as f64 > stop_threshold as f64 * 0.35 {
+                return None;
+            }
+        }
+
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -270,7 +285,12 @@ impl IntraCompactionPicker {
                 0,
                 0,
                 overlap_strategy.clone(),
-                0,
+                if self.compaction_task_validator.is_enable() {
+                    // tips: Older versions of the compaction group will be upgraded without this configuration, we leave it with its default behaviour and enable it manually when needed.
+                    self.config.sst_allowed_trivial_move_min_size.unwrap_or(0)
+                } else {
+                    0
+                },
                 self.config
                     .sst_allowed_trivial_move_max_count
                     .unwrap_or(compaction_config::sst_allowed_trivial_move_max_count())
