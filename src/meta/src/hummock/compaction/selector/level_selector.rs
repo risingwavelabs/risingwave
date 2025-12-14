@@ -481,51 +481,54 @@ impl DynamicLevelSelectorCore {
             );
         }
 
-        // L0 scores
+        // L0 scores - Unified L0 pressure with base_level backpressure
+        // Key change: Unify overlapping and non-overlapping pressure, then apply base_level backpressure
+        // This removes the incorrect mutual suppression between overlapping and non-overlapping
         {
+            let overlapping_pressure = self.calculate_l0_overlap_score(levels, handlers);
+            let non_overlapping_pressure = self.calculate_l0_non_overlap_score(levels, handlers);
             let base_level_score = level_scores[ctx.base_level];
-            let base_level_denominator = base_level_score.max(0.01);
 
-            let non_overlapping_raw_score = self.calculate_l0_non_overlap_score(levels, handlers);
+            // Unified L0 pressure: max of overlapping and non-overlapping
+            // Rationale: 216 overlapping + 84 non-overlapping = 300 sublevels is a unified L0 pressure problem
+            // Old V2 bug: overlapping was suppressed by non-overlapping, causing Tier to lose priority
+            let l0_raw_score = overlapping_pressure.max(non_overlapping_pressure);
 
-            // Apply boost/suppress to raw score based on base level pressure
-            let non_overlapping_score = non_overlapping_raw_score / base_level_denominator;
+            // Apply base_level backpressure to unified L0 score
+            // This preserves the original design: when base is full, reduce L0 compaction priority
+            let l0_score = l0_raw_score / base_level_score.max(0.01);
 
-            // Add L0 candidates if raw score exceeds threshold (before boost/suppress)
-            // This ensures L0 compaction happens even when base level is over-target
-            if non_overlapping_raw_score > 1.0 {
-                // Try ToBase first, if failed, degrade to Intra.
+            // Only trigger L0 compaction when unified pressure exceeds threshold
+            // Once triggered, add all three compaction types and let them compete
+            if l0_raw_score > 1.0 {
+                // Priority 1: Tier compaction (score + 0.02)
+                // Fastest layer reduction - compacts N consecutive overlapping sublevels at once
                 ctx.score_levels.push(PickerInfo {
-                    score: non_overlapping_score + 0.01,
-                    select_level: 0,
-                    target_level: ctx.base_level,
-                    picker_type: PickerType::ToBase,
-                    raw_score: non_overlapping_raw_score,
-                });
-
-                ctx.score_levels.push(PickerInfo {
-                    score: non_overlapping_score,
-                    select_level: 0,
-                    target_level: 0,
-                    picker_type: PickerType::Intra,
-                    raw_score: non_overlapping_raw_score,
-                });
-            }
-
-            // Tier compaction score is backpressured by non-overlapping score
-            let l0_overlap_raw_score = self.calculate_l0_overlap_score(levels, handlers);
-            let l0_overlap_denominator = non_overlapping_raw_score.max(0.01);
-            let l0_overlap_score = l0_overlap_raw_score / l0_overlap_denominator;
-
-            // Add Tier compaction candidates if raw score exceeds threshold (before backpressure adjustment)
-            // This ensures overlapping L0 files get compacted even when non-overlapping levels have pressure
-            if l0_overlap_raw_score > 1.0 {
-                ctx.score_levels.push(PickerInfo {
-                    score: l0_overlap_score,
+                    score: l0_score + 0.02,
                     select_level: 0,
                     target_level: 0,
                     picker_type: PickerType::Tier,
-                    raw_score: l0_overlap_raw_score,
+                    raw_score: l0_raw_score,
+                });
+
+                // Priority 2: ToBase compaction (score + 0.01)
+                // Medium priority - reduces layers while pushing data to base level
+                ctx.score_levels.push(PickerInfo {
+                    score: l0_score + 0.01,
+                    select_level: 0,
+                    target_level: ctx.base_level,
+                    picker_type: PickerType::ToBase,
+                    raw_score: l0_raw_score,
+                });
+
+                // Priority 3: Intra compaction (score + 0.00)
+                // Lowest priority - in-place optimization within L0
+                ctx.score_levels.push(PickerInfo {
+                    score: l0_score,
+                    select_level: 0,
+                    target_level: 0,
+                    picker_type: PickerType::Intra,
+                    raw_score: l0_raw_score,
                 });
             }
         }
