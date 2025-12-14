@@ -97,7 +97,7 @@ impl FrontendService for FrontendServiceImpl {
             s.get_cursor_manager()
                 .iter_subscription_cursors(|cursor_name, sub_cursor| {
                     cursor_names.push(cursor_name.clone());
-                    sub_cursor_names.push(sub_cursor.subscription_name().to_string());
+                    sub_cursor_names.push(sub_cursor.subscription_name().to_owned());
                     states.push(sub_cursor.state_info_string());
                     idle_durations.push(sub_cursor.idle_duration().as_secs());
                 })
@@ -107,9 +107,9 @@ impl FrontendService for FrontendServiceImpl {
                 user_name: s.user_name(),
                 peer_addr: format!("{}", s.peer_addr()),
                 database: s.database(),
-                states: states,
-                idle_durations: idle_durations,
-                cursor_names: cursor_names,
+                states,
+                idle_durations,
+                cursor_names,
                 subscription_names: sub_cursor_names,
             });
         }

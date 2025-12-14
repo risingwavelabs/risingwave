@@ -976,7 +976,7 @@ async fn show_all_sub_cursors_impl(
                                 cursor_name: sub_cursor.cursor_names[index].clone(),
                                 subscription_name: sub_cursor.subscription_names[index].clone(),
                                 state: sub_cursor.states[index].clone(),
-                                idle_duration_ms: sub_cursor.idle_durations[index].clone() as i64,
+                                idle_duration_ms: sub_cursor.idle_durations[index] as i64,
                                 info: None,
                             })
                         }

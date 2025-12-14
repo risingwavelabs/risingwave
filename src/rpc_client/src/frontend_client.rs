@@ -21,7 +21,9 @@ use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::frontend_service::frontend_service_client::FrontendServiceClient;
 use risingwave_pb::frontend_service::{
-    CancelRunningSqlRequest, CancelRunningSqlResponse, GetAllCursorsRequest, GetAllCursorsResponse, GetAllSubCursorsRequest, GetAllSubCursorsResponse, GetRunningSqlsRequest, GetRunningSqlsResponse, GetTableReplacePlanRequest, GetTableReplacePlanResponse
+    CancelRunningSqlRequest, CancelRunningSqlResponse, GetAllCursorsRequest, GetAllCursorsResponse,
+    GetAllSubCursorsRequest, GetAllSubCursorsResponse, GetRunningSqlsRequest,
+    GetRunningSqlsResponse, GetTableReplacePlanRequest, GetTableReplacePlanResponse,
 };
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Response;
