@@ -18,8 +18,9 @@ use risingwave_common::id::{DatabaseId, TableId};
 use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_plan};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{
-    CancelRunningSqlRequest, CancelRunningSqlResponse, GetRunningSqlsRequest,
-    GetRunningSqlsResponse, GetTableReplacePlanRequest, GetTableReplacePlanResponse, RunningSql,
+    AllCursors, CancelRunningSqlRequest, CancelRunningSqlResponse, GetAllCursorsRequest,
+    GetAllCursorsResponse, GetRunningSqlsRequest, GetRunningSqlsResponse,
+    GetTableReplacePlanRequest, GetTableReplacePlanResponse, RunningSql,
 };
 use risingwave_sqlparser::ast::ObjectName;
 use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
@@ -55,6 +56,30 @@ impl FrontendService for FrontendServiceImpl {
         Ok(RpcResponse::new(GetTableReplacePlanResponse {
             replace_plan: Some(replace_plan),
         }))
+    }
+
+    async fn get_all_cursors(
+        &self,
+        _request: RpcRequest<GetAllCursorsRequest>,
+    ) -> Result<RpcResponse<GetAllCursorsResponse>, Status> {
+        let sessions = self.session_map.read().values().cloned().collect_vec();
+        let mut all_cursors = vec![];
+        for s in sessions {
+            let mut cursor_names = vec![];
+            s.get_cursor_manager()
+                .iter_query_cursors(|cursor_name: &String, _| {
+                    cursor_names.push(cursor_name.clone());
+                })
+                .await;
+            all_cursors.push(AllCursors {
+                session_id: s.id().0,
+                user_name: s.user_name(),
+                peer_addr: format!("{}", s.peer_addr()),
+                database: s.database(),
+                cursor_names,
+            });
+        }
+        Ok(RpcResponse::new(GetAllCursorsResponse { all_cursors }))
     }
 
     async fn get_running_sqls(

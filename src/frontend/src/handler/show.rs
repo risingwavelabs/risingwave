@@ -29,7 +29,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
-use risingwave_pb::frontend_service::GetRunningSqlsRequest;
+use risingwave_pb::frontend_service::{GetAllCursorsRequest, GetRunningSqlsRequest};
 use risingwave_pb::id::WorkerId;
 use risingwave_rpc_client::FrontendClientPoolRef;
 use risingwave_sqlparser::ast::{
@@ -424,11 +424,13 @@ struct ShowSubscriptionRow {
 #[derive(Fields)]
 #[fields(style = "Title Case")]
 struct ShowCursorRow {
+    worker_id: String,
     session_id: String,
     user: String,
     host: String,
     database: String,
     cursor_name: String,
+    info: Option<String>,
 }
 
 #[derive(Fields)]
@@ -750,32 +752,11 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::Cursor => {
-            let sessions = session
-                .env()
-                .sessions_map()
-                .read()
-                .values()
-                .cloned()
-                .collect_vec();
-            let mut rows = vec![];
-            for s in sessions {
-                let session_id = format!("{}", s.id().0);
-                let user = s.user_name();
-                let host = format!("{}", s.peer_addr());
-                let database = s.database();
-
-                s.get_cursor_manager()
-                    .iter_query_cursors(|cursor_name: &String, _| {
-                        rows.push(ShowCursorRow {
-                            session_id: session_id.clone(),
-                            user: user.clone(),
-                            host: host.clone(),
-                            database: database.clone(),
-                            cursor_name: cursor_name.to_owned(),
-                        });
-                    })
-                    .await;
-            }
+            let rows = show_all_cursors_impl(
+                session.env().frontend_client_pool(),
+                session.env().worker_node_manager_ref(),
+            )
+            .await;
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .rows(rows)
                 .into());
@@ -953,6 +934,75 @@ pub fn handle_show_create_object(
             create_sql: sql,
         }])
         .into())
+}
+
+async fn show_all_cursors_impl(
+    frontend_client_pool: FrontendClientPoolRef,
+    worker_node_manager: WorkerNodeManagerRef,
+) -> Vec<ShowCursorRow> {
+    fn on_error(worker_id: WorkerId, err_msg: String) -> Vec<ShowCursorRow> {
+        vec![ShowCursorRow {
+            worker_id: format!("{}", worker_id),
+            session_id: "".to_owned(),
+            user: "".to_owned(),
+            host: "".to_owned(),
+            database: "".to_owned(),
+            cursor_name: "".to_owned(),
+            info: Some(format!(
+                "Failed to show cursor from worker {worker_id} due to: {err_msg}"
+            )),
+        }]
+    }
+    let futures = worker_node_manager
+        .list_frontend_nodes()
+        .into_iter()
+        .map(|worker| {
+            let frontend_client_pool_ = frontend_client_pool.clone();
+            async move {
+                let client = match frontend_client_pool_.get(&worker).await {
+                    Ok(client) => client,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+
+                let resp = match client.get_all_cursors(GetAllCursorsRequest {}).await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        return on_error(worker.id, format!("{}", e.as_report()));
+                    }
+                };
+
+                resp.into_inner()
+                    .all_cursors
+                    .into_iter()
+                    .flat_map(|cursors| {
+                        let worker_id = worker.id.to_string();
+                        let session_id = cursors.session_id.to_string();
+
+                        let user = cursors.user_name;
+                        let host = cursors.peer_addr;
+                        let database = cursors.database;
+
+                        cursors
+                            .cursor_names
+                            .into_iter()
+                            .map(|cursor_name| ShowCursorRow {
+                                worker_id: worker_id.clone(),
+                                session_id: session_id.clone(),
+                                user: user.clone(),
+                                host: host.clone(),
+                                database: database.clone(),
+                                cursor_name,
+                                info: None,
+                            })
+                            .collect_vec()
+                    })
+                    .collect_vec()
+            }
+        })
+        .collect_vec();
+    join_all(futures).await.into_iter().flatten().collect()
 }
 
 async fn show_process_list_impl(
