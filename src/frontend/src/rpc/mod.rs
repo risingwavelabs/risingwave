@@ -19,8 +19,9 @@ use risingwave_pb::ddl_service::{ReplaceJobPlan, TableSchemaChange, replace_job_
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{
     AllCursors, CancelRunningSqlRequest, CancelRunningSqlResponse, GetAllCursorsRequest,
-    GetAllCursorsResponse, GetRunningSqlsRequest, GetRunningSqlsResponse,
-    GetTableReplacePlanRequest, GetTableReplacePlanResponse, RunningSql,
+    GetAllCursorsResponse, GetAllSubCursorsRequest, GetAllSubCursorsResponse,
+    GetRunningSqlsRequest, GetRunningSqlsResponse, GetTableReplacePlanRequest,
+    GetTableReplacePlanResponse, RunningSql, SubscriptionCursor,
 };
 use risingwave_sqlparser::ast::ObjectName;
 use tonic::{Request as RpcRequest, Response as RpcResponse, Status};
@@ -80,6 +81,41 @@ impl FrontendService for FrontendServiceImpl {
             });
         }
         Ok(RpcResponse::new(GetAllCursorsResponse { all_cursors }))
+    }
+
+    async fn get_all_sub_cursors(
+        &self,
+        _request: RpcRequest<GetAllSubCursorsRequest>,
+    ) -> Result<RpcResponse<GetAllSubCursorsResponse>, Status> {
+        let sessions = self.session_map.read().values().cloned().collect_vec();
+        let mut subscription_cursors = vec![];
+        for s in sessions {
+            let mut sub_cursor_names = vec![];
+            let mut cursor_names = vec![];
+            let mut states = vec![];
+            let mut idle_durations = vec![];
+            s.get_cursor_manager()
+                .iter_subscription_cursors(|cursor_name, sub_cursor| {
+                    cursor_names.push(cursor_name.clone());
+                    sub_cursor_names.push(sub_cursor.subscription_name().to_string());
+                    states.push(sub_cursor.state_info_string());
+                    idle_durations.push(sub_cursor.idle_duration().as_secs());
+                })
+                .await;
+            subscription_cursors.push(SubscriptionCursor {
+                session_id: s.id().0,
+                user_name: s.user_name(),
+                peer_addr: format!("{}", s.peer_addr()),
+                database: s.database(),
+                states: states,
+                idle_durations: idle_durations,
+                cursor_names: cursor_names,
+                subscription_names: sub_cursor_names,
+            });
+        }
+        Ok(RpcResponse::new(GetAllSubCursorsResponse {
+            subscription_cursors,
+        }))
     }
 
     async fn get_running_sqls(
