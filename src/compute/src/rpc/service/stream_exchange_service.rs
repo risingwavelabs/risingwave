@@ -128,6 +128,10 @@ impl StreamExchangeServiceImpl {
         );
         pin_mut!(select_stream);
 
+        let exchange_frag_send_size_metrics = metrics
+            .stream_fragment_exchange_bytes
+            .with_label_values(&[&up_fragment_id, &down_fragment_id]);
+
         while let Some(r) = select_stream.try_next().await? {
             match r {
                 Either::Left(permits_to_add) => {
@@ -151,10 +155,7 @@ impl StreamExchangeServiceImpl {
 
                     yield response;
 
-                    metrics
-                        .stream_fragment_exchange_bytes
-                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                        .inc_by(bytes as u64);
+                    exchange_frag_send_size_metrics.inc_by(bytes as u64);
                 }
             }
         }
