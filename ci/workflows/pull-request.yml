@@ -723,6 +723,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 40
+    parallelism: 4
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -733,7 +734,8 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
+    parallelism: 4
     retry: *auto-retry
 
   - label: "end-to-end test ({{matrix.label}} backend)"
@@ -748,7 +750,7 @@ steps:
           run: ci-standard-env
           propagate-environment: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 37
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.
