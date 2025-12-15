@@ -791,12 +791,9 @@ pub async fn scan_task_to_chunk_with_deletes(
             let mut delete_key_map: HashMap<Vec<String>, HashSet<Vec<Datum>>> = HashMap::new();
 
             for delete_task in equality_delete_tasks {
-                let equality_ids = delete_task.equality_ids.clone();
-
-                if equality_ids.is_none() {
+                let Some(equality_ids) = delete_task.equality_ids.as_ref() else {
                     continue;
-                }
-                let equality_ids = equality_ids.unwrap();
+                };
 
                 let delete_schema = delete_task.schema();
                 let delete_name_vec = equality_ids

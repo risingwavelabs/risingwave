@@ -131,7 +131,7 @@ aws-sdk-kinesis = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
 ] }
-aws-sdk-s3 = { version = "1.17", default-features = false, features = [
+aws-sdk-s3 = { version = "1", default-features = false, features = [
     "rt-tokio",
     "rustls",
 ] }
@@ -171,14 +171,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0126310dfd0e8685a96f51ec80834ca720a7fdbc", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "20fb0cf17b949a4ca68a3d65b12743cf79ab095e", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0126310dfd0e8685a96f51ec80834ca720a7fdbc" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "0126310dfd0e8685a96f51ec80834ca720a7fdbc" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "20fb0cf17b949a4ca68a3d65b12743cf79ab095e" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "20fb0cf17b949a4ca68a3d65b12743cf79ab095e" }
 
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
