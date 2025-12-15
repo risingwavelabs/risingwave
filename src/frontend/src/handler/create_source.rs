@@ -1018,7 +1018,8 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
     let append_only = row_id_index.is_some();
     if is_create_source && !append_only && !watermark_descs.is_empty() {
         return Err(ErrorCode::NotSupported(
-            "Defining watermarks on source requires the source connector to be append only.".to_owned(),
+            "Defining watermarks on source requires the source connector to be append only."
+                .to_owned(),
             "Use the key words `FORMAT PLAIN`".to_owned(),
         )
         .into());
