@@ -1407,7 +1407,6 @@ impl SinkWriter for IcebergSinkWriter {
                         writer_builder
                             .clone()
                             .build()
-                            .await
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                     ));
                 }
@@ -1422,7 +1421,6 @@ impl SinkWriter for IcebergSinkWriter {
                         writer_builder
                             .clone()
                             .build()
-                            .await
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
                     ));
                 }
