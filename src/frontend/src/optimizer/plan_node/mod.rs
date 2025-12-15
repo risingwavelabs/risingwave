@@ -55,8 +55,8 @@ use super::property::{
     Distribution, FunctionalDependencySet, MonotonicityMap, Order, WatermarkColumns,
 };
 use crate::error::{ErrorCode, Result};
-use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::optimizer::property::StreamKind;
+use crate::optimizer::{ExpressionSimplifyRewriter, PlanVisitor};
 use crate::session::current::notice_to_user;
 use crate::utils::{PrettySerde, build_graph_from_pretty};
 
@@ -562,6 +562,42 @@ impl LogicalPlanRef {
             let dyn_t = self.deref();
             dyn_t.predicate_pushdown(predicate, ctx)
         }
+    }
+
+    pub fn forbid_snapshot_backfill(&self) -> Option<String> {
+        struct ForbidSnapshotBackfill {
+            warning_msg: Option<String>,
+        }
+        impl LogicalPlanVisitor for ForbidSnapshotBackfill {
+            type Result = ();
+
+            type DefaultBehavior = impl DefaultBehavior<Self::Result>;
+
+            fn default_behavior() -> Self::DefaultBehavior {
+                DefaultValue
+            }
+
+            fn visit_logical_join(&mut self, plan: &LogicalJoin) -> Self::Result {
+                self.visit(plan.left());
+                self.visit(plan.right());
+                if self.warning_msg.is_none() && plan.should_be_temporal_join() {
+                    self.warning_msg =
+                        Some("snapshot backfill disabled due to temporal join".to_owned());
+                }
+            }
+
+            fn visit_logical_source(&mut self, plan: &LogicalSource) -> Self::Result {
+                if self.warning_msg.is_none() && plan.is_shared_source() {
+                    self.warning_msg = Some(format!(
+                        "snapshot backfill disabled due to using shared source {:?}",
+                        plan.core.catalog.as_ref().map(|c| &c.name)
+                    ));
+                }
+            }
+        }
+        let mut forbid_snapshot = ForbidSnapshotBackfill { warning_msg: None };
+        forbid_snapshot.visit(self.clone());
+        forbid_snapshot.warning_msg
     }
 }
 
@@ -1231,7 +1267,9 @@ use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
-use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
+use crate::optimizer::plan_visitor::{
+    DefaultBehavior, DefaultValue, ExprCorrelatedIdFinder, LogicalPlanVisitor,
+};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};

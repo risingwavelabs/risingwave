@@ -700,7 +700,7 @@
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: [t1.a ASC], limit: 1, offset: 0, group_key: [_vnode] }
             └─StreamProject { exprs: [t1.a, Vnode(t1.a) as _vnode] }
-              └─StreamTableScan { table: t1, columns: [t1.a], stream_scan_type: ArrangementBackfill, stream_key: [t1.a], pk: [a], dist: UpstreamHashShard(t1.a) }
+              └─StreamTableScan { table: t1, columns: [t1.a], stream_scan_type: SnapshotBackfill, stream_key: [t1.a], pk: [a], dist: UpstreamHashShard(t1.a) }
 - sql: |
     create table t1 (a varchar, b int, c int, d int);
     create index idx on t1(a);
@@ -986,11 +986,11 @@
         ├─StreamExchange { dist: HashShard(t2.t3_id) }
         │ └─StreamHashJoin { type: Inner, predicate: t1.t2_id = t2.id, output: [t1.id, t2.id, t2.t3_id, t1.t2_id] }
         │   ├─StreamExchange { dist: HashShard(t1.t2_id) }
-        │   │ └─StreamTableScan { table: t1, columns: [t1.id, t1.t2_id], stream_scan_type: ArrangementBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+        │   │ └─StreamTableScan { table: t1, columns: [t1.id, t1.t2_id], stream_scan_type: SnapshotBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
         │   └─StreamExchange { dist: HashShard(t2.id) }
-        │     └─StreamTableScan { table: t2, columns: [t2.id, t2.t3_id], stream_scan_type: ArrangementBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
+        │     └─StreamTableScan { table: t2, columns: [t2.id, t2.t3_id], stream_scan_type: SnapshotBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
         └─StreamExchange { dist: HashShard(t3.id) }
-          └─StreamTableScan { table: t3, columns: [t3.id], stream_scan_type: ArrangementBackfill, stream_key: [t3.id], pk: [id], dist: UpstreamHashShard(t3.id) }
+          └─StreamTableScan { table: t3, columns: [t3.id], stream_scan_type: SnapshotBackfill, stream_key: [t3.id], pk: [id], dist: UpstreamHashShard(t3.id) }
 - name: topn index selection for scan with output column idx
   sql: |
     create table t (c int, b int, a int);

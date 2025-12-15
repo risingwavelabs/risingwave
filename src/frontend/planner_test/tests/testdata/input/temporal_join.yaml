@@ -182,4 +182,4 @@
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     select id1, a1, id2, v1 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
   expected_outputs:
-    - stream_error
+    - stream_plan

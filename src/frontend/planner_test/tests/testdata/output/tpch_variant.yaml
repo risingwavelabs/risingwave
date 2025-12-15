@@ -136,11 +136,11 @@
         │ ├─LogicalJoin { type: Inner, on: true, output: all }
         │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
         │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ │ │ │ ├─LogicalSource { source: part, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
-        │ │ │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-        │ │ │ └─LogicalSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
-        │ │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-        │ └─LogicalSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id] }
+        │ │ │ │ ├─LogicalSource { source: part, is_shared: false, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
+        │ │ │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+        │ │ │ └─LogicalSource { source: partsupp, is_shared: false, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
+        │ │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+        │ └─LogicalSource { source: region, is_shared: false, columns: [r_regionkey, r_name, r_comment, _row_id] }
         └─LogicalProject { exprs: [min(ps_supplycost)] }
           └─LogicalAgg { aggs: [min(ps_supplycost)] }
             └─LogicalProject { exprs: [ps_supplycost] }
@@ -148,29 +148,29 @@
                 └─LogicalJoin { type: Inner, on: true, output: all }
                   ├─LogicalJoin { type: Inner, on: true, output: all }
                   │ ├─LogicalJoin { type: Inner, on: true, output: all }
-                  │ │ ├─LogicalSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
-                  │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-                  │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-                  └─LogicalSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id] }
+                  │ │ ├─LogicalSource { source: partsupp, is_shared: false, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
+                  │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+                  │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+                  └─LogicalSource { source: region, is_shared: false, columns: [r_regionkey, r_name, r_comment, _row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: (n_regionkey = r_regionkey), output: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment] }
     ├─LogicalJoin { type: Inner, on: (s_nationkey = n_nationkey), output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, n_name, n_regionkey] }
     │ ├─LogicalJoin { type: Inner, on: (s_suppkey = ps_suppkey), output: [p_partkey, p_mfgr, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
     │ │ ├─LogicalJoin { type: Inner, on: (p_partkey = ps_partkey) AND (ps_supplycost = min(ps_supplycost)), output: [p_partkey, p_mfgr, ps_suppkey] }
     │ │ │ ├─LogicalJoin { type: Inner, on: (p_partkey = ps_partkey), output: [p_partkey, p_mfgr, ps_suppkey, ps_supplycost] }
-    │ │ │ │ ├─LogicalSource { source: part, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
-    │ │ │ │ └─LogicalSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
+    │ │ │ │ ├─LogicalSource { source: part, is_shared: false, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
+    │ │ │ │ └─LogicalSource { source: partsupp, is_shared: false, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
     │ │ │ └─LogicalAgg { group_key: [ps_partkey], aggs: [min(ps_supplycost)] }
     │ │ │   └─LogicalJoin { type: Inner, on: (n_regionkey = r_regionkey), output: [ps_supplycost, ps_partkey] }
     │ │ │     ├─LogicalJoin { type: Inner, on: (s_nationkey = n_nationkey), output: [ps_partkey, ps_supplycost, n_regionkey] }
     │ │ │     │ ├─LogicalJoin { type: Inner, on: (s_suppkey = ps_suppkey), output: [ps_partkey, ps_supplycost, s_nationkey] }
-    │ │ │     │ │ ├─LogicalSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
-    │ │ │     │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-    │ │ │     │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-    │ │ │     └─LogicalSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id] }
-    │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-    │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-    └─LogicalSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id] }
+    │ │ │     │ │ ├─LogicalSource { source: partsupp, is_shared: false, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
+    │ │ │     │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+    │ │ │     │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+    │ │ │     └─LogicalSource { source: region, is_shared: false, columns: [r_regionkey, r_name, r_comment, _row_id] }
+    │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+    │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+    └─LogicalSource { source: region, is_shared: false, columns: [r_regionkey, r_name, r_comment, _row_id] }
   batch_plan: |-
     BatchExchange { order: [s_acctbal DESC, n_name ASC, s_name ASC, p_partkey ASC], dist: Single }
     └─BatchSort { order: [s_acctbal DESC, n_name ASC, s_name ASC, p_partkey ASC] }
@@ -487,12 +487,12 @@
             │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ │ │ ├─LogicalSource { source: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
-            │ │ │ │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
-            │ │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-            │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-            │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-            └─LogicalSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id] }
+            │ │ │ │ ├─LogicalSource { source: customer, is_shared: false, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
+            │ │ │ │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+            │ │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+            │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+            │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+            └─LogicalSource { source: region, is_shared: false, columns: [r_regionkey, r_name, r_comment, _row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [n_name], aggs: [sum($expr1)] }
     └─LogicalProject { exprs: [n_name, (l_extendedprice * (1:Int32::Decimal - l_discount)) as $expr1] }
@@ -501,12 +501,12 @@
         │ ├─LogicalJoin { type: Inner, on: (l_orderkey = o_orderkey) AND (l_suppkey = s_suppkey), output: [s_nationkey, l_extendedprice, l_discount] }
         │ │ ├─LogicalJoin { type: Inner, on: (c_nationkey = s_nationkey), output: [o_orderkey, s_suppkey, s_nationkey] }
         │ │ │ ├─LogicalJoin { type: Inner, on: (c_custkey = o_custkey), output: [c_nationkey, o_orderkey] }
-        │ │ │ │ ├─LogicalSource { source: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
-        │ │ │ │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
-        │ │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-        │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-        │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-        └─LogicalSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id] }
+        │ │ │ │ ├─LogicalSource { source: customer, is_shared: false, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
+        │ │ │ │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+        │ │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+        │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+        │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+        └─LogicalSource { source: region, is_shared: false, columns: [r_regionkey, r_name, r_comment, _row_id] }
   batch_plan: |-
     BatchExchange { order: [sum($expr1) DESC], dist: Single }
     └─BatchSort { order: [sum($expr1) DESC] }
@@ -753,12 +753,12 @@
               │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ │ │ │ ├─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-              │ │ │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-              │ │ │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
-              │ │ └─LogicalSource { source: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
-              │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-              └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+              │ │ │ │ ├─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+              │ │ │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+              │ │ │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+              │ │ └─LogicalSource { source: customer, is_shared: false, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
+              │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+              └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [n_name, n_name, $expr1], aggs: [sum($expr2)] }
     └─LogicalProject { exprs: [n_name, n_name, Extract('YEAR':Varchar, l_shipdate) as $expr1, (l_extendedprice * (1:Int32::Decimal - l_discount)) as $expr2] }
@@ -767,12 +767,12 @@
         │ ├─LogicalJoin { type: Inner, on: (o_orderkey = l_orderkey), output: [l_extendedprice, l_discount, l_shipdate, n_name, o_custkey] }
         │ │ ├─LogicalJoin { type: Inner, on: (s_nationkey = n_nationkey), output: [l_orderkey, l_extendedprice, l_discount, l_shipdate, n_name] }
         │ │ │ ├─LogicalJoin { type: Inner, on: (s_suppkey = l_suppkey), output: [s_nationkey, l_orderkey, l_extendedprice, l_discount, l_shipdate] }
-        │ │ │ │ ├─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-        │ │ │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-        │ │ │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-        │ │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
-        │ └─LogicalSource { source: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
-        └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+        │ │ │ │ ├─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+        │ │ │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+        │ │ │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+        │ │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+        │ └─LogicalSource { source: customer, is_shared: false, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
+        └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
   batch_plan: |-
     BatchExchange { order: [n_name ASC, n_name ASC, $expr1 ASC], dist: Single }
     └─BatchSort { order: [n_name ASC, n_name ASC, $expr1 ASC] }
@@ -1032,14 +1032,14 @@
               │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ │ │ │ │ │ ├─LogicalSource { source: part, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
-              │ │ │ │ │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-              │ │ │ │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-              │ │ │ │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
-              │ │ │ └─LogicalSource { source: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
-              │ │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-              │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-              └─LogicalSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id] }
+              │ │ │ │ │ │ ├─LogicalSource { source: part, is_shared: false, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
+              │ │ │ │ │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+              │ │ │ │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+              │ │ │ │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+              │ │ │ └─LogicalSource { source: customer, is_shared: false, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
+              │ │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+              │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+              └─LogicalSource { source: region, is_shared: false, columns: [r_regionkey, r_name, r_comment, _row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [$expr1, RoundDigit((sum($expr3) / sum($expr2)), 6:Int32) as $expr4] }
     └─LogicalAgg { group_key: [$expr1], aggs: [sum($expr3), sum($expr2)] }
@@ -1052,14 +1052,14 @@
             │ │ │ ├─LogicalJoin { type: Inner, on: (s_nationkey = n_nationkey), output: [l_orderkey, l_extendedprice, l_discount, n_name] }
             │ │ │ │ ├─LogicalJoin { type: Inner, on: (s_suppkey = l_suppkey), output: [l_orderkey, l_extendedprice, l_discount, s_nationkey] }
             │ │ │ │ │ ├─LogicalJoin { type: Inner, on: (p_partkey = l_partkey), output: [l_orderkey, l_suppkey, l_extendedprice, l_discount] }
-            │ │ │ │ │ │ ├─LogicalSource { source: part, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
-            │ │ │ │ │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-            │ │ │ │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-            │ │ │ │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-            │ │ │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
-            │ │ └─LogicalSource { source: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
-            │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-            └─LogicalSource { source: region, columns: [r_regionkey, r_name, r_comment, _row_id] }
+            │ │ │ │ │ │ ├─LogicalSource { source: part, is_shared: false, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
+            │ │ │ │ │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+            │ │ │ │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+            │ │ │ │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+            │ │ │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+            │ │ └─LogicalSource { source: customer, is_shared: false, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment, _row_id] }
+            │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+            └─LogicalSource { source: region, is_shared: false, columns: [r_regionkey, r_name, r_comment, _row_id] }
   batch_plan: |-
     BatchExchange { order: [$expr1 ASC], dist: Single }
     └─BatchProject { exprs: [$expr1, RoundDigit((sum($expr3) / sum($expr2)), 6:Int32) as $expr4] }
@@ -1370,12 +1370,12 @@
               │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
               │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ │ │ │ ├─LogicalSource { source: part, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
-              │ │ │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-              │ │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-              │ │ └─LogicalSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
-              │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
-              └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+              │ │ │ │ ├─LogicalSource { source: part, is_shared: false, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
+              │ │ │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+              │ │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+              │ │ └─LogicalSource { source: partsupp, is_shared: false, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
+              │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+              └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
     └─LogicalAgg { group_key: [n_name, $expr1], aggs: [sum($expr2)] }
@@ -1385,12 +1385,12 @@
           │ ├─LogicalJoin { type: Inner, on: (s_nationkey = n_nationkey), output: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, n_name] }
           │ │ ├─LogicalJoin { type: Inner, on: (s_suppkey = l_suppkey), output: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, s_nationkey] }
           │ │ │ ├─LogicalJoin { type: Inner, on: (p_partkey = l_partkey), output: [l_orderkey, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount] }
-          │ │ │ │ ├─LogicalSource { source: part, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
-          │ │ │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-          │ │ │ └─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-          │ │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-          │ └─LogicalSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
-          └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+          │ │ │ │ ├─LogicalSource { source: part, is_shared: false, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
+          │ │ │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+          │ │ │ └─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+          │ │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+          │ └─LogicalSource { source: partsupp, is_shared: false, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
+          └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
   batch_plan: |-
     BatchExchange { order: [n_name ASC, $expr1 DESC], dist: Single }
     └─BatchProject { exprs: [n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
@@ -1617,34 +1617,34 @@
     └─LogicalFilter { predicate: (s_nationkey = n_nationkey) }
       └─LogicalApply { type: LeftSemi, on: (s_suppkey = ps_suppkey), correlated_id: 1 }
         ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ ├─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-        │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+        │ ├─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+        │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
         └─LogicalProject { exprs: [ps_suppkey] }
           └─LogicalFilter { predicate: (ps_availqty::Decimal > $expr1) }
             └─LogicalApply { type: LeftOuter, on: true, correlated_id: 3, max_one_row: true }
               ├─LogicalApply { type: LeftSemi, on: (ps_partkey = p_partkey), correlated_id: 2 }
-              │ ├─LogicalSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
+              │ ├─LogicalSource { source: partsupp, is_shared: false, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
               │ └─LogicalProject { exprs: [p_partkey] }
-              │   └─LogicalSource { source: part, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
+              │   └─LogicalSource { source: part, is_shared: false, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
               └─LogicalProject { exprs: [(0.5:Decimal * sum(l_quantity)) as $expr1] }
                 └─LogicalAgg { aggs: [sum(l_quantity)] }
                   └─LogicalProject { exprs: [l_quantity] }
                     └─LogicalFilter { predicate: (l_partkey = CorrelatedInputRef { index: 0, correlated_id: 3 }) AND (l_suppkey = CorrelatedInputRef { index: 1, correlated_id: 3 }) }
-                      └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+                      └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftSemi, on: (s_suppkey = ps_suppkey), output: [s_name, s_address] }
     ├─LogicalJoin { type: Inner, on: (s_nationkey = n_nationkey), output: [s_suppkey, s_name, s_address] }
-    │ ├─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-    │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+    │ ├─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+    │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
     └─LogicalJoin { type: Inner, on: (ps_partkey = l_partkey) AND (ps_suppkey = l_suppkey) AND ($expr1 > $expr2), output: [ps_suppkey] }
       ├─LogicalProject { exprs: [ps_partkey, ps_suppkey, ps_availqty::Decimal as $expr1] }
       │ └─LogicalJoin { type: LeftSemi, on: (ps_partkey = p_partkey), output: [ps_partkey, ps_suppkey, ps_availqty] }
-      │   ├─LogicalSource { source: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
+      │   ├─LogicalSource { source: partsupp, is_shared: false, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id] }
       │   └─LogicalProject { exprs: [p_partkey] }
-      │     └─LogicalSource { source: part, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
+      │     └─LogicalSource { source: part, is_shared: false, columns: [p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment, _row_id] }
       └─LogicalProject { exprs: [(0.5:Decimal * sum(l_quantity)) as $expr2, l_partkey, l_suppkey] }
         └─LogicalAgg { group_key: [l_partkey, l_suppkey], aggs: [sum(l_quantity)] }
-          └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+          └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
   batch_plan: |-
     BatchExchange { order: [s_name ASC], dist: Single }
     └─BatchSort { order: [s_name ASC] }
@@ -1849,16 +1849,16 @@
             │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
             │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-            │ │ │ │ ├─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
-            │ │ │ │ └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-            │ │ │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
-            │ │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+            │ │ │ │ ├─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+            │ │ │ │ └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+            │ │ │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+            │ │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
             │ └─LogicalProject { exprs: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
             │   └─LogicalFilter { predicate: (l_orderkey = CorrelatedInputRef { index: 8, correlated_id: 1 }) AND (l_suppkey <> CorrelatedInputRef { index: 10, correlated_id: 1 }) }
-            │     └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+            │     └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
             └─LogicalProject { exprs: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
               └─LogicalFilter { predicate: (l_orderkey = CorrelatedInputRef { index: 8, correlated_id: 2 }) AND (l_suppkey <> CorrelatedInputRef { index: 10, correlated_id: 2 }) AND (l_receiptdate > l_commitdate) }
-                └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+                └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [s_name], aggs: [count] }
     └─LogicalJoin { type: LeftAnti, on: (l_orderkey = l_orderkey) AND (l_suppkey <> l_suppkey), output: [s_name] }
@@ -1866,16 +1866,16 @@
       │ ├─LogicalJoin { type: Inner, on: (o_orderkey = l_orderkey), output: [s_name, l_orderkey, l_suppkey] }
       │ │ ├─LogicalJoin { type: Inner, on: (s_nationkey = n_nationkey), output: [s_name, l_orderkey, l_suppkey] }
       │ │ │ ├─LogicalJoin { type: Inner, on: (s_suppkey = l_suppkey), output: [s_name, s_nationkey, l_orderkey, l_suppkey] }
-      │ │ │ │ ├─LogicalSource { source: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
+      │ │ │ │ ├─LogicalSource { source: supplier, is_shared: false, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
       │ │ │ │ └─LogicalFilter { predicate: (l_receiptdate > l_commitdate) }
-      │ │ │ │   └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
-      │ │ │ └─LogicalSource { source: nation, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
-      │ │ └─LogicalSource { source: orders, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
+      │ │ │ │   └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+      │ │ │ └─LogicalSource { source: nation, is_shared: false, columns: [n_nationkey, n_name, n_regionkey, n_comment, _row_id] }
+      │ │ └─LogicalSource { source: orders, is_shared: false, columns: [o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment, _row_id] }
       │ └─LogicalProject { exprs: [l_orderkey, l_suppkey] }
-      │   └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+      │   └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
       └─LogicalProject { exprs: [l_orderkey, l_suppkey] }
         └─LogicalFilter { predicate: (l_receiptdate > l_commitdate) }
-          └─LogicalSource { source: lineitem, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
+          └─LogicalSource { source: lineitem, is_shared: false, columns: [l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment, _row_id] }
   batch_plan: |-
     BatchExchange { order: [count DESC, s_name ASC], dist: Single }
     └─BatchSort { order: [count DESC, s_name ASC] }
