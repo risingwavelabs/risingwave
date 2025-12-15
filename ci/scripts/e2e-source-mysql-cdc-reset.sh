@@ -176,12 +176,6 @@ sleep 10
 
 echo "\n\n\n-------------Final Verification------------\n\n\n"
 
-FINAL_RW_COUNT=$(risedev psql -t -c "SELECT COUNT(*) FROM test_table;" 2>&1 | grep -E '^[0-9]+$' | head -n 1 | tr -d ' ')
-FINAL_MYSQL_COUNT=$(mysql -s -N -e "USE binlog_test; SELECT COUNT(*) FROM test_table;" 2>/dev/null)
-
-echo "MySQL total records: $FINAL_MYSQL_COUNT"
-echo "RisingWave total records: $FINAL_RW_COUNT"
-
 # Verify batch 1 (id=1-5): should have 5 rows
 echo "--- Verify batch 1 (id=1-5, should be 5 rows)"
 OUTPUT=$(risedev psql -t -c "SELECT CASE WHEN COUNT(*) = 5 THEN 'OK' ELSE 'FAIL' END FROM test_table WHERE id BETWEEN 1 AND 5;" 2>&1)
