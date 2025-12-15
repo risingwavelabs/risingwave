@@ -223,7 +223,9 @@ impl Scheduler {
             "parallelism should be limited by vnode count in previous steps"
         );
 
-        let assigner = AssignerBuilder::new(streaming_job_id).build();
+        let assigner = AssignerBuilder::new(streaming_job_id)
+            .with_actor_oriented_balancing()
+            .build();
 
         let worker_weights = workers
             .iter()
