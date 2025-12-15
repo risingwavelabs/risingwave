@@ -19,7 +19,7 @@ use adbc_core::{
 };
 use adbc_snowflake::database::Builder as DatabaseBuilder;
 pub use adbc_snowflake::{Connection, Database, Driver, Statement};
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,7 +27,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::{Arrow55FromArrow, arrow_array_55, arrow_schema_55};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
-use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
@@ -179,7 +178,7 @@ impl AdbcSnowflakeProperties {
         if let Some(ref host) = self.host {
             builder = builder
                 .with_parse_host(host)
-                .map_err(|e| anyhow!("Failed to parse host: {}", e.as_report()))?;
+                .context("Failed to parse host")?;
         }
 
         if let Some(port) = self.port {
@@ -189,13 +188,13 @@ impl AdbcSnowflakeProperties {
         if let Some(ref protocol) = self.protocol {
             builder = builder
                 .with_parse_protocol(protocol)
-                .map_err(|e| anyhow!("Failed to parse protocol: {}", e.as_report()))?;
+                .context("Failed to parse protocol")?;
         }
 
         if let Some(ref auth_type) = self.auth_type {
             builder = builder
                 .with_parse_auth_type(auth_type)
-                .map_err(|e| anyhow!("Failed to parse auth type: {}", e.as_report()))?;
+                .context("Failed to parse auth type")?;
         }
 
         if let Some(ref auth_token) = self.auth_token {
@@ -213,11 +212,9 @@ impl AdbcSnowflakeProperties {
     /// This validates that the driver library is available before attempting connection.
     pub fn create_database(&self) -> ConnectorResult<Database> {
         // Validate driver availability and load the driver
-        let mut driver = Driver::try_load().map_err(|e| {
-            anyhow!(
-                "Failed to load ADBC Snowflake driver shared library. \
-                Error: {}. \
-                Please ensure that:\n\
+        let mut driver = Driver::try_load().context(
+            "Failed to load ADBC Snowflake driver shared library. \
+                Check the following:\
                 1. The ADBC Snowflake driver is installed correctly\n\
                 2. The shared library (libadbc_driver_snowflake.so on Linux, \
                    libadbc_driver_snowflake.dylib on macOS, or \
@@ -225,27 +222,12 @@ impl AdbcSnowflakeProperties {
                 3. Environment variables like LD_LIBRARY_PATH (Linux), \
                    DYLD_LIBRARY_PATH (macOS), or PATH (Windows) are set correctly\n\
                 4. All required dependencies of the ADBC Snowflake driver are installed",
-                e.as_report()
-            )
-        })?;
+        )?;
 
         let builder = self.build_database_builder()?;
-        let database = builder.build(&mut driver).map_err(|e| {
-            anyhow!(
-                "Failed to create Snowflake database connection. \
-                Error: {}. \
-                Please verify your credentials and connection parameters:\n\
-                - Account: {}\n\
-                - Database: {}\n\
-                - Schema: {}\n\
-                - Warehouse: {}",
-                e.as_report(),
-                self.account,
-                self.database,
-                self.schema,
-                self.warehouse
-            )
-        })?;
+        let database = builder
+            .build(&mut driver)
+            .context("Failed to build database")?;
         Ok(database)
     }
 
@@ -253,7 +235,7 @@ impl AdbcSnowflakeProperties {
     pub fn create_connection(&self, database: &Database) -> ConnectorResult<Connection> {
         let connection = database
             .new_connection()
-            .map_err(|e| anyhow!("Failed to create connection: {}", e))?;
+            .context("Failed to create connection")?;
         Ok(connection)
     }
 
@@ -265,10 +247,10 @@ impl AdbcSnowflakeProperties {
     ) -> ConnectorResult<Statement> {
         let mut statement = connection
             .new_statement()
-            .map_err(|e| anyhow!("Failed to create statement: {}", e))?;
+            .context("Failed to create statement")?;
         statement
             .set_sql_query(query)
-            .map_err(|e| anyhow!("Failed to set SQL query: {}", e))?;
+            .context("Failed to set SQL query")?;
         Ok(statement)
     }
 
@@ -281,18 +263,16 @@ impl AdbcSnowflakeProperties {
     ) -> ConnectorResult<Vec<arrow_array_55::RecordBatch>> {
         let mut statement = connection
             .new_statement()
-            .map_err(|e| anyhow!("Failed to create statement: {}", e))?;
+            .context("Failed to create statement")?;
         statement
             .set_sql_query(query)
-            .map_err(|e| anyhow!("Failed to set SQL query: {}", e))?;
-        let reader = statement
-            .execute()
-            .map_err(|e| anyhow!("Failed to execute query: {}", e))?;
+            .context("Failed to set SQL query")?;
+        let reader = statement.execute().context("Failed to execute query")?;
 
         // Collect all batches into a vector
         let mut batches = Vec::new();
         for batch_result in reader {
-            let batch = batch_result.map_err(|e| anyhow!("Failed to read record batch: {}", e))?;
+            let batch = batch_result.context("Failed to read record batch")?;
             batches.push(batch);
         }
         Ok(batches)
@@ -367,16 +347,13 @@ impl SplitEnumerator for AdbcSnowflakeSplitEnumerator {
         );
         let mut statement = connection
             .new_statement()
-            .map_err(|e| anyhow!("Failed to create statement: {}", e))?;
+            .context("Failed to create statement")?;
         statement
             .set_sql_query(&validation_query)
-            .map_err(|e| anyhow!("Failed to set SQL query: {}", e))?;
-        let _ = statement.execute().map_err(|e| {
-            anyhow!(
-                "Failed to validate connection - check credentials and permissions: {}",
-                e
-            )
-        })?;
+            .context("Failed to set SQL query")?;
+        let _ = statement
+            .execute()
+            .context("Failed to validate connection")?;
 
         // Connection and query are valid, return the split
         let split = AdbcSnowflakeSplit {
@@ -433,15 +410,13 @@ impl AdbcSnowflakeSplitReader {
         let mut statement = self.properties.create_statement(&mut connection, &query)?;
 
         // Execute the query and get a record batch reader
-        let reader = statement
-            .execute()
-            .map_err(|e| anyhow!("Failed to execute query: {}", e))?;
+        let reader = statement.execute().context("Failed to execute query")?;
 
         let converter = AdbcSnowflakeArrowConvert;
 
         // Iterate over the record batches and convert them to StreamChunks
         for batch_result in reader {
-            let batch = batch_result.map_err(|e| anyhow!("Failed to read record batch: {}", e))?;
+            let batch = batch_result.context("Failed to read record batch")?;
 
             // Convert Arrow RecordBatch to RisingWave DataChunk using the converter
             let data_chunk = converter.chunk_from_record_batch(&batch)?;

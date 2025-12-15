@@ -237,12 +237,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
                     ),
                     OptionValue::from("false"),
                 )
-                .map_err(|e| {
-                    anyhow!(
-                        "Failed to set Snowflake ADBC option use_high_precision=false: {}",
-                        e
-                    )
-                })?;
+                .context("Failed to set Snowflake ADBC option use_high_precision=false")?;
         }
 
         // Check time travel availability early if we will request snapshot

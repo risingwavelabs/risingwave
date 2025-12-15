@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use adbc_core::Statement as _;
-use anyhow::anyhow;
+use anyhow::Context;
 use risingwave_common::array::arrow::arrow_array_55::RecordBatchReader;
 use risingwave_common::array::arrow::arrow_schema_55;
-use thiserror_ext::AsReport;
 
 use super::AdbcSnowflakeProperties;
 use crate::error::ConnectorResult;
@@ -43,7 +42,7 @@ impl AdbcSnowflakeProperties {
 
         let reader = statement
             .execute()
-            .map_err(|e| anyhow!("Failed to execute schema query: {}", e.as_report()))?;
+            .context("Failed to execute schema query")?;
 
         let schema = reader.schema();
 
