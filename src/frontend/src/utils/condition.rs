@@ -30,9 +30,9 @@ use crate::TableCatalog;
 use crate::error::Result;
 use crate::expr::{
     ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor, FunctionCall,
-    InequalityInputPair, InputRef, collect_input_refs, column_self_eq_eliminate,
-    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
-    try_get_bool_constant,
+    InequalityInputPair, InequalityInputPairV2, InputRef, collect_input_refs,
+    column_self_eq_eliminate, factorization_expr, fold_boolean_constant, push_down_not,
+    to_conjunctions, try_get_bool_constant,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
@@ -258,7 +258,10 @@ impl Condition {
     ///
     /// The inequality conditions are transformed into `(left_col_id, right_col_id, offset)` pairs.
     ///
+    /// Deprecated: Use `extract_inequality_keys_v2` instead.
+    ///
     /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
+    #[allow(dead_code)]
     pub(crate) fn extract_inequality_keys(
         &self,
         left_col_num: usize,
@@ -277,6 +280,57 @@ impl Condition {
                 } else {
                     expr.as_input_comparison_cond()
                         .map(|inequality_pair| (conjunction_idx, inequality_pair))
+                }
+            })
+            .collect_vec()
+    }
+
+    /// For [`EqJoinPredicate`], extract inequality conditions which connect left columns and right
+    /// columns from other conditions.
+    ///
+    /// Returns a list of `(conjunction_index, InequalityInputPairV2)` where the pair contains
+    /// the left column index, right column index (NOT offset by `left_col_num`), and the comparison
+    /// operator.
+    ///
+    /// Only pure `InputRef <op> InputRef` conditions are extracted (no offsets like `+ INTERVAL`).
+    ///
+    /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
+    pub(crate) fn extract_inequality_keys_v2(
+        &self,
+        left_col_num: usize,
+        right_col_num: usize,
+    ) -> Vec<(usize, InequalityInputPairV2)> {
+        let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
+        let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+
+        self.conjunctions
+            .iter()
+            .enumerate()
+            .filter_map(|(conjunction_idx, expr)| {
+                let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
+                if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
+                    return None;
+                }
+
+                // Use as_comparison_cond which only matches pure InputRef <op> InputRef
+                let (left_input, op, right_input) = expr.as_comparison_cond()?;
+
+                // Ensure left is from left input and right is from right input
+                // as_comparison_cond normalizes to left.index < right.index
+                if left_input.index() < left_col_num
+                    && right_input.index() >= left_col_num
+                    && right_input.index() < left_col_num + right_col_num
+                {
+                    Some((
+                        conjunction_idx,
+                        InequalityInputPairV2::new(
+                            left_input.index(),
+                            right_input.index() - left_col_num, // Convert to right input index
+                            op,
+                        ),
+                    ))
+                } else {
+                    None
                 }
             })
             .collect_vec()
