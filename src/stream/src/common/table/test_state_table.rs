@@ -14,11 +14,13 @@
 
 use std::collections::HashSet;
 use std::ops::Bound::{self, *};
+use std::sync::Arc;
 
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::{EpochPair, test_epoch};
@@ -1823,4 +1825,233 @@ async fn test_non_pk_prefix_watermark_read() {
             .unwrap();
         assert_eq!(r3, item_3);
     }
+}
+
+#[tokio::test]
+async fn test_state_table_with_vnode_stats() {
+    use crate::common::table::state_table::StateTableBuilder;
+    use crate::executor::monitor::streaming_stats::global_streaming_metrics;
+    use risingwave_common::config::MetricLevel;
+    use crate::task::{ActorId, FragmentId};
+
+    const TEST_TABLE_ID: TableId = TableId::new(233);
+    let test_env = prepare_hummock_test_env().await;
+
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
+    ];
+    let order_types = vec![OrderType::ascending()];
+    let pk_index = vec![0_usize];
+    let read_prefix_len_hint = 1;
+    let table = gen_pbtable(
+        TEST_TABLE_ID,
+        column_descs.clone(),
+        order_types.clone(),
+        pk_index.clone(),
+        read_prefix_len_hint,
+    );
+
+    test_env.register_table(table.clone()).await;
+
+    // Attach metrics to verify vnode pruning effectiveness
+    let metrics = global_streaming_metrics(MetricLevel::Debug)
+        .new_state_table_metrics(TEST_TABLE_ID, ActorId::new(1), FragmentId::new(1));
+
+    // Build state table with vnode stats enabled
+    let vnode_bitmap = {
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+        for i in 0..VirtualNode::COUNT_FOR_TEST {
+            builder.set(i, true);
+        }
+        builder.finish()
+    };
+    let mut state_table: StateTable<HummockStorage> = StateTableBuilder::new(
+        &table,
+        test_env.storage.clone(),
+        Some(Arc::new(vnode_bitmap)),
+    )
+    .with_enable_vnode_stats(true)
+    .with_metrics(metrics)
+    .forbid_preload_all_rows()
+    .build()
+    .await;
+
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.init_epoch(epoch).await.unwrap();
+
+    // Insert some rows
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]));
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(5_i32.into()),
+        Some(55_i32.into()),
+        Some(555_i32.into()),
+    ]));
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(9_i32.into()),
+        Some(99_i32.into()),
+        Some(999_i32.into()),
+    ]));
+
+    // Commit first epoch to establish vnode stats (min=1, max=9)
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.commit_for_test(epoch).await.unwrap();
+
+    // Verify rows can be read
+    let row1 = state_table
+        .get_row(OwnedRow::new(vec![Some(1_i32.into())]))
+        .await
+        .unwrap();
+    assert_eq!(
+        row1,
+        Some(OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
+    );
+
+    let row5 = state_table
+        .get_row(OwnedRow::new(vec![Some(5_i32.into())]))
+        .await
+        .unwrap();
+    assert_eq!(
+        row5,
+        Some(OwnedRow::new(vec![
+            Some(5_i32.into()),
+            Some(55_i32.into()),
+            Some(555_i32.into()),
+        ]))
+    );
+
+    let row9 = state_table
+        .get_row(OwnedRow::new(vec![Some(9_i32.into())]))
+        .await
+        .unwrap();
+    assert_eq!(
+        row9,
+        Some(OwnedRow::new(vec![
+            Some(9_i32.into()),
+            Some(99_i32.into()),
+            Some(999_i32.into()),
+        ]))
+    );
+
+    // Test reading non-existent rows and ensure pruning happens
+    // Key 0 is less than min key (1)
+    let row0 = state_table
+        .get_row(OwnedRow::new(vec![Some(0_i32.into())]))
+        .await
+        .unwrap();
+    assert_eq!(row0, None);
+
+    // gets above should be pruned by vnode stats
+    assert_eq!(state_table.metrics().unwrap().get_vnode_pruned_count.get(), 1);
+
+    // Key 10 is greater than max key (9)
+    let row10 = state_table
+        .get_row(OwnedRow::new(vec![Some(10_i32.into())]))
+        .await
+        .unwrap();
+    assert_eq!(row10, None);
+
+    // Both gets above should be pruned by vnode stats
+    assert_eq!(state_table.metrics().unwrap().get_vnode_pruned_count.get(), 2);
+
+    // Test update and delete operations
+    state_table.delete(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]));
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(1111_i32.into()),
+    ]));
+
+    // Verify updated row
+    let row1_updated = state_table
+        .get_row(OwnedRow::new(vec![Some(1_i32.into())]))
+        .await
+        .unwrap();
+    assert_eq!(
+        row1_updated,
+        Some(OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(1111_i32.into()),
+        ]))
+    );
+
+    // Commit second epoch
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.commit_for_test(epoch).await.unwrap();
+
+    // Verify all rows after commit
+    let row1_commit = state_table
+        .get_row(OwnedRow::new(vec![Some(1_i32.into())]))
+        .await
+        .unwrap();
+    assert_eq!(
+        row1_commit,
+        Some(OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(1111_i32.into()),
+        ]))
+    );
+
+    // Test iteration with vnode stats: prefix 1 should yield 1 row
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+    let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+    let iter = state_table
+        .iter_with_prefix(pk_prefix, sub_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(iter);
+
+    let mut count = 0;
+    while let Some(result) = iter.next().await {
+        result.unwrap();
+        count += 1;
+    }
+    assert_eq!(count, 1);
+
+    // Iteration over pruned prefix should immediately return empty and increment metric
+    let pruned_prefix = OwnedRow::new(vec![Some(0_i32.into())]);
+    let pruned_iter = state_table
+        .iter_with_prefix(pruned_prefix, sub_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(pruned_iter);
+    assert!(pruned_iter.next().await.is_none());
+    assert_eq!(state_table.metrics().unwrap().iter_vnode_pruned_count.get(), 1);
+
+    // iteration over another pruned prefix should immediately return empty and increment metric
+    let pruned_prefix = OwnedRow::new(vec![Some(10_i32.into())]);
+    let pruned_iter = state_table
+        .iter_with_prefix(pruned_prefix, sub_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(pruned_iter);
+    assert!(pruned_iter.next().await.is_none());
+    assert_eq!(state_table.metrics().unwrap().iter_vnode_pruned_count.get(), 2);
 }
