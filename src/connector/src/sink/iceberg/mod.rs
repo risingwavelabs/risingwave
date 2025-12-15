@@ -1086,7 +1086,7 @@ impl IcebergSinkWriter {
 }
 
 impl IcebergSinkWriterInner {
-    async fn build_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
+    fn build_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
         let SinkWriterParam {
             extra_partition_col_idx,
             actor_id,
@@ -1189,7 +1189,7 @@ impl IcebergSinkWriterInner {
         })
     }
 
-    async fn build_upsert(
+    fn build_upsert(
         table: Table,
         unique_column_ids: Vec<usize>,
         writer_param: &SinkWriterParam,
@@ -1282,7 +1282,7 @@ impl IcebergSinkWriterInner {
             )
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             let parquet_writer_builder = ParquetWriterBuilder::new(
-                parquet_writer_properties.clone(),
+                parquet_writer_properties,
                 Arc::new(
                     arrow_schema_to_schema(config.projected_arrow_schema_ref())
                         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -1306,7 +1306,7 @@ impl IcebergSinkWriterInner {
             data_file_builder,
             position_delete_builder,
             equality_delete_builder,
-            unique_column_ids.clone(),
+            unique_column_ids,
             schema.clone(),
         );
         let original_arrow_schema = Arc::new(
@@ -1375,15 +1375,12 @@ impl SinkWriter for IcebergSinkWriter {
 
         let table = create_and_validate_table_impl(&args.config, &args.sink_param).await?;
         let inner = match &args.unique_column_ids {
-            Some(unique_column_ids) => {
-                IcebergSinkWriterInner::build_upsert(
-                    table,
-                    unique_column_ids.clone(),
-                    &args.writer_param,
-                )
-                .await?
-            }
-            None => IcebergSinkWriterInner::build_append_only(table, &args.writer_param).await?,
+            Some(unique_column_ids) => IcebergSinkWriterInner::build_upsert(
+                table,
+                unique_column_ids.clone(),
+                &args.writer_param,
+            )?,
+            None => IcebergSinkWriterInner::build_append_only(table, &args.writer_param)?,
         };
 
         *self = IcebergSinkWriter::Initialized(inner);
