@@ -91,4 +91,4 @@
     └─BatchScan { table: t, columns: [t.v], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v, t._row_id(hidden), t.proc_time(hidden)], stream_key: [t._row_id, t.proc_time], pk_columns: [t._row_id, t.proc_time], pk_conflict: NoCheck, watermark_columns: [t.proc_time(hidden)] }
-    └─StreamTableScan { table: t, columns: [t.v, t._row_id, t.proc_time], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id, t.proc_time], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.v, t._row_id, t.proc_time], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id, t.proc_time], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

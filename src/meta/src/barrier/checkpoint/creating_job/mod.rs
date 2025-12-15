@@ -393,9 +393,9 @@ impl CreatingStreamingJobControl {
         initial_mutation: Mutation,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<Self> {
-        debug!(
+        info!(
             %job_id,
-            "recovered creating job"
+            "recovered creating snapshot backfill job"
         );
         let mut barrier_control =
             CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, Some(committed_epoch));

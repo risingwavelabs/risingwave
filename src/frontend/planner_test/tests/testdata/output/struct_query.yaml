@@ -7,7 +7,7 @@
     └─BatchScan { table: t, columns: [t.country], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [country, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: t, columns: [t.country, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.country, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   create_source:
     format: plain
     encode: protobuf
