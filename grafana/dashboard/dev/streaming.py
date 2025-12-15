@@ -11,8 +11,8 @@ def _(outer_panels: Panels):
             [
                 panels.subheader("General"),
                 panels.timeseries_percentage(
-                    "CPU Usage Per Job",
-                    "The figure shows the CPU usage of each job",
+                    "CPU Usage Per Materialized View",
+                    "The figure shows the CPU usage of each materialized view",
                     [
                         panels.target(
                             f" sum(sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
@@ -25,11 +25,11 @@ def _(outer_panels: Panels):
                             f" max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
                             f" by (materialized_view_id)"
                             f" / 1000000000",
-                            "job {{materialized_view_id}}",
+                            "materialized_view {{materialized_view_id}}",
                         )
                     ],
                 ),
-                
+
                 panels.subheader("Source"),
                 panels.timeseries_rowsps(
                     "Source Throughput(rows/s)",
