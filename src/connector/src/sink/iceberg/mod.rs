@@ -1818,6 +1818,17 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             return Ok(());
         }
 
+        // Count total data files to commit
+        let total_data_files: usize = write_results.iter().map(|r| r.data_files.len()).sum();
+
+        tracing::info!(
+            sink_id = ?self.sink_id,
+            epoch = epoch,
+            parallelism_count = write_results.len(),
+            total_data_files = total_data_files,
+            "Preparing to commit iceberg data files"
+        );
+
         // guarantee that all write results has same schema_id and partition_spec_id
         if write_results
             .iter()
