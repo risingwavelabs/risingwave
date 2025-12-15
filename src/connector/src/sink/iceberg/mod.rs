@@ -167,9 +167,9 @@ fn serialize_add_columns(fields: Vec<Field>) -> Result<Vec<u8>> {
     // Use protobuf encoding
     let mut buf = Vec::new();
     for pb_field in pb_fields {
-        pb_field
-            .encode_length_delimited(&mut buf)
-            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to encode add_columns: {}", e)))?;
+        pb_field.encode_length_delimited(&mut buf).map_err(|e| {
+            SinkError::Iceberg(anyhow!("Failed to encode add_columns: {}", e.as_report()))
+        })?;
     }
     Ok(buf)
 }
@@ -181,8 +181,9 @@ fn deserialize_add_columns(mut bytes: &[u8]) -> Result<Vec<Field>> {
 
     let mut pb_fields = Vec::new();
     while !bytes.is_empty() {
-        let pb_field = PbField::decode_length_delimited(&mut bytes)
-            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to decode add_columns: {}", e)))?;
+        let pb_field = PbField::decode_length_delimited(&mut bytes).map_err(|e| {
+            SinkError::Iceberg(anyhow!("Failed to decode add_columns: {}", e.as_report()))
+        })?;
         pb_fields.push(pb_field);
     }
 
@@ -2555,8 +2556,10 @@ impl IcebergSinkCommitter {
     /// This is used to determine if schema change has already been applied.
     fn check_columns_exist(&self, add_columns: &[Field]) -> Result<bool> {
         let current_schema = self.table.metadata().current_schema();
-        let current_arrow_schema = schema_to_arrow_schema(current_schema.as_ref())
-            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to convert schema: {}", e)))?;
+        let current_arrow_schema =
+            schema_to_arrow_schema(current_schema.as_ref()).map_err(|e| {
+                SinkError::Iceberg(anyhow!("Failed to convert schema: {}", e.as_report()))
+            })?;
 
         let iceberg_arrow_convert = IcebergArrowConvert;
 
@@ -2565,7 +2568,10 @@ impl IcebergSinkCommitter {
             let arrow_field = iceberg_arrow_convert
                 .to_arrow_field(&field.name, &field.data_type)
                 .map_err(|e| {
-                    SinkError::Iceberg(anyhow!("Failed to convert field to arrow: {}", e))
+                    SinkError::Iceberg(anyhow!(
+                        "Failed to convert field to arrow: {}",
+                        e.as_report()
+                    ))
                 })?;
 
             // Check if this field exists in current schema
@@ -2617,7 +2623,7 @@ impl IcebergSinkCommitter {
                     SinkError::Iceberg(anyhow!(
                         "Failed to convert field '{}' to arrow: {}",
                         field.name,
-                        e
+                        e.as_report()
                     ))
                 })?;
 
@@ -2637,9 +2643,9 @@ impl IcebergSinkCommitter {
             tracing::info!("Added field '{}' with ID {}", field.name, next_field_id - 1);
         }
 
-        let new_schema = builder
-            .build()
-            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to build new schema: {}", e)))?;
+        let new_schema = builder.build().map_err(|e| {
+            SinkError::Iceberg(anyhow!("Failed to build new schema: {}", e.as_report()))
+        })?;
 
         tracing::info!("Successfully built new schema for table");
         // Step 3: Create TableCommit with optimistic locking
@@ -2669,11 +2675,9 @@ impl IcebergSinkCommitter {
             self.table.identifier()
         );
 
-        let updated_table = self
-            .catalog
-            .update_table(commit)
-            .await
-            .map_err(|e| SinkError::Iceberg(anyhow!("Failed to update table schema: {}", e)))?;
+        let updated_table = self.catalog.update_table(commit).await.map_err(|e| {
+            SinkError::Iceberg(anyhow!("Failed to update table schema: {}", e.as_report()))
+        })?;
 
         self.table = updated_table;
 
