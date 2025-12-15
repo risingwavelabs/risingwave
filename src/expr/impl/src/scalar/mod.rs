@@ -90,6 +90,7 @@ mod to_jsonb;
 mod vnode;
 pub use to_jsonb::*;
 mod encrypt;
+mod pgp_encrypt;
 mod external;
 mod inet;
 mod license;
