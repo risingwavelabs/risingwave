@@ -251,6 +251,10 @@ impl Strong {
             | ExprType::ConvertTo
             | ExprType::Decrypt
             | ExprType::Encrypt
+            | ExprType::PgpSymEncrypt
+            | ExprType::PgpSymDecrypt
+            | ExprType::PgpPubEncrypt
+            | ExprType::PgpPubDecrypt
             | ExprType::Neg
             | ExprType::Field
             | ExprType::Array
