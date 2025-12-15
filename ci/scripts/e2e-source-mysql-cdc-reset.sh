@@ -28,7 +28,7 @@ echo "\n\n\n-------------Run MySQL CDC binlog expire and RESET test------------\
 risedev kill && risedev clean-data
 
 # Setup CDC table with initial schema
-risedev ci-start
+risedev ci-resume mysql-offline-schema-change-test
 echo "\n\n\n-------------RW started------------\n\n\n"
 
 # Create database and test table
@@ -164,7 +164,7 @@ sleep 5
 echo "Restarting RW to ensure offset persistence..."
 risedev kill
 sleep 2
-risedev ci-start
+risedev ci-resume mysql-offline-schema-change-test
 sleep 5
 
 echo "Inserting fourth batch (id=101-120) after restart..."
