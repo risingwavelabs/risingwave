@@ -300,6 +300,7 @@ where
             self.local_barrier_manager,
             self.metrics.clone(),
             self.fragment_id,
+            self.actor_context.config.clone(),
         );
 
         loop {
@@ -473,12 +474,10 @@ mod tests {
     use futures::future::try_join_all;
     use risingwave_common::array::Op;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_pb::task_service::exchange_service_server::{
-        ExchangeService, ExchangeServiceServer,
+    use risingwave_pb::task_service::stream_exchange_service_server::{
+        StreamExchangeService, StreamExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{
-        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
-    };
+    use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse, PbPermits};
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status, Streaming};
@@ -718,6 +717,8 @@ mod tests {
 
         let (upstream_fragment_id, fragment_id) = (10.into(), 18.into());
 
+        let actor_ctx = ActorContext::for_test(actor_id);
+
         let inputs: Vec<_> =
             try_join_all([untouched, old].into_iter().map(async |upstream_actor_id| {
                 new_input(
@@ -727,6 +728,7 @@ mod tests {
                     fragment_id,
                     &helper_make_local_actor(upstream_actor_id),
                     upstream_fragment_id,
+                    actor_ctx.config.clone(),
                 )
                 .await
             }))
@@ -755,7 +757,6 @@ mod tests {
         let barrier_rx = barrier_test_env
             .local_barrier_manager
             .subscribe_barrier(actor_id);
-        let actor_ctx = ActorContext::for_test(actor_id);
         let upstream = MergeExecutor::new_merge_upstream(
             inputs,
             &metrics,
@@ -858,16 +859,8 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl ExchangeService for FakeExchangeService {
-        type GetDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+    impl StreamExchangeService for FakeExchangeService {
         type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
-
-        async fn get_data(
-            &self,
-            _: Request<GetDataRequest>,
-        ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
-            unimplemented!()
-        }
 
         async fn get_stream(
             &self,
@@ -917,7 +910,7 @@ mod tests {
 
         // Start a server.
         let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
-        let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
+        let exchange_svc = StreamExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
         });
         let cp_server_run = server_run.clone();
@@ -944,6 +937,7 @@ mod tests {
                 (0.into(), 0.into()),
                 (0.into(), 0.into()),
                 Arc::new(StreamingMetrics::unused()),
+                Arc::new(StreamingConfig::default()),
             )
             .await
             .unwrap()

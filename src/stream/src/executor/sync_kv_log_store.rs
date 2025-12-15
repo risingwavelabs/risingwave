@@ -1048,6 +1048,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             LogStoreBufferItem::Barrier {
                 is_checkpoint: barrier.is_checkpoint(),
                 next_epoch: barrier.epoch.curr,
+                add_columns: None,
             },
         ));
         buffer.next_chunk_id = 0;

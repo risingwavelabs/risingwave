@@ -25,6 +25,7 @@ use super::alter_utils::resolve_streaming_job_id_for_alter;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::FragmentId;
 use crate::error::{ErrorCode, Result};
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 
 pub async fn handle_alter_parallelism(
     handler_args: HandlerArgs,
@@ -42,9 +43,13 @@ pub async fn handle_alter_parallelism(
     let mut builder = RwPgResponse::builder(stmt_type);
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .alter_parallelism(job_id, target_parallelism, deferred)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.alter_parallelism(job_id, target_parallelism, deferred),
+        &session,
+        "ALTER PARALLELISM",
+        LongRunningNotificationAction::SuggestRecover,
+    )
+    .await?;
 
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());

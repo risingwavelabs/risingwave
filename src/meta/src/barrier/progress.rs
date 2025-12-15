@@ -363,6 +363,7 @@ pub(super) struct StagingCommitInfo {
     pub finished_jobs: Vec<TrackingJob>,
     /// Table IDs whose locality provider state tables need to be truncated
     pub table_ids_to_truncate: Vec<TableId>,
+    pub finished_cdc_table_backfill: Vec<JobId>,
 }
 
 pub(super) enum UpdateProgressResult {
@@ -681,7 +682,7 @@ impl Progress {
                 let upstream_total_key_count: u64 =
                     calculate_total_key_count(&progress_state.upstream_mv_count, version_stats);
 
-                tracing::debug!(%job_id, "updating progress for table");
+                tracing::trace!(%job_id, "updating progress for table");
                 let pending = progress_state.update(actor, new_state, upstream_total_key_count);
 
                 if progress_state.is_done() {

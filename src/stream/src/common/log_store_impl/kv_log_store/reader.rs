@@ -591,6 +591,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             LogStoreBufferItem::Barrier {
                 is_checkpoint,
                 next_epoch,
+                add_columns,
             } => {
                 assert!(
                     item_epoch < next_epoch,
@@ -605,7 +606,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         is_checkpoint,
                         new_vnode_bitmap: None,
                         is_stop: false,
-                        add_columns: None,
+                        add_columns,
                     },
                 )
             }
