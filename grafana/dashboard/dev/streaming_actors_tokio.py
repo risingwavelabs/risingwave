@@ -63,12 +63,19 @@ def _(outer_panels: Panels):
                     "Tokio: Actor Idle Rate Per Actor",
                     "Idle time could be due to no data to process, or waiting for async operations like IO",
                     [
+                        # panels.target(
+                        #     f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
+                        #     f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                        #     f" / 1000000000",
+                        #     "fragment {{fragment_id}}",
+                        # ),
                         panels.target(
-                            f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
-                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
+                            f"{_sum_fragment_metric_by_mv(f'sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)')}"
+                            f" / "
+                            f"{_sum_fragment_metric_by_mv(f'sum({metric('stream_actor_count')}) by (fragment_id)')}"
                             f" / 1000000000",
-                            "fragment {{fragment_id}}",
-                        ),
+                            "job {{materialized_view_id}}",
+                        )
                     ],
                 ),
                 panels.timeseries_actor_ops_small(
