@@ -13025,6 +13025,7 @@ dependencies = [
 name = "risingwave_stream"
 version = "2.7.0-alpha"
 dependencies = [
+ "adbc_core",
  "anyhow",
  "assert_matches",
  "async-recursion",

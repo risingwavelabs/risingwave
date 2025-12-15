@@ -14,7 +14,9 @@
 
 use std::collections::HashMap;
 
-use adbc_core::{Connection as _, Database as _, Statement as _};
+use adbc_core::{
+    Connection as AdbcCoreConnection, Database as AdbcCoreDatabase, Statement as AdbcCoreStatement,
+};
 use adbc_snowflake::database::Builder as DatabaseBuilder;
 pub use adbc_snowflake::{Connection, Database, Driver, Statement};
 use anyhow::anyhow;
@@ -25,6 +27,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::{Arrow55FromArrow, arrow_array_55, arrow_schema_55};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
@@ -176,7 +179,7 @@ impl AdbcSnowflakeProperties {
         if let Some(ref host) = self.host {
             builder = builder
                 .with_parse_host(host)
-                .map_err(|e| anyhow!("Failed to parse host: {}", e))?;
+                .map_err(|e| anyhow!("Failed to parse host: {}", e.as_report()))?;
         }
 
         if let Some(port) = self.port {
@@ -186,13 +189,13 @@ impl AdbcSnowflakeProperties {
         if let Some(ref protocol) = self.protocol {
             builder = builder
                 .with_parse_protocol(protocol)
-                .map_err(|e| anyhow!("Failed to parse protocol: {}", e))?;
+                .map_err(|e| anyhow!("Failed to parse protocol: {}", e.as_report()))?;
         }
 
         if let Some(ref auth_type) = self.auth_type {
             builder = builder
                 .with_parse_auth_type(auth_type)
-                .map_err(|e| anyhow!("Failed to parse auth type: {}", e))?;
+                .map_err(|e| anyhow!("Failed to parse auth type: {}", e.as_report()))?;
         }
 
         if let Some(ref auth_token) = self.auth_token {
@@ -222,7 +225,7 @@ impl AdbcSnowflakeProperties {
                 3. Environment variables like LD_LIBRARY_PATH (Linux), \
                    DYLD_LIBRARY_PATH (macOS), or PATH (Windows) are set correctly\n\
                 4. All required dependencies of the ADBC Snowflake driver are installed",
-                e
+                e.as_report()
             )
         })?;
 
@@ -236,7 +239,7 @@ impl AdbcSnowflakeProperties {
                 - Database: {}\n\
                 - Schema: {}\n\
                 - Warehouse: {}",
-                e,
+                e.as_report(),
                 self.account,
                 self.database,
                 self.schema,

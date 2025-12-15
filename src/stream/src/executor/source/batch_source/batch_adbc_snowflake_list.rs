@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use adbc_core::Optionable as _;
+use adbc_core::options::{OptionConnection, OptionValue};
 use anyhow::{Context, anyhow};
 use either::Either;
 use parking_lot::RwLock;
@@ -154,14 +156,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
                                             "RefreshStart triggered split generation"
                                         );
                                         is_refreshing = true;
-
                                         *is_list_finished.write() = false;
-
-                                        // validate upstream schema before generating splits
-                                        // Self::validate_upstream_schema(
-                                        //     &snowflake_properties,
-                                        //     &source_columns,
-                                        // )?;
 
                                         // Generate splits for snowflake table
                                         let split_stream = Self::generate_splits(
@@ -224,6 +219,31 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         // Create a single connection for all metadata queries
         let database = snowflake_properties.create_database()?;
         let mut connection = snowflake_properties.create_connection(&database)?;
+
+        {
+            // Why: the Snowflake ADBC driver defaults to "high precision" mode and returns Snowflake
+            // `NUMBER` columns as Arrow `Decimal128`. In list executor metadata queries, we expect some
+            // `NUMBER(?, 0)` columns (e.g. `SHOW PRIMARY KEYS`'s `KEY_SEQUENCE`, `ROW_COUNT`) to be
+            // `Int64`, and we downcast them as such. Turning off high precision makes scale-0 numbers
+            // come back as Arrow `Int64` and avoids `Decimal128` downcast failures.
+            //
+            // Note: We intentionally apply this only for metadata connections. Disabling high precision
+            // causes non-zero-scale `NUMBER` to be returned as `Float64` (lossy), which is not suitable
+            // for reading user data.
+            connection
+                .set_option(
+                    OptionConnection::Other(
+                        "adbc.snowflake.sql.client_option.use_high_precision".to_owned(),
+                    ),
+                    OptionValue::from("false"),
+                )
+                .map_err(|e| {
+                    anyhow!(
+                        "Failed to set Snowflake ADBC option use_high_precision=false: {}",
+                        e
+                    )
+                })?;
+        }
 
         // Check time travel availability early if we will request snapshot
         let snapshot_timestamp =

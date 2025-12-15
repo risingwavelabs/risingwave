@@ -40,8 +40,8 @@ sink-starrocks = []
 
 [dependencies]
 # rust adbc 0.21 maps to lib 0.19
-adbc_core = { version = "0.21", optional = true }
-adbc_snowflake = { version = "0.21", optional = true, default-features = false }
+adbc_core = { workspace = true, optional = true }
+adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"

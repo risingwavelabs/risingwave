@@ -14,6 +14,7 @@ all-sources = ["source-adbc_snowflake"]
 source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
 [dependencies]
+adbc_core = { workspace = true }
 anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
