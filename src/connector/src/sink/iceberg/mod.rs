@@ -1433,7 +1433,7 @@ impl SinkWriter for IcebergSinkWriter {
 /// This prevents metadata from ballooning to gigabytes when dealing with large
 /// JSONB, TEXT, or BINARY fields, while still preserving statistics for small fields
 /// that benefit from query optimization.
-const MAX_COLUMN_STAT_SIZE: usize = 10240; // 10KB
+const MAX_COLUMN_STAT_SIZE: usize = 512; // 512 bytes
 
 /// Truncate large column statistics from `DataFile` BEFORE serialization.
 ///
