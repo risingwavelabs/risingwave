@@ -25,7 +25,6 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
 use risingwave_meta_model::{CreateType, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -140,6 +139,11 @@ impl CreatingStreamingJobControl {
             .flat_map(build_actor_connector_splits)
             .collect();
 
+        assert!(
+            info.cdc_table_snapshot_splits.is_none(),
+            "should not have cdc backfill for snapshot backfill job"
+        );
+
         let initial_mutation = Mutation::Add(AddMutation {
             // for mutation of snapshot backfill job, we won't include changes to dispatchers of upstream actors.
             actor_dispatchers: Default::default(),
@@ -149,11 +153,7 @@ impl CreatingStreamingJobControl {
             pause: false,
             subscriptions_to_add: Default::default(),
             backfill_nodes_to_pause,
-            actor_cdc_table_snapshot_splits:
-                build_pb_actor_cdc_table_snapshot_splits_with_generation(
-                    info.cdc_table_snapshot_split_assignment.clone(),
-                )
-                .into(),
+            actor_cdc_table_snapshot_splits: None,
             new_upstream_sinks: Default::default(),
         });
 

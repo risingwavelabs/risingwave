@@ -283,7 +283,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if result_tx.send(progress).is_err() {
                                     error!("failed to send get ddl progress");
                                 }
-                            }// Handle adhoc recovery triggered by user.
+                            }
+                            BarrierManagerRequest::GetCdcProgress(result_tx) => {
+                                let progress = self.checkpoint_control.gen_cdc_progress();
+                                if result_tx.send(progress).is_err() {
+                                    error!("failed to send get ddl progress");
+                                }
+                            }
+                            // Handle adhoc recovery triggered by user.
                             BarrierManagerRequest::AdhocRecovery(sender) => {
                                 self.adhoc_recovery().await;
                                 if sender.send(()).is_err() {
@@ -772,7 +779,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut background_jobs,
                 hummock_version_stats,
                 database_infos,
-                mut cdc_table_snapshot_split_assignment,
+                mut cdc_table_snapshot_splits,
             } = runtime_info_snapshot;
 
             let term_id = Uuid::new_v4().to_string();
@@ -808,7 +815,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &mut mv_depended_subscriptions,
                         is_paused,
                         &hummock_version_stats,
-                        &mut cdc_table_snapshot_split_assignment,
+                        &mut cdc_table_snapshot_splits,
                     );
                     let node_to_collect = match result {
                         Ok(info) => {

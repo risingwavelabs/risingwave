@@ -85,7 +85,7 @@ use crate::model::{
     TableParallelism,
 };
 use crate::stream::cdc::{
-    is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
+    parallel_cdc_table_backfill_fragment, try_init_parallel_cdc_table_snapshot_splits,
 };
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
@@ -863,7 +863,6 @@ impl DdlController {
         node_body: &Option<NodeBody>,
         table_id: TableId,
     ) -> MetaResult<bool> {
-        let meta_store = self.env.meta_store_ref();
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
@@ -879,20 +878,6 @@ impl DdlController {
             let _enumerator = props
                 .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                 .await?;
-
-            if is_parallelized_backfill_enabled(stream_cdc_scan) {
-                // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
-                try_init_parallel_cdc_table_snapshot_splits(
-                    table_id,
-                    cdc_table_desc,
-                    meta_store,
-                    &stream_cdc_scan.options,
-                    self.env.opts.cdc_table_split_init_insert_batch_size,
-                    self.env.opts.cdc_table_split_init_sleep_interval_splits,
-                    self.env.opts.cdc_table_split_init_sleep_duration_millis,
-                )
-                .await?;
-            }
 
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
@@ -1845,6 +1830,27 @@ impl DdlController {
             None
         };
 
+        let mut cdc_table_snapshot_splits = None;
+        if let StreamingJob::Table(None, table, TableJobType::SharedCdcSource) = &stream_job
+            && let Some((_, stream_cdc_scan)) =
+                parallel_cdc_table_backfill_fragment(stream_job_fragments.fragments.values())
+        {
+            {
+                // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
+                let splits = try_init_parallel_cdc_table_snapshot_splits(
+                    table.id,
+                    stream_cdc_scan.cdc_table_desc.as_ref().unwrap(),
+                    self.env.meta_store_ref(),
+                    stream_cdc_scan.options.as_ref().unwrap(),
+                    self.env.opts.cdc_table_split_init_insert_batch_size,
+                    self.env.opts.cdc_table_split_init_sleep_interval_splits,
+                    self.env.opts.cdc_table_split_init_sleep_duration_millis,
+                )
+                .await?;
+                cdc_table_snapshot_splits = Some(splits);
+            }
+        }
+
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
             new_no_shuffle,
@@ -1860,6 +1866,7 @@ impl DdlController {
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
+            cdc_table_snapshot_splits,
         };
 
         Ok((
