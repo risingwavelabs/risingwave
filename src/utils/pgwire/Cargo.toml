@@ -24,7 +24,7 @@ postgres-types = { version = "0.2.6" }
 reqwest = "0.12.2"
 risingwave_common = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-rustls = "0.21"
+rustls = "0.23"
 rustls-native-certs = "0.6.3"
 rustls-pemfile = "1.0"
 serde = { workspace = true }
