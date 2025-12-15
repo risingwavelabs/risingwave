@@ -405,7 +405,6 @@ impl IcebergSplitEnumerator {
             .scan()
             .with_filter(predicate)
             .snapshot_id(snapshot_id)
-            .with_delete_file_processing_enabled(true)
             .select(require_names)
             .build()
             .map_err(|e| anyhow!(e))?;
@@ -491,7 +490,6 @@ impl IcebergSplitEnumerator {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
-            .with_delete_file_processing_enabled(true)
             .build()
             .map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
@@ -519,12 +517,14 @@ impl IcebergSplitEnumerator {
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
-            .with_delete_file_processing_enabled(true)
             .build()
             .map_err(|e| anyhow!(e))?;
         let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
-        let schema = scan.snapshot().schema(table.metadata())?;
-        let mut equality_ids = vec![];
+        let schema = scan
+            .snapshot()
+            .context("snapshot not found")?
+            .schema(table.metadata())?;
+        let mut equality_ids: Option<Vec<i32>> = None;
         let mut have_position_delete = false;
         #[for_await]
         for task in file_scan_stream {
@@ -533,7 +533,7 @@ impl IcebergSplitEnumerator {
                 match delete_file.data_file_content {
                     iceberg::spec::DataContentType::Data => {}
                     iceberg::spec::DataContentType::EqualityDeletes => {
-                        if equality_ids.is_empty() {
+                        if equality_ids.is_none() {
                             equality_ids = delete_file.equality_ids.clone();
                         } else if equality_ids != delete_file.equality_ids {
                             bail!("The schema of iceberg equality delete file must be consistent");
@@ -546,6 +546,7 @@ impl IcebergSplitEnumerator {
             }
         }
         let delete_columns = equality_ids
+            .unwrap_or_default()
             .into_iter()
             .map(|id| match schema.name_by_field_id(id) {
                 Some(name) => Ok::<std::string::String, ConnectorError>(name.to_owned()),
@@ -726,7 +727,8 @@ pub async fn scan_task_to_chunk_with_deletes(
             // Clone the FileScanTask (not Arc) to create a proper stream
             let task_clone: FileScanTask = (*delete_task).clone();
             let delete_stream = tokio_stream::once(Ok(task_clone));
-            let mut delete_record_stream = delete_reader.read(Box::pin(delete_stream)).await?;
+            let mut delete_record_stream: iceberg::scan::ArrowRecordBatchStream =
+                delete_reader.read(Box::pin(delete_stream))?;
 
             while let Some(record_batch) = delete_record_stream.next().await {
                 let record_batch = record_batch?;
@@ -789,11 +791,9 @@ pub async fn scan_task_to_chunk_with_deletes(
             let mut delete_key_map: HashMap<Vec<String>, HashSet<Vec<Datum>>> = HashMap::new();
 
             for delete_task in equality_delete_tasks {
-                let equality_ids = delete_task.equality_ids.clone();
-
-                if equality_ids.is_empty() {
+                let Some(equality_ids) = delete_task.equality_ids.as_ref() else {
                     continue;
-                }
+                };
 
                 let delete_schema = delete_task.schema();
                 let delete_name_vec = equality_ids
@@ -815,7 +815,8 @@ pub async fn scan_task_to_chunk_with_deletes(
                 // Clone the FileScanTask (not Arc) to create a proper stream
                 let task_clone: FileScanTask = delete_task.as_ref().clone();
                 let delete_stream = tokio_stream::once(Ok(task_clone));
-                let mut delete_record_stream = delete_reader.read(Box::pin(delete_stream)).await?;
+                let mut delete_record_stream: iceberg::scan::ArrowRecordBatchStream =
+                    delete_reader.read(Box::pin(delete_stream))?;
 
                 let mut task_delete_key_set: HashSet<Vec<Datum>> = HashSet::new();
 
@@ -871,7 +872,9 @@ pub async fn scan_task_to_chunk_with_deletes(
     let reader = table.reader_builder().with_batch_size(chunk_size).build();
     let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
-    let mut record_batch_stream = reader.read(Box::pin(file_scan_stream)).await?.enumerate();
+    let record_batch_stream: iceberg::scan::ArrowRecordBatchStream =
+        reader.read(Box::pin(file_scan_stream))?;
+    let mut record_batch_stream = record_batch_stream.enumerate();
 
     // Step 3: Process each record batch and apply deletes
     while let Some((batch_index, record_batch)) = record_batch_stream.next().await {
@@ -1054,7 +1057,7 @@ mod tests {
             predicate: None,
             deletes: vec![],
             sequence_number: 0,
-            equality_ids: vec![],
+            equality_ids: None,
             file_size_in_bytes: 0,
         }
     }
