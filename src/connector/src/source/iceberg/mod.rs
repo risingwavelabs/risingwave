@@ -15,7 +15,7 @@
 pub mod parquet_file_handler;
 
 mod metrics;
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -31,15 +31,13 @@ use itertools::Itertools;
 pub use parquet_file_handler::*;
 use phf::{Set, phf_set};
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::arrow::arrow_array_iceberg::Array;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bail;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
     Schema,
 };
-use risingwave_common::types::{Datum, DatumRef, JsonbVal, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::JsonbVal;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
@@ -662,14 +660,11 @@ pub struct IcebergScanOpts {
     pub handle_delete_files: bool,
 }
 
-type EqualityDeleteEntries = Vec<(Vec<String>, HashSet<Vec<Datum>>)>;
-
-/// Scan a data file and optionally apply delete files (both position delete and equality delete).
-/// This implementation follows the iceberg-rust `process_file_scan_task` logic for proper delete handling.
+/// Scan a data file. Delete files are handled by the iceberg-rust `reader.read` implementation.
 #[try_stream(ok = DataChunk, error = ConnectorError)]
 pub async fn scan_task_to_chunk_with_deletes(
     table: Table,
-    data_file_scan_task: FileScanTask,
+    mut data_file_scan_task: FileScanTask,
     IcebergScanOpts {
         chunk_size,
         need_seq_num,
@@ -699,176 +694,12 @@ pub async fn scan_task_to_chunk_with_deletes(
         data_file_scan_task.deletes.len()
     );
 
-    // Step 1: Load and process delete files
-    // We build both position deletes (sorted set of row positions) and equality deletes (hash set of row keys)
+    if !handle_delete_files {
+        // Keep the delete files from being applied when the caller opts out.
+        data_file_scan_task.deletes.clear();
+    }
 
-    // Build position delete vector - using BTreeSet for sorted storage (similar to DeleteVector in iceberg-rust)
-    let position_delete_set: BTreeSet<i64> = if handle_delete_files {
-        let mut deletes = BTreeSet::new();
-
-        // Filter position delete tasks for this specific data file
-        let position_delete_tasks: Vec<_> = data_file_scan_task
-            .deletes
-            .iter()
-            .filter(|delete| delete.data_file_content == DataContentType::PositionDeletes)
-            .cloned()
-            .collect();
-
-        tracing::debug!(
-            "Processing position deletes for data file: {}, found {} position delete tasks",
-            data_file_path,
-            position_delete_tasks.len()
-        );
-
-        for delete_task in position_delete_tasks {
-            let delete_task_file_path = delete_task.data_file_path.clone();
-
-            let delete_reader = table.reader_builder().with_batch_size(chunk_size).build();
-            // Clone the FileScanTask (not Arc) to create a proper stream
-            let task_clone: FileScanTask = (*delete_task).clone();
-            let delete_stream = tokio_stream::once(Ok(task_clone));
-            let mut delete_record_stream: iceberg::scan::ArrowRecordBatchStream =
-                delete_reader.read(Box::pin(delete_stream))?;
-
-            while let Some(record_batch) = delete_record_stream.next().await {
-                let record_batch = record_batch?;
-
-                // Position delete files have schema: file_path (string), pos (long)
-                if let Some(file_path_col) = record_batch.column_by_name("file_path")
-                    && let Some(pos_col) = record_batch.column_by_name("pos")
-                {
-                    let file_paths = file_path_col
-                            .as_any()
-                            .downcast_ref::<risingwave_common::array::arrow::arrow_array_iceberg::StringArray>()
-                            .with_context(|| "file_path column is not StringArray")?;
-                    let positions = pos_col
-                            .as_any()
-                            .downcast_ref::<risingwave_common::array::arrow::arrow_array_iceberg::Int64Array>()
-                            .with_context(|| "pos column is not Int64Array")?;
-
-                    // Only include positions that match the current data file
-                    for idx in 0..record_batch.num_rows() {
-                        if !file_paths.is_null(idx) && !positions.is_null(idx) {
-                            let file_path = file_paths.value(idx);
-                            let pos = positions.value(idx);
-
-                            if file_path == data_file_path {
-                                deletes.insert(pos);
-                            }
-                        } else {
-                            tracing::warn!(
-                                "Position delete file {} at line {}: file_path or pos is null",
-                                delete_task_file_path,
-                                idx
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        tracing::debug!(
-            "Built position delete set for data file {}: {:?}",
-            data_file_path,
-            deletes
-        );
-
-        deletes
-    } else {
-        BTreeSet::new()
-    };
-
-    // Build equality delete predicates
-    let equality_deletes: Option<EqualityDeleteEntries> = if handle_delete_files {
-        let equality_delete_tasks: Vec<_> = data_file_scan_task
-            .deletes
-            .iter()
-            .filter(|delete| delete.data_file_content == DataContentType::EqualityDeletes)
-            .cloned()
-            .collect();
-
-        if !equality_delete_tasks.is_empty() {
-            let mut delete_key_map: HashMap<Vec<String>, HashSet<Vec<Datum>>> = HashMap::new();
-
-            for delete_task in equality_delete_tasks {
-                let Some(equality_ids) = delete_task.equality_ids.as_ref() else {
-                    continue;
-                };
-
-                let delete_schema = delete_task.schema();
-                let delete_name_vec = equality_ids
-                    .iter()
-                    .filter_map(|id| delete_schema.name_by_field_id(*id))
-                    .map(|s| s.to_owned())
-                    .collect_vec();
-
-                if delete_name_vec.len() != equality_ids.len() {
-                    tracing::warn!(
-                        "Skip equality delete task due to missing column mappings: expected {} names, got {}",
-                        equality_ids.len(),
-                        delete_name_vec.len()
-                    );
-                    continue;
-                }
-
-                let delete_reader = table.reader_builder().with_batch_size(chunk_size).build();
-                // Clone the FileScanTask (not Arc) to create a proper stream
-                let task_clone: FileScanTask = delete_task.as_ref().clone();
-                let delete_stream = tokio_stream::once(Ok(task_clone));
-                let mut delete_record_stream: iceberg::scan::ArrowRecordBatchStream =
-                    delete_reader.read(Box::pin(delete_stream))?;
-
-                let mut task_delete_key_set: HashSet<Vec<Datum>> = HashSet::new();
-
-                while let Some(record_batch) = delete_record_stream.next().await {
-                    let record_batch = record_batch?;
-
-                    let delete_chunk =
-                        IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-
-                    let field_indices = delete_name_vec
-                        .iter()
-                        .map(|field_name| {
-                            record_batch
-                                .schema()
-                                .column_with_name(field_name)
-                                .map(|(idx, _)| idx)
-                                .unwrap()
-                        })
-                        .collect_vec();
-
-                    // Build delete keys from equality columns
-                    for row_idx in 0..delete_chunk.capacity() {
-                        let mut key = Vec::with_capacity(field_indices.len());
-                        for &col_idx in &field_indices {
-                            let col = delete_chunk.column_at(col_idx);
-                            key.push(col.value_at(row_idx).to_owned_datum());
-                        }
-                        task_delete_key_set.insert(key);
-                    }
-                }
-
-                if !task_delete_key_set.is_empty() {
-                    delete_key_map
-                        .entry(delete_name_vec.clone())
-                        .or_default()
-                        .extend(task_delete_key_set);
-                }
-            }
-
-            if delete_key_map.is_empty() {
-                None
-            } else {
-                Some(delete_key_map.into_iter().collect())
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Step 2: Read the data file
+    // Read the data file; delete application is delegated to the reader.
     let reader = table.reader_builder().with_batch_size(chunk_size).build();
     let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
@@ -876,119 +707,19 @@ pub async fn scan_task_to_chunk_with_deletes(
         reader.read(Box::pin(file_scan_stream))?;
     let mut record_batch_stream = record_batch_stream.enumerate();
 
-    // Step 3: Process each record batch and apply deletes
+    // Process each record batch. Delete application is handled by the SDK.
     while let Some((batch_index, record_batch)) = record_batch_stream.next().await {
         let record_batch = record_batch?;
         let batch_start_pos = (batch_index * chunk_size) as i64;
-        let batch_num_rows = record_batch.num_rows();
 
         let mut chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+        let row_count = chunk.capacity();
 
-        // Apply position deletes using efficient range-based filtering
-        // Build visibility bitmap based on position deletes
-        let mut visibility = vec![true; batch_num_rows];
-
-        if !position_delete_set.is_empty() {
-            let batch_end_pos = batch_start_pos + batch_num_rows as i64;
-
-            tracing::debug!(
-                "Applying position deletes to batch {}: range [{}, {}), total delete set size: {}",
-                batch_index,
-                batch_start_pos,
-                batch_end_pos,
-                position_delete_set.len()
-            );
-
-            let mut position_deleted_count = 0;
-
-            // Use BTreeSet's range query for efficient filtering
-            // Only check positions that fall within this batch's range
-            for &deleted_pos in position_delete_set.range(batch_start_pos..batch_end_pos) {
-                let local_idx = (deleted_pos - batch_start_pos) as usize;
-                if local_idx < batch_num_rows {
-                    visibility[local_idx] = false;
-                    position_deleted_count += 1;
-                }
-            }
-
-            tracing::debug!(
-                "Position delete results for batch {}: deleted {} rows",
-                batch_index,
-                position_deleted_count
-            );
-        }
-
-        // Apply equality deletes
-        if let Some(ref equality_delete_entries) = equality_deletes {
-            let (columns, _) = chunk.into_parts();
-
-            let delete_entries_info: Vec<(Vec<usize>, HashSet<Vec<DatumRef<'_>>>)> =
-                equality_delete_entries
-                    .iter()
-                    .map(|(delete_name_vec, delete_key_set)| {
-                        let indices = delete_name_vec
-                            .iter()
-                            .map(|field_name| {
-                                record_batch
-                                    .schema()
-                                    .column_with_name(field_name)
-                                    .map(|(idx, _)| idx)
-                                    .unwrap()
-                            })
-                            .collect_vec();
-                        let delete_key_ref_set: HashSet<Vec<DatumRef<'_>>> = delete_key_set
-                            .iter()
-                            .map(|datum_vec| {
-                                datum_vec.iter().map(|datum| datum.to_datum_ref()).collect()
-                            })
-                            .collect();
-                        (indices, delete_key_ref_set)
-                    })
-                    .collect::<Vec<_>>();
-
-            let mut deleted_count = 0;
-
-            // Check each row against the delete sets built per equality delete task
-            for (row_idx, item) in visibility.iter_mut().enumerate().take(batch_num_rows) {
-                if !*item {
-                    continue;
-                }
-
-                for (field_indices, delete_key_set) in &delete_entries_info {
-                    let mut row_key = Vec::with_capacity(field_indices.len());
-                    for &col_idx in field_indices {
-                        let datum = columns[col_idx].value_at(row_idx);
-                        row_key.push(datum);
-                    }
-
-                    if delete_key_set.contains(&row_key) {
-                        *item = false;
-                        deleted_count += 1;
-                        break;
-                    }
-                }
-            }
-
-            tracing::debug!(
-                "Equality delete results for batch {}: deleted {} rows",
-                batch_index,
-                deleted_count
-            );
-
-            let columns: Vec<_> = columns.into_iter().collect();
-            chunk = DataChunk::from_parts(columns.into(), Bitmap::from_bool_slice(&visibility));
-        } else {
-            // Only position deletes to apply
-            let (columns, _) = chunk.into_parts();
-            let columns: Vec<_> = columns.into_iter().collect();
-            chunk = DataChunk::from_parts(columns.into(), Bitmap::from_bool_slice(&visibility));
-        }
-
-        // Step 4: Add metadata columns if requested
+        // Add metadata columns if requested
         if need_seq_num {
             let (mut columns, visibility) = chunk.into_parts();
             columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
-                vec![data_sequence_number; visibility.len()],
+                std::iter::repeat_n(data_sequence_number, row_count),
             ))));
             chunk = DataChunk::from_parts(columns.into(), visibility);
         }
@@ -996,12 +727,12 @@ pub async fn scan_task_to_chunk_with_deletes(
         if need_file_path_and_pos {
             let (mut columns, visibility) = chunk.into_parts();
             columns.push(Arc::new(ArrayImpl::Utf8(Utf8Array::from_iter(
-                vec![data_file_path.as_str(); visibility.len()],
+                std::iter::repeat_n(data_file_path.as_str(), row_count),
             ))));
 
             // Generate position values for each row in the batch
             let positions: Vec<i64> =
-                (batch_start_pos..(batch_start_pos + visibility.len() as i64)).collect();
+                (batch_start_pos..(batch_start_pos + row_count as i64)).collect();
             columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(positions))));
 
             chunk = DataChunk::from_parts(columns.into(), visibility);
