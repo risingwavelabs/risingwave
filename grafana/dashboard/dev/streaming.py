@@ -3,10 +3,10 @@ from . import section
 
 def _sum_fragment_metric_by_mv(expr: str) -> str:
     return (
-        f" sum(({expr})"
-        f" * on(fragment_id) group_left(materialized_view_id)"
-        f" max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
-        f" by (materialized_view_id)"
+        f"sum(({expr})"
+        f"* on(fragment_id) group_left(materialized_view_id)"
+        f"max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
+        f"by (materialized_view_id)"
     )
 
 @section
