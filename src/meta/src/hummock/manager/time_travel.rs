@@ -658,8 +658,11 @@ impl HummockManager {
             self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
         )
         .await?;
-        // Ignore delta which adds no data.
-        if written > 0 {
+        let has_state_table_info_delta = delta
+            .state_table_info_delta
+            .keys()
+            .any(|table_id| time_travel_table_ids.contains(table_id));
+        if written > 0 || has_state_table_info_delta {
             let m = hummock_time_travel_delta::ActiveModel {
                 version_id: Set(risingwave_meta_model::HummockVersionId::try_from(
                     delta.id.to_u64(),

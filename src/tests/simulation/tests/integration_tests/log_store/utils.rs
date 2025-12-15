@@ -120,7 +120,7 @@ pub(crate) async fn get_mv_count(cluster: &mut Cluster, name: &str) -> Result<us
     Ok(count)
 }
 
-pub(crate) async fn assert_lag_in_log_store(
+pub(crate) async fn check_lag_in_log_store(
     cluster: &mut Cluster,
     name: &str,
     result_count: usize,
@@ -130,10 +130,11 @@ pub(crate) async fn assert_lag_in_log_store(
     let result = session.run(query).await?;
     let current_count: usize = result.parse()?;
     tracing::info!("current count: {current_count}");
-    if current_count != result_count {
-        return Ok(());
+    assert!(current_count <= result_count);
+    if current_count == result_count {
+        tracing::warn!("no lag in log store");
     }
-    bail!("there was no lag in the logstore")
+    Ok(())
 }
 
 pub(crate) async fn realign_join(

@@ -523,7 +523,7 @@
         9 [ label = "BatchPlanNode" ]
         10 [ label = "Table 0\lcolumns: [\"sign\",\"bucket_id\",\"count\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\",\"$1 ASC\"]\lvalue indices: [\"0\",\"1\",\"2\"]\ldistribution key: []\lread pk prefix len hint: \"0\"\l" ]
         11 [ label = "Table 1\lcolumns: [\"total_count\",\"_rw_timestamp\"]\lprimary key: []\lvalue indices: [\"0\"]\ldistribution key: []\lread pk prefix len hint: \"0\"\l" ]
-        12 [ label = "Table 2\lcolumns: [\"vnode\",\"_row_id\",\"backfill_finished\",\"row_count\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"1\",\"2\",\"3\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\lvnode column idx: \"0\"\l" ]
+        12 [ label = "Table 2\lcolumns: [\"vnode\",\"epoch\",\"row_count\",\"is_epoch_finished\",\"_row_id\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"1\",\"2\",\"3\",\"4\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\lvnode column idx: \"0\"\l" ]
         13 [ label = "Table 4294967294\lcolumns: [\"approx_percentile\",\"_rw_timestamp\"]\lprimary key: []\lvalue indices: [\"0\"]\ldistribution key: []\lread pk prefix len hint: \"0\"\l" ]
         0 -> 1 [ label = "" ]
         1 -> 2 [ label = "" ]

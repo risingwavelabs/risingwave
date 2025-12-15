@@ -317,6 +317,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of update database barrier");
                                 }
                             }
+                            BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
+                                if tx.send(self.checkpoint_control.may_have_snapshot_backfilling_jobs()).is_err() {
+                                    warn!("failed to may have snapshot backfill job");
+                                }
+                            }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
@@ -987,6 +992,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                         BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
                             update_barrier_requests.push(request);
+                        }
+                        BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
+                            // may recover snapshot backfill jobs
+                            let _ = tx.send(true);
                         }
                     }
                 }

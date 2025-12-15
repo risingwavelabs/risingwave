@@ -362,8 +362,28 @@ impl HummockStorageReadSnapshot {
                 self.build_read_version_tuple_from_backup(epoch, self.table_id, key_range)
                     .await
             }
-            HummockReadEpoch::Committed(epoch)
-            | HummockReadEpoch::BatchQueryCommitted(epoch, _)
+            HummockReadEpoch::Committed(epoch) => {
+                let tuple = self
+                    .build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
+                    .await?;
+                let (_, (_, _, version)) = &tuple;
+                let Some(committed_epoch) = version.table_committed_epoch(self.table_id) else {
+                    return Err(HummockError::other(format!(
+                        "table {} not found in version",
+                        self.table_id
+                    ))
+                    .into());
+                };
+                if committed_epoch != epoch {
+                    return Err(HummockError::wait_epoch(format!(
+                        "mismatch table {} committed_epoch {} for read committed_epoch {}",
+                        self.table_id, committed_epoch, epoch
+                    ))
+                    .into());
+                }
+                Ok(tuple)
+            }
+            HummockReadEpoch::BatchQueryCommitted(epoch, _)
             | HummockReadEpoch::TimeTravel(epoch) => {
                 self.build_read_version_tuple_from_committed(epoch, self.table_id, key_range)
                     .await
