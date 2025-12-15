@@ -1,6 +1,13 @@
 from ..common import *
 from . import section
 
+def _sum_fragment_metric_by_mv(expr: str) -> str:
+    return (
+        f" sum(({expr})"
+        f" * on(fragment_id) group_left(materialized_view_id)"
+        f" max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
+        f" by (materialized_view_id)"
+    )
 
 @section
 def _(outer_panels: Panels):
@@ -15,16 +22,10 @@ def _(outer_panels: Panels):
                     "The figure shows the CPU usage of each materialized view",
                     [
                         panels.target(
-                            f" sum(sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
-                            f" * on(fragment_id) group_left(materialized_view_id)"
-                            f" max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
-                            f" by (materialized_view_id)"
-                            f" / on(materialized_view_id)"
-                            f" sum(sum({metric('stream_actor_count')}) by (fragment_id)"
-                            f" * on(fragment_id) group_left(materialized_view_id)"
-                            f" max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
-                            f" by (materialized_view_id)"
-                            f" / 1000000000",
+                            f"{_sum_fragment_metric_by_mv(f'sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)')}"
+                            f"/ on(materialized_view_id)"
+                            f"{_sum_fragment_metric_by_mv(f'sum({metric('stream_actor_count')}) by (fragment_id)')}"
+                            f"/ 1000000000",
                             "materialized_view {{materialized_view_id}}",
                         )
                     ],
