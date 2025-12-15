@@ -514,8 +514,8 @@ pub struct ThrottleCommandArgs {
     id: u32,
     rate: Option<u32>,
     /// The type of throttle to apply. Options: dml, backfill, source, sink
-    #[clap(long, value_name = "TYPE")]
-    throttle_type: Option<String>,
+    #[clap(long, value_name = "TYPE", required = true)]
+    throttle_type: String,
 }
 
 #[derive(Subcommand, Clone, Debug)]

@@ -43,24 +43,7 @@ pub async fn apply_throttle(
     params: ThrottleCommandArgs,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-
-    // Use provided throttle type if specified, otherwise infer from target for backward compatibility
-    let throttle_type = if let Some(type_str) = &params.throttle_type {
-        parse_throttle_type(type_str)?
-    } else {
-        // Infer throttle type from target for backward compatibility
-        match kind {
-            PbThrottleTarget::Source => PbThrottleType::Source,
-            PbThrottleTarget::Mv => PbThrottleType::Backfill,
-            PbThrottleTarget::Sink => PbThrottleType::Sink,
-            PbThrottleTarget::Table
-            | PbThrottleTarget::Fragment
-            | PbThrottleTarget::Unspecified => {
-                // Default to Backfill for unspecified/unsupported combinations; user should use SQL for table throttling
-                PbThrottleType::Backfill
-            }
-        }
-    };
+    let throttle_type = parse_throttle_type(&params.throttle_type)?;
 
     meta_client
         .apply_throttle(kind, throttle_type, params.id, params.rate)
