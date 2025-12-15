@@ -21,15 +21,19 @@ use crate::common::CtlContext;
 
 /// Parse throttle type from string
 fn parse_throttle_type(s: &str) -> anyhow::Result<PbThrottleType> {
-    match s.to_lowercase().as_str() {
-        "dml" => Ok(PbThrottleType::Dml),
-        "backfill" => Ok(PbThrottleType::Backfill),
-        "source" => Ok(PbThrottleType::Source),
-        "sink" => Ok(PbThrottleType::Sink),
-        _ => bail!(
+    if s.eq_ignore_ascii_case("dml") {
+        Ok(PbThrottleType::Dml)
+    } else if s.eq_ignore_ascii_case("backfill") {
+        Ok(PbThrottleType::Backfill)
+    } else if s.eq_ignore_ascii_case("source") {
+        Ok(PbThrottleType::Source)
+    } else if s.eq_ignore_ascii_case("sink") {
+        Ok(PbThrottleType::Sink)
+    } else {
+        bail!(
             "Invalid throttle type: {}. Valid options are: dml, backfill, source, sink",
             s
-        ),
+        )
     }
 }
 
@@ -41,7 +45,7 @@ pub async fn apply_throttle(
     let meta_client = context.meta_client().await?;
 
     // Use provided throttle type if specified, otherwise infer from target for backward compatibility
-    let throttle_type = if let Some(ref type_str) = params.throttle_type {
+    let throttle_type = if let Some(type_str) = &params.throttle_type {
         parse_throttle_type(type_str)?
     } else {
         // Infer throttle type from target for backward compatibility
