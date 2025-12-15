@@ -25,6 +25,8 @@ message WatermarkDesc {
   uint32 watermark_idx = 1;
   // The expression to calculate the watermark value.
   expr.ExprNode expr = 2;
+  // Whether this watermark is used for TTL (`WITH TTL`).
+  bool with_ttl = 3;
 }
 
 enum SchemaRegistryNameStrategy {

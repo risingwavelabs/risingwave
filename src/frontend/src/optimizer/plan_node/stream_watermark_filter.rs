@@ -36,11 +36,13 @@ pub struct StreamWatermarkFilter {
 
 impl StreamWatermarkFilter {
     pub fn new(input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
-        assert!(
-            input.append_only(),
-            "StreamWatermarkFilter only supports append-only input, got {}",
-            input.stream_kind()
-        );
+        if watermark_descs.iter().any(|d| !d.with_ttl) {
+            assert!(
+                input.append_only(),
+                "StreamWatermarkFilter on non-TTL watermark only supports append-only input, got {}",
+                input.stream_kind()
+            );
+        }
 
         let ctx = input.ctx();
         let mut watermark_columns = input.watermark_columns().clone();
