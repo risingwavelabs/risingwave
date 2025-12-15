@@ -519,7 +519,6 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn reset_source(&self, _source_id: SourceId) -> Result<()> {
-        // Mock implementation - just return Ok
         Ok(())
     }
 

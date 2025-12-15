@@ -43,18 +43,11 @@ pub async fn handle_reset_source(
     // Only CDC sources (MySQL/MongoDB) support RESET operation
     if !source.with_properties.is_cdc_connector() {
         return Err(ErrorCode::NotSupported(
-            "RESET SOURCE only supports CDC sources (MySQL, MongoDB)".to_owned(),
-            "this operation is only for CDC sources with binlog/oplog based synchronization"
-                .to_owned(),
+            "RESET SOURCE only supports CDC sources".to_owned(),
+            "This operation is only for CDC sources when offset has expired".to_owned(),
         )
         .into());
     }
-
-    tracing::info!(
-        "RESET SOURCE {} (id: {}) - Calling meta service...",
-        source.name,
-        source.id
-    );
 
     // Call meta service to reset the source
     let catalog_writer = session.catalog_writer()?;
