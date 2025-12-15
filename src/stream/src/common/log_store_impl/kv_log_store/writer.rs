@@ -174,11 +174,14 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 .unwrap_or(LogStoreVnodeProgress::None),
         );
         let has_schema_change = options.add_columns.is_some();
+        // Barrier's new_vnode_bitmap field does not need to be passed to log-reader, because when sink is decoupled, we
+        // always rebuild sink when update vnode bitmap.
         self.tx.barrier(
             epoch,
             options.is_checkpoint,
             next_epoch,
             options.add_columns,
+            options.is_stop,
         );
         if has_schema_change {
             let truncate_offset = self.tx.wait_for_barrier_truncation(epoch).await?;

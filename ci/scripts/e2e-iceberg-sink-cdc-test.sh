@@ -23,25 +23,25 @@ verify_iceberg_source() {
     shift
     expected=$(cat)
 
-    # 创建临时文件
+    # Create temporary files
     expected_file=$(mktemp)
     actual_file=$(mktemp)
 
-    # 写入期望结果
+    # Write expected results
     echo "$expected" > "$expected_file"
 
     while [ $retry_count -lt $max_retries ]; do
-        # 如果不是第一次尝试，先等待2秒
+        # If not the first attempt, wait 2 seconds
         if [ $retry_count -gt 0 ]; then
             echo "⚠️  ${source} verification failed (attempt $retry_count/$max_retries), retrying in 2 seconds..."
             sleep 2
         fi
 
-        # 获取实际结果（使用 -t 去掉表头，-A 使用无对齐格式，用空格分隔）
-        # 过滤掉 cargo-make 的日志行，只保留查询结果
+        # Get actual results (use -t to remove header, -A for unaligned format, space-separated)
+        # Filter out cargo-make log lines, keep only query results
         risedev psql -t -A -F ' ' -c "SELECT * FROM ${source} ORDER BY id;" 2>&1 | grep -v '\[cargo-make\]' | grep -v '^$' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' > "$actual_file"
 
-        # 检查是否有ERROR（查询执行失败）
+        # Check for ERROR (query execution failed)
         if grep -q "ERROR:" "$actual_file"; then
             retry_count=$((retry_count + 1))
             if [ $retry_count -ge $max_retries ]; then
@@ -55,7 +55,7 @@ verify_iceberg_source() {
             continue
         fi
 
-        # 比较结果
+        # Compare results
         if diff -u "$expected_file" "$actual_file" > /dev/null 2>&1; then
             echo "✅ ${source} matches expected results"
             rm -f "$expected_file" "$actual_file"
@@ -65,7 +65,7 @@ verify_iceberg_source() {
         retry_count=$((retry_count + 1))
     done
 
-    # 所有重试都失败了
+    # All retries failed
     echo "❌ ${source} does NOT match expected results after $max_retries attempts"
     echo ""
     echo "Expected:"
@@ -119,7 +119,6 @@ sleep 3
 
 echo "Creating Iceberg sink with auto schema change..."
 risedev psql -c "
-set sink_decouple = false;
 CREATE SINK s1 from t WITH (
     connector = 'iceberg',
     type = 'append-only',
@@ -133,7 +132,7 @@ CREATE SINK s1 from t WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
-    commit_checkpoint_interval = 1,
+    commit_checkpoint_interval = 2,
     primary_key = 'id',
     force_append_only='true',
     auto.schema.change = 'true',
