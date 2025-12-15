@@ -170,7 +170,7 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
     "nightly",
 ] }
 hytra = "0.1"
-# branch dev_rebase_main_20250325
+# branch dev_rebase_main_20251111
 iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "20fb0cf17b949a4ca68a3d65b12743cf79ab095e", features = [
     "storage-s3",
     "storage-gcs",
