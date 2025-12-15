@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pretty_xmlish::XmlNode;
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::FilterNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::DistillUnit as _;
+use crate::optimizer::plan_node::utils::{Distill, plan_node_name};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
 
@@ -82,7 +84,14 @@ impl PlanTreeNodeUnary<Stream> for StreamFilter {
 }
 
 impl_plan_tree_node_for_unary! { Stream, StreamFilter }
-impl_distill_by_unit!(StreamFilter, core, "StreamFilter");
+
+impl Distill for StreamFilter {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        self.core.distill_with_name(plan_node_name!("StreamFilter",
+            { "upsert", self.input().stream_kind().is_upsert() }
+        ))
+    }
+}
 
 impl StreamNode for StreamFilter {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {

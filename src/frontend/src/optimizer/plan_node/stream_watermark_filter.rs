@@ -25,6 +25,7 @@ use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanR
 use crate::TableCatalog;
 use crate::expr::{ExprDisplay, ExprImpl};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::utils::plan_node_name;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -100,7 +101,12 @@ impl Distill for StreamWatermarkFilter {
             ("watermark_descs", Pretty::Array(display_watermark_descs)),
             ("output_watermarks", display_output_watermark_groups),
         ];
-        childless_record("StreamWatermarkFilter", fields)
+        childless_record(
+            plan_node_name!("StreamWatermarkFilter",
+               { "upsert", self.input().stream_kind().is_upsert() }
+            ),
+            fields,
+        )
     }
 }
 
