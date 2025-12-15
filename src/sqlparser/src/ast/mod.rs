@@ -2140,13 +2140,15 @@ impl Statement {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
-                if let Some(info) = webhook_info {
+                if let Some(info) = webhook_info
+                    && let Some(signature_expr) = &info.signature_expr
+                {
                     if let Some(secret) = &info.secret_ref {
                         write!(f, " VALIDATE SECRET {}", secret.secret_name)?;
                     } else {
                         write!(f, " VALIDATE")?;
                     }
-                    write!(f, " AS {}", info.signature_expr)?;
+                    write!(f, " AS {}", signature_expr)?;
                 }
                 match engine {
                     Engine::Hummock => {}
