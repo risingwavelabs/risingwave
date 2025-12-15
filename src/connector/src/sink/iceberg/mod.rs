@@ -978,7 +978,7 @@ impl<B: IcebergWriterBuilder> TaskWriterBuilderWrapper<B> {
         }
     }
 
-    async fn build(self) -> iceberg::Result<TaskWriter<B>> {
+    fn build(self) -> iceberg::Result<TaskWriter<B>> {
         let partition_splitter = match (
             self.partition_spec.is_unpartitioned(),
             self.compute_partition,
@@ -1038,10 +1038,12 @@ enum IcebergWriterDispatch {
     Upsert {
         writer: Option<Box<dyn IcebergWriter>>,
         writer_builder: TaskWriterBuilderWrapper<
-            DeltaWriterBuilder<
-                DataFileWriterBuilderType,
-                PositionDeleteFileWriterBuilderType,
-                EqualityDeleteFileWriterBuilderType,
+            MonitoredGeneralWriterBuilder<
+                DeltaWriterBuilder<
+                    DataFileWriterBuilderType,
+                    PositionDeleteFileWriterBuilderType,
+                    EqualityDeleteFileWriterBuilderType,
+                >,
             >,
         >,
         arrow_schema_with_op_column: SchemaRef,
@@ -1160,7 +1162,6 @@ impl IcebergSinkWriterInner {
             writer_builder
                 .clone()
                 .build()
-                .await
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         ) as Box<dyn IcebergWriter>);
         Ok(Self {
@@ -1322,7 +1323,11 @@ impl IcebergSinkWriterInner {
             Arc::new(ArrowSchema::new(new_fields))
         };
         let writer_builder = TaskWriterBuilderWrapper::new(
-            delta_builder,
+            MonitoredGeneralWriterBuilder::new(
+                delta_builder,
+                write_qps.clone(),
+                write_latency.clone(),
+            ),
             fanout_enabled,
             schema.clone(),
             partition_spec.clone(),
@@ -1332,7 +1337,6 @@ impl IcebergSinkWriterInner {
             writer_builder
                 .clone()
                 .build()
-                .await
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         ) as Box<dyn IcebergWriter>);
         Ok(Self {
@@ -1515,7 +1519,7 @@ impl SinkWriter for IcebergSinkWriter {
                     }
                     _ => None,
                 };
-                match writer_builder.clone().build().await {
+                match writer_builder.clone().build() {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
@@ -1538,7 +1542,7 @@ impl SinkWriter for IcebergSinkWriter {
                     }
                     _ => None,
                 };
-                match writer_builder.clone().build().await {
+                match writer_builder.clone().build() {
                     Ok(new_writer) => {
                         *writer = Some(Box::new(new_writer));
                     }
