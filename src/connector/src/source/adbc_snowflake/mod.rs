@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use adbc_core::options::{OptionDatabase, OptionValue};
 use adbc_core::{
     Connection as AdbcCoreConnection, Database as AdbcCoreDatabase, Statement as AdbcCoreStatement,
 };
@@ -170,6 +171,14 @@ impl AdbcSnowflakeProperties {
             .with_database(&self.database)
             .with_schema(&self.schema)
             .with_warehouse(&self.warehouse);
+
+        // Set the max timestamp precision to microseconds, as RisingWave supports at most microsecond precision.
+        builder.other.push((
+            OptionDatabase::Other(
+                "adbc.snowflake.sql.client_option.max_timestamp_precision".to_owned(),
+            ),
+            OptionValue::String("microseconds".to_owned()),
+        ));
 
         if let Some(ref role) = self.role {
             builder = builder.with_role(role);
