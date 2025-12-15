@@ -121,8 +121,14 @@ pub struct AdbcSnowflakeProperties {
     pub auth_token: Option<String>,
 
     /// JWT private key file path (when using `auth_jwt`).
-    #[serde(rename = "adbc_snowflake.jwt_private_key")]
-    pub jwt_private_key: Option<String>,
+    #[serde(rename = "adbc_snowflake.jwt_private_key_path")]
+    pub jwt_private_key_path: Option<String>,
+
+    #[serde(rename = "adbc_snowflake.jwt_private_key_pkcs8_value")]
+    pub jwt_private_key_pkcs8_value: Option<String>,
+
+    #[serde(rename = "adbc_snowflake.jwt_private_key_pkcs8_password")]
+    pub jwt_private_key_pkcs8_password: Option<String>,
 
     /// Unknown fields for forward compatibility.
     #[serde(flatten)]
@@ -133,7 +139,9 @@ impl crate::enforce_secret::EnforceSecret for AdbcSnowflakeProperties {
     const ENFORCE_SECRET_PROPERTIES: phf::Set<&'static str> = phf::phf_set! {
         "adbc_snowflake.password",
         "adbc_snowflake.auth_token",
-        "adbc_snowflake.jwt_private_key",
+        "adbc_snowflake.jwt_private_key_path",
+        "adbc_snowflake.jwt_private_key_pkcs8_value",
+        "adbc_snowflake.jwt_private_key_pkcs8_password"
     };
 }
 
@@ -210,8 +218,17 @@ impl AdbcSnowflakeProperties {
             builder = builder.with_auth_token(auth_token);
         }
 
-        if let Some(ref jwt_private_key) = self.jwt_private_key {
-            builder = builder.with_jwt_private_key(jwt_private_key.into());
+        if let Some(ref jwt_private_key_path) = self.jwt_private_key_path {
+            builder = builder.with_jwt_private_key(jwt_private_key_path.into());
+        }
+
+        if let Some(ref jwt_private_key_pkcs8_value) = self.jwt_private_key_pkcs8_value {
+            builder = builder.with_jwt_private_key_pkcs8_value(jwt_private_key_pkcs8_value.into());
+        }
+
+        if let Some(ref jwt_private_key_pkcs8_password) = self.jwt_private_key_pkcs8_password {
+            builder =
+                builder.with_jwt_private_key_pkcs8_password(jwt_private_key_pkcs8_password.into());
         }
 
         Ok(builder)
