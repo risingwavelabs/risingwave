@@ -478,6 +478,8 @@ macro_rules! impl_has_variant {
 
 impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction, UserDefinedFunction, Now}
 
+/// Deprecated: Use `InequalityInputPairV2` instead.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InequalityInputPair {
     /// Input index of greater side of inequality.
@@ -488,6 +490,7 @@ pub struct InequalityInputPair {
     pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
 }
 
+#[allow(dead_code)]
 impl InequalityInputPair {
     fn new(
         key_required_larger: usize,
@@ -499,6 +502,45 @@ impl InequalityInputPair {
             key_required_smaller,
             delta_expression,
         }
+    }
+}
+
+/// Inequality condition between two input columns with clearer semantics.
+/// Represents: `left_col <op> right_col` where op is one of `<`, `<=`, `>`, `>=`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InequalityInputPairV2 {
+    /// Index of the left side column (from left input).
+    pub left_idx: usize,
+    /// Index of the right side column (from right input, NOT offset by `left_cols_num`).
+    pub right_idx: usize,
+    /// Comparison operator: `left_col <op> right_col`.
+    pub op: ExprType,
+}
+
+impl InequalityInputPairV2 {
+    pub fn new(left_idx: usize, right_idx: usize, op: ExprType) -> Self {
+        debug_assert!(matches!(
+            op,
+            ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual
+        ));
+        Self {
+            left_idx,
+            right_idx,
+            op,
+        }
+    }
+
+    /// Returns true if the left side has larger values based on the operator.
+    /// For `>` and `>=`, left side is larger.
+    /// State cleanup applies to the side with larger values.
+    pub fn left_side_is_larger(&self) -> bool {
+        matches!(
+            self.op,
+            ExprType::GreaterThan | ExprType::GreaterThanOrEqual
+        )
     }
 }
 
@@ -791,6 +833,9 @@ impl ExprImpl {
 
     /// Accepts expressions of the form `InputRef cmp InputRef [+- const_expr]` or
     /// `InputRef [+- const_expr] cmp InputRef`.
+    ///
+    /// Deprecated: Use `as_comparison_cond` instead, which only matches pure `InputRef <op> InputRef`.
+    #[allow(dead_code)]
     pub(crate) fn as_input_comparison_cond(&self) -> Option<InequalityInputPair> {
         if let ExprImpl::FunctionCall(function_call) = self {
             match function_call.func_type() {
@@ -839,6 +884,9 @@ impl ExprImpl {
 
     /// Returns the `InputRef` and offset of a predicate if it matches
     /// the form `InputRef [+- const_expr]`, else returns None.
+    ///
+    /// Deprecated: Only used by `as_input_comparison_cond`.
+    #[allow(dead_code)]
     fn as_input_offset(&self) -> Option<(usize, Option<(ExprType, ExprImpl)>)> {
         match self {
             ExprImpl::InputRef(input_ref) => Some((input_ref.index(), None)),

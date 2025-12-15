@@ -18,7 +18,8 @@ use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DeltaExpression, HashJoinNode, PbInequalityPair, PbJoinEncodingType,
+    HashJoinNode, InequalityPairV2 as PbInequalityPairV2, InequalityType as PbInequalityType,
+    PbJoinEncodingType,
 };
 
 use super::generic::{GenericPlanNode, Join};
@@ -29,7 +30,7 @@ use super::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamDeltaJoin, StreamPlanRef as PlanRef,
     TryToStreamPb, generic,
 };
-use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputPair};
+use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprType, ExprVisitor, InequalityInputPairV2};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
@@ -45,9 +46,9 @@ pub struct StreamHashJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
 
-    /// `(do_state_cleaning, InequalityInputPair {key_required_larger, key_required_smaller,
-    /// delta_expression})`. View struct `InequalityInputPair` for details.
-    inequality_pairs: Vec<(bool, InequalityInputPair)>,
+    /// `(clean_left_state, clean_right_state, InequalityInputPairV2)`.
+    /// Each entry represents an inequality condition like `left_col <op> right_col`.
+    inequality_pairs: Vec<(bool, bool, InequalityInputPairV2)>,
 
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
@@ -125,81 +126,73 @@ impl StreamHashJoin {
                     }
                 }
             }
-            let (left_cols_num, original_inequality_pairs) = eq_join_predicate.inequality_pairs();
-            for (
-                conjunction_idx,
-                InequalityInputPair {
-                    key_required_larger,
-                    key_required_smaller,
-                    delta_expression,
-                },
-            ) in original_inequality_pairs
-            {
-                let both_upstream_has_watermark = if key_required_larger < key_required_smaller {
-                    core.left.watermark_columns().contains(key_required_larger)
-                        && core
-                            .right
-                            .watermark_columns()
-                            .contains(key_required_smaller - left_cols_num)
-                } else {
-                    core.left.watermark_columns().contains(key_required_smaller)
-                        && core
-                            .right
-                            .watermark_columns()
-                            .contains(key_required_larger - left_cols_num)
-                };
+
+            // Process inequality pairs using the new V2 format
+            let original_inequality_pairs = eq_join_predicate.inequality_pairs_v2();
+            for (conjunction_idx, pair) in original_inequality_pairs {
+                let InequalityInputPairV2 {
+                    left_idx,
+                    right_idx,
+                    op,
+                } = pair;
+
+                // Check if both upstream sides have watermarks on the inequality columns
+                let both_upstream_has_watermark = core.left.watermark_columns().contains(left_idx)
+                    && core.right.watermark_columns().contains(right_idx);
                 if !both_upstream_has_watermark {
                     continue;
                 }
 
-                let (internal_col1, internal_col2, do_state_cleaning) =
-                    if key_required_larger < key_required_smaller {
-                        (
-                            l2i.try_map(key_required_larger),
-                            r2i.try_map(key_required_smaller - left_cols_num),
-                            if !equal_condition_clean_state
-                                && clean_left_state_conjunction_idx.is_none()
-                            {
-                                clean_left_state_conjunction_idx = Some(conjunction_idx);
-                                true
-                            } else {
-                                false
-                            },
-                        )
-                    } else {
-                        (
-                            r2i.try_map(key_required_larger - left_cols_num),
-                            l2i.try_map(key_required_smaller),
-                            if !equal_condition_clean_state
-                                && clean_right_state_conjunction_idx.is_none()
-                            {
-                                clean_right_state_conjunction_idx = Some(conjunction_idx);
-                                true
-                            } else {
-                                false
-                            },
-                        )
-                    };
-                let mut is_valuable_inequality = do_state_cleaning;
-                if let Some(internal) = internal_col1
+                // Determine which side's state can be cleaned based on the operator.
+                // State cleanup applies to the side with LARGER values.
+                // For `left < right` or `left <= right`: RIGHT is larger → clean RIGHT state
+                // For `left > right` or `left >= right`: LEFT is larger → clean LEFT state
+                let left_is_larger =
+                    matches!(op, ExprType::GreaterThan | ExprType::GreaterThanOrEqual);
+
+                let (clean_left, clean_right) = if left_is_larger {
+                    // Left side is larger, we can clean left state
+                    let do_clean =
+                        !equal_condition_clean_state && clean_left_state_conjunction_idx.is_none();
+                    if do_clean {
+                        clean_left_state_conjunction_idx = Some(conjunction_idx);
+                    }
+                    (do_clean, false)
+                } else {
+                    // Right side is larger, we can clean right state
+                    let do_clean =
+                        !equal_condition_clean_state && clean_right_state_conjunction_idx.is_none();
+                    if do_clean {
+                        clean_right_state_conjunction_idx = Some(conjunction_idx);
+                    }
+                    (false, do_clean)
+                };
+
+                let mut is_valuable_inequality = clean_left || clean_right;
+
+                // Add watermark columns for the inequality.
+                // We can only yield watermark from the LARGER side downstream.
+                // For `left >= right`: left is larger, yield left watermark
+                // For `left <= right`: right is larger, yield right watermark
+                if left_is_larger {
+                    if let Some(internal) = l2i.try_map(left_idx)
+                        && !watermark_columns.contains(internal)
+                    {
+                        watermark_columns.insert(internal, ctx.next_watermark_group_id());
+                        is_valuable_inequality = true;
+                    }
+                } else if let Some(internal) = r2i.try_map(right_idx)
                     && !watermark_columns.contains(internal)
                 {
                     watermark_columns.insert(internal, ctx.next_watermark_group_id());
                     is_valuable_inequality = true;
                 }
-                if let Some(internal) = internal_col2
-                    && !watermark_columns.contains(internal)
-                {
-                    watermark_columns.insert(internal, ctx.next_watermark_group_id());
-                }
+
                 if is_valuable_inequality {
                     inequality_pairs.push((
-                        do_state_cleaning,
-                        InequalityInputPair {
-                            key_required_larger,
-                            key_required_smaller,
-                            delta_expression,
-                        },
+                        clean_left,
+                        clean_right,
+                        InequalityInputPairV2::new(left_idx, right_idx, op),
                     ));
                 }
             }
@@ -255,7 +248,7 @@ impl StreamHashJoin {
         )
     }
 
-    pub fn inequality_pairs(&self) -> &Vec<(bool, InequalityInputPair)> {
+    pub fn inequality_pairs(&self) -> &Vec<(bool, bool, InequalityInputPairV2)> {
         &self.inequality_pairs
     }
 }
@@ -387,39 +380,16 @@ impl TryToStreamPb for StreamHashJoin {
             .map(|expr| expr.to_expr_proto_checked_pure(retract, "JOIN condition"))
             .transpose()?;
 
-        let inequality_pairs = self
-            .inequality_pairs
-            .iter()
-            .map(
-                |(
-                    do_state_clean,
-                    InequalityInputPair {
-                        key_required_larger,
-                        key_required_smaller,
-                        delta_expression,
-                    },
-                )|
-                 -> SchedulerResult<PbInequalityPair> {
-                    let delta_expression = delta_expression
-                        .as_ref()
-                        .map(|(delta_type, delta)| -> SchedulerResult<DeltaExpression> {
-                            Ok(DeltaExpression {
-                                delta_type: *delta_type as i32,
-                                delta: Some(
-                                    delta.to_expr_proto_checked_pure(retract, "JOIN condition")?,
-                                ),
-                            })
-                        })
-                        .transpose()?;
-                    Ok(PbInequalityPair {
-                        key_required_larger: *key_required_larger as u32,
-                        key_required_smaller: *key_required_smaller as u32,
-                        clean_state: *do_state_clean,
-                        delta_expression,
-                    })
-                },
-            )
-            .try_collect()?;
+        // Helper function to convert ExprType to PbInequalityType
+        fn expr_type_to_pb_inequality_type(op: ExprType) -> i32 {
+            match op {
+                ExprType::LessThan => PbInequalityType::LessThan as i32,
+                ExprType::LessThanOrEqual => PbInequalityType::LessThanOrEqual as i32,
+                ExprType::GreaterThan => PbInequalityType::GreaterThan as i32,
+                ExprType::GreaterThanOrEqual => PbInequalityType::GreaterThanOrEqual as i32,
+                _ => PbInequalityType::Unspecified as i32,
+            }
+        }
 
         Ok(NodeBody::HashJoin(Box::new(HashJoinNode {
             join_type: self.core.join_type as i32,
@@ -427,7 +397,20 @@ impl TryToStreamPb for StreamHashJoin {
             right_key: right_jk_indices_prost,
             null_safe: null_safe_prost,
             condition,
-            inequality_pairs,
+            // Deprecated: keep empty for new plans
+            inequality_pairs: vec![],
+            // New inequality pairs with clearer semantics
+            inequality_pairs_v2: self
+                .inequality_pairs
+                .iter()
+                .map(|(clean_left, clean_right, pair)| PbInequalityPairV2 {
+                    left_idx: pair.left_idx as u32,
+                    right_idx: pair.right_idx as u32,
+                    clean_left_state: *clean_left,
+                    clean_right_state: *clean_right,
+                    op: expr_type_to_pb_inequality_type(pair.op),
+                })
+                .collect_vec(),
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             left_degree_table: Some(left_degree_table.to_internal_table_prost()),
