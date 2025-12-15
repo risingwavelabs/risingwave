@@ -779,7 +779,7 @@ fn gen_table_plan_inner(
 
     if !append_only && has_non_ttl_watermark {
         return Err(ErrorCode::NotSupported(
-            "Defining non-TTL watermarks on table requires the table to be append only.".to_owned(),
+            "Defining watermarks on table requires the table to be append only.".to_owned(),
             "Use the key words `APPEND ONLY`".to_owned(),
         )
         .into());
