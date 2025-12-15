@@ -171,14 +171,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8d8902cfe45b1dc6fdb2ec7e2f2da3bd3d425faf", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "41525a555f7dde497841114ffacf78f742fe5285", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8d8902cfe45b1dc6fdb2ec7e2f2da3bd3d425faf" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8d8902cfe45b1dc6fdb2ec7e2f2da3bd3d425faf" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "41525a555f7dde497841114ffacf78f742fe5285" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "41525a555f7dde497841114ffacf78f742fe5285" }
 
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"

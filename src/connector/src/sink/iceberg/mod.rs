@@ -40,14 +40,12 @@ use iceberg::writer::base_writer::equality_delete_writer::{
 use iceberg::writer::base_writer::position_delete_file_writer::{
     POSITION_DELETE_SCHEMA, PositionDeleteFileWriterBuilder,
 };
+use iceberg::writer::delta_writer::{DELETE_OP, DeltaWriterBuilder, INSERT_OP};
 use iceberg::writer::file_writer::ParquetWriterBuilder;
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
 };
 use iceberg::writer::file_writer::rolling_writer::RollingFileWriterBuilder;
-use iceberg::writer::function_writer::equality_delta_writer::{
-    DELETE_OP, EqualityDeltaWriterBuilder, INSERT_OP,
-};
 use iceberg::writer::task_writer::TaskWriter;
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
 use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
@@ -1058,7 +1056,7 @@ enum IcebergWriterDispatch {
     Upsert {
         writer: Option<Box<dyn IcebergWriter>>,
         writer_builder: TaskWriterBuilderWrapper<
-            EqualityDeltaWriterBuilder<
+            DeltaWriterBuilder<
                 DataFileWriterBuilderType,
                 PositionDeleteFileWriterBuilderType,
                 EqualityDeleteFileWriterBuilderType,
@@ -1321,7 +1319,7 @@ impl IcebergSinkWriterInner {
 
             EqualityDeleteFileWriterBuilder::new(rolling_writer_builder, config)
         };
-        let delta_builder = EqualityDeltaWriterBuilder::new(
+        let delta_builder = DeltaWriterBuilder::new(
             data_file_builder,
             position_delete_builder,
             equality_delete_builder,
