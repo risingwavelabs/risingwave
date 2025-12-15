@@ -139,6 +139,8 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
             TableFunctionToInternalBackfillProgressRule::create(),
             // Apply internal source backfill progress rule next
             TableFunctionToInternalSourceBackfillProgressRule::create(),
+            // Apply internal get channel delta stats rule next
+            TableFunctionToInternalGetChannelDeltaStatsRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
@@ -188,6 +190,15 @@ static TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS: LazyLock<Optimizatio
         OptimizationStage::new(
             "Table Function To Internal Source Backfill Progress",
             vec![TableFunctionToInternalSourceBackfillProgressRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
+
+static TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Get Channel Delta Stats",
+            vec![TableFunctionToInternalGetChannelDeltaStatsRule::create()],
             ApplyOrder::TopDown,
         )
     });
@@ -513,6 +524,24 @@ static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(true)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(false)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: LogicalPlanRef,
@@ -659,6 +688,8 @@ impl LogicalOptimizer {
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM)?;
+
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
         if has_logical_max_one_row(plan.clone()) {
             // `MaxOneRow` is currently only used for the runtime check of
@@ -768,11 +799,12 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
-        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH)?;
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
@@ -821,6 +853,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&SIMPLIFY_AGG)?;
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
+
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);

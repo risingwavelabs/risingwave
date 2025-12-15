@@ -12,18 +12,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: risingwave-large # this runner comes with more disk space, necessary for workflows that build RW
     steps:
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@master
-        with:
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-          root-reserve-mb: 10240
-          temp-reserve-mb: 10240
       - uses: actions/checkout@v4
         if: ${{ github.event_name == 'schedule' }}
         with:

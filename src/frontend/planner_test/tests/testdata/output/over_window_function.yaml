@@ -177,7 +177,7 @@
         └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: t.y = t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w)] }
+    └─BatchHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w)] }
       ├─BatchExchange { order: [], dist: HashShard(t.y) }
       │ └─BatchScan { table: t, columns: [t.x, t.y, t.w], distribution: SomeShard }
       └─BatchHashAgg { group_key: [t.y], aggs: [sum(t.x), max(t.x), min(t.w)] }
@@ -186,7 +186,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [x, y, sum, max, min, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.y, t._row_id) }
-      └─StreamHashJoin { type: Inner, predicate: t.y = t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w), t._row_id, t.y] }
+      └─StreamHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w), t._row_id, t.y] }
         ├─StreamExchange { dist: HashShard(t.y) }
         │ └─StreamShare { id: 1 }
         │   └─StreamTableScan { table: t, columns: [t.x, t.y, t.w, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -697,10 +697,11 @@
       └─BatchExchange { order: [], dist: HashShard(t.x) }
         └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [x], pk_columns: [x], pk_conflict: NoCheck }
-    └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
-      └─StreamExchange { dist: HashShard(t.x) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, y], stream_key: [x], pk_columns: [x], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y] }
+      └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
+        └─StreamExchange { dist: HashShard(t.x) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN with intersected partition key and order key
   sql: |
     create table t (x int, y int, z int);
@@ -1093,9 +1094,10 @@
     StreamMaterialize { columns: [t1x, t2x, t1z, t2y, t2z, t._row_id(hidden)], stream_key: [t1x, t._row_id], pk_columns: [t1x, t._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.x, t._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t.x = t.x, output: [t.x, t.x, t.z, t.y, t.z, t._row_id] }
-        ├─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
-        │ └─StreamExchange { dist: HashShard(t.x) }
-        │   └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        ├─StreamProject { exprs: [t.x, t.y, t.z] }
+        │ └─StreamGroupTopN { order: [t.y ASC], limit: 1, offset: 0, group_key: [t.x] }
+        │   └─StreamExchange { dist: HashShard(t.x) }
+        │     └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard(t.x) }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: split calls with different ORDER BY or PARTITION BY

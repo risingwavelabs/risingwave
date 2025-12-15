@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_common::row::Row;
 use risingwave_common::types::ToText;
 use risingwave_expr::function;
@@ -34,7 +32,7 @@ use risingwave_expr::function;
 /// abcde222
 /// ```
 #[function("concat(variadic anyarray) -> varchar")]
-fn concat(vals: impl Row, writer: &mut impl Write) {
+fn concat(vals: impl Row, writer: &mut impl std::fmt::Write) {
     for string in vals.iter().flatten() {
         string.write(writer).unwrap();
     }

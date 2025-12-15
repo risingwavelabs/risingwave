@@ -78,6 +78,7 @@ pub enum Components {
     Udf,
     NoDefaultFeatures,
     Moat,
+    DataFusion,
 }
 
 impl Components {
@@ -103,6 +104,7 @@ impl Components {
             Self::Udf => "[Build] Enable UDF",
             Self::NoDefaultFeatures => "[Build] Disable default features",
             Self::Moat => "[Component] Enable Moat",
+            Self::DataFusion => "[Build] Enable DataFusion",
         }
         .into()
     }
@@ -221,6 +223,10 @@ Currently, default features are: rw-static-link, all-connectors
                 "
 Enable Moat as distributed hybrid cache service."
             }
+            Self::DataFusion => {
+                "
+Enable DataFusion as the optional query engine for Iceberg tables."
+            }
         }
         .into()
     }
@@ -247,6 +253,7 @@ Enable Moat as distributed hybrid cache service."
             "ENABLE_UDF" => Some(Self::Udf),
             "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
             "ENABLE_MOAT" => Some(Self::Moat),
+            "ENABLE_DATAFUSION" => Some(Self::DataFusion),
             _ => None,
         }
     }
@@ -273,6 +280,7 @@ Enable Moat as distributed hybrid cache service."
             Self::Udf => "ENABLE_UDF",
             Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
             Self::Moat => "ENABLE_MOAT",
+            Self::DataFusion => "ENABLE_DATAFUSION",
         }
         .into()
     }
@@ -314,7 +322,7 @@ fn configure(chosen: &[Components]) -> Result<Option<Vec<Components>>> {
                 style("Space").reverse(),
             )
         )
-        .items_checked(&items)
+        .items_checked(items)
         .max_length(ITEMS_PER_PAGE)
         .interact_opt()? else {
         return Ok(None);

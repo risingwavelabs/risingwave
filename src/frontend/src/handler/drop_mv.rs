@@ -16,10 +16,11 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
+use crate::catalog::{CatalogError, CatalogErrorInner};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 
@@ -50,13 +51,14 @@ pub async fn handle_drop_mv(
                                 table_name
                             ))
                             .into())
+                    } else if let CatalogErrorInner::NotFound {
+                        object_type: "table",
+                        name,
+                    } = e.inner()
+                    {
+                        Err(CatalogError::not_found("materialized view", name).into())
                     } else {
-                        match e {
-                            CatalogError::NotFound("table", name) => {
-                                Err(CatalogError::NotFound("materialized view", name).into())
-                            }
-                            _ => Err(e.into()),
-                        }
+                        Err(e.into())
                     };
                 }
             };
@@ -72,9 +74,14 @@ pub async fn handle_drop_mv(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .drop_materialized_view(table_id, cascade)
-        .await?;
+
+    execute_with_long_running_notification(
+        catalog_writer.drop_materialized_view(table_id, cascade),
+        &session,
+        "DROP MATERIALIZED VIEW",
+        LongRunningNotificationAction::SuggestRecover,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,

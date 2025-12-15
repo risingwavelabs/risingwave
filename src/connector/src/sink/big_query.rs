@@ -608,13 +608,9 @@ impl TryFrom<SinkParam> for BigQuerySink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = BigQueryConfig::from_btreemap(param.properties)?;
-        BigQuerySink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        BigQuerySink::new(config, schema, pk_indices, param.sink_type.is_append_only())
     }
 }
 
@@ -865,7 +861,7 @@ impl StorageWriterClient {
 
     pub fn append_rows(&mut self, row: AppendRowsRequestRows, write_stream: String) -> Result<()> {
         let append_req = AppendRowsRequest {
-            write_stream: write_stream.clone(),
+            write_stream,
             offset: None,
             trace_id: Uuid::new_v4().hyphenated().to_string(),
             missing_value_interpretations: HashMap::default(),
@@ -959,7 +955,7 @@ fn build_protobuf_field(
             return Ok((field, Some(sub_proto)));
         }
         DataType::List(l) => {
-            let (mut field, proto) = build_protobuf_field(l.elem(), index, name.clone())?;
+            let (mut field, proto) = build_protobuf_field(l.elem(), index, name)?;
             field.label = Some(field_descriptor_proto::Label::Repeated.into());
             return Ok((field, proto));
         }

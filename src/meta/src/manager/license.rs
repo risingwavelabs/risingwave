@@ -68,7 +68,7 @@ impl MetaSrvEnv {
 
         let updater = {
             let mgr = self.system_params_manager_impl_ref();
-            let path = path.to_path_buf();
+            let path = path.clone();
 
             async move {
                 // Let the watcher live until the end of the updater to prevent dropping (then stopping).
@@ -131,7 +131,7 @@ mod tests {
     //     sub: "rw-test",
     //     iss: Test,
     //     tier: Free,              <- difference from the default license in debug build
-    //     cpu_core_limit: None,
+    //     rwu_limit: None,
     //     exp: 9999999999,
     // }
     const INITIAL_KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\

@@ -16,6 +16,7 @@ use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
 
 use crate::key_range::KeyRange;
@@ -29,7 +30,7 @@ pub struct SstableInfoInner {
     pub sst_id: HummockSstableId,
     pub key_range: KeyRange,
     pub file_size: u64,
-    pub table_ids: Vec<u32>,
+    pub table_ids: Vec<TableId>,
     pub meta_offset: u64,
     pub stale_key_count: u64,
     pub total_key_count: u64,

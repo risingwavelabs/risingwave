@@ -26,7 +26,7 @@ use super::{
     BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
     LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     StreamEowcOverWindow, StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
-    gen_filter_and_pushdown,
+    gen_filter_and_pushdown, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -126,7 +126,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                         agg_call.args.clone(),
                         false, // we don't support `IGNORE NULLS` for these functions now
                         partition_by.clone(),
-                        agg_call.order_by.clone(),
+                        agg_call.order_by,
                         frame.clone(),
                     )?,
                 ))
@@ -670,11 +670,8 @@ impl ToStream for LogicalOverWindow {
         if partition_key_indices.is_empty() {
             empty_partition_by_not_implemented!();
         }
-        let input = self
-            .core
-            .input
-            .try_better_locality(&partition_key_indices)
-            .unwrap_or_else(|| self.core.input.clone());
+
+        let input = try_enforce_locality_requirement(self.input(), &partition_key_indices);
         let stream_input = input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {

@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_index` contains part of the information about indexes.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-index.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-index.html`
 #[system_catalog(
     view,
     "pg_catalog.pg_index",

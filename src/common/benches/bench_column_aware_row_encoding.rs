@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hint::black_box;
 use std::sync::Arc;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use rand::{Rng, SeedableRng};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::row::OwnedRow;
@@ -173,7 +174,7 @@ fn bench_column_aware_encoding_struct(c: &mut Criterion) {
             [outer_struct].into(),
             std::iter::empty(),
         );
-        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value))]);
 
         (serializer, deserializer, row)
     };
@@ -238,7 +239,7 @@ fn bench_column_aware_encoding_composite(c: &mut Criterion) {
             [outer_struct].into(),
             std::iter::empty(),
         );
-        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value.clone()))]);
+        let row = OwnedRow::new(vec![Some(Struct(outer_struct_value))]);
 
         (serializer, deserializer, row)
     };

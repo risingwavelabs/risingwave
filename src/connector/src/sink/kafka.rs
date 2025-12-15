@@ -331,11 +331,12 @@ impl TryFrom<SinkParam> for KafkaSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = KafkaConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
@@ -375,7 +376,7 @@ impl Sink for KafkaSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        // For upsert Kafka sink, the primary key must be defined.
+        // For non-append-only Kafka sink, the primary key must be defined.
         if self.format_desc.format != SinkFormat::AppendOnly && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "primary key not defined for {:?} kafka sink (please define in `primary_key` field)",

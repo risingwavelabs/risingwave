@@ -162,8 +162,8 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "clippy_utils"
-version = "0.1.89"
-source = "git+https://github.com/risingwavelabs/clippy?rev=ff5af2fc22b4bb813fc7af028f99f58ecea22cd4#ff5af2fc22b4bb813fc7af028f99f58ecea22cd4"
+version = "0.1.92"
+source = "git+https://github.com/risingwavelabs/clippy?rev=0b9b812ddd1b49a581ae865afde73e7d6365eb8c#0b9b812ddd1b49a581ae865afde73e7d6365eb8c"
 dependencies = [
  "arrayvec",
  "itertools 0.12.0",

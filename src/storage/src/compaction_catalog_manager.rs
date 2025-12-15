@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -186,11 +186,11 @@ impl SchemaFilterKeyExtractor {
 
 #[derive(Default)]
 pub struct MultiFilterKeyExtractor {
-    id_to_filter_key_extractor: HashMap<u32, FilterKeyExtractorImpl>,
+    id_to_filter_key_extractor: HashMap<TableId, FilterKeyExtractorImpl>,
 }
 
 impl MultiFilterKeyExtractor {
-    pub fn register(&mut self, table_id: u32, filter_key_extractor: FilterKeyExtractorImpl) {
+    pub fn register(&mut self, table_id: TableId, filter_key_extractor: FilterKeyExtractorImpl) {
         self.id_to_filter_key_extractor
             .insert(table_id, filter_key_extractor);
     }
@@ -199,7 +199,7 @@ impl MultiFilterKeyExtractor {
         self.id_to_filter_key_extractor.len()
     }
 
-    pub fn get_existing_table_ids(&self) -> HashSet<u32> {
+    pub fn get_existing_table_ids(&self) -> HashSet<TableId> {
         self.id_to_filter_key_extractor.keys().cloned().collect()
     }
 }
@@ -216,7 +216,7 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
             return full_key;
         }
 
-        let table_id = get_table_id(full_key);
+        let table_id = get_table_id(full_key).into();
         self.id_to_filter_key_extractor
             .get(&table_id)
             .unwrap()
@@ -226,7 +226,7 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
 
 #[async_trait::async_trait]
 pub trait StateTableAccessor: Send + Sync {
-    async fn get_tables(&self, table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>>;
+    async fn get_tables(&self, table_ids: &[TableId]) -> RpcResult<HashMap<TableId, Table>>;
 }
 
 #[derive(Default)]
@@ -244,14 +244,14 @@ impl RemoteTableAccessor {
 
 #[async_trait::async_trait]
 impl StateTableAccessor for RemoteTableAccessor {
-    async fn get_tables(&self, table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
-        self.meta_client.get_tables(table_ids, true).await
+    async fn get_tables(&self, table_ids: &[TableId]) -> RpcResult<HashMap<TableId, Table>> {
+        self.meta_client.get_tables(table_ids.to_vec(), true).await
     }
 }
 
 #[async_trait::async_trait]
 impl StateTableAccessor for FakeRemoteTableAccessor {
-    async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
+    async fn get_tables(&self, _table_ids: &[TableId]) -> RpcResult<HashMap<TableId, Table>> {
         Err(RpcError::Internal(anyhow::anyhow!(
             "fake accessor does not support fetch remote table"
         )))
@@ -283,19 +283,19 @@ impl CompactionCatalogManager {
 
 impl CompactionCatalogManager {
     /// `update` is used to update `Table` in `table_id_to_catalog` from notification
-    pub fn update(&self, table_id: u32, catalog: Table) {
+    pub fn update(&self, table_id: TableId, catalog: Table) {
         self.table_id_to_catalog.write().insert(table_id, catalog);
     }
 
     /// `sync` is used to sync all `Table` in `table_id_to_catalog` from notification whole snapshot
-    pub fn sync(&self, catalog_map: HashMap<u32, Table>) {
+    pub fn sync(&self, catalog_map: HashMap<TableId, Table>) {
         let mut guard = self.table_id_to_catalog.write();
         guard.clear();
         guard.extend(catalog_map);
     }
 
     /// `remove` is used to remove `Table` in `table_id_to_catalog` by `table_id`
-    pub fn remove(&self, table_id: u32) {
+    pub fn remove(&self, table_id: TableId) {
         self.table_id_to_catalog.write().remove(&table_id);
     }
 
@@ -441,13 +441,13 @@ impl CompactionCatalogAgent {
         }
     }
 
-    pub fn for_test(table_ids: Vec<StateTableId>) -> Arc<Self> {
+    pub fn for_test(table_ids: Vec<impl Into<StateTableId>>) -> Arc<Self> {
         let full_key_filter_key_extractor =
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor);
 
-        let table_id_to_vnode: HashMap<u32, usize> = table_ids
+        let table_id_to_vnode: HashMap<TableId, usize> = table_ids
             .into_iter()
-            .map(|table_id| (table_id, VirtualNode::COUNT_FOR_TEST))
+            .map(|table_id| (table_id.into(), VirtualNode::COUNT_FOR_TEST))
             .collect();
 
         let table_id_to_watermark_serde = table_id_to_vnode
@@ -509,7 +509,10 @@ pub type CompactionCatalogAgentRef = Arc<CompactionCatalogAgent>;
 fn build_watermark_col_serde(
     table_catalog: &Table,
 ) -> Option<(OrderedRowSerde, OrderedRowSerde, usize)> {
-    match table_catalog.clean_watermark_index_in_pk {
+    // Get clean watermark PK index using the helper method
+    let clean_watermark_index_in_pk = table_catalog.get_clean_watermark_index_in_pk_compat();
+
+    match clean_watermark_index_in_pk {
         None => {
             // non watermark table or watermark column is the first column (pk_prefix_watermark)
             None
@@ -541,14 +544,8 @@ fn build_watermark_col_serde(
 
             assert_eq!(pk_data_types.len(), pk_order_types.len());
             let pk_serde = OrderedRowSerde::new(pk_data_types, pk_order_types);
-            let watermark_col_serde = pk_serde
-                .index(clean_watermark_index_in_pk as usize)
-                .into_owned();
-            Some((
-                pk_serde,
-                watermark_col_serde,
-                clean_watermark_index_in_pk as usize,
-            ))
+            let watermark_col_serde = pk_serde.index(clean_watermark_index_in_pk).into_owned();
+            Some((pk_serde, watermark_col_serde, clean_watermark_index_in_pk))
         }
     }
 }
@@ -596,9 +593,9 @@ mod tests {
 
     fn build_table_with_prefix_column_num(column_count: u32) -> PbTable {
         PbTable {
-            id: 0,
-            schema_id: 0,
-            database_id: 0,
+            id: 0.into(),
+            schema_id: 0.into(),
+            database_id: 0.into(),
             name: "test".to_owned(),
             table_type: TableType::Table as i32,
             columns: vec![
@@ -649,7 +646,7 @@ mod tests {
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
-            fragment_id: 0,
+            fragment_id: 0.into(),
             dml_fragment_id: None,
             initialized_at_epoch: None,
             vnode_col_index: None,
@@ -677,11 +674,12 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,
-            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
     }
 
@@ -721,7 +719,7 @@ mod tests {
             let prost_table = build_table_with_prefix_column_num(1);
             let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
             multi_filter_key_extractor.register(
-                1,
+                1.into(),
                 FilterKeyExtractorImpl::Schema(schema_filter_key_extractor),
             );
             let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
@@ -758,7 +756,7 @@ mod tests {
             let prost_table = build_table_with_prefix_column_num(2);
             let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
             multi_filter_key_extractor.register(
-                2,
+                2.into(),
                 FilterKeyExtractorImpl::Schema(schema_filter_key_extractor),
             );
             let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
@@ -806,7 +804,7 @@ mod tests {
 
         {
             // network error with FakeRemoteTableAccessor
-            let ret = compaction_catalog_manager.acquire(vec![1]).await;
+            let ret = compaction_catalog_manager.acquire(vec![1.into()]).await;
             assert!(ret.is_err());
             if let Err(e) = ret {
                 assert_eq!(

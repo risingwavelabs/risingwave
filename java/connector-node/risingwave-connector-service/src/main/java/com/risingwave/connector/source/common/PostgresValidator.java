@@ -76,8 +76,14 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
 
+        // Determine if this is AWS RDS (priority from high to low):
+        // 1. Explicit user configuration via 'postgres.is.aws.rds'
+        // 2. Automatic detection via hostname containing 'amazonaws.com'
+        // 3. Test-only parameter 'test.only.force.rds' (for backward compatibility)
         this.isAwsRds =
-                dbHost.contains(AWS_RDS_HOST)
+                Boolean.parseBoolean(
+                                userProps.getOrDefault(DbzConnectorConfig.PG_IS_AWS_RDS, "false"))
+                        || dbHost.contains(AWS_RDS_HOST)
                         || userProps
                                 .getOrDefault(DbzConnectorConfig.PG_TEST_ONLY_FORCE_RDS, "false")
                                 .equalsIgnoreCase("true");

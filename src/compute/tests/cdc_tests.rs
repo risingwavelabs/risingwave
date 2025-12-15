@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(coroutines)]
 
 use std::collections::{BTreeMap, HashMap};
@@ -113,7 +112,7 @@ impl MockOffsetGenExecutor {
             match msg {
                 Message::Chunk(chunk) => {
                     let mut offset_builder = Utf8ArrayBuilder::new(chunk.cardinality());
-                    assert!(chunk.is_compacted());
+                    assert!(chunk.is_vis_compacted());
                     let (ops, mut columns, vis) = chunk.into_inner();
 
                     for _ in 0..ops.len() {
@@ -308,7 +307,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let mut curr_epoch = test_epoch(11);
     let mut splits = HashMap::new();
     splits.insert(
-        actor_id,
+        actor_id.into(),
         vec![SplitImpl::MysqlCdc(DebeziumCdcSplit::new(0, None, None))],
     );
     let init_barrier =
@@ -383,7 +382,6 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_owned(),
-        None,
         None,
         None,
     ));
@@ -497,7 +495,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         table_pk_order_types,
         table_pk_indices.clone(),
     );
-    let actor_id = 0x1a;
+    let actor_id = 0x1a.into();
 
     // create state table
     let state_schema = Schema::new(vec![
@@ -1062,7 +1060,6 @@ async fn assert_mv(
         test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_owned(),
-        None,
         None,
         None,
     ));

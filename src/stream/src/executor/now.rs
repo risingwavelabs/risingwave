@@ -361,7 +361,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 + 2021-04-01T00:00:00.001Z"
@@ -393,7 +393,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:00.001Z
@@ -431,7 +431,7 @@ mod tests {
         // Consume the data chunk
         let chunk_msg = now.next_unwrap_ready_chunk()?;
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             // the last chunk was not checkpointed so the deleted old value should be `001`
             StreamChunk::from_pretty(
                 " TZ
@@ -480,7 +480,7 @@ mod tests {
         // Consume the data chunk
         let chunk_msg = now.next_unwrap_ready_chunk()?;
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:00.001Z
@@ -532,7 +532,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 + 2021-04-01T00:00:00.002Z" // <- the timestamp is extracted from the current epoch
@@ -583,7 +583,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 + 2021-04-01T00:00:00.001Z"
@@ -619,7 +619,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:00.001Z
@@ -655,7 +655,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:02.001Z
@@ -691,7 +691,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:04.001Z
@@ -727,7 +727,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:06.001Z
@@ -764,7 +764,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:08.001Z
@@ -801,7 +801,7 @@ mod tests {
         let chunk_msg = now.next_unwrap_ready_chunk()?;
 
         assert_eq!(
-            chunk_msg.compact(),
+            chunk_msg.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 - 2021-04-01T00:00:10.001Z
@@ -872,7 +872,7 @@ mod tests {
 
         let chunk = now.next_unwrap_ready_chunk()?;
         assert_eq!(
-            chunk.compact(),
+            chunk.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 + 2021-04-01T00:00:02.000Z
@@ -911,7 +911,7 @@ mod tests {
 
         let chunk = now.next_unwrap_ready_chunk()?;
         assert_eq!(
-            chunk.compact(),
+            chunk.compact_vis(),
             StreamChunk::from_pretty(
                 " TZ
                 + 2021-04-01T00:00:02.000Z

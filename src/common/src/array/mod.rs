@@ -54,7 +54,7 @@ pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
-pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
+pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue, ListWrite, ListWriter};
 pub use map_array::{MapArray, MapArrayBuilder, MapRef, MapValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -310,15 +310,12 @@ pub trait Array:
     }
 }
 
-/// Implement `compact` on array, which removes element according to `visibility`.
-trait CompactableArray: Array {
+/// Implement `compact_vis` on array, which removes element according to `visibility`.
+#[easy_ext::ext(ArrayCompactVisExt)]
+impl<A: Array> A {
     /// Select some elements from `Array` based on `visibility` bitmap.
     /// `cardinality` is only used to decide capacity of the new `Array`.
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self;
-}
-
-impl<A: Array> CompactableArray for A {
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
+    pub fn compact_vis(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         let mut builder = A::Builder::with_type(cardinality, self.data_type());
         for idx in visibility.iter_ones() {
             // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -588,9 +585,9 @@ impl ArrayImpl {
     }
 
     /// Select some elements from `Array` based on `visibility` bitmap.
-    pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
+    pub fn compact_vis(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         dispatch_array_variants!(self, inner, {
-            inner.compact(visibility, cardinality).into()
+            inner.compact_vis(visibility, cardinality).into()
         })
     }
 

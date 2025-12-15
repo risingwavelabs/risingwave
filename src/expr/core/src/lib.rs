@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![feature(iterator_try_collect)]
 #![feature(coroutines)]
 #![feature(never_type)]

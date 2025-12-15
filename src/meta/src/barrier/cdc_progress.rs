@@ -17,13 +17,14 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
-use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+use risingwave_common::catalog::FragmentTypeFlag;
+use risingwave_common::id::JobId;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_connector::source::cdc::external::CDC_TABLE_SPLIT_ID_START;
 use risingwave_connector::source::cdc::{
     INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID, INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID,
 };
-use risingwave_meta_model::{FragmentId, ObjectId, cdc_table_snapshot_split, fragment};
+use risingwave_meta_model::{FragmentId, cdc_table_snapshot_split, fragment};
 use risingwave_pb::stream_service::PbBarrierCompleteResponse;
 use risingwave_pb::stream_service::barrier_complete_response::PbCdcTableBackfillProgress;
 use sea_orm::prelude::Expr;
@@ -89,7 +90,7 @@ impl CdcTableBackfillTracker {
     pub fn apply_collected_command(
         &self,
         resps: impl IntoIterator<Item = &PbBarrierCompleteResponse>,
-    ) -> Vec<TableId> {
+    ) -> Vec<JobId> {
         let mut inner = self.inner.lock();
         let mut pre_completed_jobs = vec![];
         for resp in resps {
@@ -97,10 +98,10 @@ impl CdcTableBackfillTracker {
                 pre_completed_jobs.extend(inner.update_split_progress(progress));
             }
         }
-        pre_completed_jobs.into_iter().map(Into::into).collect()
+        pre_completed_jobs
     }
 
-    pub async fn complete_job(&self, job_id: TableId) -> MetaResult<()> {
+    pub async fn complete_job(&self, job_id: JobId) -> MetaResult<()> {
         let txn = self.meta_store.conn.begin().await?;
         // Rewrite the first split as [inf, inf].
         let bound = OwnedRow::new(vec![None]).value_serialize();
@@ -114,19 +115,13 @@ impl CdcTableBackfillTracker {
                 Expr::value(bound.clone()),
             )
             .col_expr(cdc_table_snapshot_split::Column::Right, Expr::value(bound))
-            .filter(
-                cdc_table_snapshot_split::Column::TableId
-                    .eq(job_id.table_id as risingwave_meta_model::TableId),
-            )
+            .filter(cdc_table_snapshot_split::Column::TableId.eq(job_id))
             .filter(cdc_table_snapshot_split::Column::SplitId.eq(CDC_TABLE_SPLIT_ID_START))
             .exec(&txn)
             .await?;
         // Keep only the first split.
         cdc_table_snapshot_split::Entity::delete_many()
-            .filter(
-                cdc_table_snapshot_split::Column::TableId
-                    .eq(job_id.table_id as risingwave_meta_model::TableId),
-            )
+            .filter(cdc_table_snapshot_split::Column::TableId.eq(job_id))
             .filter(cdc_table_snapshot_split::Column::SplitId.gt(CDC_TABLE_SPLIT_ID_START))
             .exec(&txn)
             .await?;
@@ -137,17 +132,21 @@ impl CdcTableBackfillTracker {
 
     /// Starts to track the progress for the `job_id`.
     /// A generation ID must be assigned via `next_generation` before it can be used.
-    pub fn track_new_job(&self, job_id: u32, split_count: u64) {
+    pub fn track_new_job(&self, job_id: JobId, split_count: u64) {
         self.inner.lock().track_new_job(job_id, split_count);
     }
 
-    pub fn add_fragment_table_mapping(&self, fragment_ids: impl Iterator<Item = u32>, job_id: u32) {
+    pub fn add_fragment_table_mapping(
+        &self,
+        fragment_ids: impl Iterator<Item = FragmentId>,
+        job_id: JobId,
+    ) {
         self.inner
             .lock()
             .add_fragment_job_mapping(fragment_ids, job_id);
     }
 
-    pub fn next_generation(&self, job_ids: impl Iterator<Item = u32>) -> u64 {
+    pub fn next_generation(&self, job_ids: impl Iterator<Item = JobId>) -> u64 {
         let mut inner = self.inner.lock();
         let generation = inner.next_generation;
         inner.next_generation += 1;
@@ -157,19 +156,19 @@ impl CdcTableBackfillTracker {
         generation
     }
 
-    pub fn list_cdc_progress(&self) -> HashMap<u32, CdcProgress> {
+    pub fn list_cdc_progress(&self) -> HashMap<JobId, CdcProgress> {
         self.inner.lock().list_cdc_progress()
     }
 
-    pub fn completed_job_ids(&self) -> HashSet<u32> {
+    pub fn completed_job_ids(&self) -> HashSet<JobId> {
         self.inner.lock().completed_job_ids()
     }
 }
 
 struct CdcTableBackfillTrackerInner {
-    cdc_progress: HashMap<u32, CdcProgress>,
+    cdc_progress: HashMap<JobId, CdcProgress>,
     next_generation: u64,
-    fragment_id_to_job_id: HashMap<u32, u32>,
+    fragment_id_to_job_id: HashMap<FragmentId, JobId>,
 }
 
 impl CdcTableBackfillTrackerInner {
@@ -197,22 +196,22 @@ impl CdcTableBackfillTrackerInner {
         Ok(inst)
     }
 
-    fn track_new_job(&mut self, job_id: u32, split_count: u64) {
+    fn track_new_job(&mut self, job_id: JobId, split_count: u64) {
         self.cdc_progress
             .insert(job_id, CdcProgress::new_partial(split_count));
     }
 
-    fn update_split_progress(&mut self, progress: &PbCdcTableBackfillProgress) -> Vec<u32> {
+    fn update_split_progress(&mut self, progress: &PbCdcTableBackfillProgress) -> Vec<JobId> {
         let Some(job_id) = self.fragment_id_to_job_id.get(&progress.fragment_id) else {
             tracing::warn!(
-                fragment_id = progress.fragment_id,
+                fragment_id = %progress.fragment_id,
                 "CDC table mapping not found."
             );
             return vec![];
         };
         tracing::debug!(?progress, "Complete split.");
         let Some(current_progress) = self.cdc_progress.get_mut(job_id) else {
-            tracing::warn!(job_id, "CDC table current progress not found.");
+            tracing::warn!(%job_id, "CDC table current progress not found.");
             return vec![];
         };
         if current_progress.is_completed {
@@ -238,31 +237,35 @@ impl CdcTableBackfillTrackerInner {
         pre_completed_jobs
     }
 
-    fn complete_job(&mut self, job_id: TableId) {
-        if let Some(p) = self.cdc_progress.get_mut(&job_id.table_id) {
+    fn complete_job(&mut self, job_id: JobId) {
+        if let Some(p) = self.cdc_progress.get_mut(&job_id) {
             p.is_completed = true;
         } else {
-            tracing::warn!(?job_id, "CDC table current progress not found.");
+            tracing::warn!(%job_id, "CDC table current progress not found.");
         }
     }
 
-    fn update_split_assignment_generation(&mut self, job_id: u32, generation: u64) {
+    fn update_split_assignment_generation(&mut self, job_id: JobId, generation: u64) {
         if let Some(p) = self.cdc_progress.get_mut(&job_id) {
             p.split_assignment_generation = generation;
             p.split_backfilled_count = 0;
             p.split_completed_count = 0;
         } else {
-            tracing::warn!(job_id, generation, "CDC table current progress not found.");
+            tracing::warn!(%job_id, generation, "CDC table current progress not found.");
         }
     }
 
-    fn add_fragment_job_mapping(&mut self, fragment_ids: impl Iterator<Item = u32>, job_id: u32) {
+    fn add_fragment_job_mapping(
+        &mut self,
+        fragment_ids: impl Iterator<Item = FragmentId>,
+        job_id: JobId,
+    ) {
         for fragment_id in fragment_ids {
             self.fragment_id_to_job_id.insert(fragment_id, job_id);
         }
     }
 
-    fn list_cdc_progress(&self) -> HashMap<u32, CdcProgress> {
+    fn list_cdc_progress(&self) -> HashMap<JobId, CdcProgress> {
         self.cdc_progress
             .iter()
             .map(|(job_id, progress)| {
@@ -286,7 +289,7 @@ impl CdcTableBackfillTrackerInner {
             .collect()
     }
 
-    fn completed_job_ids(&self) -> HashSet<u32> {
+    fn completed_job_ids(&self) -> HashSet<JobId> {
         self.cdc_progress
             .iter()
             .filter_map(
@@ -298,8 +301,8 @@ impl CdcTableBackfillTrackerInner {
     }
 }
 
-async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, (u64, bool)>> {
-    let split_progress: Vec<(i32, i64, i16)> = cdc_table_snapshot_split::Entity::find()
+async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<JobId, (u64, bool)>> {
+    let split_progress: Vec<(JobId, i64, i16)> = cdc_table_snapshot_split::Entity::find()
         .select_only()
         .column(cdc_table_snapshot_split::Column::TableId)
         .column_as(
@@ -329,7 +332,7 @@ async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, 
                 // CdcTableBackfillTracker::complete_job rewrites splits in a transaction.
                 // This error should only happen when the meta store reads uncommitted data.
                 tracing::error!(
-                    job_id,
+                    %job_id,
                     split_total_count,
                     split_completed_count,
                     "unexpected split count"
@@ -337,7 +340,7 @@ async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, 
                 Err(anyhow!(format!("unexpected split count:job_id={job_id}, split_total_count={split_total_count}, split_completed_count={split_completed_count}")).into())
             } else {
                 Ok((
-                    u32::try_from(job_id).unwrap(),
+                    job_id,
                     (
                         u64::try_from(split_total_count).unwrap(),
                         is_backfill_finished,
@@ -350,10 +353,10 @@ async fn restore_progress(meta_store: &SqlMetaStore) -> MetaResult<HashMap<u32, 
 
 async fn load_cdc_fragment_table_mapping(
     meta_store: &SqlMetaStore,
-) -> MetaResult<HashMap<u32, u32>> {
+) -> MetaResult<HashMap<FragmentId, JobId>> {
     use risingwave_common::catalog::FragmentTypeMask;
     use risingwave_meta_model::prelude::Fragment as FragmentModel;
-    let fragment_jobs: Vec<(FragmentId, ObjectId)> = FragmentModel::find()
+    let fragment_jobs: Vec<(FragmentId, JobId)> = FragmentModel::find()
         .select_only()
         .columns([fragment::Column::FragmentId, fragment::Column::JobId])
         .filter(FragmentTypeMask::intersects(
@@ -362,16 +365,14 @@ async fn load_cdc_fragment_table_mapping(
         .into_tuple()
         .all(&meta_store.conn)
         .await?;
-    Ok(fragment_jobs
-        .into_iter()
-        .map(|(k, v)| (u32::try_from(k).unwrap(), u32::try_from(v).unwrap()))
-        .collect())
+    Ok(fragment_jobs.into_iter().collect())
 }
 
 #[cfg(test)]
 mod test {
     use std::iter;
 
+    use risingwave_common::id::JobId;
     use risingwave_pb::stream_service::BarrierCompleteResponse;
     use risingwave_pb::stream_service::barrier_complete_response::CdcTableBackfillProgress;
 
@@ -384,10 +385,13 @@ mod test {
         let meta_store = env.meta_store();
         let tracker = CdcTableBackfillTracker::new(meta_store).await.unwrap();
         assert_eq!(tracker.inner.lock().next_generation, 2);
-        let table_id = 123;
+        let table_id = 123.into();
         let split_count = 10;
         tracker.track_new_job(table_id, split_count);
-        tracker.add_fragment_table_mapping(vec![11, 12, 13].into_iter(), table_id);
+        tracker.add_fragment_table_mapping(
+            vec![11.into(), 12.into(), 13.into()].into_iter(),
+            table_id,
+        );
         let generation = tracker.next_generation(vec![table_id].into_iter());
         assert_eq!(generation, 2);
         assert_init_state(&tracker, table_id, generation, split_count);
@@ -398,7 +402,7 @@ mod test {
                     split_id_start_inclusive: 1,
                     split_id_end_inclusive: 2,
                     generation,
-                    fragment_id: 12,
+                    fragment_id: 12.into(),
                     ..Default::default()
                 },
                 CdcTableBackfillProgress {
@@ -406,7 +410,7 @@ mod test {
                     split_id_start_inclusive: 5,
                     split_id_end_inclusive: 10,
                     generation,
-                    fragment_id: 11,
+                    fragment_id: 11.into(),
                     ..Default::default()
                 },
             ],
@@ -436,7 +440,7 @@ mod test {
                 split_id_end_inclusive: 4,
                 // Expired generation.
                 generation: generation - 1,
-                fragment_id: 13,
+                fragment_id: 13.into(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -462,7 +466,7 @@ mod test {
                     split_id_start_inclusive: 1,
                     split_id_end_inclusive: 2,
                     generation,
-                    fragment_id: 12,
+                    fragment_id: 12.into(),
                     ..Default::default()
                 },
                 CdcTableBackfillProgress {
@@ -470,7 +474,7 @@ mod test {
                     split_id_start_inclusive: 5,
                     split_id_end_inclusive: 10,
                     generation,
-                    fragment_id: 11,
+                    fragment_id: 11.into(),
                     ..Default::default()
                 },
                 CdcTableBackfillProgress {
@@ -478,14 +482,14 @@ mod test {
                     split_id_start_inclusive: 3,
                     split_id_end_inclusive: 4,
                     generation,
-                    fragment_id: 13,
+                    fragment_id: 13.into(),
                     ..Default::default()
                 },
             ],
             ..Default::default()
         };
         let completed = tracker.apply_collected_command(iter::once(&barrier_complete));
-        assert_eq!(completed, vec![table_id.into()]);
+        assert_eq!(completed, vec![table_id]);
         assert_eq!(
             tracker
                 .inner
@@ -500,7 +504,7 @@ mod test {
 
     fn assert_init_state(
         tracker: &CdcTableBackfillTracker,
-        table_id: u32,
+        table_id: JobId,
         generation: u64,
         split_count: u64,
     ) {

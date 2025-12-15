@@ -416,7 +416,7 @@ impl HummockManager {
     pub async fn epoch_to_version(
         &self,
         query_epoch: HummockEpoch,
-        table_id: u32,
+        table_id: TableId,
     ) -> Result<HummockVersion> {
         let sql_store = self.env.meta_store_ref();
         let _permit = self.inflight_time_travel_query.try_acquire().map_err(|_| {
@@ -428,7 +428,10 @@ impl HummockManager {
         let epoch_to_version = hummock_epoch_to_version::Entity::find()
             .filter(
                 Condition::any()
-                    .add(hummock_epoch_to_version::Column::TableId.eq(i64::from(table_id)))
+                    .add(
+                        hummock_epoch_to_version::Column::TableId
+                            .eq(i64::from(table_id.as_raw_id())),
+                    )
                     // for backward compatibility
                     .add(hummock_epoch_to_version::Column::TableId.eq(0)),
             )
@@ -573,7 +576,7 @@ impl HummockManager {
             let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
                 epoch: Set(committed_epoch.try_into().unwrap()),
-                table_id: Set(table_id.table_id.into()),
+                table_id: Set(table_id.as_raw_id() as _),
                 version_id: Set(version_id.try_into().unwrap()),
             };
             batch.push(m);

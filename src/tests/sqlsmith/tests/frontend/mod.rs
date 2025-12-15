@@ -192,7 +192,7 @@ fn run_batch_query(
 ) -> Result<()> {
     let _guard = session.txn_begin_implicit();
 
-    let mut binder = Binder::new(&session);
+    let mut binder = Binder::new_for_batch(&session);
     let bound = binder
         .bind(stmt)
         .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e.as_report())))?;

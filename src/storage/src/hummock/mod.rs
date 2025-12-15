@@ -52,7 +52,6 @@ pub mod recent_filter;
 pub use recent_filter::*;
 
 pub mod block_stream;
-mod iceberg_compactor_runner;
 mod time_travel_version_cache;
 
 pub(crate) mod vector;

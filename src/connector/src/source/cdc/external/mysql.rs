@@ -37,12 +37,60 @@ use sqlx::MySqlPool;
 use sqlx::mysql::MySqlConnectOptions;
 use thiserror_ext::AsReport;
 
+use crate::connector_common::SslMode;
+// Re-export SslMode for convenience
+pub use crate::connector_common::SslMode as MySqlSslMode;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName, SslMode, mysql_row_to_owned_row,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName, mysql_row_to_owned_row,
 };
+
+/// Build MySQL connection pool with proper SSL configuration.
+///
+/// This helper function creates a `mysql_async::Pool` with all necessary configurations
+/// including SSL settings. Use this function to ensure consistent MySQL connection setup
+/// across the codebase.
+///
+/// # Arguments
+/// * `host` - MySQL server hostname or IP address
+/// * `port` - MySQL server port
+/// * `username` - MySQL username
+/// * `password` - MySQL password
+/// * `database` - Database name
+/// * `ssl_mode` - SSL mode configuration (disabled, preferred, required, verify-ca, verify-full)
+///
+/// # Returns
+/// Returns a configured `mysql_async::Pool` ready for use
+pub fn build_mysql_connection_pool(
+    host: &str,
+    port: u16,
+    username: &str,
+    password: &str,
+    database: &str,
+    ssl_mode: SslMode,
+) -> mysql_async::Pool {
+    let mut opts_builder = mysql_async::OptsBuilder::default()
+        .user(Some(username))
+        .pass(Some(password))
+        .ip_or_hostname(host)
+        .tcp_port(port)
+        .db_name(Some(database));
+
+    opts_builder = match ssl_mode {
+        SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
+        // verify-ca and verify-full are same as required for mysql now
+        SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
+            let ssl_without_verify = mysql_async::SslOpts::default()
+                .with_danger_accept_invalid_certs(true)
+                .with_danger_skip_domain_validation(true);
+            opts_builder.ssl_opts(Some(ssl_without_verify))
+        }
+    };
+
+    mysql_async::Pool::new(opts_builder)
+}
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct MySqlOffset {
@@ -344,13 +392,27 @@ pub struct MySqlExternalTableReader {
     rw_schema: Schema,
     field_names: String,
     pool: mysql_async::Pool,
+    upstream_mysql_pk_infos: Vec<(String, String)>, // (column_name, column_type)
+    mysql_version: (u8, u8),
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut conn = self.pool.get_conn().await?;
 
-        let sql = "SHOW MASTER STATUS".to_owned();
+        // Choose SQL command based on MySQL version
+        let sql = if self.is_mysql_8_4_or_later() {
+            "SHOW BINARY LOG STATUS"
+        } else {
+            "SHOW MASTER STATUS"
+        };
+
+        tracing::debug!(
+            "Using SQL command: {} for MySQL version {}.{}",
+            sql,
+            self.mysql_version.0,
+            self.mysql_version.1
+        );
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
         let row = rs
             .iter_mut()
@@ -398,25 +460,43 @@ impl ExternalTableReader for MySqlExternalTableReader {
 }
 
 impl MySqlExternalTableReader {
-    pub fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
-        let mut opts_builder = mysql_async::OptsBuilder::default()
-            .user(Some(config.username))
-            .pass(Some(config.password))
-            .ip_or_hostname(config.host)
-            .tcp_port(config.port.parse::<u16>().unwrap())
-            .db_name(Some(config.database));
+    /// Get MySQL version from the connection
+    async fn get_mysql_version(pool: &mysql_async::Pool) -> ConnectorResult<(u8, u8)> {
+        let mut conn = pool.get_conn().await?;
+        let result: Option<String> = conn.query_first("SELECT VERSION()").await?;
 
-        opts_builder = match config.ssl_mode {
-            SslMode::Disabled | SslMode::Preferred => opts_builder.ssl_opts(None),
-            // verify-ca and verify-full are same as required for mysql now
-            SslMode::Required | SslMode::VerifyCa | SslMode::VerifyFull => {
-                let ssl_without_verify = mysql_async::SslOpts::default()
-                    .with_danger_accept_invalid_certs(true)
-                    .with_danger_skip_domain_validation(true);
-                opts_builder.ssl_opts(Some(ssl_without_verify))
+        if let Some(version_str) = result {
+            let parts: Vec<&str> = version_str.split('.').collect();
+            if parts.len() >= 2 {
+                let major_version = parts[0]
+                    .parse::<u8>()
+                    .context("Failed to parse major version")?;
+                let minor_version = parts[1]
+                    .parse::<u8>()
+                    .context("Failed to parse minor version")?;
+                return Ok((major_version, minor_version));
             }
-        };
-        let pool = mysql_async::Pool::new(opts_builder);
+        }
+        Err(anyhow!("Failed to get MySQL version").into())
+    }
+
+    /// Check if MySQL version is 8.4 or later
+    fn is_mysql_8_4_or_later(&self) -> bool {
+        let (major, minor) = self.mysql_version;
+        major > 8 || (major == 8 && minor >= 4)
+    }
+
+    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+        let database = config.database.clone();
+        let table = config.table.clone();
+        let pool = build_mysql_connection_pool(
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.username,
+            &config.password,
+            &config.database,
+            config.ssl_mode,
+        );
 
         let field_names = rw_schema
             .fields
@@ -425,10 +505,23 @@ impl MySqlExternalTableReader {
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
+        // Query MySQL primary key infos for type casting.
+        let upstream_mysql_pk_infos =
+            Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+        // Get MySQL version
+        let mysql_version = Self::get_mysql_version(&pool).await?;
+        tracing::info!(
+            "MySQL version detected: {}.{}",
+            mysql_version.0,
+            mysql_version.1
+        );
+
         Ok(Self {
             rw_schema,
             field_names,
             pool,
+            upstream_mysql_pk_infos,
+            mysql_version,
         })
     }
 
@@ -443,6 +536,53 @@ impl MySqlExternalTableReader {
                 offset,
             )?))
         })
+    }
+
+    /// Query upstream primary key data types, used for generating filter conditions with proper type casting.
+    async fn query_upstream_pk_infos(
+        pool: &mysql_async::Pool,
+        database: &str,
+        table: &str,
+    ) -> ConnectorResult<Vec<(String, String)>> {
+        let mut conn = pool.get_conn().await?;
+
+        // Query primary key columns and their data types
+        let sql = format!(
+            "SELECT COLUMN_NAME, COLUMN_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = '{}'
+            AND TABLE_NAME = '{}'
+            AND COLUMN_KEY = 'PRI'
+            ORDER BY ORDINAL_POSITION",
+            database, table
+        );
+
+        let rs = conn.query::<mysql_async::Row, _>(sql).await?;
+
+        let mut column_infos = Vec::new();
+        for row in &rs {
+            let column_name: String = row.get(0).unwrap();
+            let column_type: String = row.get(1).unwrap();
+            column_infos.push((column_name, column_type));
+        }
+
+        drop(conn);
+
+        Ok(column_infos)
+    }
+
+    /// Check if a column is unsigned type
+    fn is_unsigned_type(&self, column_name: &str) -> bool {
+        self.upstream_mysql_pk_infos
+            .iter()
+            .find(|(col_name, _)| col_name == column_name)
+            .map(|(_, col_type)| col_type.to_lowercase().contains("unsigned"))
+            .unwrap_or(false)
+    }
+
+    /// Convert negative i64 to unsigned u64 based on column type
+    fn convert_negative_to_unsigned(&self, negative_val: i64) -> u64 {
+        negative_val as u64
     }
 
     #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
@@ -474,25 +614,11 @@ impl MySqlExternalTableReader {
                 order_key,
             )
         };
-
         let mut conn = self.pool.get_conn().await?;
         // Set session timezone to UTC
         conn.exec_drop("SET time_zone = \"+00:00\"", ()).await?;
 
-        if start_pk_row.is_none() {
-            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
-            let row_stream = rs_stream.map(|row| {
-                // convert mysql row into OwnedRow
-                let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
-            });
-            pin_mut!(row_stream);
-            #[for_await]
-            for row in row_stream {
-                let row = row?;
-                yield row;
-            }
-        } else {
+        if let Some(start_pk_row) = start_pk_row {
             let field_map = self
                 .rw_schema
                 .fields
@@ -503,7 +629,7 @@ impl MySqlExternalTableReader {
             // fill in start primary key params
             let params: Vec<_> = primary_keys
                 .iter()
-                .zip_eq_fast(start_pk_row.unwrap().into_iter())
+                .zip_eq_fast(start_pk_row.into_iter())
                 .map(|(pk, datum)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
@@ -511,13 +637,21 @@ impl MySqlExternalTableReader {
                             DataType::Boolean => Value::from(value.into_bool()),
                             DataType::Int16 => Value::from(value.into_int16()),
                             DataType::Int32 => Value::from(value.into_int32()),
-                            DataType::Int64 => Value::from(value.into_int64()),
+                            DataType::Int64 => {
+                                let int64_val = value.into_int64();
+                                if int64_val < 0 && self.is_unsigned_type(pk.as_str()) {
+                                    Value::from(self.convert_negative_to_unsigned(int64_val))
+                                } else {
+                                    Value::from(int64_val)
+                                }
+                            }
                             DataType::Float32 => Value::from(value.into_float32().into_inner()),
                             DataType::Float64 => Value::from(value.into_float64().into_inner()),
                             DataType::Varchar => Value::from(String::from(value.into_utf8())),
                             DataType::Date => Value::from(value.into_date().0),
                             DataType::Time => Value::from(value.into_time().0),
                             DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Decimal => Value::from(value.into_decimal().to_string()),
                             DataType::Timestamptz => {
                                 // Convert timestamptz to NaiveDateTime for MySQL TIMESTAMP comparison
                                 // MySQL expects NaiveDateTime for TIMESTAMP parameters
@@ -552,7 +686,20 @@ impl MySqlExternalTableReader {
                 let row = row?;
                 yield row;
             }
-        };
+        } else {
+            let rs_stream = sql.stream::<mysql_async::Row, _>(&mut conn).await?;
+            let row_stream = rs_stream.map(|row| {
+                // convert mysql row into OwnedRow
+                let mut row = row?;
+                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+            });
+            pin_mut!(row_stream);
+            #[for_await]
+            for row in row_stream {
+                let row = row?;
+                yield row;
+            }
+        }
         drop(conn);
     }
 
@@ -681,7 +828,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_mysql_table_reader() {
-        let columns = vec![
+        let columns = [
             ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32),
             ColumnDesc::named("v2", ColumnId::new(2), DataType::Decimal),
             ColumnDesc::named("v3", ColumnId::new(3), DataType::Varchar),
@@ -701,7 +848,9 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema).unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema)
+            .await
+            .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
         println!("BinlogOffset: {:?}", offset);
 

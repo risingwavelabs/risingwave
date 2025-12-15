@@ -233,6 +233,11 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Acosh
             | Type::Decode
             | Type::Encode
+            | Type::GetBit
+            | Type::GetByte
+            | Type::SetBit
+            | Type::SetByte
+            | Type::BitCount
             | Type::Sha1
             | Type::Sha224
             | Type::Sha256
@@ -278,6 +283,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::VecConcat
             | Type::L2Norm
             | Type::L2Normalize
+            | Type::Subvector
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
@@ -312,6 +318,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
+            | Type::RwClusterId
+            | Type::RwFragmentVnodes
+            | Type::RwActorVnodes
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding

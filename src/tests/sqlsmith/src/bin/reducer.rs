@@ -12,21 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::process::Command;
 use std::time::Duration;
 
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use risingwave_sqlsmith::reducer::shrink_file;
-use risingwave_sqlsmith::sqlreduce::Strategy;
 use thiserror_ext::AsReport;
 use tokio_postgres::NoTls;
 use tracing_subscriber::EnvFilter;
-
-#[derive(Debug, Clone, ValueEnum)]
-enum ReductionStrategy {
-    Single,
-    Aggressive,
-    Consecutive,
-}
 
 /// Reduce an sql query
 #[derive(Parser, Debug)]
@@ -39,14 +32,6 @@ struct Args {
     /// Output file
     #[arg(short, long)]
     output_file: String,
-
-    /// Reducer strategy
-    #[arg(short, long, default_value = "single")]
-    strategy: ReductionStrategy,
-
-    /// For consecutive strategy, number of elements to reduce at once (used only when strategy = consecutive)
-    #[arg(short, long, default_value_t = 2)]
-    consecutive_k: usize,
 
     /// Command to restore RW
     #[clap(long)]
@@ -62,6 +47,22 @@ async fn main() {
         .try_init();
 
     let args = Args::parse();
+
+    // Execute restore command before connecting to database
+    tracing::info!("Executing restore command: {}", args.run_rw_cmd);
+    let status = Command::new("sh").arg("-c").arg(&args.run_rw_cmd).status();
+
+    match status {
+        Ok(s) if s.success() => tracing::info!("Restore command executed successfully"),
+        Ok(s) => {
+            tracing::error!("Restore command failed with status: {}", s);
+            panic!("Failed to restore RW");
+        }
+        Err(err) => {
+            tracing::error!("Failed to execute restore command: {}", err.as_report());
+            panic!("Failed to execute restore command: {}", err.as_report());
+        }
+    }
 
     let (client, connection) = tokio_postgres::Config::new()
         .host("localhost")
@@ -80,16 +81,9 @@ async fn main() {
         }
     });
 
-    let strategy = match args.strategy {
-        ReductionStrategy::Single => Strategy::Single,
-        ReductionStrategy::Aggressive => Strategy::Aggressive,
-        ReductionStrategy::Consecutive => Strategy::Consecutive(args.consecutive_k),
-    };
-
     shrink_file(
         &args.input_file,
         &args.output_file,
-        strategy,
         client,
         &args.run_rw_cmd,
     )

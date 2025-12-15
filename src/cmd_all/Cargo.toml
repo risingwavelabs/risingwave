@@ -33,11 +33,12 @@ openssl-vendored = ["workspace-config/openssl-vendored"]
 udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
 all-connectors = ["risingwave_connector/all-sinks", "risingwave_connector/all-sources"]
+datafusion = ["risingwave_frontend/datafusion"]
 
 [dependencies]
 clap = { workspace = true }
-console = "0.15"
-const-str = "0.6"
+console = "0.16"
+const-str = "0.7"
 home = "0.5"
 risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }

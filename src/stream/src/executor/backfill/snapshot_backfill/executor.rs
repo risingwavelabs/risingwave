@@ -163,7 +163,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
         let (mut barrier_epoch, mut need_report_finish) = {
             if let Some(snapshot_epoch) = should_snapshot_backfill {
-                let table_id_str = format!("{}", self.upstream_table.table_id().table_id);
+                let table_id_str = format!("{}", self.upstream_table.table_id());
                 let actor_id_str = format!("{}", self.actor_ctx.id);
 
                 let consume_upstream_row_count = self
@@ -256,7 +256,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     );
                     info!(
                         ?barrier_epoch,
-                        table_id = self.upstream_table.table_id().table_id,
+                        table_id = %self.upstream_table.table_id(),
                         ?initial_pending_lag,
                         "start consuming log store"
                     );
@@ -340,7 +340,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     }
                     info!(
                         ?barrier_epoch,
-                        table_id = self.upstream_table.table_id().table_id,
+                        table_id = %self.upstream_table.table_id(),
                         "finish consuming log store"
                     );
 
@@ -348,7 +348,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 } else {
                     info!(
                         ?barrier_epoch,
-                        table_id = self.upstream_table.table_id().table_id,
+                        table_id = %self.upstream_table.table_id(),
                         "skip consuming log store and start consuming upstream directly"
                     );
 
@@ -372,7 +372,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                         );
                     });
                 info!(
-                    table_id = self.upstream_table.table_id().table_id,
+                    table_id = %self.upstream_table.table_id(),
                     "skip backfill"
                 );
                 assert_eq!(first_upstream_barrier.epoch, first_recv_barrier_epoch);
@@ -406,9 +406,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     if let Some(new_vnode_bitmap) =
                         post_commit.post_yield_barrier(update_vnode_bitmap).await?
                     {
-                        let _prev_vnode_bitmap = self
-                            .upstream_table
-                            .update_vnode_bitmap(new_vnode_bitmap.clone());
+                        let _prev_vnode_bitmap =
+                            self.upstream_table.update_vnode_bitmap(new_vnode_bitmap);
                         backfill_state
                             .latest_progress()
                             .for_each(|(vnode, progress)| {

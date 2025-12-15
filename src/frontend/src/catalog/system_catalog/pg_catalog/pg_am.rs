@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// Stores information about relation access methods.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-am.html`]
+/// Reference: `https://www.postgresql.org/docs/current/catalog-pg-am.html`
 #[system_catalog(view, "pg_catalog.pg_am")]
 #[derive(Fields)]
 struct PgAmColumn {

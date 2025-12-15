@@ -220,7 +220,7 @@ impl Condition {
     /// For [`EqJoinPredicate`], separate equality conditions which connect left columns and right
     /// columns from other conditions.
     ///
-    /// The equality conditions are transformed into `(left_col_id, right_col_id)` pairs.
+    /// The equality conditions are transformed into `(left_col_id, right_col_id, null_eq_null)` tuples.
     ///
     /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
     pub fn split_eq_keys(
@@ -468,9 +468,9 @@ impl Condition {
 
                         let bound = {
                             if (cmp.is_le() && left_bound) || (cmp.is_ge() && !left_bound) {
-                                left_scan_range.to_vec()
+                                left_scan_range.clone()
                             } else {
-                                right_scan_range.to_vec()
+                                right_scan_range.clone()
                             }
                         };
 
@@ -1421,7 +1421,7 @@ mod tests {
 
         let cond = Condition::with_expr(other.clone())
             .and(Condition::with_expr(right.clone()))
-            .and(Condition::with_expr(left.clone()));
+            .and(Condition::with_expr(left));
 
         let res = cond.split(left_col_num, right_col_num);
 

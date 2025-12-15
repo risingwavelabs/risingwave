@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::{Future, FutureExt};
+use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -145,11 +146,11 @@ impl<S> TracedStateStore<S, TableSnapshot> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for TracedStateStore<S, TableSnapshot> {
-    async fn on_key_value<O: Send + 'static>(
-        &self,
+    async fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
+        on_key_value_fn: impl KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         if let Some((key, value)) = self
             .traced_get_keyed_row(
@@ -336,12 +337,12 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
 }
 
 impl<S: StateStoreReadVector> StateStoreReadVector for TracedStateStore<S, TableSnapshot> {
-    fn nearest<O: Send + 'static>(
-        &self,
-        vec: Vector,
+    fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
-    ) -> impl StorageFuture<'_, Vec<O>> {
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>> {
         self.inner.nearest(vec, options, on_nearest_item_fn)
     }
 }

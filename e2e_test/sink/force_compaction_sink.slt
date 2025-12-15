@@ -1,0 +1,28 @@
+statement ok
+create table t_force_compaction (
+    id integer primary key,
+    v_int int
+);
+
+statement ok
+create sink sink_t_force_compaction from t_force_compaction with (
+  connector = 'blackhole',
+  type = 'upsert',
+  force_compaction = 'true',
+  primary_key = 'id',
+);
+
+statement ok
+insert into t_force_compaction values (1, 10), (2, 20), (3, 30);
+
+statement ok
+delete from t_force_compaction where id = 2;
+
+statement ok
+update t_force_compaction set v_int = 100 where id = 3;
+
+statement ok
+drop sink sink_t_force_compaction;
+
+statement ok
+drop table t_force_compaction;

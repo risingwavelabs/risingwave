@@ -135,7 +135,7 @@ impl StreamProject {
         }
     }
 
-    pub fn as_logical(&self) -> &generic::Project<PlanRef> {
+    pub fn core(&self) -> &generic::Project<PlanRef> {
         &self.core
     }
 
@@ -186,7 +186,8 @@ impl ExprRewritable<Stream> for StreamProject {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new_inner(core, self.noop_update_hint).into()
+        let noop_update_hint = self.noop_update_hint || core.likely_produces_noop_updates();
+        Self::new_inner(core, noop_update_hint).into()
     }
 }
 

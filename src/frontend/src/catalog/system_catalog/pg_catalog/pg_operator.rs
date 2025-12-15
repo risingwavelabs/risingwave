@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_operator` stores operator info.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-operator.html`]
+/// Reference: `https://www.postgresql.org/docs/current/catalog-pg-operator.html`
 #[system_catalog(view, "pg_catalog.pg_operator")]
 #[derive(Fields)]
 struct PgOpclass {

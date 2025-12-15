@@ -261,11 +261,6 @@ impl<'a> JsonbRef<'a> {
         Self(ValueRef::Null)
     }
 
-    /// Returns a value for empty string.
-    pub const fn empty_string() -> Self {
-        Self(ValueRef::String(""))
-    }
-
     /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
         self.0.is_null()
@@ -358,7 +353,7 @@ impl<'a> JsonbRef<'a> {
     ///   * Jsonb string is displayed with quotes but treated as its inner value here.
     pub fn force_str<W: std::fmt::Write>(&self, writer: &mut W) -> std::fmt::Result {
         match self.0 {
-            ValueRef::String(v) => writer.write_str(v),
+            ValueRef::String(v) => writer.write_str(v.as_str()),
             ValueRef::Null => Ok(()),
             ValueRef::Bool(_) | ValueRef::Number(_) | ValueRef::Array(_) | ValueRef::Object(_) => {
                 use crate::types::to_text::ToText as _;

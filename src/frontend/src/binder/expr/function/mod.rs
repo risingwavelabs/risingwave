@@ -24,7 +24,6 @@ use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
-use risingwave_pb::user::grant_privilege::PbObject;
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
     OrderByExpr, Statement, Window,
@@ -178,12 +177,7 @@ impl Binder {
                 // record the dependency upon the UDF
                 referred_udfs.insert(func.id);
                 self.check_privilege(
-                    ObjectCheckItem::new(
-                        func.owner,
-                        AclMode::Execute,
-                        func.name.clone(),
-                        PbObject::FunctionId(func.id.function_id()),
-                    ),
+                    ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                     self.database_id,
                 )?;
 
@@ -232,12 +226,7 @@ impl Binder {
             // record the dependency upon the UDF
             referred_udfs.insert(func.id);
             self.check_privilege(
-                ObjectCheckItem::new(
-                    func.owner,
-                    AclMode::Execute,
-                    func.name.clone(),
-                    PbObject::FunctionId(func.id.function_id()),
-                ),
+                ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                 self.database_id,
             )?;
             Some(func.clone())
@@ -394,6 +383,16 @@ impl Binder {
                 );
                 self.ensure_table_function_allowed()?;
                 return Ok(TableFunction::new_internal_source_backfill_progress().into());
+            }
+            // `internal_get_channel_delta_stats` table function
+            if func_name.eq("internal_get_channel_delta_stats") {
+                reject_syntax!(
+                    arg_list.variadic,
+                    "`VARIADIC` is not allowed in table function call"
+                );
+                self.ensure_table_function_allowed()?;
+
+                return Ok(TableFunction::new_internal_get_channel_delta_stats(args).into());
             }
             // UDTF
             if let Some(ref udf) = udf

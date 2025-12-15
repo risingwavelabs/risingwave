@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::Either;
+
 use crate::executor::prelude::*;
 
 mod epoch_check;
@@ -24,27 +26,12 @@ mod update_check;
 /// [`WrapperExecutor`] will do some sanity checks and logging for the wrapped executor.
 pub struct WrapperExecutor {
     input: Executor,
-
     actor_ctx: ActorContextRef,
-
-    enable_executor_row_count: bool,
-
-    enable_explain_analyze_stats: bool,
 }
 
 impl WrapperExecutor {
-    pub fn new(
-        input: Executor,
-        actor_ctx: ActorContextRef,
-        enable_executor_row_count: bool,
-        enable_explain_analyze_stats: bool,
-    ) -> Self {
-        Self {
-            input,
-            actor_ctx,
-            enable_executor_row_count,
-            enable_explain_analyze_stats,
-        }
+    pub fn new(input: Executor, actor_ctx: ActorContextRef) -> Self {
+        Self { input, actor_ctx }
     }
 
     #[allow(clippy::let_and_return)]
@@ -59,16 +46,11 @@ impl WrapperExecutor {
     }
 
     fn wrap(
-        enable_executor_row_count: bool,
-        enable_explain_analyze_stats: bool,
         info: Arc<ExecutorInfo>,
         actor_ctx: ActorContextRef,
         stream: impl MessageStream + 'static,
     ) -> BoxedMessageStream {
         // -- Shared wrappers --
-
-        // Await tree
-        let stream = trace::instrument_await_tree(info.clone(), stream);
 
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);
@@ -79,51 +61,33 @@ impl WrapperExecutor {
         let stream = epoch_provide::epoch_provide(stream);
 
         // Trace
-        let stream = trace::trace(
-            enable_executor_row_count,
-            info.clone(),
-            actor_ctx.clone(),
-            stream,
-        );
+        let stream = trace::trace(info.clone(), actor_ctx.clone(), stream);
 
         // operator-level metrics
-        let stream = stream_node_metrics::stream_node_metrics(
-            info.clone(),
-            enable_explain_analyze_stats,
-            stream,
-            actor_ctx.clone(),
-        );
+        let stream = stream_node_metrics::stream_node_metrics(info.clone(), stream, actor_ctx);
 
-        if cfg!(debug_assertions) {
-            Self::wrap_debug(info, stream).boxed()
+        // -- Debug-only wrappers --
+        let stream = if cfg!(debug_assertions) {
+            Either::Left(Self::wrap_debug(info.clone(), stream))
         } else {
-            stream.boxed()
-        }
+            Either::Right(stream)
+        };
+
+        // Await tree
+        // This should be the last wrapper, so that code in other wrappers are also instrumented with
+        // the span of the current executor.
+        trace::instrument_await_tree(info, stream).boxed()
     }
 }
 
 impl Execute for WrapperExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let info = Arc::new(self.input.info().clone());
-        Self::wrap(
-            self.enable_executor_row_count,
-            self.enable_explain_analyze_stats,
-            info,
-            self.actor_ctx,
-            self.input.execute(),
-        )
-        .boxed()
+        Self::wrap(info, self.actor_ctx, self.input.execute()).boxed()
     }
 
     fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
         let info = Arc::new(self.input.info().clone());
-        Self::wrap(
-            self.enable_executor_row_count,
-            self.enable_explain_analyze_stats,
-            info,
-            self.actor_ctx,
-            self.input.execute_with_epoch(epoch),
-        )
-        .boxed()
+        Self::wrap(info, self.actor_ctx, self.input.execute_with_epoch(epoch)).boxed()
     }
 }

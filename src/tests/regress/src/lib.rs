@@ -25,8 +25,6 @@
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
-#![feature(path_file_prefix)]
-#![feature(let_chains)]
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![allow(rw::format_error)]

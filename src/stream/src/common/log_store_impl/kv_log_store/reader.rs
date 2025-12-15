@@ -295,7 +295,7 @@ pub(crate) mod timeout_auto_rebuild {
                         curr_iter_item_count.0 = 0;
                         start_time = Instant::now();
                         info!(
-                            table_id = table_id.table_id,
+                            %table_id,
                             iter_exist_time_secs = initial_start_time.elapsed().as_secs(),
                             prev_iter_item_count,
                             total_iter_item_count = total_count.0,
@@ -591,6 +591,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             LogStoreBufferItem::Barrier {
                 is_checkpoint,
                 next_epoch,
+                add_columns,
             } => {
                 assert!(
                     item_epoch < next_epoch,
@@ -605,7 +606,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         is_checkpoint,
                         new_vnode_bitmap: None,
                         is_stop: false,
-                        add_columns: None,
+                        add_columns,
                     },
                 )
             }

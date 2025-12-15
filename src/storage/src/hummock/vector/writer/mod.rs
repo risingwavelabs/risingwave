@@ -19,6 +19,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::FutureExt;
 use hnsw::HnswFlatIndexWriter;
+use risingwave_common::array::VectorRef;
+use risingwave_common::catalog::TableId;
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::vector_index::{
     FlatIndex, FlatIndexAdd, VectorFileInfo, VectorIndex, VectorIndexAdd, VectorIndexImpl,
@@ -28,8 +30,8 @@ use risingwave_hummock_sdk::{HummockObjectId, HummockRawObjectId};
 
 use crate::hummock::vector::file::VectorFileBuilder;
 use crate::hummock::{HummockResult, ObjectIdManager, SstableStoreRef};
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
-use crate::vector::Vector;
 
 #[async_trait::async_trait]
 pub trait VectorObjectIdManager: Send + Sync {
@@ -78,9 +80,11 @@ pub(crate) enum VectorWriterImpl {
 
 impl VectorWriterImpl {
     pub(crate) async fn new(
+        table_id: TableId,
         index: &VectorIndex,
         sstable_store: SstableStoreRef,
         object_id_manager: VectorObjectIdManagerRef,
+        stats: Arc<HummockStateStoreMetrics>,
         storage_opts: &StorageOpts,
     ) -> HummockResult<Self> {
         Ok(match &index.inner {
@@ -93,11 +97,13 @@ impl VectorWriterImpl {
             )),
             VectorIndexImpl::HnswFlat(hnsw_flat) => VectorWriterImpl::HnswFlat(
                 HnswFlatIndexWriter::new(
+                    table_id,
                     hnsw_flat,
                     index.dimension,
                     DistanceMeasurement::from(index.distance_type),
                     sstable_store,
                     object_id_manager,
+                    stats,
                     storage_opts,
                 )
                 .await?,
@@ -105,7 +111,7 @@ impl VectorWriterImpl {
         })
     }
 
-    pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
+    pub(crate) fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> HummockResult<()> {
         match self {
             VectorWriterImpl::Flat(writer) => writer.insert(vec, info),
             VectorWriterImpl::HnswFlat(writer) => writer.insert(vec, info),
@@ -163,8 +169,8 @@ impl FlatIndexWriter {
         }
     }
 
-    pub(crate) fn insert(&mut self, vec: Vector, info: Bytes) -> HummockResult<()> {
-        self.vector_file_builder.add(vec.to_ref(), info.as_ref());
+    pub(crate) fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> HummockResult<()> {
+        self.vector_file_builder.add(vec, info.as_ref());
         Ok(())
     }
 

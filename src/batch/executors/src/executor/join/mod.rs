@@ -146,7 +146,7 @@ fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
     concated_columns.extend_from_slice(left.columns());
     concated_columns.extend_from_slice(right.columns());
     // Only handle one side is constant row chunk: One of visibility must be None.
-    let vis = match (left.is_compacted(), right.is_compacted()) {
+    let vis = match (left.is_vis_compacted(), right.is_vis_compacted()) {
         (true, _) => right.visibility().clone(),
         (_, true) => left.visibility().clone(),
         (false, false) => {

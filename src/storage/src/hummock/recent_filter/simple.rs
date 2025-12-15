@@ -55,7 +55,6 @@ impl<T> Clone for SimpleRecentFilter<T> {
 }
 
 impl<T> Inner<T> {
-    #[expect(clippy::swap_with_temporary)]
     fn maybe_rotate(&self, force: bool) {
         if let Some(mut layers) = self.layers.try_write()
             && (layers.updated.elapsed() >= self.refresh || force)

@@ -118,7 +118,7 @@ impl Expression for SomeAllExpression {
                 }
             };
 
-        if data_chunk.is_compacted() {
+        if data_chunk.is_vis_compacted() {
             for (left, right) in arr_left.iter().zip_eq_fast(arr_right.iter()) {
                 unfolded_left_right(left, right, &mut num_array);
             }

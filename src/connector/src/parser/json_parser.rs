@@ -293,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_parse_struct() {
-        let descs = vec![
+        let descs = [
             ColumnDesc::named(
                 "data",
                 0.into(),
@@ -371,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_parse_struct_from_string() {
-        let descs = vec![ColumnDesc::named(
+        let descs = [ColumnDesc::named(
             "struct",
             0.into(),
             DataType::from(StructType::new([
@@ -407,7 +407,7 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_json_parse_struct_missing_field_warning() {
-        let descs = vec![ColumnDesc::named(
+        let descs = [ColumnDesc::named(
             "struct",
             0.into(),
             DataType::from(StructType::new([

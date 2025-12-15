@@ -14,8 +14,8 @@
 
 use std::time::Duration;
 
+use indexmap::IndexMap;
 use itertools::Itertools;
-use lru::{Iter, LruCache};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use sqllogictest::{DBOutput, DefaultColumnType};
@@ -33,33 +33,10 @@ pub struct RisingWave {
 
 /// `SetStmts` stores and compacts all `SET` statements that have been executed in the client
 /// history.
+#[derive(Default)]
 pub struct SetStmts {
-    stmts_cache: LruCache<String, String>,
-}
-
-impl Default for SetStmts {
-    fn default() -> Self {
-        Self {
-            stmts_cache: LruCache::unbounded(),
-        }
-    }
-}
-
-struct SetStmtsIterator<'a, 'b>
-where
-    'a: 'b,
-{
-    _stmts: &'a SetStmts,
-    stmts_iter: core::iter::Rev<Iter<'b, String, String>>,
-}
-
-impl<'a> SetStmtsIterator<'a, '_> {
-    fn new(stmts: &'a SetStmts) -> Self {
-        Self {
-            _stmts: stmts,
-            stmts_iter: stmts.stmts_cache.iter().rev(),
-        }
-    }
+    // variable name -> last set statement
+    stmts: IndexMap<String, String>,
 }
 
 impl SetStmts {
@@ -78,19 +55,14 @@ impl SetStmts {
             } => {
                 let key = variable.real_value().to_lowercase();
                 // store complete sql as value.
-                self.stmts_cache.put(key, sql.to_owned());
+                self.stmts.insert(key, sql.to_owned());
             }
             _ => unreachable!(),
         }
     }
-}
 
-impl Iterator for SetStmtsIterator<'_, '_> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (_, stmt) = self.stmts_iter.next()?;
-        Some(stmt.clone())
+    fn replay_iter(&self) -> impl Iterator<Item = &str> + '_ {
+        self.stmts.values().map(|s| s.as_str())
     }
 }
 
@@ -130,8 +102,8 @@ impl RisingWave {
             }
         });
         // replay all SET statements
-        for stmt in SetStmtsIterator::new(set_stmts) {
-            client.simple_query(&stmt).await?;
+        for stmt in set_stmts.replay_iter() {
+            client.simple_query(stmt).await?;
         }
         Ok((client, task))
     }

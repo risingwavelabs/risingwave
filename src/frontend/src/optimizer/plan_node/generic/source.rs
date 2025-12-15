@@ -157,6 +157,29 @@ impl Source {
                     is_hidden: false,
                 },
             ]
+        } else if core.is_batch_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_id".to_owned(),
+                            data_type: DataType::Varchar,
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_info".to_owned(),
+                            data_type: DataType::Jsonb,
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+            ]
         } else if core.is_new_fs_connector() {
             vec![
                 ColumnCatalog {

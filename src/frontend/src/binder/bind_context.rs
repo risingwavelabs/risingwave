@@ -268,7 +268,7 @@ impl BindContext {
                         return Ok(vec![*non_nullable]);
                     } else {
                         // These will be converted to a `COALESCE(col1, col2, ..., coln)`
-                        return Ok(columns.to_vec());
+                        return Ok(columns.clone());
                     }
                 }
             }
@@ -277,7 +277,7 @@ impl BindContext {
                 column_name
             )))
         } else {
-            Ok(columns.to_vec())
+            Ok(columns.clone())
         }
     }
 

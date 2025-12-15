@@ -20,7 +20,7 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::expr::CAST_TABLE;
 
 /// The catalog `pg_cast` stores data type conversion paths.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-cast.html`
 #[derive(Fields)]
 struct PgCast {
     #[primary_key]

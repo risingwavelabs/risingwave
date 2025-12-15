@@ -24,7 +24,6 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
-use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_json::json;
 use serde_with::{DisplayFromStr, serde_as};
@@ -47,7 +46,7 @@ use crate::sink::snowflake_redshift::{
 };
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    Result, Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam,
+    Result, SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
     SinkWriterMetrics,
 };
 
@@ -166,8 +165,8 @@ impl TryFrom<SinkParam> for RedshiftSink {
         )
         .map_err(|e| SinkError::Config(anyhow!(e)))?;
         let is_append_only = param.sink_type.is_append_only();
-        let schema = param.schema().clone();
-        let pk_indices = param.downstream_pk.clone();
+        let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         Ok(Self {
             config,
             param,
@@ -179,7 +178,6 @@ impl TryFrom<SinkParam> for RedshiftSink {
 }
 
 impl Sink for RedshiftSink {
-    type Coordinator = RedshiftSinkCommitter;
     type LogSinker = CoordinatedLogSinker<RedShiftSinkWriter>;
 
     const SINK_NAME: &'static str = REDSHIFT_SINK;
@@ -243,9 +241,8 @@ impl Sink for RedshiftSink {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
+    ) -> Result<SinkCommitCoordinator> {
         let pk_column_names: Vec<_> = self
             .schema
             .fields
@@ -271,7 +268,7 @@ impl Sink for RedshiftSink {
             &pk_column_names,
             &all_column_names,
         )?;
-        Ok(coordinator)
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -570,9 +567,9 @@ impl Drop for RedshiftSinkCommitter {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for RedshiftSinkCommitter {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
     }
 
     async fn commit(
@@ -919,6 +916,8 @@ fn build_copy_into_sql(
         FROM '{manifest_path}'
         CREDENTIALS '{credentials}'
         FORMAT AS JSON 'auto'
+        DATEFORMAT 'auto'
+        TIMEFORMAT 'auto'
         MANIFEST;
         "#,
         table_name = table_name,

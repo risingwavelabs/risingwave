@@ -168,6 +168,7 @@ public class SourceTestClient {
                         .putProperties("slot.name", "orders") // pg only
                         .putProperties("server.id", "1") // mysql only
                         .build();
+
         Iterator<ConnectorServiceProto.GetEventStreamResponse> responses = null;
         try {
             responses = blockingStub.getEventStream(req);

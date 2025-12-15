@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use risingwave_simulation::cluster::Configuration;
-use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use tokio::time::sleep;
 
@@ -41,18 +40,17 @@ async fn nexmark_source_inner(watermark: bool) -> Result<()> {
         expected_events..=expected_events
     };
 
-    let mut cluster = NexmarkCluster::new(
-        Configuration::for_scale(),
-        6,
-        Some(expected_events),
-        watermark,
-    )
-    .await?;
+    let configuration = Configuration::for_scale();
+    let total_cores = configuration.total_streaming_cores();
+    let mut cluster =
+        NexmarkCluster::new(configuration, 6, Some(expected_events), watermark).await?;
 
     // Materialize all sources so that we can also check whether the row id generator is working
     // correctly after scaling.
     // https://github.com/risingwavelabs/risingwave/issues/7103
-    for table in ["person", "auction", "bid"] {
+    let tables = ["person", "auction", "bid"];
+
+    for table in &tables {
         cluster
             .run(&format!(
                 "create materialized view materialized_{table} as select * from {table};"
@@ -62,12 +60,20 @@ async fn nexmark_source_inner(watermark: bool) -> Result<()> {
 
     macro_rules! reschedule {
         () => {
-            let fragments = cluster
-                .locate_fragments([identity_contains("StreamSource")])
-                .await?;
-            assert_eq!(fragments.len(), 3);
-            for fragment in fragments {
-                cluster.reschedule(fragment.random_reschedule()).await?;
+            for table in tables {
+                let parallelism = {
+                    use rand::{Rng, rng as thread_rng};
+                    let rng = &mut thread_rng();
+                    let parallelism = rng.random_range(1..=total_cores);
+                    parallelism
+                };
+
+                cluster
+                    .run(format!(
+                        "alter materialized view materialized_{} set parallelism = {}",
+                        table, parallelism
+                    ))
+                    .await?;
             }
         };
     }

@@ -122,8 +122,8 @@ impl ExternalStorageTable {
                 self.schema.clone(),
                 self.pk_indices.clone(),
                 SchemaTableName {
-                    schema_name: self.schema_name.to_owned(),
-                    table_name: self.table_name.to_owned(),
+                    schema_name: self.schema_name.clone(),
+                    table_name: self.table_name.clone(),
                 },
             )
             .await

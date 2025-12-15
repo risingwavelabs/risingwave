@@ -51,7 +51,7 @@ impl Rule<Logical> for TableFunctionToProjectSetRule {
         let logical_values = LogicalValues::create(
             vec![vec![]],
             Schema::new(vec![]),
-            logical_table_function.base.ctx().clone(),
+            logical_table_function.base.ctx(),
         );
         let logical_project_set = LogicalProjectSet::create(logical_values, vec![table_function]);
         // We need a project to align schema type because

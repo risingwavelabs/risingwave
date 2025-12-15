@@ -173,7 +173,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             NodeBody::Delete
         )?;
 
-        let table_id = TableId::new(delete_node.table_id);
+        let table_id = delete_node.table_id;
 
         Ok(Box::new(Self::new(
             table_id,

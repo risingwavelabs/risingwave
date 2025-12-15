@@ -121,6 +121,8 @@ impl StreamNode for StreamFsFetch {
                 with_properties,
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
+                refresh_mode: source_catalog.refresh_mode,
+                associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });
         NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {

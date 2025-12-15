@@ -196,18 +196,18 @@ impl TableFunction {
                             ),
                         };
                         new_s3_operator(
-                            s3_region.clone(),
+                            s3_region,
                             eval_args[3].clone(),
                             eval_args[4].clone(),
-                            bucket.clone(),
-                            s3_endpoint.clone(),
+                            bucket,
+                            s3_endpoint,
                         )?
                     }
                     FileScanBackend::Gcs => {
                         let (bucket, _) =
                             extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
 
-                        new_gcs_operator(eval_args[2].clone(), bucket.clone())?
+                        new_gcs_operator(eval_args[2].clone(), bucket)?
                     }
                     FileScanBackend::Azblob => {
                         let (bucket, _) =
@@ -217,7 +217,7 @@ impl TableFunction {
                             eval_args[2].clone(),
                             eval_args[3].clone(),
                             eval_args[4].clone(),
-                            bucket.clone(),
+                            bucket,
                         )?
                     }
                 };
@@ -569,6 +569,7 @@ impl TableFunction {
                             | MySqlColumnType::MYSQL_TYPE_ENUM
                             | MySqlColumnType::MYSQL_TYPE_SET
                             | MySqlColumnType::MYSQL_TYPE_GEOMETRY
+                            | MySqlColumnType::MYSQL_TYPE_VECTOR
                             | MySqlColumnType::MYSQL_TYPE_NULL => {
                                 return Err(crate::error::ErrorCode::BindError(format!(
                                     "unsupported column type: {:?}",
@@ -621,6 +622,21 @@ impl TableFunction {
                 ("backfill_progress".to_owned(), DataType::Jsonb),
             ])),
             function_type: TableFunctionType::InternalSourceBackfillProgress,
+            user_defined: None,
+        }
+    }
+
+    pub fn new_internal_get_channel_delta_stats(args: Vec<ExprImpl>) -> Self {
+        Self {
+            args,
+            return_type: DataType::Struct(StructType::new(vec![
+                ("upstream_fragment_id".to_owned(), DataType::Int32),
+                ("downstream_fragment_id".to_owned(), DataType::Int32),
+                ("backpressure_rate".to_owned(), DataType::Float64),
+                ("recv_throughput".to_owned(), DataType::Float64),
+                ("send_throughput".to_owned(), DataType::Float64),
+            ])),
+            function_type: TableFunctionType::InternalGetChannelDeltaStats,
             user_defined: None,
         }
     }

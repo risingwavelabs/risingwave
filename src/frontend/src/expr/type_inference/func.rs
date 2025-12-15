@@ -765,7 +765,7 @@ fn infer_type_for_special(
         }
         ExprType::JsonbBuildArray => Ok(Some(DataType::Jsonb)),
         ExprType::JsonbBuildObject => {
-            if inputs.len() % 2 != 0 {
+            if !inputs.len().is_multiple_of(2) {
                 return Err(ErrorCode::BindError(
                     "argument list must have even number of elements".into(),
                 )

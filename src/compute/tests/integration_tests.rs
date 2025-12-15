@@ -53,7 +53,7 @@ use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source::DummySourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, StreamKey,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -145,7 +145,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
-    let pk_indices = PkIndices::from([0]);
+    let stream_key = StreamKey::from([0]);
     let column_descs = all_column_ids
         .iter()
         .zip_eq_fast(all_schema.fields.iter().cloned())
@@ -161,7 +161,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let source_executor = Executor::new(
         ExecutorInfo::for_test(
             all_schema.clone(),
-            pk_indices.clone(),
+            stream_key.clone(),
             "SourceExecutor".to_owned(),
             1,
         ),
@@ -172,7 +172,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let dml_executor = Executor::new(
         ExecutorInfo::for_test(
             all_schema.clone(),
-            pk_indices.clone(),
+            stream_key.clone(),
             "DmlExecutor".to_owned(),
             2,
         ),
@@ -192,7 +192,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let row_id_gen_executor = Executor::new(
         ExecutorInfo::for_test(
             all_schema.clone(),
-            pk_indices.clone(),
+            stream_key.clone(),
             "RowIdGenExecutor".to_owned(),
             3,
         ),
@@ -259,7 +259,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_owned(),
-        None,
         None,
         None,
     ));
@@ -330,7 +329,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         test_batch_query_epoch(),
         1024,
         "RowSeqScanExecutor2".to_owned(),
-        None,
         None,
         None,
     ));
@@ -412,7 +410,6 @@ async fn test_table_materialize() -> StreamResult<()> {
         "RowSeqScanExecutor2".to_owned(),
         None,
         None,
-        None,
     ));
 
     let mut stream = scan.execute();
@@ -489,7 +486,6 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         test_batch_query_epoch(),
         1,
         "RowSeqScanExecutor2".to_owned(),
-        None,
         None,
         None,
     ));

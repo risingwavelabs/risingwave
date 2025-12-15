@@ -168,7 +168,11 @@ impl LogicalApply {
     }
 
     pub fn correlated_indices(&self) -> Vec<usize> {
-        self.correlated_indices.to_owned()
+        self.correlated_indices.clone()
+    }
+
+    pub fn on_condition(&self) -> &Condition {
+        &self.on
     }
 
     pub fn translated(&self) -> bool {

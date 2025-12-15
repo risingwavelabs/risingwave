@@ -54,7 +54,7 @@ pub fn check_nexmark_schema(
         .map(|c| {
             (
                 c.column_desc.name.to_ascii_lowercase(),
-                c.column_desc.data_type.to_owned(),
+                c.column_desc.data_type.clone(),
             )
         })
         .collect_vec();

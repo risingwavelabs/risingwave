@@ -274,7 +274,7 @@ impl ColPrunable for LogicalProjectSet {
             new_node
         } else {
             // projected_row_id column is not needed so we did a projection to remove it
-            let mut new_output_cols = required_cols.to_vec();
+            let mut new_output_cols = required_cols.clone();
             if !required_cols.contains(&0) {
                 new_output_cols.insert(0, 0);
             }

@@ -129,8 +129,7 @@ pub const MAX_SPILL_TIMES: u16 = ((1 << EPOCH_AVAILABLE_BITS) - 1) as u16;
 // Low EPOCH_AVAILABLE_BITS bits set to 1
 pub const EPOCH_SPILL_TIME_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
 // High (64-EPOCH_AVAILABLE_BITS) bits set to 1
-const EPOCH_MASK: u64 = !EPOCH_SPILL_TIME_MASK;
-pub const MAX_EPOCH: u64 = u64::MAX & EPOCH_MASK;
+pub const MAX_EPOCH: u64 = !((1 << EPOCH_AVAILABLE_BITS) - 1);
 
 // EPOCH_INC_MIN_STEP_FOR_TEST is the minimum increment step for epoch in unit tests.
 // We need to keep the lower 16 bits of the epoch unchanged during each increment,

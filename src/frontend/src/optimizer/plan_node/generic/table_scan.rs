@@ -360,7 +360,7 @@ impl GenericPlanNode for TableScan {
         let id_to_op_idx =
             Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_catalog);
         self.table_catalog
-            .stream_key
+            .stream_key()
             .iter()
             .map(|&c| {
                 id_to_op_idx

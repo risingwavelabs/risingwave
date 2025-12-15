@@ -9,16 +9,37 @@ repository = { workspace = true }
 
 [features]
 default = []
-all-sinks = ["sink-deltalake"]
+all-sinks = [
+    "sink-bigquery",
+    "sink-deltalake",
+    "sink-google_pubsub",
+    "sink-clickhouse",
+    "sink-doris",
+    "sink-starrocks",
+]
 all-sources = []
+sink-bigquery = [
+    "dep:gcp-bigquery-client",
+    "dep:google-cloud-bigquery",
+    "dep:google-cloud-gax",
+    "dep:google-cloud-googleapis",
+]
 sink-deltalake = ["dep:deltalake"]
+sink-google_pubsub = [
+    # "dep:google-cloud-pubsub",
+    "dep:google-cloud-gax",
+    "dep:google-cloud-googleapis",
+]
+sink-clickhouse = ["dep:clickhouse"]
+sink-doris = []
+sink-starrocks = []
 
 [dependencies]
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = { version = "0.42", features = ["websockets"] }
+async-nats = { version = "0.45", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -39,15 +60,12 @@ byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 cfg-if = "1"
 cfg-or-panic = "0.2"
-chrono = { workspace = true, features = [
-    "clock",
-    "std",
-] }
+chrono = { workspace = true, features = ["clock", "std"] }
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f05029d2cb65164d61fa8699dd955f808375a618", features = [
     "time",
     "rustls-tls",
-] }
-csv = "1.3"
+], optional = true }
+csv = "1.4"
 deltalake = { workspace = true, optional = true }
 duration-str = "0.17.0"
 easy-ext = "1"
@@ -56,28 +74,28 @@ elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcp-bigquery-client = "0.18.0"
+gcp-bigquery-client = { version = "0.18.0", optional = true }
 glob = "0.3"
 google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", features = [
     "auth",
-] }
-google-cloud-gax = { package = "gcloud-gax", version = "1" }
+], optional = true }
+google-cloud-gax = { package = "gcloud-gax", version = "1", optional = true }
 google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", features = [
     "pubsub",
     "bigquery",
-] }
+], optional = true }
 google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
-indexmap = { version = "2.10.0", features = ["serde"] }
+indexmap = { workspace = true }
 itertools = { workspace = true }
 jni = { workspace = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
-mongodb = "3.2.3"
+mongodb = "3.2.5"
 mysql_async = { workspace = true }
-mysql_common = { version = "0.32", default-features = false, features = [
+mysql_common = { version = "0.35", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
@@ -97,7 +115,7 @@ parking_lot = { workspace = true }
 parquet = { workspace = true }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
-phf = { version = "0.11", features = ["macros"] }
+phf = { version = "0.13", features = ["macros"] }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
@@ -110,6 +128,8 @@ pulsar = { version = "6.3", default-features = false, features = [
     "lz4",
     "zstd",
 ] }
+# should align with pulsar's prost version
+pulsar-prost = { package = "prost", version = "0.11.9" }
 rdkafka = { workspace = true, features = [
     "cmake-build",
     "ssl",
@@ -123,6 +143,7 @@ redis = { workspace = true, features = [
     "tokio-rustls-comp",
     "cluster-async",
     "geospatial",
+    "streams",
 ] }
 regex = { workspace = true }
 reqwest = { workspace = true }
@@ -131,10 +152,9 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_connector_codec = { workspace = true }
 risingwave_jni_core = { workspace = true }
-risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-rumqttc = { version = "0.24.0", features = ["url"] }
+rumqttc = { version = "0.25.0", features = ["url"] }
 rust_decimal = "1"
 rustls-native-certs = "0.8"
 rustls-pemfile = "2"
@@ -150,7 +170,7 @@ sea-schema = { version = "0.16", default-features = false, features = [
 serde = { workspace = true, features = ["rc"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = { version = "0.15.0", features = ["hints"] }
+simd-json = { version = "0.17.0", features = ["hints"] }
 smallvec = { workspace = true }
 sqlx = { workspace = true }
 strum = "0.27"
@@ -185,10 +205,10 @@ tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
-typed-builder = "^0.21"
+typed-builder = "^0.23"
 url = "2"
 urlencoding = "2"
-uuid = { version = "1", features = ["v4", "fast-rng"] }
+uuid = { version = "1", features = ["v4", "v7", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
 

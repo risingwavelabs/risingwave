@@ -71,9 +71,9 @@ pub trait ToArrow {
         chunk: &DataChunk,
     ) -> Result<arrow_array::RecordBatch, ArrayError> {
         // compact the chunk if it's not compacted
-        if !chunk.is_compacted() {
+        if !chunk.is_vis_compacted() {
             let c = chunk.clone();
-            return self.to_record_batch(schema, &c.compact());
+            return self.to_record_batch(schema, &c.compact_vis());
         }
 
         // convert each column to arrow array

@@ -213,7 +213,7 @@ impl IndexSelectionRule {
         let index_scan = LogicalScan::create(
             index.index_table.clone(),
             logical_scan.ctx(),
-            logical_scan.as_of().clone(),
+            logical_scan.as_of(),
         );
         // We use `schema.len` instead of `index_item.len` here,
         // because schema contains system columns like `_rw_timestamp` column which is not represented in the index item.
@@ -222,7 +222,7 @@ impl IndexSelectionRule {
         let primary_table_scan = LogicalScan::create(
             index.primary_table.clone(),
             logical_scan.ctx(),
-            logical_scan.as_of().clone(),
+            logical_scan.as_of(),
         );
 
         let predicate = logical_scan.predicate().clone();
@@ -326,7 +326,7 @@ impl IndexSelectionRule {
         let primary_table_scan = LogicalScan::create(
             logical_scan.table().clone(),
             logical_scan.ctx(),
-            logical_scan.as_of().clone(),
+            logical_scan.as_of(),
         );
 
         let conjunctions = primary_table
@@ -599,7 +599,7 @@ impl IndexSelectionRule {
             Condition {
                 conjunctions: conjunctions.to_vec(),
             },
-            logical_scan.as_of().clone(),
+            logical_scan.as_of(),
         );
 
         result.push(primary_access.into());

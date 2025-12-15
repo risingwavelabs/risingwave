@@ -97,7 +97,7 @@ impl std::fmt::Display for PortalResult {
 pub async fn handle_parse(
     session: Arc<SessionImpl>,
     statement: Statement,
-    specific_param_types: Vec<Option<DataType>>,
+    specified_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
     session.clear_cancel_query_flag();
     let sql: Arc<str> = Arc::from(statement.to_string());
@@ -107,13 +107,13 @@ pub async fn handle_parse(
         | Statement::Insert { .. }
         | Statement::Delete { .. }
         | Statement::Update { .. } => {
-            query::handle_parse(handler_args, statement, specific_param_types)
+            query::handle_parse_for_batch(handler_args, statement, specified_param_types)
         }
         Statement::FetchCursor { .. } => {
-            fetch_cursor::handle_parse(handler_args, statement, specific_param_types).await
+            fetch_cursor::handle_parse(handler_args, statement, specified_param_types).await
         }
         Statement::DeclareCursor { .. } => {
-            query::handle_parse(handler_args, statement, specific_param_types)
+            query::handle_parse_for_batch(handler_args, statement, specified_param_types)
         }
         Statement::CreateView {
             query,
@@ -121,7 +121,11 @@ pub async fn handle_parse(
             ..
         } => {
             if *materialized {
-                return query::handle_parse(handler_args, statement, specific_param_types);
+                return query::handle_parse_for_stream(
+                    handler_args,
+                    statement,
+                    specified_param_types,
+                );
             }
             if have_parameter_in_query(query) {
                 bail_not_implemented!("CREATE VIEW with parameters");

@@ -172,9 +172,13 @@ fn build_delta_join_inner(
             use_current_epoch: false,
             // will be updated later to a global id
             arrangement_table_id: if is_local_table_id {
-                Some(ArrangementTableId::TableId(delta_join_node.left_table_id))
+                Some(ArrangementTableId::TableId(
+                    delta_join_node.left_table_id.as_raw_id(),
+                ))
             } else {
-                Some(ArrangementTableId::IndexId(delta_join_node.left_table_id))
+                Some(ArrangementTableId::IndexId(
+                    delta_join_node.left_table_id.as_raw_id(),
+                ))
             },
             column_mapping: lookup_0_column_reordering,
             arrangement_table_info: delta_join_node.left_info.clone(),
@@ -201,9 +205,13 @@ fn build_delta_join_inner(
             use_current_epoch: true,
             // will be updated later to a global id
             arrangement_table_id: if is_local_table_id {
-                Some(ArrangementTableId::TableId(delta_join_node.right_table_id))
+                Some(ArrangementTableId::TableId(
+                    delta_join_node.right_table_id.as_raw_id(),
+                ))
             } else {
-                Some(ArrangementTableId::IndexId(delta_join_node.right_table_id))
+                Some(ArrangementTableId::IndexId(
+                    delta_join_node.right_table_id.as_raw_id(),
+                ))
             },
             column_mapping: lookup_1_column_reordering,
             arrangement_table_info: delta_join_node.right_info.clone(),

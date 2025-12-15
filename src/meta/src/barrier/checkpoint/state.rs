@@ -12,20 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::assert_matches::assert_matches;
+use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::id::{ActorId, FragmentId, WorkerId};
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use tracing::warn;
 
+use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{
-    BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo, InflightSubscriptionInfo,
-    SharedActorInfos,
+    BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
+    SharedActorInfos, SubscriberType,
 };
+use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::controller::fragment::InflightFragmentInfo;
+use crate::model::StreamJobActorsToCreate;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
-pub(crate) struct BarrierWorkerState {
+pub(in crate::barrier) struct BarrierWorkerState {
     /// The last sent `prev_epoch`
     ///
     /// There's no need to persist this field. On recovery, we will restore this from the latest
@@ -35,10 +44,8 @@ pub(crate) struct BarrierWorkerState {
     /// The `prev_epoch` of pending non checkpoint barriers
     pending_non_checkpoint_barriers: Vec<u64>,
 
-    /// Inflight running actors info.
-    pub(super) inflight_graph_info: InflightDatabaseInfo,
-
-    pub(super) inflight_subscription_info: InflightSubscriptionInfo,
+    /// Running info of database.
+    pub(super) database_info: InflightDatabaseInfo,
 
     /// Whether the cluster is paused.
     is_paused: bool,
@@ -49,8 +56,7 @@ impl BarrierWorkerState {
         Self {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],
-            inflight_graph_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
-            inflight_subscription_info: InflightSubscriptionInfo::default(),
+            database_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
             is_paused: false,
         }
     }
@@ -60,18 +66,12 @@ impl BarrierWorkerState {
         shared_actor_infos: SharedActorInfos,
         in_flight_prev_epoch: TracedEpoch,
         jobs: impl Iterator<Item = InflightStreamingJobInfo>,
-        inflight_subscription_info: InflightSubscriptionInfo,
         is_paused: bool,
     ) -> Self {
         Self {
             in_flight_prev_epoch,
             pending_non_checkpoint_barriers: vec![],
-            inflight_graph_info: InflightDatabaseInfo::recover(
-                database_id,
-                jobs,
-                shared_actor_infos,
-            ),
-            inflight_subscription_info,
+            database_info: InflightDatabaseInfo::recover(database_id, jobs, shared_actor_infos),
             is_paused,
         }
     }
@@ -102,7 +102,7 @@ impl BarrierWorkerState {
         is_checkpoint: bool,
         curr_epoch: TracedEpoch,
     ) -> Option<BarrierInfo> {
-        if self.inflight_graph_info.is_empty()
+        if self.database_info.is_empty()
             && !matches!(&command, Some(Command::CreateStreamingJob { .. }))
         {
             return None;
@@ -129,57 +129,142 @@ impl BarrierWorkerState {
             kind,
         })
     }
+}
 
+pub(super) struct ApplyCommandInfo {
+    pub node_actors: HashMap<WorkerId, HashSet<ActorId>>,
+    pub actors_to_create: Option<StreamJobActorsToCreate>,
+    pub mv_subscription_max_retention: HashMap<TableId, u64>,
+    pub table_ids_to_commit: HashSet<TableId>,
+    pub table_ids_to_sync: HashSet<TableId>,
+    pub jobs_to_wait: HashSet<JobId>,
+    pub mutation: Option<Mutation>,
+}
+
+impl BarrierWorkerState {
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
-    ///
-    /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_is_paused`)
-    pub fn apply_command(
+    pub(super) fn apply_command(
         &mut self,
         command: Option<&Command>,
-    ) -> (
-        InflightDatabaseInfo,
-        InflightSubscriptionInfo,
-        HashSet<TableId>,
-        HashSet<TableId>,
-        bool,
-    ) {
+        finished_snapshot_backfill_job_fragments: HashMap<
+            JobId,
+            HashMap<FragmentId, InflightFragmentInfo>,
+        >,
+        edges: &mut Option<FragmentEdgeBuildResult>,
+        control_stream_manager: &ControlStreamManager,
+    ) -> ApplyCommandInfo {
         // update the fragment_infos outside pre_apply
-        let fragment_changes = if let Some(Command::CreateStreamingJob {
+        let post_apply_changes = if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(_),
             ..
         }) = command
         {
             None
-        } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
-            self.inflight_graph_info.pre_apply(&fragment_changes);
-            Some(fragment_changes)
+        } else if let Some((new_job_id, fragment_changes)) =
+            command.and_then(Command::fragment_changes)
+        {
+            Some(self.database_info.pre_apply(new_job_id, fragment_changes))
         } else {
             None
         };
-        if let Some(command) = &command {
-            self.inflight_subscription_info.pre_apply(command);
+
+        match &command {
+            Some(Command::CreateSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+                retention_second,
+            }) => {
+                self.database_info.register_subscriber(
+                    upstream_mv_table_id.as_job_id(),
+                    subscription_id.as_subscriber_id(),
+                    SubscriberType::Subscription(*retention_second),
+                );
+            }
+            Some(Command::CreateStreamingJob {
+                info,
+                job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
+                ..
+            }) => {
+                for upstream_mv_table_id in snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .keys()
+                {
+                    self.database_info.register_subscriber(
+                        upstream_mv_table_id.as_job_id(),
+                        info.streaming_job.id().as_subscriber_id(),
+                        SubscriberType::SnapshotBackfill,
+                    );
+                }
+            }
+            _ => {}
+        };
+
+        let mut table_ids_to_commit: HashSet<_> = self.database_info.existing_table_ids().collect();
+        let actors_to_create = command.as_ref().and_then(|command| {
+            command.actors_to_create(&self.database_info, edges, control_stream_manager)
+        });
+        let node_actors =
+            InflightFragmentInfo::actor_ids_to_collect(self.database_info.fragment_infos());
+
+        if let Some(post_apply_changes) = post_apply_changes {
+            self.database_info.post_apply(post_apply_changes);
         }
 
-        let info = self.inflight_graph_info.clone();
-        let subscription_info = self.inflight_subscription_info.clone();
-
-        if let Some(fragment_changes) = fragment_changes {
-            self.inflight_graph_info.post_apply(&fragment_changes);
-        }
-
-        let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
         let mut jobs_to_wait = HashSet::new();
         if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
-            for (table_id, (_, graph_info)) in jobs_to_merge {
-                jobs_to_wait.insert(*table_id);
-                table_ids_to_commit.extend(graph_info.existing_table_ids());
-                self.inflight_graph_info.add_existing(graph_info.clone());
+            assert!(
+                jobs_to_merge
+                    .keys()
+                    .all(|job_id| finished_snapshot_backfill_job_fragments.contains_key(job_id))
+            );
+            for (job_id, job_fragments) in finished_snapshot_backfill_job_fragments {
+                assert!(jobs_to_merge.contains_key(&job_id));
+                jobs_to_wait.insert(job_id);
+                table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
+                    job_fragments.values(),
+                ));
+                self.database_info.add_existing(InflightStreamingJobInfo {
+                    job_id,
+                    fragment_infos: job_fragments,
+                    subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
+                    status: CreateStreamingJobStatus::Created,
+                });
             }
+        } else {
+            assert!(finished_snapshot_backfill_job_fragments.is_empty());
         }
 
-        if let Some(command) = command {
-            self.inflight_subscription_info.post_apply(command);
+        match &command {
+            Some(Command::DropSubscription {
+                subscription_id,
+                upstream_mv_table_id,
+            }) => {
+                if self
+                    .database_info
+                    .unregister_subscriber(
+                        upstream_mv_table_id.as_job_id(),
+                        subscription_id.as_subscriber_id(),
+                    )
+                    .is_none()
+                {
+                    warn!(%subscription_id, %upstream_mv_table_id, "no subscription to drop");
+                }
+            }
+            Some(Command::MergeSnapshotBackfillStreamingJobs(snapshot_backfill_jobs)) => {
+                for (snapshot_backfill_job_id, upstream_tables) in snapshot_backfill_jobs {
+                    for upstream_mv_table_id in upstream_tables {
+                        assert_matches!(
+                            self.database_info.unregister_subscriber(
+                                upstream_mv_table_id.as_job_id(),
+                                snapshot_backfill_job_id.as_subscriber_id()
+                            ),
+                            Some(SubscriberType::SnapshotBackfill)
+                        );
+                    }
+                }
+            }
+            _ => {}
         }
 
         let prev_is_paused = self.is_paused();
@@ -190,12 +275,21 @@ impl BarrierWorkerState {
         };
         self.set_is_paused(curr_is_paused);
 
-        (
-            info,
-            subscription_info,
+        let table_ids_to_sync =
+            InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()).collect();
+
+        let mutation = command
+            .as_ref()
+            .and_then(|c| c.to_mutation(prev_is_paused, edges, control_stream_manager));
+
+        ApplyCommandInfo {
+            node_actors,
+            actors_to_create,
+            mv_subscription_max_retention: self.database_info.max_subscription_retention(),
             table_ids_to_commit,
+            table_ids_to_sync,
             jobs_to_wait,
-            prev_is_paused,
-        )
+            mutation,
+        }
     }
 }

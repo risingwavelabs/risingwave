@@ -169,7 +169,7 @@ impl RowEncoder for JsonEncoder {
         Ok(if let Some(param) = &self.kafka_connect {
             json_converter_with_schema(
                 Value::Object(mappings),
-                param.schema_name.to_owned(),
+                param.schema_name.clone(),
                 col_indices.into_iter().map(|i| &self.schema[i]),
             )
         } else {
@@ -723,7 +723,7 @@ mod tests {
         let json_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Jsonb,
-                ..mock_field.clone()
+                ..mock_field
             },
             Some(ScalarImpl::Jsonb(JsonbVal::from(json!([1, 2, 3]))).as_scalar_ref_impl()),
             &encode_jsonb_obj_config,

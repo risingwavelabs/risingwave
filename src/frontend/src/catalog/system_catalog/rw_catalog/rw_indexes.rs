@@ -54,9 +54,9 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                     IndexType::Vector(index) => (&index.index_table, 1),
                 };
                 RwIndex {
-                    id: index.id.index_id as i32,
+                    id: index.id.as_i32_id(),
                     name: index.name.clone(),
-                    primary_table_id: index.primary_table.id().table_id as i32,
+                    primary_table_id: index.primary_table.id().as_i32_id(),
                     key_columns: index
                         .index_item
                         .iter()
@@ -83,7 +83,7 @@ fn read_rw_indexes(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIndex>> {
                             ind as i16
                         })
                         .collect(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_i32_id(),
                     owner: index.index_table().owner as i32,
                     definition: index_table.create_sql(),
                     acl: vec![],

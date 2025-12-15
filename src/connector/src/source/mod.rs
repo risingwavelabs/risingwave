@@ -81,6 +81,7 @@ use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use risingwave_common::row::OwnedRow;
+use risingwave_pb::id::SourceId;
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
@@ -91,6 +92,7 @@ pub use crate::source::filesystem::opendal_source::{
 };
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
+use crate::source::pulsar::source::reader::PULSAR_ACK_CHANNEL;
 
 pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
@@ -119,6 +121,7 @@ pub enum WaitCheckpointTask {
     CommitCdcOffset(Option<(SplitId, String)>),
     AckPubsubMessage(Subscription, Vec<ArrayRef>),
     AckNatsJetStream(JetStreamContext, Vec<ArrayRef>, JetStreamAckPolicy),
+    AckPulsarMessage(Vec<(String, ArrayRef)>),
 }
 
 impl WaitCheckpointTask {
@@ -150,6 +153,20 @@ impl WaitCheckpointTask {
                                 "source#{source_id}: failed to commit cdc offset: {offset}.",
                             )
                         }
+                    }
+                }
+            }
+            WaitCheckpointTask::AckPulsarMessage(ack_array) => {
+                if let Some((ack_channel_id, to_cumulative_ack)) = ack_array.last() {
+                    let encode_message_id_data = to_cumulative_ack
+                        .as_bytea()
+                        .iter()
+                        .last()
+                        .flatten()
+                        .map(|x| x.to_owned())
+                        .unwrap();
+                    if let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await {
+                        let _ = ack_tx.send(encode_message_id_data);
                     }
                 }
             }
@@ -235,3 +252,8 @@ pub struct CdcTableSnapshotSplitCommon<T: Clone> {
 
 pub type CdcTableSnapshotSplit = CdcTableSnapshotSplitCommon<OwnedRow>;
 pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;
+
+#[inline]
+pub fn build_pulsar_ack_channel_id(source_id: SourceId, split_id: &SplitId) -> String {
+    format!("{}-{}", source_id, split_id)
+}

@@ -284,7 +284,7 @@ mod tests {
         raw.hummock_version.id = HummockVersionId::new(1);
         raw.version_stats.hummock_version_id = 10;
         raw.version_stats.table_stats.insert(
-            200,
+            200.into(),
             TableStats {
                 total_key_count: 1000,
                 ..Default::default()

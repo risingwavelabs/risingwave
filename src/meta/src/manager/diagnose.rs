@@ -19,11 +19,14 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
+use risingwave_common::id::ObjectId;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
+use risingwave_license::LicenseManager;
+use risingwave_meta_model::{JobStatus, StreamingParallelism};
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
@@ -82,6 +85,8 @@ impl DiagnoseCommand {
             risingwave_common::current_cluster_version(),
         );
         let _ = writeln!(report);
+        self.write_license(&mut report);
+        let _ = writeln!(report);
         self.write_catalog(&mut report).await;
         let _ = writeln!(report);
         self.write_worker_nodes(&mut report).await;
@@ -108,12 +113,9 @@ impl DiagnoseCommand {
     }
 
     async fn write_catalog_inner(&self, s: &mut String) {
-        let guard = self
-            .metadata_manager
-            .catalog_controller
-            .get_inner_read_guard()
-            .await;
-        let stat = match guard.stats().await {
+        let stats = self.metadata_manager.catalog_controller.stats().await;
+
+        let stat = match stats {
             Ok(stat) => stat,
             Err(err) => {
                 tracing::warn!(error=?err.as_report(), "failed to get catalog stats");
@@ -131,7 +133,7 @@ impl DiagnoseCommand {
     }
 
     async fn write_worker_nodes(&self, s: &mut String) {
-        let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count().await else {
+        let Ok(worker_actor_count) = self.metadata_manager.worker_actor_count() else {
             tracing::warn!("failed to get worker actor count");
             return;
         };
@@ -151,6 +153,7 @@ impl DiagnoseCommand {
             row.add_cell("parallelism".into());
             row.add_cell("is_streaming".into());
             row.add_cell("is_serving".into());
+            row.add_cell("is_iceberg_compactor".into());
             row.add_cell("rw_version".into());
             row.add_cell("total_memory_bytes".into());
             row.add_cell("total_cpu_cores".into());
@@ -177,14 +180,35 @@ impl DiagnoseCommand {
                 worker_node.get_state().ok().map(|s| s.as_str_name()),
             );
             try_add_cell(&mut row, worker_node.parallelism());
-            try_add_cell(
-                &mut row,
-                worker_node.property.as_ref().map(|p| p.is_streaming),
-            );
-            try_add_cell(
-                &mut row,
-                worker_node.property.as_ref().map(|p| p.is_serving),
-            );
+            // is_streaming and is_serving are only meaningful for ComputeNode
+            let (is_streaming, is_serving) = {
+                if let Ok(t) = worker_node.get_type()
+                    && t == WorkerType::ComputeNode
+                {
+                    (
+                        worker_node.property.as_ref().map(|p| p.is_streaming),
+                        worker_node.property.as_ref().map(|p| p.is_serving),
+                    )
+                } else {
+                    (None, None)
+                }
+            };
+            try_add_cell(&mut row, is_streaming);
+            try_add_cell(&mut row, is_serving);
+            // is_iceberg_compactor is only meaningful for Compactor worker type
+            let is_iceberg_compactor = {
+                if let Ok(t) = worker_node.get_type()
+                    && t == WorkerType::Compactor
+                {
+                    worker_node
+                        .property
+                        .as_ref()
+                        .map(|p| p.is_iceberg_compactor)
+                } else {
+                    None
+                }
+            };
+            try_add_cell(&mut row, is_iceberg_compactor);
             try_add_cell(
                 &mut row,
                 worker_node.resource.as_ref().map(|r| r.rw_version.clone()),
@@ -209,7 +233,7 @@ impl DiagnoseCommand {
                 {
                     None
                 } else {
-                    match worker_actor_count.get(&(worker_node.id as _)) {
+                    match worker_actor_count.get(&worker_node.id) {
                         None => Some(0),
                         Some(c) => Some(*c),
                     }
@@ -632,7 +656,7 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| {
                 (
-                    s.id,
+                    s.id.into(),
                     (s.name, s.schema_id, s.definition, s.created_at_epoch),
                 )
             })
@@ -652,7 +676,7 @@ impl DiagnoseCommand {
             for (table_type, tables) in &grouped {
                 let tables = tables.into_iter().map(|t| {
                     (
-                        t.id,
+                        t.id.into(),
                         (t.name, t.schema_id, t.definition, t.created_at_epoch),
                     )
                 });
@@ -675,20 +699,70 @@ impl DiagnoseCommand {
             .into_iter()
             .map(|s| {
                 (
-                    s.id,
+                    s.id.into(),
                     (s.name, s.schema_id, s.definition, s.created_at_epoch),
                 )
             })
             .collect::<BTreeMap<_, _>>();
+        let views = self
+            .metadata_manager
+            .catalog_controller
+            .list_views()
+            .await?
+            .into_iter()
+            .map(|v| (v.id.into(), (v.name, v.schema_id, v.sql, None)))
+            .collect::<BTreeMap<_, _>>();
+        let mut streaming_jobs = self
+            .metadata_manager
+            .catalog_controller
+            .list_streaming_job_infos()
+            .await?;
+        streaming_jobs.sort_by_key(|info| (info.obj_type as usize, info.job_id));
+        {
+            use comfy_table::{Row, Table};
+            let mut table = Table::new();
+            table.set_header({
+                let mut row = Row::new();
+                row.add_cell("job_id".into());
+                row.add_cell("name".into());
+                row.add_cell("obj_type".into());
+                row.add_cell("state".into());
+                row.add_cell("parallelism".into());
+                row.add_cell("max_parallelism".into());
+                row.add_cell("resource_group".into());
+                row.add_cell("database_id".into());
+                row.add_cell("schema_id".into());
+                row.add_cell("config_override".into());
+                row
+            });
+            for job in streaming_jobs {
+                let mut row = Row::new();
+                row.add_cell(job.job_id.into());
+                row.add_cell(job.name.into());
+                row.add_cell(job.obj_type.as_str().into());
+                row.add_cell(format_job_status(job.job_status).into());
+                row.add_cell(format_streaming_parallelism(&job.parallelism).into());
+                row.add_cell(job.max_parallelism.into());
+                row.add_cell(job.resource_group.into());
+                row.add_cell(job.database_id.into());
+                row.add_cell(job.schema_id.into());
+                row.add_cell(job.config_override.into());
+                table.add_row(row);
+            }
+            let _ = writeln!(s);
+            let _ = writeln!(s, "STREAMING JOB");
+            let _ = writeln!(s, "{table}");
+        }
         let catalogs = [
             ("SOURCE", sources),
             ("TABLE", user_tables),
             ("MATERIALIZED VIEW", mvs),
             ("INDEX", indexes),
             ("SINK", sinks),
+            ("VIEW", views),
             ("INTERNAL TABLE", internal_tables),
         ];
-        let mut obj_id_to_name = HashMap::new();
+        let mut obj_id_to_name: HashMap<ObjectId, _> = HashMap::new();
         for (title, items) in catalogs {
             use comfy_table::{Row, Table};
             let mut table = Table::new();
@@ -737,10 +811,7 @@ impl DiagnoseCommand {
                         job_id,
                         schema_id,
                         obj_type,
-                        obj_id_to_name
-                            .get(&(job_id as _))
-                            .cloned()
-                            .unwrap_or_default(),
+                        obj_id_to_name.get(&job_id).cloned().unwrap_or_default(),
                     ),
                 )
             })
@@ -773,6 +844,96 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "{table}");
         Ok(())
     }
+
+    fn write_license(&self, s: &mut String) {
+        use comfy_table::presets::ASCII_BORDERS_ONLY;
+        use comfy_table::{ContentArrangement, Row, Table};
+
+        let mut table = Table::new();
+        table.load_preset(ASCII_BORDERS_ONLY);
+        table.set_content_arrangement(ContentArrangement::Dynamic);
+        table.set_header({
+            let mut row = Row::new();
+            row.add_cell("field".into());
+            row.add_cell("value".into());
+            row
+        });
+
+        match LicenseManager::get().license() {
+            Ok(license) => {
+                let fmt_option = |value: Option<u64>| match value {
+                    Some(v) => v.to_string(),
+                    None => "unlimited".to_owned(),
+                };
+
+                let expires_at = if license.exp == u64::MAX {
+                    "never".to_owned()
+                } else {
+                    let exp_i64 = license.exp as i64;
+                    chrono::DateTime::<chrono::Utc>::from_timestamp(exp_i64, 0)
+                        .map(|ts| ts.to_rfc3339())
+                        .unwrap_or_else(|| format!("invalid ({})", license.exp))
+                };
+
+                let mut row = Row::new();
+                row.add_cell("status".into());
+                row.add_cell("valid".into());
+                table.add_row(row);
+
+                let mut row = Row::new();
+                row.add_cell("tier".into());
+                row.add_cell(license.tier.name().into());
+                table.add_row(row);
+
+                let mut row = Row::new();
+                row.add_cell("expires_at".into());
+                row.add_cell(expires_at.into());
+                table.add_row(row);
+
+                let mut row = Row::new();
+                row.add_cell("rwu_limit".into());
+                row.add_cell(fmt_option(license.rwu_limit.map(|v| v.get())).into());
+                table.add_row(row);
+
+                let mut row = Row::new();
+                row.add_cell("cpu_core_limit".into());
+                row.add_cell(fmt_option(license.cpu_core_limit()).into());
+                table.add_row(row);
+
+                let mut row = Row::new();
+                row.add_cell("memory_limit_bytes".into());
+                row.add_cell(fmt_option(license.memory_limit()).into());
+                table.add_row(row);
+
+                let mut features: Vec<_> = license
+                    .tier
+                    .available_features()
+                    .map(|f| f.name())
+                    .collect();
+                features.sort_unstable();
+                let feature_summary = format_features(&features);
+
+                let mut row = Row::new();
+                row.add_cell("available_features".into());
+                row.add_cell(feature_summary.into());
+                table.add_row(row);
+            }
+            Err(error) => {
+                let mut row = Row::new();
+                row.add_cell("status".into());
+                row.add_cell("invalid".into());
+                table.add_row(row);
+
+                let mut row = Row::new();
+                row.add_cell("error".into());
+                row.add_cell(error.to_report_string().into());
+                table.add_row(row);
+            }
+        }
+
+        let _ = writeln!(s, "LICENSE");
+        let _ = writeln!(s, "{table}");
+    }
 }
 
 fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Option<T>) {
@@ -798,5 +959,34 @@ fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> Option<String>
                 .join(";"),
         ),
         Err(_) => None,
+    }
+}
+
+fn format_features(features: &[&'static str]) -> String {
+    if features.is_empty() {
+        return "(none)".into();
+    }
+
+    const PER_LINE: usize = 6;
+    features
+        .chunks(PER_LINE)
+        .map(|chunk| format!("  {}", chunk.join(", ")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_job_status(status: JobStatus) -> &'static str {
+    match status {
+        JobStatus::Initial => "initial",
+        JobStatus::Creating => "creating",
+        JobStatus::Created => "created",
+    }
+}
+
+fn format_streaming_parallelism(parallelism: &StreamingParallelism) -> String {
+    match parallelism {
+        StreamingParallelism::Adaptive => "adaptive".into(),
+        StreamingParallelism::Fixed(n) => format!("fixed({n})"),
+        StreamingParallelism::Custom => "custom".into(),
     }
 }

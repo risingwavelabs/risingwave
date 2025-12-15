@@ -7,6 +7,10 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+default = []
+datafusion = ["dep:datafusion", "dep:datafusion-common"]
+
 [dependencies]
 anyhow = "1"
 arc-swap = { workspace = true }
@@ -20,6 +24,8 @@ bk-tree = "0.5.0"
 bytes = "1"
 chrono = { workspace = true }
 clap = { workspace = true }
+datafusion = { version = "45.0.0", optional = true }
+datafusion-common = { version = "45.0.0", optional = true }
 downcast-rs = "2.0"
 dyn-clone = "1.0.14"
 easy-ext = "1"
@@ -36,12 +42,10 @@ itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
 maplit = "1"
-md5 = "0.7.0"
+md5 = { package = "md-5", version = "0.10.6" }
 memcomparable = "0.2"
-mysql_async = { version = "0.34", default-features = false, features = [
-    "default",
-] }
-mysql_common = { version = "0.32", default-features = false, features = [
+mysql_async = { workspace = true }
+mysql_common = { version = "0.35", default-features = false, features = [
     "chrono",
 ] }
 num-integer = "0.1"
@@ -56,6 +60,7 @@ postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.14", features = ["process"] }
+prometheus-http-query = "0.8"
 prost = { workspace = true }
 quick-xml = { version = "0.38", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
@@ -74,6 +79,7 @@ risingwave_sqlparser = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_variables = { workspace = true }
 rw_futures_util = { workspace = true }
+scopeguard = "1.2.0"
 serde = { workspace = true }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -95,6 +101,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
+toml = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
 tower-http = { version = "0.6", features = [

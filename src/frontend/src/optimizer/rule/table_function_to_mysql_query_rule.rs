@@ -32,7 +32,7 @@ impl Rule<Logical> for TableFunctionToMySqlQueryRule {
         assert!(!logical_table_function.with_ordinality);
         let table_function_return_type = logical_table_function.table_function().return_type();
 
-        if let DataType::Struct(st) = table_function_return_type.clone() {
+        if let DataType::Struct(st) = table_function_return_type {
             let fields = st
                 .iter()
                 .map(|(name, data_type)| Field::with_name(data_type.clone(), name.to_owned()))

@@ -44,7 +44,7 @@ impl ObserverState for CompactorObserverNode {
                         PbObjectInfo::Table(table_catalog) => {
                             self.handle_catalog_notification(resp.operation(), table_catalog);
                         }
-                        _ => panic!("error type notification"),
+                        object => panic!("invalid notification object: {object}"),
                     };
                 }
                 assert!(
@@ -59,11 +59,11 @@ impl ObserverState for CompactorObserverNode {
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
-            Info::ComputeNodeTotalCpuCount(count) => {
-                LicenseManager::get().update_cpu_core_count(count as _);
+            Info::ClusterResource(resource) => {
+                LicenseManager::get().update_cluster_resource(resource);
             }
-            _ => {
-                panic!("error type notification");
+            info => {
+                panic!("invalid notification info: {info}");
             }
         }
     }
@@ -75,7 +75,7 @@ impl ObserverState for CompactorObserverNode {
         self.handle_catalog_snapshot(snapshot.tables);
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;
-        LicenseManager::get().update_cpu_core_count(snapshot.compute_node_total_cpu_count as _);
+        LicenseManager::get().update_cluster_resource(snapshot.cluster_resource.unwrap());
     }
 }
 

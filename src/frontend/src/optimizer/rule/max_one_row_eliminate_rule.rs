@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::prelude::{PlanRef, *};
-use crate::optimizer::plan_node::{LogicalApply, LogicalMaxOneRow};
-use crate::optimizer::plan_visitor::LogicalCardinalityExt;
+use crate::optimizer::plan_node::{LogicalApply, LogicalLimit, LogicalMaxOneRow};
+use crate::optimizer::plan_visitor::{LogicalCardinalityExt, SoleSysTableVisitor};
 
 /// Eliminate max one row restriction from `LogicalApply`.
 ///
@@ -36,7 +36,14 @@ impl Rule<Logical> for MaxOneRowEliminateRule {
         }
 
         if !right.max_one_row() {
-            right = LogicalMaxOneRow::create(right);
+            right = if SoleSysTableVisitor::sys_table_only(right.clone()) {
+                // If the right side is just a `SysScan` (with `Values`), we add a `Limit 1` to enforce the max one row restriction.
+                // This is a workaround for the case where `SysScan` cannot be guaranteed to return at most one row in compile time,
+                // but to make the system queries work compatible with PostgreSQL, we need to enforce the max one row restriction at runtime.
+                LogicalLimit::create(right, 1, 0)
+            } else {
+                LogicalMaxOneRow::create(right)
+            };
             debug_assert!(right.max_one_row());
         }
 

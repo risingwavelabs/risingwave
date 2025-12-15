@@ -20,18 +20,15 @@ use anyhow::Result;
 use itertools::Itertools;
 use tokio::time::sleep;
 
-use crate::sink::utils::{
-    CREATE_SINK, CREATE_SOURCE, DROP_SINK, DROP_SOURCE, SimulationTestSink, SimulationTestSource,
-    start_sink_test_cluster,
-};
+use crate::sink::utils::*;
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
-async fn basic_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Result<()> {
+async fn basic_test_inner(is_decouple: bool, test_type: TestSinkType) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new(is_coordinated_sink);
+    let test_sink = SimulationTestSink::register_new(test_type);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
@@ -48,7 +45,7 @@ async fn basic_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Resul
 
     let internal_tables = session.run("show internal tables").await?;
 
-    let table_name_prefix = "__internal_test_sink_";
+    let table_name_prefix = "public.__internal_test_sink_";
 
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables
@@ -109,25 +106,30 @@ async fn basic_test_inner(is_decouple: bool, is_coordinated_sink: bool) -> Resul
     Ok(())
 }
 
-#[tokio::test]
-async fn test_sink_basic() -> Result<()> {
-    basic_test_inner(false, false).await
+macro_rules! define_tests {
+    ($($test_type:ident,)+) => {
+        $(
+            paste::paste! {
+                #[tokio::test]
+                async fn [<test_ $test_type:snake _basic>]() -> Result<()> {
+                    basic_test_inner(false, TestSinkType::$test_type).await
+                }
+
+                #[tokio::test]
+                async fn [<test_ $test_type:snake _decouple_basic>]() -> Result<()> {
+                    basic_test_inner(true, TestSinkType::$test_type).await
+                }
+            }
+        )+
+    };
+    () => {
+        $crate::for_all_sink_types! {
+            define_tests
+        }
+    }
 }
 
-#[tokio::test]
-async fn test_sink_decouple_basic() -> Result<()> {
-    basic_test_inner(true, false).await
-}
-
-#[tokio::test]
-async fn test_coordinated_sink_basic() -> Result<()> {
-    basic_test_inner(false, true).await
-}
-
-#[tokio::test]
-async fn test_coordinated_sink_decouple_basic() -> Result<()> {
-    basic_test_inner(true, true).await
-}
+define_tests!();
 
 #[tokio::test]
 async fn test_sink_decouple_blackhole() -> Result<()> {

@@ -43,10 +43,6 @@ pub enum SqlCmd {
     Create {
         is_create_table_as: bool,
     },
-    /// Create sink.
-    CreateSink {
-        is_sink_into_table: bool,
-    },
     /// Create Materialized views
     CreateMaterializedView {
         name: String,
@@ -69,8 +65,6 @@ impl SqlCmd {
                 // `create table as` is also not atomic in our system.
                 is_create_table_as: false,
                 ..
-            } | SqlCmd::CreateSink {
-                is_sink_into_table: false,
             } | SqlCmd::CreateMaterializedView { .. }
                 | SqlCmd::Drop
         )
@@ -83,9 +77,7 @@ impl SqlCmd {
     fn is_create(&self) -> bool {
         matches!(
             self,
-            SqlCmd::Create { .. }
-                | SqlCmd::CreateSink { .. }
-                | SqlCmd::CreateMaterializedView { .. }
+            SqlCmd::Create { .. } | SqlCmd::CreateMaterializedView { .. }
         )
     }
 }
@@ -427,7 +419,7 @@ mod runner {
                 })
                 .await
             {
-                let err_string = err.to_string();
+                let err_string = err.to_string().to_ascii_lowercase();
                 // cluster could be still under recovering if killed before, retry if
                 // meets `no reader for dml in table with id {}`.
                 let allowed_errs = [
@@ -436,11 +428,13 @@ mod runner {
                     "failed to inject barrier",
                     "get error from control stream",
                     "cluster is under recovering",
+                    "streaming vnode mapping has not been initialized",
+                    "streaming vnode mapping not found",
                 ];
                 let should_retry = i < MAX_RETRY
                     && allowed_errs
                         .iter()
-                        .any(|allowed_err| err_string.contains(allowed_err));
+                        .any(|allowed_err| err_string.contains(&allowed_err.to_ascii_lowercase()));
                 if !should_retry {
                     panic!("{}", err);
                 }
@@ -598,9 +592,6 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: Opts) {
                             // allow 'table exists' error when retry CREATE statement
                             SqlCmd::Create {
                                 is_create_table_as: false,
-                            }
-                            | SqlCmd::CreateSink {
-                                is_sink_into_table: false,
                             }
                             | SqlCmd::CreateMaterializedView { .. }
                                 if i != 0

@@ -790,7 +790,7 @@ impl<T: Into<ScalarImpl>> ToOwnedDatum for Option<T> {
 }
 
 #[auto_impl::auto_impl(&)]
-pub trait ToDatumRef: PartialEq + Eq + Debug {
+pub trait ToDatumRef: PartialEq + Eq + Debug + Send + Sync {
     /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }
@@ -1091,7 +1091,11 @@ impl ScalarImpl {
             DataType::List(_) => ListValue::from_str(s, data_type)?.into(),
             DataType::Struct(st) => StructValue::from_str(s, st)?.into(),
             DataType::Jsonb => JsonbVal::from_str(s)?.into(),
-            DataType::Bytea => str_to_bytea(s)?.into(),
+            DataType::Bytea => {
+                let mut buf = Vec::new();
+                str_to_bytea(s, &mut buf)?;
+                buf.into()
+            }
             DataType::Vector(size) => VectorVal::from_text(s, *size)?.into(),
             DataType::Map(_m) => return Err("map from text is not supported".into()),
         })

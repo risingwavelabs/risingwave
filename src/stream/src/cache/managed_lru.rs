@@ -39,7 +39,7 @@ where
     inner: LruCache<K, V, S, A>,
 
     /// The entry with sequence less than `watermark_sequence` should be evicted.
-    /// `watermark_sequence` should only be updatd by `MemoryManager`.
+    /// `watermark_sequence` should only be updated by `MemoryManager`.
     watermark_sequence: Arc<AtomicSequence>,
 
     // Metrics info

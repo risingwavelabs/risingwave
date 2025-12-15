@@ -613,14 +613,14 @@ impl LocalInstanceUnsyncData {
             if cfg!(debug_assertions) {
                 panic!(
                     "sync epoch exceeds latest epoch, and the current instance should have been archived, table_id = {}, latest_epoch_data = {}, epoch = {}",
-                    self.table_id.table_id,
+                    self.table_id,
                     latest_epoch_data.epoch(),
                     epoch
                 );
             }
             warn!(
                 instance_id = self.instance_id,
-                table_id = self.table_id.table_id,
+                table_id = %self.table_id,
                 "sync epoch exceeds latest epoch, and the current instance should have be archived"
             );
             self.current_epoch_data = None;
@@ -824,7 +824,7 @@ impl UnsyncData {
         init_epoch: HummockEpoch,
     ) {
         debug!(
-            table_id = table_id.table_id,
+            table_id = %table_id,
             instance_id, init_epoch, "init epoch"
         );
         let table_data = self
@@ -890,7 +890,7 @@ impl UnsyncData {
         if !table_data.unsync_epochs.contains_key(&next_epoch) {
             if let Some(stopped_next_epoch) = table_data.stopped_next_epoch {
                 if stopped_next_epoch != next_epoch {
-                    let table_id = table_data.table_id.table_id;
+                    let table_id = table_data.table_id;
                     let unsync_epochs = table_data.unsync_epochs.keys().collect_vec();
                     if cfg!(debug_assertions) {
                         panic!(
@@ -904,7 +904,7 @@ impl UnsyncData {
                         );
                     } else {
                         warn!(
-                            table_id,
+                            %table_id,
                             stopped_next_epoch,
                             next_epoch,
                             ?unsync_epochs,

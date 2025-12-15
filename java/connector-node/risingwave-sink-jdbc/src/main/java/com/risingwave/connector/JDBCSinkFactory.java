@@ -35,10 +35,26 @@ public class JDBCSinkFactory implements SinkFactory {
     public static final String JDBC_URL_PROP = "jdbc.url";
     public static final String TABLE_NAME_PROP = "table.name";
 
+    /**
+     * Creates the appropriate config class based on the JDBC URL. Returns SnowflakeJDBCSinkConfig
+     * for Snowflake, otherwise JDBCSinkConfig.
+     *
+     * @param mapper ObjectMapper for deserialization
+     * @param tableProperties properties to deserialize
+     * @return appropriate config instance
+     */
+    private JDBCSinkConfig createConfig(ObjectMapper mapper, Map<String, String> tableProperties) {
+        String jdbcUrl = tableProperties.get(JDBC_URL_PROP);
+        if (jdbcUrl != null && jdbcUrl.startsWith("jdbc:snowflake")) {
+            return mapper.convertValue(tableProperties, SnowflakeJDBCSinkConfig.class);
+        }
+        return mapper.convertValue(tableProperties, JDBCSinkConfig.class);
+    }
+
     @Override
     public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
-        JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
+        JDBCSinkConfig config = createConfig(mapper, tableProperties);
         if ((config.getJdbcUrl().startsWith("jdbc:snowflake")
                 || config.getJdbcUrl().startsWith("jdbc:redshift"))) {
             return new BatchAppendOnlyJDBCSink(config, tableSchema);
@@ -51,7 +67,7 @@ public class JDBCSinkFactory implements SinkFactory {
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
-        JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
+        JDBCSinkConfig config = createConfig(mapper, tableProperties);
 
         String jdbcUrl = config.getJdbcUrl();
         String tableName = config.getTableName();
@@ -60,9 +76,7 @@ public class JDBCSinkFactory implements SinkFactory {
         Set<String> jdbcPks = new HashSet<>();
         Set<String> jdbcTableNames = new HashSet<>();
 
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                jdbcUrl, config.getUser(), config.getPassword());
+        try (Connection conn = config.getConnection();
                 ResultSet tableNamesResultSet =
                         conn.getMetaData().getTables(null, schemaName, "%", null);
                 ResultSet columnResultSet =

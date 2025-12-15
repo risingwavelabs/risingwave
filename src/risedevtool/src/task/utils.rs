@@ -62,8 +62,12 @@ where
                 .arg(&name)
                 .arg("--network")
                 .arg("host")
+                // Release build has a premium license working with <= 4 RWUs, i.e.,
+                // 4 CPUs and 16 GiB of memory.
                 .arg("--cpus")
-                .arg("4") // release build has a premium license working with <= 4 cpus
+                .arg("4")
+                .arg("--memory")
+                .arg("16g")
                 .arg("-v")
                 .arg(format!("{wd}:{wd}"))
                 .arg(&image)

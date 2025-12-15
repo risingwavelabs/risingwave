@@ -14,13 +14,14 @@
 
 use std::future::Future;
 
+use risingwave_common::id::FragmentId;
 use risingwave_expr::{Result as ExprResult, define_context};
 use risingwave_pb::plan_common::ExprContext;
 
 // For all execution mode.
 define_context! {
     pub TIME_ZONE: String,
-    pub FRAGMENT_ID: u32,
+    pub FRAGMENT_ID: FragmentId,
     pub VNODE_COUNT: usize,
     pub STRICT_MODE: bool,
 }
@@ -56,7 +57,7 @@ where
     Fut: Future,
 {
     TIME_ZONE::scope(
-        expr_context.time_zone.to_owned(),
+        expr_context.time_zone.clone(),
         STRICT_MODE::scope(expr_context.strict_mode, future),
     )
     .await

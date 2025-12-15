@@ -473,11 +473,11 @@ impl<
         let preload_all_rows = if developer.default_enable_mem_preload_state_table {
             !developer
                 .mem_preload_state_table_ids_blacklist
-                .contains(&self.table_catalog.id)
+                .contains(&self.table_catalog.id.as_raw_id())
         } else {
             developer
                 .mem_preload_state_table_ids_whitelist
-                .contains(&self.table_catalog.id)
+                .contains(&self.table_catalog.id.as_raw_id())
         };
         self.with_preload_all_rows(preload_all_rows)
     }
@@ -526,7 +526,7 @@ impl<
             && let Err(e) =
                 risingwave_common::license::Feature::StateTableMemoryPreload.check_available()
         {
-            warn!(table_id=self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
+            warn!(table_id=%self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
             preload_all_rows = false;
         }
         StateTableInner::from_table_catalog_inner(
@@ -589,7 +589,7 @@ where
         output_column_ids: Vec<ColumnId>,
         preload_all_rows: bool,
     ) -> Self {
-        let table_id = TableId::new(table_catalog.id);
+        let table_id = table_catalog.id;
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
@@ -716,41 +716,6 @@ where
             row_serde.kind().is_column_aware()
         );
 
-        // Restore persisted table watermark.
-        let watermark_serde = if pk_indices.is_empty() {
-            None
-        } else {
-            match table_catalog.clean_watermark_index_in_pk {
-                None => Some(pk_serde.index(0)),
-                Some(clean_watermark_index_in_pk) => {
-                    Some(pk_serde.index(clean_watermark_index_in_pk as usize))
-                }
-            }
-        };
-        let max_watermark_of_vnodes = distribution
-            .vnodes()
-            .iter_vnodes()
-            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
-            .max();
-        let committed_watermark = if let Some(deser) = watermark_serde
-            && let Some(max_watermark) = max_watermark_of_vnodes
-        {
-            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
-                assert!(row.len() == 1);
-                row[0].clone()
-            });
-            if deserialized.is_none() {
-                tracing::error!(
-                    vnodes = ?distribution.vnodes(),
-                    watermark = ?max_watermark,
-                    "Failed to deserialize persisted watermark from state store.",
-                );
-            }
-            deserialized
-        } else {
-            None
-        };
-
         let watermark_cache = if USE_WATERMARK_CACHE {
             StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
         } else {
@@ -786,6 +751,43 @@ where
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
+        // Get clean watermark PK index using the helper method
+        let clean_watermark_index_in_pk: Option<i32> = table_catalog
+            .get_clean_watermark_index_in_pk_compat()
+            .map(|idx| idx as i32);
+
+        // Restore persisted table watermark.
+        let watermark_serde = if pk_indices.is_empty() {
+            None
+        } else {
+            // Use the watermark PK index from clean_watermark_index_in_pk
+            let pk_idx = clean_watermark_index_in_pk.unwrap_or(0) as usize;
+            Some(pk_serde.index(pk_idx))
+        };
+        let max_watermark_of_vnodes = distribution
+            .vnodes()
+            .iter_vnodes()
+            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
+            .max();
+        let committed_watermark = if let Some(deser) = watermark_serde
+            && let Some(max_watermark) = max_watermark_of_vnodes
+        {
+            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
+                assert!(row.len() == 1);
+                row[0].clone()
+            });
+            if deserialized.is_none() {
+                tracing::error!(
+                    vnodes = ?distribution.vnodes(),
+                    watermark = ?max_watermark,
+                    "Failed to deserialize persisted watermark from state store.",
+                );
+            }
+            deserialized
+        } else {
+            None
+        };
+
         Self {
             table_id,
             row_store: StateTableRowStore {
@@ -810,7 +812,7 @@ where
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
-            clean_watermark_index_in_pk: table_catalog.clean_watermark_index_in_pk,
+            clean_watermark_index_in_pk,
             on_post_commit: false,
         }
     }
@@ -819,8 +821,8 @@ where
         &self.data_types
     }
 
-    pub fn table_id(&self) -> u32 {
-        self.table_id.table_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -967,12 +969,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             ..Default::default()
         };
 
-        // TODO: avoid clone when `on_key_value_fn` can be non-static
-        let row_serde = self.row_serde.clone();
-
         self.state_store
             .on_key_value(key_bytes, read_options, move |_, value| {
-                let row = row_serde.deserialize(value)?;
+                let row = self.row_serde.deserialize(value)?;
                 Ok(OwnedRow::new(row))
             })
             .await
@@ -1326,7 +1325,7 @@ where
                     ?new_epoch,
                     prev_op_consistency_level = ?self.op_consistency_level,
                     ?op_consistency_level,
-                    table_id = self.table_id.table_id,
+                    table_id = %self.table_id,
                     "switch to new op consistency level"
                 );
             }
@@ -1396,7 +1395,8 @@ where
                     let keyed_row = entry?;
                     let pk = self.pk_serde.deserialize(keyed_row.key())?;
                     // watermark column should be part of the pk
-                    if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
+                    let pk_idx = self.clean_watermark_index_in_pk.unwrap_or(0) as usize;
+                    if !pk.is_null_at(pk_idx) {
                         pks.push(pk);
                     }
                 }
@@ -1429,21 +1429,14 @@ where
             !self.pk_indices().is_empty(),
             "see pending watermark on empty pk"
         );
-        let watermark_serializer = {
-            match self.clean_watermark_index_in_pk {
-                None => self.pk_serde.index(0),
-                Some(clean_watermark_index_in_pk) => {
-                    self.pk_serde.index(clean_watermark_index_in_pk as usize)
-                }
-            }
-        };
+        // Get the watermark PK index
+        let watermark_pk_idx = self.clean_watermark_index_in_pk.unwrap_or(0) as usize;
 
-        let watermark_type = match self.clean_watermark_index_in_pk {
-            None => WatermarkSerdeType::PkPrefix,
-            Some(clean_watermark_index_in_pk) => match clean_watermark_index_in_pk {
-                0 => WatermarkSerdeType::PkPrefix,
-                _ => WatermarkSerdeType::NonPkPrefix,
-            },
+        let watermark_serializer = self.pk_serde.index(watermark_pk_idx);
+
+        let watermark_type = match watermark_pk_idx {
+            0 => WatermarkSerdeType::PkPrefix,
+            _ => WatermarkSerdeType::NonPkPrefix,
         };
 
         let should_clean_watermark = {
@@ -1524,9 +1517,15 @@ where
     }
 }
 
-pub trait RowStream<'a> = Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
-pub trait KeyedRowStream<'a> = Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
-pub trait PkRowStream<'a, K> = Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a;
+// Manually expand trait alias for better IDE experience.
+pub trait RowStream<'a>: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a {}
+impl<'a, S: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a> RowStream<'a> for S {}
+
+pub trait KeyedRowStream<'a>: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {}
+impl<'a, S: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a> KeyedRowStream<'a> for S {}
+
+pub trait PkRowStream<'a, K>: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a {}
+impl<'a, K, S: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a> PkRowStream<'a, K> for S {}
 
 pub trait FromVnodeBytes {
     fn from_vnode_bytes(vnode: VirtualNode, bytes: &Bytes) -> Self;

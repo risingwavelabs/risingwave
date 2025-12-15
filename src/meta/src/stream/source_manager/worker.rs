@@ -180,7 +180,7 @@ pub fn create_source_worker_async(
     });
 
     managed_sources.insert(
-        source_id as SourceId,
+        source_id,
         ConnectorSourceWorkerHandle {
             handle,
             command_tx,
@@ -203,7 +203,7 @@ impl ConnectorSourceWorker {
             .create_split_enumerator(Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
-                    source_id: self.source_id as u32,
+                    source_id: self.source_id,
                 },
             }))
             .await
@@ -239,7 +239,7 @@ impl ConnectorSourceWorker {
             .with_guarded_label_values(&[source.id.to_string().as_str(), &source.name]);
 
         Ok(Self {
-            source_id: source.id as SourceId,
+            source_id: source.id,
             source_name: source.name.clone(),
             current_splits: splits,
             enumerator,
@@ -400,7 +400,7 @@ impl ConnectorSourceWorkerHandle {
     pub async fn discovered_splits(
         &self,
         source_id: SourceId,
-        actors: &HashSet<ActorId>,
+        actor_count: usize,
     ) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
         // XXX: when is this None? Can we remove the Option?
         let Some(mut discovered_splits) = self.splits.lock().await.splits.clone() else {
@@ -422,7 +422,7 @@ impl ConnectorSourceWorkerHandle {
             debug_assert!(self.enable_drop_split);
             debug_assert!(discovered_splits.len() == 1);
             discovered_splits =
-                fill_adaptive_split(discovered_splits.values().next().unwrap(), actors)?;
+                fill_adaptive_split(discovered_splits.values().next().unwrap(), actor_count)?;
         }
 
         Ok(discovered_splits)

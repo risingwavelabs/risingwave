@@ -12,13 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::FragmentTypeMask;
+use risingwave_common::id::JobId;
+use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::prelude::DateTime;
 
 use super::*;
+use crate::controller::fragment::FragmentTypeMaskExt;
 
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.inner.read().await.list_time_travel_table_ids().await
+    }
+
+    pub async fn list_refresh_jobs(&self) -> MetaResult<Vec<refresh_job::Model>> {
+        let inner = self.inner.read().await;
+        Ok(RefreshJob::find().all(&inner.db).await?)
+    }
+
+    pub async fn get_refresh_job_state_by_table_id(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<RefreshState> {
+        let inner = self.inner.read().await;
+        let (refresh_job_state,): (RefreshState,) = RefreshJob::find_by_id(table_id)
+            .select_only()
+            .select_column(refresh_job::Column::CurrentStatus)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("refresh_job", table_id))?;
+        Ok(refresh_job_state)
+    }
+
+    pub async fn list_refreshable_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        let inner = self.inner.read().await;
+        Ok(Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::Refreshable.eq(true))
+            .into_tuple()
+            .all(&inner.db)
+            .await?)
     }
 
     pub async fn list_stream_job_desc_for_telemetry(
@@ -51,7 +86,7 @@ impl CatalogController {
                     None
                 };
                 MetaTelemetryJobDesc {
-                    table_id,
+                    table_id: table_id.as_i32_id(),
                     connector: connector_info,
                     optimization: vec![],
                 }
@@ -62,14 +97,15 @@ impl CatalogController {
     pub async fn list_background_creating_jobs(
         &self,
         include_initial: bool,
-    ) -> MetaResult<Vec<(ObjectId, String, DateTime)>> {
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<(JobId, String, DateTime)>> {
         let inner = self.inner.read().await;
         let status_cond = if include_initial {
             streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating])
         } else {
             streaming_job::Column::JobStatus.eq(JobStatus::Creating)
         };
-        let mut table_info: Vec<(ObjectId, String, DateTime)> = Table::find()
+        let mut table_info: Vec<(JobId, String, DateTime)> = Table::find()
             .select_only()
             .columns([table::Column::TableId, table::Column::Definition])
             .column(object::Column::InitializedAt)
@@ -78,12 +114,17 @@ impl CatalogController {
             .filter(
                 streaming_job::Column::CreateType
                     .eq(CreateType::Background)
-                    .and(status_cond.clone()),
+                    .and(status_cond.clone())
+                    .and(
+                        database_id
+                            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+                            .unwrap_or_else(|| SimpleExpr::from(true)),
+                    ),
             )
             .into_tuple()
             .all(&inner.db)
             .await?;
-        let sink_info: Vec<(ObjectId, String, DateTime)> = Sink::find()
+        let sink_info: Vec<(JobId, String, DateTime)> = Sink::find()
             .select_only()
             .columns([sink::Column::SinkId, sink::Column::Definition])
             .column(object::Column::InitializedAt)
@@ -92,7 +133,12 @@ impl CatalogController {
             .filter(
                 streaming_job::Column::CreateType
                     .eq(CreateType::Background)
-                    .and(status_cond),
+                    .and(status_cond)
+                    .and(
+                        database_id
+                            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+                            .unwrap_or_else(|| SimpleExpr::from(true)),
+                    ),
             )
             .into_tuple()
             .all(&inner.db)
@@ -268,5 +314,42 @@ impl CatalogController {
     pub async fn list_functions(&self) -> MetaResult<Vec<PbFunction>> {
         let inner = self.inner.read().await;
         inner.list_functions().await
+    }
+
+    /// `Unmigrated` refers to table-fragments that have not yet been migrated to the new plan (for now, this means
+    /// table-fragments that do not use `UpstreamSinkUnion` operator to receive multiple upstream sinks)
+    pub async fn list_unmigrated_tables(&self) -> MetaResult<Vec<PbTable>> {
+        let inner = self.inner.read().await;
+
+        let table_objs = Table::find()
+            .filter(table::Column::TableType.eq(TableType::Table))
+            .find_also_related(Object)
+            .join(JoinType::InnerJoin, object::Relation::Fragment.def())
+            .filter(FragmentTypeMask::intersects(FragmentTypeFlag::Mview).and(
+                FragmentTypeMask::disjoint(FragmentTypeFlag::UpstreamSinkUnion),
+            ))
+            .all(&inner.db)
+            .await?;
+
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .collect())
+    }
+
+    pub async fn list_sink_ids(&self, database_id: Option<DatabaseId>) -> MetaResult<Vec<SinkId>> {
+        let inner = self.inner.read().await;
+
+        let mut query = Sink::find().select_only().column(sink::Column::SinkId);
+
+        if let Some(database_id) = database_id {
+            query = query
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .filter(object::Column::DatabaseId.eq(database_id));
+        }
+
+        let sink_ids: Vec<SinkId> = query.into_tuple().all(&inner.db).await?;
+
+        Ok(sink_ids)
     }
 }
