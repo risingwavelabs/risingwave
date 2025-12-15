@@ -601,22 +601,12 @@ impl DdlController {
     async fn reset_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
         tracing::info!(source_id = %source_id, "resetting CDC source offset to latest");
 
-        // Note: CDC source validation is already done in frontend handler
-
         // Get database_id for the source
         let database_id = self
             .metadata_manager
             .catalog_controller
             .get_object_database_id(source_id)
             .await?;
-
-        // Send Command::ResetSource via barrier
-        // This will trigger source executors to:
-        // 1. Clear state table offset (set to None)
-        // 2. Wait for Debezium to send latest offset
-        // 3. Persist the new offset
-        //
-        // TODO: The actual state table clearing logic needs to be implemented in stream executors
 
         self.stream_manager
             .barrier_scheduler
