@@ -27,8 +27,8 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::table::batch_table::BatchTable;
 
-use crate::executor::FilterExecutor;
 use crate::executor::prelude::*;
+use crate::executor::{FilterExecutor, UpsertFilterExecutor};
 use crate::task::ActorEvalErrorReport;
 
 /// The executor will generate a `Watermark` after each chunk.
@@ -42,6 +42,9 @@ pub struct WatermarkFilterExecutor<S: StateStore> {
     watermark_expr: NonStrictExpression,
     /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
+    /// Whether the input stream is an upsert stream, so we need to follow the upsert behavior of
+    /// `FilterExecutor`.
+    upsert: bool,
     table: StateTable<S>,
     global_watermark_table: BatchTable<S>,
 
@@ -54,6 +57,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         input: Executor,
         watermark_expr: NonStrictExpression,
         event_time_col_idx: usize,
+        upsert: bool,
         table: StateTable<S>,
         global_watermark_table: BatchTable<S>,
         eval_error_report: ActorEvalErrorReport,
@@ -63,6 +67,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             input,
             watermark_expr,
             event_time_col_idx,
+            upsert,
             table,
             global_watermark_table,
             eval_error_report,
@@ -84,6 +89,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             input,
             event_time_col_idx,
             watermark_expr,
+            upsert,
             ctx,
             mut table,
             mut global_watermark_table,
@@ -158,7 +164,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     // NULL watermark should not be considered.
                     let max_watermark = watermark_array
                         .iter()
-                        .flatten()
+                        .flatten() // skip NULL values
                         .max_by(DefaultOrd::default_cmp);
 
                     if let Some(max_watermark) = max_watermark {
@@ -178,7 +184,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     if let Some(expr) = watermark_filter_expr {
                         let pred_output = expr.eval_infallible(chunk.data_chunk()).await;
 
-                        if let Some(output_chunk) = FilterExecutor::filter(chunk, pred_output)? {
+                        if let Some(output_chunk) = match upsert {
+                            true => UpsertFilterExecutor::filter(chunk, pred_output)?,
+                            false => FilterExecutor::filter(chunk, pred_output)?,
+                        } {
                             yield Message::Chunk(output_chunk);
                         };
                     } else {
@@ -506,6 +515,7 @@ mod tests {
                 source,
                 watermark_expr,
                 1,
+                false,
                 table,
                 storage_table,
                 eval_error_report,
