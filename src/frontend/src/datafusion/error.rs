@@ -30,9 +30,7 @@ struct ToDataFusionErrorWrapper(BoxedError, Option<Backtrace>);
 impl Display for ToDataFusionErrorWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)?;
-        if let Some(bt) = std::error::request_ref::<Backtrace>(self.0.as_ref()) {
-            write!(f, "{}{}", DataFusionError::BACK_TRACE_SEP, bt)?;
-        } else if let Some(bt) = &self.1 {
+        if let Some(bt) = std::error::request_ref::<Backtrace>(self) {
             write!(f, "{}{}", DataFusionError::BACK_TRACE_SEP, bt)?;
         }
         Ok(())
@@ -45,6 +43,9 @@ impl std::error::Error for ToDataFusionErrorWrapper {
     }
 
     fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        if let Some(bt) = &self.1 {
+            request.provide_ref(bt);
+        }
         if let Some(source) = self.source() {
             source.provide(request);
         }
