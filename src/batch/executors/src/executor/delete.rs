@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
+use hashbrown::HashSet;
 use itertools::Itertools;
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
@@ -45,6 +46,7 @@ pub struct DeleteExecutor {
     returning: bool,
     txn_id: TxnId,
     session_id: u32,
+    upsert: bool,
 }
 
 impl DeleteExecutor {
@@ -79,6 +81,7 @@ impl DeleteExecutor {
             returning,
             txn_id,
             session_id,
+            upsert: false,
         }
     }
 }
@@ -100,6 +103,7 @@ impl Executor for DeleteExecutor {
 impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        let pk_indices: HashSet<_> = self.pk_indices.into_iter().collect();
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
@@ -137,9 +141,25 @@ impl DeleteExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
+            let mut data_chunk = data_chunk?;
             if self.returning {
                 yield data_chunk.clone();
+            }
+            if self.upsert {
+                let (cols, vis) = data_chunk.into_parts();
+                let cap = vis.len();
+                let mut new_cols = Vec::with_capacity(cols.len());
+                // Only keep the primary key columns, pad the rest with null.
+                for (i, col) in cols.into_iter().enumerate() {
+                    if pk_indices.contains(&i) {
+                        new_cols.push(col);
+                    } else {
+                        let mut builder = col.create_builder(cap);
+                        builder.append_n_null(cap);
+                        new_cols.push(builder.finish().into());
+                    }
+                }
+                data_chunk = DataChunk::new(new_cols, vis);
             }
             for chunk in builder.append_chunk(data_chunk) {
                 rows_deleted += write_txn_data(chunk).await?;
