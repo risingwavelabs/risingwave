@@ -77,7 +77,7 @@ pub struct AdbcSnowflakeProperties {
 
     /// The password for authentication.
     #[serde(rename = "adbc_snowflake.password")]
-    pub password: String,
+    pub password: Option<String>,
 
     /// The name of the database to use.
     #[serde(rename = "adbc_snowflake.database")]
@@ -175,10 +175,13 @@ impl AdbcSnowflakeProperties {
         let mut builder = DatabaseBuilder::default()
             .with_account(&self.account)
             .with_username(&self.username)
-            .with_password(&self.password)
             .with_database(&self.database)
             .with_schema(&self.schema)
             .with_warehouse(&self.warehouse);
+
+        if let Some(ref password) = self.password {
+            builder = builder.with_password(password);
+        }
 
         // Set the max timestamp precision to microseconds, as RisingWave supports at most microsecond precision.
         builder.other.push((
