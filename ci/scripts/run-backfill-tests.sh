@@ -296,6 +296,9 @@ test_snapshot_backfill() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/create_nexmark_table.slt'
 
+  # sleep for a while to let table accumulate enough data
+  sleep 10
+
   psql -h localhost -p 4566 -d dev -U root -c 'ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 4;'
 
   TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q3.slt' &
