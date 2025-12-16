@@ -15,6 +15,8 @@
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::generic::GenericPlanRef;
@@ -60,6 +62,29 @@ impl LogicalIcebergScan {
             core,
             iceberg_scan_type,
             snapshot_id,
+        }
+    }
+
+    pub fn iceberg_scan_type(&self) -> IcebergScanType {
+        self.iceberg_scan_type
+    }
+
+    pub fn new_count_star_with_logical_iceberg_scan(
+        logical_iceberg_scan: &LogicalIcebergScan,
+    ) -> Self {
+        let mut core = logical_iceberg_scan.core.clone();
+        core.column_catalog = vec![ColumnCatalog::visible(ColumnDesc::named(
+            "count",
+            ColumnId::first_user_column(),
+            DataType::Int64,
+        ))];
+        let base = PlanBase::new_logical_with_core(&core);
+
+        LogicalIcebergScan {
+            base,
+            core,
+            iceberg_scan_type: IcebergScanType::CountStar,
+            snapshot_id: logical_iceberg_scan.snapshot_id,
         }
     }
 
