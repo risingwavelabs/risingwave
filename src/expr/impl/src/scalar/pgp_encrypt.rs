@@ -15,8 +15,22 @@
 //! PGP encryption/decryption functions compatible with PostgreSQL's pgcrypto
 //!
 //! Reference: https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS
+//!
+//! This implementation uses Sequoia-PGP to create OpenPGP-compliant messages
+//! that are fully compatible with PostgreSQL's pgcrypto extension.
+
+use std::io::{Cursor, Write as IoWrite};
 
 use risingwave_expr::{ExprError, Result, function};
+use sequoia_openpgp::crypto::Password;
+use sequoia_openpgp::packet::prelude::*;
+use sequoia_openpgp::parse::{PacketParser, Parse};
+use sequoia_openpgp::policy::Policy;
+use sequoia_openpgp::serialize::stream::{Compressor, Encryptor, LiteralWriter, Message};
+use sequoia_openpgp::types::{
+    CompressionAlgorithm as SeqCompressionAlgorithm, CompressionLevel, HashAlgorithm,
+    SymmetricAlgorithm,
+};
 
 /// Cipher algorithms supported by PGP
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +43,7 @@ enum CipherAlgorithm {
     Aes192,
     /// AES with 256-bit key
     Aes256,
-    /// Triple-DES with 168-bit key (112-bit strength)
+    /// Triple-DES with 168-bit key
     TripleDes,
     /// CAST5 with 128-bit key
     Cast5,
@@ -58,6 +72,17 @@ impl CipherAlgorithm {
                 )
                 .into(),
             }),
+        }
+    }
+
+    fn to_sequoia(&self) -> SymmetricAlgorithm {
+        match self {
+            CipherAlgorithm::Aes128 => SymmetricAlgorithm::AES128,
+            CipherAlgorithm::Aes192 => SymmetricAlgorithm::AES192,
+            CipherAlgorithm::Aes256 => SymmetricAlgorithm::AES256,
+            CipherAlgorithm::TripleDes => SymmetricAlgorithm::TripleDES,
+            CipherAlgorithm::Cast5 => SymmetricAlgorithm::CAST5,
+            CipherAlgorithm::Blowfish => SymmetricAlgorithm::Blowfish,
         }
     }
 }
@@ -96,6 +121,15 @@ impl CompressionAlgorithm {
                 )
                 .into(),
             }),
+        }
+    }
+
+    fn to_sequoia(&self) -> SeqCompressionAlgorithm {
+        match self {
+            CompressionAlgorithm::None => SeqCompressionAlgorithm::Uncompressed,
+            CompressionAlgorithm::Zip => SeqCompressionAlgorithm::Zip,
+            CompressionAlgorithm::Zlib => SeqCompressionAlgorithm::Zlib,
+            CompressionAlgorithm::Bzip2 => SeqCompressionAlgorithm::BZip2,
         }
     }
 }
@@ -169,6 +203,17 @@ impl DigestAlgorithm {
                 )
                 .into(),
             }),
+        }
+    }
+
+    fn to_sequoia(&self) -> HashAlgorithm {
+        match self {
+            DigestAlgorithm::Md5 => HashAlgorithm::MD5,
+            DigestAlgorithm::Sha1 => HashAlgorithm::SHA1,
+            DigestAlgorithm::Ripemd160 => HashAlgorithm::RipeMD,
+            DigestAlgorithm::Sha256 => HashAlgorithm::SHA256,
+            DigestAlgorithm::Sha384 => HashAlgorithm::SHA384,
+            DigestAlgorithm::Sha512 => HashAlgorithm::SHA512,
         }
     }
 }
@@ -251,12 +296,11 @@ impl PgpEncryptOptions {
                         opts.compress_algo = CompressionAlgorithm::from_str(value)?;
                     }
                     "compress-level" => {
-                        opts.compress_level = value.parse::<i32>().map_err(|_| {
-                            ExprError::InvalidParam {
+                        opts.compress_level =
+                            value.parse::<i32>().map_err(|_| ExprError::InvalidParam {
                                 name: "compress-level",
                                 reason: format!("invalid integer: {}", value).into(),
-                            }
-                        })?;
+                            })?;
                         if !(0..=9).contains(&opts.compress_level) {
                             return Err(ExprError::InvalidParam {
                                 name: "compress-level",
@@ -277,12 +321,11 @@ impl PgpEncryptOptions {
                         opts.s2k_mode = S2kMode::from_str(value)?;
                     }
                     "s2k-count" => {
-                        opts.s2k_count = value.parse::<u32>().map_err(|_| {
-                            ExprError::InvalidParam {
+                        opts.s2k_count =
+                            value.parse::<u32>().map_err(|_| ExprError::InvalidParam {
                                 name: "s2k-count",
                                 reason: format!("invalid integer: {}", value).into(),
-                            }
-                        })?;
+                            })?;
                         // PostgreSQL requires count to be between 1024 and 65011712
                         // and a power of 2 greater than 1024
                         if opts.s2k_count < 1024 || opts.s2k_count > 65011712 {
@@ -418,57 +461,238 @@ fn parse_bool(value: &str, option_name: &str) -> Result<bool> {
 // Symmetric Encryption Functions
 // ============================================================================
 
+/// Encrypts data using PGP symmetric encryption with OpenPGP format
+fn pgp_sym_encrypt_impl(data: &str, password: &str, opts: &PgpEncryptOptions) -> Result<Box<[u8]>> {
+    // Prepare the data
+    let mut data_bytes = data.as_bytes().to_vec();
+
+    // Apply CRLF conversion if requested
+    if opts.convert_crlf {
+        data_bytes = data_bytes
+            .iter()
+            .flat_map(|&b| {
+                if b == b'\n' {
+                    vec![b'\r', b'\n']
+                } else {
+                    vec![b]
+                }
+            })
+            .collect();
+    }
+
+    // Create output buffer
+    let mut output = Vec::new();
+
+    // Build the encryption stack using Sequoia's Message API
+    let message = Message::new(&mut output);
+
+    // Create password object
+    let password_obj = Password::from(password.to_string());
+
+    // Create encryptor with password-based encryption
+    let encryptor = Encryptor::with_passwords(message, std::iter::once(&password_obj))
+        .symmetric_algo(opts.cipher_algo.to_sequoia())
+        .build()
+        .map_err(|e| ExprError::InvalidParam {
+            name: "pgp_sym_encrypt",
+            reason: format!("Failed to build encryptor: {}", e).into(),
+        })?;
+
+    // Apply compression if needed
+    let writer: Box<dyn IoWrite + Send + Sync> = if opts.compress_algo != CompressionAlgorithm::None
+    {
+        let compressor = Compressor::new(encryptor)
+            .algo(opts.compress_algo.to_sequoia())
+            .level(CompressionLevel::from(opts.compress_level as u8))
+            .build()
+            .map_err(|e| ExprError::InvalidParam {
+                name: "pgp_sym_encrypt",
+                reason: format!("Failed to build compressor: {}", e).into(),
+            })?;
+        Box::new(compressor)
+    } else {
+        Box::new(encryptor)
+    };
+
+    // Write the literal data
+    let mut literal = LiteralWriter::new(writer)
+        .build()
+        .map_err(|e| ExprError::InvalidParam {
+            name: "pgp_sym_encrypt",
+            reason: format!("Failed to build literal writer: {}", e).into(),
+        })?;
+
+    literal
+        .write_all(&data_bytes)
+        .map_err(|e| ExprError::InvalidParam {
+            name: "pgp_sym_encrypt",
+            reason: format!("Failed to write data: {}", e).into(),
+        })?;
+
+    literal.finalize().map_err(|e| ExprError::InvalidParam {
+        name: "pgp_sym_encrypt",
+        reason: format!("Failed to finalize message: {}", e).into(),
+    })?;
+
+    Ok(output.into_boxed_slice())
+}
+
 /// Encrypts data using PGP symmetric encryption
 /// Compatible with PostgreSQL's pgp_sym_encrypt function
 #[function("pgp_sym_encrypt(varchar, varchar) -> bytea")]
-fn pgp_sym_encrypt_no_options(_data: &str, _password: &str) -> Result<Box<[u8]>> {
-    let _opts = PgpEncryptOptions::parse_encrypt(None, false)?;
-    Err(ExprError::InvalidParam {
-        name: "pgp_sym_encrypt",
-        reason: "PGP symmetric encryption not yet implemented".into(),
-    })
+fn pgp_sym_encrypt_no_options(data: &str, password: &str) -> Result<Box<[u8]>> {
+    let opts = PgpEncryptOptions::parse_encrypt(None, false)?;
+    pgp_sym_encrypt_impl(data, password, &opts)
 }
 
 #[function("pgp_sym_encrypt(varchar, varchar, varchar) -> bytea")]
-fn pgp_sym_encrypt_with_options(
-    _data: &str,
-    _password: &str,
-    options: &str,
-) -> Result<Box<[u8]>> {
-    let _opts = PgpEncryptOptions::parse_encrypt(Some(options), false)?;
-    Err(ExprError::InvalidParam {
-        name: "pgp_sym_encrypt",
-        reason: "PGP symmetric encryption not yet implemented".into(),
-    })
+fn pgp_sym_encrypt_with_options(data: &str, password: &str, options: &str) -> Result<Box<[u8]>> {
+    let opts = PgpEncryptOptions::parse_encrypt(Some(options), false)?;
+    pgp_sym_encrypt_impl(data, password, &opts)
+}
+
+/// Decrypts data using PGP symmetric decryption with OpenPGP format
+fn pgp_sym_decrypt_impl(
+    data: &[u8],
+    password: &str,
+    opts: &PgpDecryptOptions,
+    writer: &mut impl std::fmt::Write,
+) -> Result<()> {
+    // Parse the OpenPGP message
+    let mut ppr = PacketParser::from_bytes(data).map_err(|e| ExprError::InvalidParam {
+        name: "pgp_sym_decrypt",
+        reason: format!("Failed to parse OpenPGP message: {}", e).into(),
+    })?;
+
+    let password_obj = Password::from(password.to_string());
+    let mut decrypted_data = Vec::new();
+
+    // Process packets
+    while let PacketParserResult::Some(pp) = ppr {
+        match pp.packet {
+            sequoia_openpgp::Packet::SKESK(ref skesk) => {
+                // Try to decrypt with the provided password
+                match skesk.decrypt(&password_obj) {
+                    Ok(Some((algo, session_key))) => {
+                        // Found the session key, now decrypt the data
+                        ppr = pp.next().map_err(|e| ExprError::InvalidParam {
+                            name: "pgp_sym_decrypt",
+                            reason: format!("Failed to parse next packet: {}", e).into(),
+                        })?;
+
+                        // Process the encrypted data packet
+                        while let PacketParserResult::Some(pp2) = ppr {
+                            if let sequoia_openpgp::Packet::SEIP(ref seip) = pp2.packet {
+                                // Decrypt the SEIP packet
+                                let mut decryptor =
+                                    seip.decrypt(algo, &session_key).map_err(|e| {
+                                        ExprError::InvalidParam {
+                                            name: "pgp_sym_decrypt",
+                                            reason: format!("Failed to decrypt SEIP: {}", e).into(),
+                                        }
+                                    })?;
+
+                                std::io::copy(&mut decryptor, &mut decrypted_data).map_err(
+                                    |e| ExprError::InvalidParam {
+                                        name: "pgp_sym_decrypt",
+                                        reason: format!("Failed to read decrypted data: {}", e)
+                                            .into(),
+                                    },
+                                )?;
+                                break;
+                            }
+                            ppr = pp2.next().map_err(|e| ExprError::InvalidParam {
+                                name: "pgp_sym_decrypt",
+                                reason: format!("Failed to parse next packet: {}", e).into(),
+                            })?;
+                        }
+                        break;
+                    }
+                    Ok(None) => {
+                        // Password didn't work, continue
+                        ppr = pp.next().map_err(|e| ExprError::InvalidParam {
+                            name: "pgp_sym_decrypt",
+                            reason: format!("Failed to parse next packet: {}", e).into(),
+                        })?;
+                    }
+                    Err(e) => {
+                        return Err(ExprError::InvalidParam {
+                            name: "pgp_sym_decrypt",
+                            reason: format!("Decryption error: {}", e).into(),
+                        });
+                    }
+                }
+            }
+            _ => {
+                ppr = pp.next().map_err(|e| ExprError::InvalidParam {
+                    name: "pgp_sym_decrypt",
+                    reason: format!("Failed to parse next packet: {}", e).into(),
+                })?;
+            }
+        }
+    }
+
+    if decrypted_data.is_empty() {
+        return Err(ExprError::InvalidParam {
+            name: "pgp_sym_decrypt",
+            reason: "Could not decrypt message with provided password".into(),
+        });
+    }
+
+    // Apply CRLF conversion if requested
+    if opts.convert_crlf {
+        let mut result = Vec::new();
+        let mut i = 0;
+        while i < decrypted_data.len() {
+            if i + 1 < decrypted_data.len()
+                && decrypted_data[i] == b'\r'
+                && decrypted_data[i + 1] == b'\n'
+            {
+                result.push(b'\n');
+                i += 2;
+            } else {
+                result.push(decrypted_data[i]);
+                i += 1;
+            }
+        }
+        decrypted_data = result;
+    }
+
+    // Convert to string
+    let decrypted_str = String::from_utf8(decrypted_data).map_err(|e| ExprError::InvalidParam {
+        name: "pgp_sym_decrypt",
+        reason: format!("Decrypted data is not valid UTF-8: {}", e).into(),
+    })?;
+
+    writer
+        .write_str(&decrypted_str)
+        .map_err(|e| ExprError::InvalidParam {
+            name: "pgp_sym_decrypt",
+            reason: format!("Failed to write output: {}", e).into(),
+        })
 }
 
 /// Decrypts data using PGP symmetric decryption
 /// Compatible with PostgreSQL's pgp_sym_decrypt function
 #[function("pgp_sym_decrypt(bytea, varchar) -> varchar")]
 fn pgp_sym_decrypt_no_options(
-    _data: &[u8],
-    _password: &str,
-    _writer: &mut impl std::fmt::Write,
+    data: &[u8],
+    password: &str,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
-    let _opts = PgpDecryptOptions::parse(None)?;
-    Err(ExprError::InvalidParam {
-        name: "pgp_sym_decrypt",
-        reason: "PGP symmetric decryption not yet implemented".into(),
-    })
+    let opts = PgpDecryptOptions::parse(None)?;
+    pgp_sym_decrypt_impl(data, password, &opts, writer)
 }
 
 #[function("pgp_sym_decrypt(bytea, varchar, varchar) -> varchar")]
 fn pgp_sym_decrypt_with_options(
-    _data: &[u8],
-    _password: &str,
+    data: &[u8],
+    password: &str,
     options: &str,
-    _writer: &mut impl std::fmt::Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
-    let _opts = PgpDecryptOptions::parse(Some(options))?;
-    Err(ExprError::InvalidParam {
-        name: "pgp_sym_decrypt",
-        reason: "PGP symmetric decryption not yet implemented".into(),
-    })
+    let opts = PgpDecryptOptions::parse(Some(options))?;
+    pgp_sym_decrypt_impl(data, password, &opts, writer)
 }
 
 // ============================================================================
@@ -669,13 +893,9 @@ mod tests {
     #[test]
     fn test_decrypt_options_parsing() {
         let opts =
-            PgpDecryptOptions::parse(Some("disable-mdc=1, expected-cipher-algo=aes256"))
-                .unwrap();
+            PgpDecryptOptions::parse(Some("disable-mdc=1, expected-cipher-algo=aes256")).unwrap();
         assert!(opts.disable_mdc);
-        assert_eq!(
-            opts.expected_cipher_algo,
-            Some(CipherAlgorithm::Aes256)
-        );
+        assert_eq!(opts.expected_cipher_algo, Some(CipherAlgorithm::Aes256));
     }
 
     #[test]
@@ -691,9 +911,7 @@ mod tests {
         // Missing value
         assert!(PgpEncryptOptions::parse_encrypt(Some("cipher-algo"), false).is_err());
         // Invalid compression level
-        assert!(
-            PgpEncryptOptions::parse_encrypt(Some("compress-level=10"), false).is_err()
-        );
+        assert!(PgpEncryptOptions::parse_encrypt(Some("compress-level=10"), false).is_err());
     }
 
     #[test]

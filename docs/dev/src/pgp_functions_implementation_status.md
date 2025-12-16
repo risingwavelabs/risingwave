@@ -23,10 +23,10 @@ This document tracks the implementation status of PostgreSQL-compatible PGP encr
 - **Location**: `src/expr/impl/src/scalar/pgp_encrypt.rs`
 - **Implementation**: Needs actual PGP symmetric encryption logic
 
-### 2. pgp_sym_decrypt  
+### 2. pgp_sym_decrypt
 - **Signature**: `pgp_sym_decrypt(msg bytea, psw text [, options text]) returns text`
 - **Description**: Decrypts a symmetric-key-encrypted PGP message
-- **Status**: ✅ Stub implemented, infrastructure complete  
+- **Status**: ✅ Stub implemented, infrastructure complete
 - **Location**: `src/expr/impl/src/scalar/pgp_encrypt.rs`
 - **Implementation**: Needs actual PGP symmetric decryption logic
 
@@ -78,7 +78,7 @@ SELECT pgp_sym_encrypt('test', 'password');
 
 ### Test Files to Create:
 1. `e2e_test/batch/pgp_sym_encrypt.slt` - Tests for pgp_sym_encrypt
-2. `e2e_test/batch/pgp_sym_decrypt.slt` - Tests for pgp_sym_decrypt  
+2. `e2e_test/batch/pgp_sym_decrypt.slt` - Tests for pgp_sym_decrypt
 3. `e2e_test/batch/pgp_pub_encrypt.slt` - Tests for pgp_pub_encrypt
 4. `e2e_test/batch/pgp_pub_decrypt.slt` - Tests for pgp_pub_decrypt
 
@@ -111,7 +111,7 @@ Given the complexity of PGP, using an existing well-maintained Rust crate like `
 ## Compatibility Notes
 
 ### PostgreSQL pgcrypto Options:
-- `cipher-algo`: aes128, aes192, aes256, 3des, cast5, blowfish  
+- `cipher-algo`: aes128, aes192, aes256, 3des, cast5, blowfish
 - `compress-algo`: 0 (none), 1 (zip), 2 (zlib), 3 (bzip2)
 - `compress-level`: 0-9
 - `convert-crlf`: 0 or 1
@@ -130,7 +130,7 @@ Given the complexity of PGP, using an existing well-maintained Rust crate like `
 
 ## Current Status Summary:
 - **Infrastructure**: 100% complete ✅
-- **Stub implementations**: 100% complete ✅  
+- **Stub implementations**: 100% complete ✅
 - **Actual PGP logic**: 0% complete ⏳
 - **Tests**: 0% complete ⏳
 - **Documentation**: In progress 📝

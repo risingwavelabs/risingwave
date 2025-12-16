@@ -1,0 +1,123 @@
+# PGP Symmetric Encryption/Decryption Functions
+# Reference: https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS
+
+# Basic encryption and decryption
+statement ok
+CREATE TABLE test_pgp_data (id INT, data VARCHAR);
+
+statement ok
+INSERT INTO test_pgp_data VALUES (1, 'Hello World'), (2, 'Secret Message'), (3, 'Test Data 123');
+
+statement ok
+flush;
+
+# Test basic pgp_sym_encrypt and pgp_sym_decrypt
+query I
+SELECT id FROM test_pgp_data WHERE pgp_sym_decrypt(pgp_sym_encrypt(data, 'password'), 'password') = data ORDER BY id;
+----
+1
+2
+3
+
+
+# Test with empty string
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('', 'password'), 'password');
+----
+(empty)
+
+# Test with special characters
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('!@#$%^&*()_+-=[]{}|;:",.<>?/~`', 'password'), 'password');
+----
+!@#$%^&*()_+-=[]{}|;:",.<>?/~`
+
+# Test with Unicode characters
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('Hello 世界 🌍', 'password'), 'password');
+----
+Hello 世界 🌍
+
+# Test with newlines - verify round trip works
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt(E'line1\nline2\nline3', 'password'), 'password') = E'line1\nline2\nline3';
+----
+t
+
+# Test with tabs - verify round trip works
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt(E'col1\tcol2\tcol3', 'password'), 'password') = E'col1\tcol2\tcol3';
+----
+t
+
+# Test with long text
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt(repeat('A', 1000), 'password'), 'password') = repeat('A', 1000);
+----
+t
+
+# Test with different passwords (should fail to decrypt correctly)
+statement error
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('test', 'password1'), 'password2');
+
+# Test with options - no compression
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('test', 'password', 'compress-algo=0'), 'password');
+----
+test
+
+# Test with options - AES256 cipher
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('test', 'password', 'cipher-algo=aes256'), 'password');
+----
+test
+
+# Test with options - AES192 cipher
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('test', 'password', 'cipher-algo=aes192'), 'password');
+----
+test
+
+# Test with options - 3DES cipher
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('test', 'password', 'cipher-algo=3des'), 'password');
+----
+test
+
+# Test with multiple options
+query T
+SELECT pgp_sym_decrypt(pgp_sym_encrypt('test', 'password', 'cipher-algo=aes256,compress-algo=0'), 'password');
+----
+test
+
+# Note: Blowfish and CAST5 may not be available depending on OpenSSL configuration
+
+# Test option parsing errors
+
+# Invalid cipher algorithm
+statement error Invalid parameter cipher-algo
+SELECT pgp_sym_encrypt('test', 'password', 'cipher-algo=invalid');
+
+# Invalid compression algorithm
+statement error Invalid parameter compress-algo
+SELECT pgp_sym_encrypt('test', 'password', 'compress-algo=5');
+
+# Invalid compression level
+statement error Invalid parameter compress-level
+SELECT pgp_sym_encrypt('test', 'password', 'compress-level=10');
+
+# Invalid S2K count (not power of 2)
+statement error Invalid parameter s2k-count
+SELECT pgp_sym_encrypt('test', 'password', 's2k-count=65537');
+
+# Invalid S2K count (too small)
+statement error Invalid parameter s2k-count
+SELECT pgp_sym_encrypt('test', 'password', 's2k-count=512');
+
+# Invalid boolean value
+statement error must be 0 or 1
+SELECT pgp_sym_encrypt('test', 'password', 'disable-mdc=2');
+
+# Cleanup
+statement ok
+DROP TABLE test_pgp_data;

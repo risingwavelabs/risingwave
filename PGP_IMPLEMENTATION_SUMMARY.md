@@ -127,7 +127,7 @@ The challenging part remains: implementing the actual OpenPGP cryptographic logi
 - `sequoia-openpgp` - Modern, actively maintained
 - `pgp` crate (0.18.0) - Simpler API
 
-### Option 2: Minimal Custom Implementation  
+### Option 2: Minimal Custom Implementation
 **Pros:**
 - Full control over behavior
 - Can match PostgreSQL exactly
@@ -203,7 +203,7 @@ docs/dev/src/
 ## References
 
 - **PostgreSQL Documentation**: https://www.postgresql.org/docs/current/pgcrypto.html#PGCRYPTO-PGP-ENC-FUNCS
-- **PostgreSQL Source**: 
+- **PostgreSQL Source**:
   - `contrib/pgcrypto/pgp-encrypt.c`
   - `contrib/pgcrypto/pgp-decrypt.c`
 - **OpenPGP RFC 4880**: https://tools.ietf.org/html/rfc4880

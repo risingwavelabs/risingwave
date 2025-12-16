@@ -42,7 +42,7 @@ SELECT pgp_sym_encrypt('sensitive data', 'my_password');
 SELECT pgp_sym_encrypt('data', 'password', 'cipher-algo=aes256');
 
 -- With multiple options
-SELECT pgp_sym_encrypt('data', 'password', 
+SELECT pgp_sym_encrypt('data', 'password',
     'cipher-algo=aes256, compress-algo=2, compress-level=9');
 
 -- Disable compression and use stronger S2K
@@ -90,7 +90,7 @@ SELECT pgp_sym_encrypt('data', 'pass', 'cipher-algo=aes256');
 -- Result: Options parsed, "not yet implemented" (expected until crypto implemented)
 
 -- Valid: Multiple options
-SELECT pgp_sym_encrypt('data', 'pass', 
+SELECT pgp_sym_encrypt('data', 'pass',
     'cipher-algo=aes256, compress-level=9, s2k-mode=3');
 -- Result: All options parsed correctly
 ```
@@ -102,7 +102,7 @@ The implementation correctly rejects invalid options with helpful messages:
 ```sql
 -- Invalid cipher algorithm
 SELECT pgp_sym_encrypt('data', 'pass', 'cipher-algo=invalid');
--- ERROR: Invalid parameter cipher-algo: invalid cipher algorithm: invalid. 
+-- ERROR: Invalid parameter cipher-algo: invalid cipher algorithm: invalid.
 --        Valid values: bf, aes128, aes192, aes256, 3des, cast5
 
 -- Invalid compression level

@@ -8,6 +8,7 @@ nd = "nd"               # N-dimentional / 2nd
 steam = "stream"        # You played with Steam games too much.
 ser = "ser"             # Serialization
 typ = "typ"             # Type, to avoid conflict with rust keyword `type`
+ede = "ede"             # Part of des_ede3 (Triple DES) in OpenSSL
 # CDC / MySQL binlog terms
 GTID = "GTID"
 GTIDs = "GTIDs"
