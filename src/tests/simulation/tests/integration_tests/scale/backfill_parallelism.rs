@@ -176,3 +176,55 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_backfill_parallelism_prefers_backfill_override_over_mview_override() -> Result<()> {
+    let config = Configuration::for_background_ddl();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism=3;").await?;
+    session
+        .run("set streaming_parallelism_for_materialized_view=2;")
+        .await?;
+    session
+        .run("set streaming_parallelism_for_backfill=1;")
+        .await?;
+    session.run("set backfill_rate_limit=1;").await?;
+    session.run("set background_ddl=true;").await?;
+
+    session.run("create table t(v int);").await?;
+    session
+        .run("insert into t select * from generate_series(1, 100);")
+        .await?;
+
+    // With both MV-specific and backfill-specific overrides, backfill uses the backfill value (1),
+    // while normal parallelism falls back to the MV-specific value (2) instead of the global (3).
+    session
+        .run("create materialized view m1 as select * from t;")
+        .await?;
+    wait_parallelism(&mut session, "m1", "1").await?;
+    wait_jobs_finished(&mut session).await?;
+    wait_parallelism(&mut session, "m1", "2").await?;
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'm1' order by parallelism;")
+        .await?
+        .assert_result_eq("2");
+
+    // Clear backfill override; backfill should now use the MV-specific parallelism (2) for the new MV.
+    session
+        .run("set streaming_parallelism_for_backfill=default;")
+        .await?;
+    session
+        .run("create materialized view m2 as select * from t;")
+        .await?;
+    wait_parallelism(&mut session, "m2", "2").await?;
+    wait_jobs_finished(&mut session).await?;
+    wait_parallelism(&mut session, "m2", "2").await?;
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'm2' order by parallelism;")
+        .await?
+        .assert_result_eq("2");
+
+    Ok(())
+}
