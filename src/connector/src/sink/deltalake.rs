@@ -622,6 +622,7 @@ mod tests {
     use deltalake::kernel::DataType as SchemaDataType;
     use deltalake::operations::create::CreateBuilder;
     use maplit::btreemap;
+    use url::Url;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -702,7 +703,7 @@ mod tests {
         // dev dependency.
 
         let ctx = deltalake::datafusion::prelude::SessionContext::new();
-        let table = deltalake::open_table(path).await.unwrap();
+        let table = deltalake::open_table(Url::parse(&format!("file://{}", path)).unwrap()).await.unwrap();
         ctx.register_table("demo", std::sync::Arc::new(table))
             .unwrap();
 
