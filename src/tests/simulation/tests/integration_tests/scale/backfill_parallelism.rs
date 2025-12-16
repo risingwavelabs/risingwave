@@ -63,16 +63,16 @@ async fn test_backfill_parallelism_switches_to_normal_after_completion() -> Resu
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
 
-    session.run("set streaming_parallelism=3;").await?;
+    session.run("set streaming_parallelism = 3;").await?;
     session
-        .run("set streaming_parallelism_for_backfill=2;")
+        .run("set streaming_parallelism_for_backfill = 2;")
         .await?;
     session.run("create table t(v int);").await?;
     session
         .run("insert into t select * from generate_series(1, 12);")
         .await?;
-    session.run("set backfill_rate_limit=1;").await?;
-    session.run("set background_ddl=true;").await?;
+    session.run("set backfill_rate_limit = 1;").await?;
+    session.run("set background_ddl = true;").await?;
     session
         .run("create materialized view m as select * from t;")
         .await?;
@@ -98,14 +98,14 @@ async fn test_backfill_parallelism_optional_and_adaptive() -> Result<()> {
 
     // Adaptive (no streaming_parallelism) with a custom backfill override.
     session
-        .run("set streaming_parallelism_for_backfill=2;")
+        .run("set streaming_parallelism_for_backfill = 2;")
         .await?;
     session.run("create table t(v int);").await?;
     session
         .run("insert into t select * from generate_series(1, 12);")
         .await?;
-    session.run("set backfill_rate_limit=1;").await?;
-    session.run("set background_ddl=true;").await?;
+    session.run("set backfill_rate_limit = 1;").await?;
+    session.run("set background_ddl = true;").await?;
     session
         .run("create materialized view m as select * from t;")
         .await?;
@@ -124,7 +124,7 @@ async fn test_backfill_parallelism_optional_and_adaptive() -> Result<()> {
 
     // Now create another MV without setting backfill override; it should not lower to 2.
     session
-        .run("set streaming_parallelism_for_backfill=default;")
+        .run("set streaming_parallelism_for_backfill = default;")
         .await?;
     session
         .run("create materialized view m2 as select * from t;")
@@ -146,12 +146,12 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
 
-    session.run("set streaming_parallelism=4;").await?;
+    session.run("set streaming_parallelism = 4;").await?;
     session
-        .run("set streaming_parallelism_for_backfill=2;")
+        .run("set streaming_parallelism_for_backfill = 2;")
         .await?;
-    session.run("set backfill_rate_limit=1;").await?;
-    session.run("set background_ddl=true;").await?;
+    session.run("set backfill_rate_limit = 1;").await?;
+    session.run("set background_ddl = true;").await?;
 
     session.run("create table t(v int);").await?;
     session
@@ -183,15 +183,15 @@ async fn test_backfill_parallelism_prefers_backfill_override_over_mview_override
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
 
-    session.run("set streaming_parallelism=3;").await?;
+    session.run("set streaming_parallelism = 3;").await?;
     session
-        .run("set streaming_parallelism_for_materialized_view=2;")
+        .run("set streaming_parallelism_for_materialized_view = 2;")
         .await?;
     session
-        .run("set streaming_parallelism_for_backfill=1;")
+        .run("set streaming_parallelism_for_backfill = 1;")
         .await?;
-    session.run("set backfill_rate_limit=1;").await?;
-    session.run("set background_ddl=true;").await?;
+    session.run("set backfill_rate_limit = 1;").await?;
+    session.run("set background_ddl = true;").await?;
 
     session.run("create table t(v int);").await?;
     session
@@ -213,7 +213,7 @@ async fn test_backfill_parallelism_prefers_backfill_override_over_mview_override
 
     // Clear backfill override; backfill should now use the MV-specific parallelism (2) for the new MV.
     session
-        .run("set streaming_parallelism_for_backfill=default;")
+        .run("set streaming_parallelism_for_backfill = default;")
         .await?;
     session
         .run("create materialized view m2 as select * from t;")

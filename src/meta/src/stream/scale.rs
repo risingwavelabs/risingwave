@@ -1077,15 +1077,21 @@ impl GlobalStreamManager {
         }
     }
 
+    /// Restores a streaming job's parallelism to its target value after backfill completes.
     async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
+        // Fetch both the target parallelism (final desired state) and the backfill parallelism
+        // (temporary parallelism used during backfill phase) from the catalog.
         let (target, backfill_parallelism) = self
             .metadata_manager
             .catalog_controller
             .get_job_parallelisms(job_id)
             .await?;
 
+        // Determine if we need to reschedule based on the backfill configuration.
         match backfill_parallelism {
             Some(backfill_parallelism) if backfill_parallelism == target => {
+                // Backfill parallelism matches target - no reschedule needed since the job
+                // is already running at the desired parallelism.
                 tracing::debug!(
                     job_id = %job_id,
                     ?backfill_parallelism,
@@ -1095,9 +1101,11 @@ impl GlobalStreamManager {
                 return Ok(());
             }
             Some(_) => {
-                // proceed to restore to target parallelism
+                // Backfill parallelism differs from target - proceed to restore target parallelism.
             }
             None => {
+                // No backfill parallelism was configured, meaning the job was created without
+                // a special backfill override. No reschedule is necessary.
                 tracing::debug!(
                     job_id = %job_id,
                     ?target,
@@ -1107,6 +1115,7 @@ impl GlobalStreamManager {
             }
         }
 
+        // Reschedule the job to restore its target parallelism.
         tracing::info!(
             job_id = %job_id,
             ?target,
