@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use iceberg::spec::Operation;
-use iceberg::transaction::Transaction;
+use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::id::WorkerId;
@@ -826,27 +826,21 @@ impl IcebergCompactionManager {
             "try trigger snapshots expiration",
         );
 
-        let tx = Transaction::new(&table);
+        let txn = Transaction::new(&table);
 
-        let mut expired_snapshots = tx.expire_snapshot();
-
-        expired_snapshots = expired_snapshots.expire_older_than(snapshot_expiration_timestamp_ms);
+        let mut expired_snapshots = txn
+            .expire_snapshot()
+            .expire_older_than(snapshot_expiration_timestamp_ms)
+            .clear_expire_files(iceberg_config.snapshot_expiration_clear_expired_files)
+            .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
 
         if let Some(retain_last) = iceberg_config.snapshot_expiration_retain_last {
             expired_snapshots = expired_snapshots.retain_last(retain_last);
         }
 
-        expired_snapshots = expired_snapshots
-            .clear_expired_files(iceberg_config.snapshot_expiration_clear_expired_files);
-
-        expired_snapshots = expired_snapshots
-            .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
-
         let tx = expired_snapshots
-            .apply()
-            .await
+            .apply(txn)
             .map_err(|e| SinkError::Iceberg(e.into()))?;
-
         tx.commit(catalog.as_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;

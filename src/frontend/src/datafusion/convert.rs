@@ -30,7 +30,7 @@ pub fn convert_expr(expr: &ExprImpl, input_schema: &impl ColumnTrait) -> RwResul
                 None => ScalarValue::Null,
                 Some(sv) => convert_scalar_value(sv, lit.return_type())?,
             };
-            Ok(DFExpr::Literal(scalar))
+            Ok(DFExpr::Literal(scalar, None))
         }
         ExprImpl::InputRef(input_ref) => Ok(DFExpr::Column(input_schema.column(input_ref.index()))),
         ExprImpl::FunctionCall(func_call) => convert_function_call(func_call, input_schema),
