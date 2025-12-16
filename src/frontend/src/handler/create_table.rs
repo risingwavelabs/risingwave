@@ -2586,6 +2586,9 @@ fn bind_webhook_info(
 
         Some(expr.to_expr_proto())
     } else {
+        session.notice_to_user(
+            "VALIDATE clause is strongly recommended for safety or production usages",
+        );
         None
     };
 
