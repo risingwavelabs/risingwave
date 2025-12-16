@@ -1,4 +1,4 @@
 statement ok
 set streaming_use_snapshot_backfill = true;
 
-# TODO: add more tests
+include ../../streaming/alter_mv/alter_mv_simple.slt
