@@ -133,6 +133,12 @@ where
 
     let jobs: HashSet<JobId> = jobs.into_iter().collect();
 
+    let prepared = prepare_render_jobs(txn, jobs).await?;
+
+    if prepared.is_empty() {
+        return Ok(HashMap::new());
+    }
+
     let available_workers: BTreeMap<_, _> = worker_nodes
         .current()
         .values()
@@ -148,14 +154,12 @@ where
         })
         .collect();
 
-    let RenderedGraph { fragments, .. } = render_jobs(
-        txn,
+    let RenderedGraph { fragments, .. } = render_prepared(
         actor_id_counter,
-        jobs,
-        available_workers,
+        &available_workers,
         adaptive_parallelism_strategy,
-    )
-    .await?;
+        &prepared,
+    )?;
 
     Ok(fragments)
 }
@@ -187,6 +191,23 @@ impl RenderedGraph {
     }
 }
 
+#[derive(Default)]
+pub struct PreparedRenderContext {
+    pub ensembles: Vec<NoShuffleEnsemble>,
+    pub fragment_map: HashMap<FragmentId, fragment::Model>,
+    pub job_map: HashMap<JobId, streaming_job::Model>,
+    pub streaming_job_databases: HashMap<JobId, DatabaseId>,
+    pub database_map: HashMap<DatabaseId, database::Model>,
+    pub fragment_source_ids: HashMap<FragmentId, SourceId>,
+    pub fragment_splits: HashMap<FragmentId, Vec<SplitImpl>>,
+}
+
+impl PreparedRenderContext {
+    pub fn is_empty(&self) -> bool {
+        self.ensembles.is_empty()
+    }
+}
+
 /// Fragment-scoped rendering entry point used by operational tooling.
 /// It validates that the requested fragments are roots of their no-shuffle ensembles,
 /// resolves only the metadata required for those components, and then reuses the shared
@@ -201,8 +222,31 @@ pub async fn render_fragments<C>(
 where
     C: ConnectionTrait,
 {
-    if ensembles.is_empty() {
+    let prepared = prepare_render_fragments(txn, ensembles).await?;
+
+    if prepared.is_empty() {
         return Ok(RenderedGraph::empty());
+    }
+
+    render_prepared(
+        actor_id_counter,
+        &workers,
+        adaptive_parallelism_strategy,
+        &prepared,
+    )
+}
+
+/// Async prepare stage for fragment-scoped rendering. It resolves all metadata required to later
+/// render with arbitrary worker sets.
+pub async fn prepare_render_fragments<C>(
+    txn: &C,
+    ensembles: Vec<NoShuffleEnsemble>,
+) -> MetaResult<PreparedRenderContext>
+where
+    C: ConnectionTrait,
+{
+    if ensembles.is_empty() {
+        return Ok(PreparedRenderContext::default());
     }
 
     let required_fragment_ids: HashSet<_> = ensembles
@@ -239,7 +283,7 @@ where
         .collect();
 
     if job_ids.is_empty() {
-        return Ok(RenderedGraph::empty());
+        return Ok(PreparedRenderContext::default());
     }
 
     let jobs: HashMap<_, _> = StreamingJob::find()
@@ -256,21 +300,7 @@ where
         return Err(anyhow!("streaming jobs {:?} not found", missing).into());
     }
 
-    let fragments = render_no_shuffle_ensembles(
-        txn,
-        actor_id_counter,
-        &ensembles,
-        &fragment_map,
-        &jobs,
-        &workers,
-        adaptive_parallelism_strategy,
-    )
-    .await?;
-
-    Ok(RenderedGraph {
-        fragments,
-        ensembles,
-    })
+    build_prepared_context(txn, ensembles, fragment_map, jobs).await
 }
 
 /// Job-scoped rendering entry point that walks every no-shuffle root belonging to the
@@ -285,6 +315,33 @@ pub async fn render_jobs<C>(
 where
     C: ConnectionTrait,
 {
+    let prepared = prepare_render_jobs(txn, job_ids).await?;
+
+    if prepared.is_empty() {
+        return Ok(RenderedGraph::empty());
+    }
+
+    render_prepared(
+        actor_id_counter,
+        &workers,
+        adaptive_parallelism_strategy,
+        &prepared,
+    )
+}
+
+/// Async prepare stage for job-scoped rendering. It collects all no-shuffle ensembles and the
+/// metadata required to render them later with a provided worker set.
+pub async fn prepare_render_jobs<C>(
+    txn: &C,
+    job_ids: HashSet<JobId>,
+) -> MetaResult<PreparedRenderContext>
+where
+    C: ConnectionTrait,
+{
+    if job_ids.is_empty() {
+        return Ok(PreparedRenderContext::default());
+    }
+
     let excluded_fragments_query = FragmentRelation::find()
         .select_only()
         .column(fragment_relation::Column::TargetFragmentId)
@@ -338,51 +395,62 @@ where
         .map(|job| (job.job_id, job))
         .collect();
 
-    let fragments = render_no_shuffle_ensembles(
-        txn,
+    build_prepared_context(txn, ensembles, fragment_map, jobs).await
+}
+
+pub(crate) fn render_prepared(
+    actor_id_counter: &AtomicU32,
+    worker_map: &BTreeMap<WorkerId, WorkerInfo>,
+    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    prepared: &PreparedRenderContext,
+) -> MetaResult<RenderedGraph> {
+    if prepared.is_empty() {
+        return Ok(RenderedGraph::empty());
+    }
+
+    let render_context = RenderActorsContext {
+        fragment_source_ids: &prepared.fragment_source_ids,
+        fragment_splits: &prepared.fragment_splits,
+        streaming_job_databases: &prepared.streaming_job_databases,
+        database_map: &prepared.database_map,
+    };
+
+    let fragments = render_actors(
         actor_id_counter,
-        &ensembles,
-        &fragment_map,
-        &jobs,
-        &workers,
+        &prepared.ensembles,
+        &prepared.fragment_map,
+        &prepared.job_map,
+        worker_map,
         adaptive_parallelism_strategy,
-    )
-    .await?;
+        render_context,
+    )?;
 
     Ok(RenderedGraph {
         fragments,
-        ensembles,
+        ensembles: prepared.ensembles.clone(),
     })
 }
 
-/// Core rendering routine that consumes no-shuffle ensembles and produces
-/// `InflightFragmentInfo`s by:
-///   * determining the eligible worker pools and effective parallelism,
-///   * generating actor→worker assignments plus vnode bitmaps and source splits,
-///   * grouping the rendered fragments by database and streaming job.
-async fn render_no_shuffle_ensembles<C>(
+async fn build_prepared_context<C>(
     txn: &C,
-    actor_id_counter: &AtomicU32,
-    ensembles: &[NoShuffleEnsemble],
-    fragment_map: &HashMap<FragmentId, fragment::Model>,
-    job_map: &HashMap<JobId, streaming_job::Model>,
-    worker_map: &BTreeMap<WorkerId, WorkerInfo>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-) -> MetaResult<FragmentRenderMap>
+    ensembles: Vec<NoShuffleEnsemble>,
+    fragment_map: HashMap<FragmentId, fragment::Model>,
+    job_map: HashMap<JobId, streaming_job::Model>,
+) -> MetaResult<PreparedRenderContext>
 where
     C: ConnectionTrait,
 {
     if ensembles.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(PreparedRenderContext::default());
     }
 
     #[cfg(debug_assertions)]
     {
-        debug_sanity_check(ensembles, fragment_map, job_map);
+        debug_sanity_check(&ensembles, &fragment_map, &job_map);
     }
 
     let (fragment_source_ids, fragment_splits) =
-        resolve_source_fragments(txn, fragment_map).await?;
+        resolve_source_fragments(txn, &fragment_map).await?;
 
     let job_ids = job_map.keys().copied().collect_vec();
 
@@ -409,22 +477,15 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
-    let context = RenderActorsContext {
-        fragment_source_ids: &fragment_source_ids,
-        fragment_splits: &fragment_splits,
-        streaming_job_databases: &streaming_job_databases,
-        database_map: &database_map,
-    };
-
-    render_actors(
-        actor_id_counter,
+    Ok(PreparedRenderContext {
         ensembles,
         fragment_map,
         job_map,
-        worker_map,
-        adaptive_parallelism_strategy,
-        context,
-    )
+        streaming_job_databases,
+        database_map,
+        fragment_source_ids,
+        fragment_splits,
+    })
 }
 
 // Only metadata resolved asynchronously lives here so the renderer stays synchronous

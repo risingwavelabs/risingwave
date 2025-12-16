@@ -14,13 +14,16 @@
 
 use std::cmp::{Ordering, max, min};
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::num::NonZeroUsize;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::SinkId;
@@ -34,6 +37,7 @@ use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::{PreparedRenderContext, RenderedGraph, WorkerInfo, render_prepared};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
@@ -155,22 +159,56 @@ impl GlobalBarrierWorkerContextImpl {
             .collect())
     }
 
-    /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
-    /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
-    /// will create or drop before this barrier flow through them.
-    async fn resolve_database_info(
+    /// Async prepare: collect rendering context for specified database (or all).
+    async fn prepare_database_info(
         &self,
         database_id: Option<DatabaseId>,
+    ) -> MetaResult<PreparedRenderContext> {
+        self.metadata_manager
+            .catalog_controller
+            .prepare_all_actors_dynamic(database_id)
+            .await
+    }
+
+    /// Sync render: use current workers and strategy to render prepared context.
+    fn render_database_info(
+        &self,
+        database_id: Option<DatabaseId>,
+        prepared: &PreparedRenderContext,
         worker_nodes: &ActiveStreamingWorkerNodes,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>>
     {
-        let all_actor_infos = self
-            .metadata_manager
-            .catalog_controller
-            .load_all_actors_dynamic(database_id, worker_nodes)
-            .await?;
+        if prepared.is_empty() {
+            return Ok(HashMap::new());
+        }
 
-        Ok(all_actor_infos
+        let available_workers: BTreeMap<_, _> = worker_nodes
+            .current()
+            .values()
+            .filter(|worker| worker.is_streaming_schedulable())
+            .map(|worker| {
+                (
+                    worker.id,
+                    WorkerInfo {
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
+        let RenderedGraph { fragments, .. } = render_prepared(
+            self.metadata_manager
+                .catalog_controller
+                .env
+                .actor_id_generator(),
+            &available_workers,
+            adaptive_parallelism_strategy,
+            prepared,
+        )?;
+
+        Ok(fragments
             .into_iter()
             .map(|(loaded_database_id, job_fragment_infos)| {
                 if let Some(database_id) = database_id {
@@ -423,6 +461,16 @@ impl GlobalBarrierWorkerContextImpl {
                         .cleanup_dropped_tables()
                         .await;
 
+                    let adaptive_parallelism_strategy = {
+                        let system_params_reader = self
+                            .metadata_manager
+                            .catalog_controller
+                            .env
+                            .system_params_reader()
+                            .await;
+                        system_params_reader.adaptive_parallelism_strategy()
+                    };
+
                     let active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
                             .await?;
@@ -467,11 +515,19 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
-                        self.resolve_database_info(None, &active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "resolve actor info failed");
-                            })?
+                        let prepared =
+                            self.prepare_database_info(None).await.inspect_err(|err| {
+                                warn!(error = %err.as_report(), "prepare actor context failed");
+                            })?;
+                        self.render_database_info(
+                            None,
+                            &prepared,
+                            &active_streaming_nodes,
+                            adaptive_parallelism_strategy,
+                        )
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "render actor info failed");
+                        })?
                     } else {
                         bail!(
                             "Recovery for unreschedulable background jobs is not yet implemented. \
@@ -486,11 +542,19 @@ impl GlobalBarrierWorkerContextImpl {
                             .catalog_controller
                             .complete_dropped_tables(dropped_table_ids)
                             .await;
+                        let prepared =
+                            self.prepare_database_info(None).await.inspect_err(|err| {
+                                warn!(error = %err.as_report(), "prepare actor context failed");
+                            })?;
                         info = self
-                            .resolve_database_info(None, &active_streaming_nodes)
-                            .await
+                            .render_database_info(
+                                None,
+                                &prepared,
+                                &active_streaming_nodes,
+                                adaptive_parallelism_strategy,
+                            )
                             .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "resolve actor info failed");
+                                warn!(error = %err.as_report(), "render actor info failed");
                             })?
                     }
 
@@ -635,14 +699,35 @@ impl GlobalBarrierWorkerContextImpl {
             .complete_dropped_tables(dropped_table_ids)
             .await;
 
+        let adaptive_parallelism_strategy = {
+            let system_params_reader = self
+                .metadata_manager
+                .catalog_controller
+                .env
+                .system_params_reader()
+                .await;
+            system_params_reader.adaptive_parallelism_strategy()
+        };
+
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        let mut all_info = self
-            .resolve_database_info(Some(database_id), &active_streaming_nodes)
+        let prepared = self
+            .prepare_database_info(Some(database_id))
             .await
             .inspect_err(|err| {
-                warn!(error = %err.as_report(), "resolve actor info failed");
+                warn!(error = %err.as_report(), "prepare actor context failed");
+            })?;
+
+        let mut all_info = self
+            .render_database_info(
+                Some(database_id),
+                &prepared,
+                &active_streaming_nodes,
+                adaptive_parallelism_strategy,
+            )
+            .inspect_err(|err| {
+                warn!(error = %err.as_report(), "render actor info failed");
             })?;
 
         let mut database_info = all_info
