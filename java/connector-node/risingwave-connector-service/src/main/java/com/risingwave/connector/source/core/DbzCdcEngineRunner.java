@@ -17,6 +17,7 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.connector.source.common.DbzSourceUtils;
 import com.risingwave.java.binding.CdcSourceChannel;
+import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import io.debezium.config.CommonConnectorConfig;
 import io.grpc.stub.StreamObserver;
@@ -40,6 +41,9 @@ public class DbzCdcEngineRunner {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
+            var sourceType = config.getSourceType().toString();
+            var connectorClass =
+                    config.getResolvedDebeziumProps().getProperty("connector.class", "unknown");
             var engine =
                     new DbzCdcEngine(
                             config.getSourceType(),
@@ -50,6 +54,12 @@ public class DbzCdcEngineRunner {
                                     LOG.error(
                                             "engine#{} terminated with error. message: {}",
                                             sourceId,
+                                            message,
+                                            error);
+                                    ConnectorNodeMetrics.recordCdcEngineFailure(
+                                            sourceType,
+                                            String.valueOf(sourceId),
+                                            connectorClass,
                                             message,
                                             error);
                                     if (error != null) {
@@ -73,6 +83,9 @@ public class DbzCdcEngineRunner {
         DbzCdcEngineRunner runner = new DbzCdcEngineRunner(config);
         try {
             var sourceId = config.getSourceId();
+            var sourceType = config.getSourceType().toString();
+            var connectorClass =
+                    config.getResolvedDebeziumProps().getProperty("connector.class", "unknown");
             final DbzCdcEngineRunner finalRunner = runner;
             var engine =
                     new DbzCdcEngine(
@@ -84,6 +97,12 @@ public class DbzCdcEngineRunner {
                                     LOG.error(
                                             "engine#{} terminated with error. message: {}",
                                             sourceId,
+                                            message,
+                                            error);
+                                    ConnectorNodeMetrics.recordCdcEngineFailure(
+                                            sourceType,
+                                            String.valueOf(sourceId),
+                                            connectorClass,
                                             message,
                                             error);
                                     String errorMsg =
