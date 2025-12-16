@@ -2547,11 +2547,10 @@ impl IcebergSinkCommitter {
     }
 
     /// Commit schema changes (e.g., add columns) to the iceberg table.
-    /// This function uses `catalog.update_table()` API to atomically update the table schema
+    /// This function uses Transaction API to atomically update the table schema
     /// with optimistic locking to prevent concurrent conflicts.
     async fn commit_schema_change(&mut self, add_columns: Vec<Field>) -> Result<()> {
         use iceberg::spec::NestedField;
-        use iceberg::{TableCommit, TableRequirement, TableUpdate};
 
         tracing::info!(
             "Starting to commit schema change with {} columns",
@@ -2560,13 +2559,12 @@ impl IcebergSinkCommitter {
 
         // Step 1: Get current table metadata
         let metadata = self.table.metadata();
-        let current_schema = metadata.current_schema().as_ref().clone();
         let mut next_field_id = metadata.last_column_id() + 1;
         tracing::debug!("Starting schema change, next_field_id: {}", next_field_id);
 
-        // Step 2: Build new schema with added columns
-        let mut builder = current_schema.into_builder();
+        // Step 2: Build new fields to add
         let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+        let mut new_fields = Vec::new();
 
         for field in &add_columns {
             // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
@@ -2585,50 +2583,29 @@ impl IcebergSinkCommitter {
                 iceberg_type,
             ));
 
-            builder = builder.with_fields(vec![nested_field]);
+            new_fields.push(nested_field);
+            tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
             next_field_id += 1;
-
-            tracing::info!("Added field '{}' with ID {}", field.name, next_field_id - 1);
         }
 
-        let new_schema = builder
-            .build()
-            .context("Failed to build new schema")
-            .map_err(SinkError::Iceberg)?;
-
-        tracing::info!("Successfully built new schema for table");
-        // Step 3: Create TableCommit with optimistic locking
-        let updates = vec![
-            TableUpdate::AddSchema { schema: new_schema },
-            TableUpdate::SetCurrentSchema { schema_id: -1 }, // -1 means use the last added schema
-        ];
-
-        let requirements = vec![
-            TableRequirement::LastAssignedFieldIdMatch {
-                last_assigned_field_id: metadata.last_column_id,
-            },
-            TableRequirement::CurrentSchemaIdMatch {
-                current_schema_id: metadata.current_schema_id(),
-            },
-        ];
-
-        let commit = TableCommit::builder()
-            .ident(self.table.identifier().clone())
-            .updates(updates)
-            .requirements(requirements)
-            .build();
-
-        // Step 4: Commit to catalog
+        // Step 3: Create Transaction with UpdateSchemaAction
         tracing::info!(
             "Committing schema change to catalog for table {}",
             self.table.identifier()
         );
 
-        let updated_table = self
-            .catalog
-            .update_table(commit)
+        let txn = Transaction::new(&self.table);
+        let action = txn.update_schema().add_fields(new_fields);
+
+        let updated_table = action
+            .apply(txn)
+            .map_err(|err| {
+                tracing::error!(error = %err, "Failed to apply schema update action");
+                SinkError::Iceberg(anyhow!(err))
+            })?
+            .commit(self.catalog.as_ref())
             .await
-            .context("Failed to update table schema")
+            .context("Failed to commit table schema change")
             .map_err(SinkError::Iceberg)?;
 
         self.table = updated_table;
