@@ -232,6 +232,9 @@ public class ConnectorNodeMetrics {
         }
         Throwable cur = t;
         // Guard against cause cycles or overly deep chains.
+        // NOTE: Future improvement: detect non-trivial cycles (beyond `next == cur`) and
+        // de-duplicate / filter wrapper exceptions that add little signal, so `error_kind` can be
+        // derived from the most useful root cause.
         for (int i = 0; i < 32; i++) {
             Throwable next = cur.getCause();
             if (next == null || next == cur) {
