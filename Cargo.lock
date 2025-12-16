@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "adbc_core"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c00daa298739db8f033952bdf3c67ccbcf2ccee9652df7eb4c7cd3397a7646d"
+dependencies = [
+ "arrow-array 54.3.1",
+ "arrow-schema 54.3.1",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -566,6 +576,9 @@ name = "arrow-schema"
 version = "54.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cfaf5e440be44db5413b75b72c2a87c1f8f0627117d110264048f2969b99e9"
+dependencies = [
+ "bitflags 2.10.0",
+]
 
 [[package]]
 name = "arrow-schema"
@@ -11437,6 +11450,7 @@ dependencies = [
 name = "risingwave_connector"
 version = "2.8.0-alpha"
 dependencies = [
+ "adbc_core",
  "anyhow",
  "apache-avro 0.16.0",
  "assert_matches",
