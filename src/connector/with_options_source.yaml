@@ -14,7 +14,7 @@ AdbcSnowflakeProperties:
   - name: adbc_snowflake.password
     field_type: String
     comments: The password for authentication.
-    required: true
+    required: false
   - name: adbc_snowflake.database
     field_type: String
     comments: The name of the database to use.
