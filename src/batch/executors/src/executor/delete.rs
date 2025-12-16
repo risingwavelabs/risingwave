@@ -36,6 +36,7 @@ pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,
     table_version_id: TableVersionId,
+    pk_indices: Vec<usize>,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
     chunk_size: usize,
@@ -50,6 +51,7 @@ impl DeleteExecutor {
     pub fn new(
         table_id: TableId,
         table_version_id: TableVersionId,
+        pk_indices: Vec<usize>,
         dml_manager: DmlManagerRef,
         child: BoxedExecutor,
         chunk_size: usize,
@@ -62,6 +64,7 @@ impl DeleteExecutor {
         Self {
             table_id,
             table_version_id,
+            pk_indices,
             dml_manager,
             child,
             chunk_size,
@@ -178,6 +181,11 @@ impl BoxedExecutorBuilder for DeleteExecutor {
         Ok(Box::new(Self::new(
             table_id,
             delete_node.table_version_id,
+            delete_node
+                .pk_indices
+                .iter()
+                .map(|&idx| idx as usize)
+                .collect(),
             source.context().dml_manager(),
             child,
             source.context().get_config().developer.chunk_size,
@@ -242,6 +250,7 @@ mod tests {
         let delete_executor = Box::new(DeleteExecutor::new(
             table_id,
             INITIAL_TABLE_VERSION_ID,
+            vec![0],
             dml_manager,
             Box::new(mock_executor),
             1024,
