@@ -14,7 +14,7 @@ AdbcSnowflakeProperties:
   - name: adbc_snowflake.password
     field_type: String
     comments: The password for authentication.
-    required: true
+    required: false
   - name: adbc_snowflake.database
     field_type: String
     comments: The name of the database to use.
@@ -57,9 +57,15 @@ AdbcSnowflakeProperties:
     field_type: String
     comments: '`OAuth` token for authentication (when using `auth_oauth`).'
     required: false
-  - name: adbc_snowflake.jwt_private_key
+  - name: adbc_snowflake.jwt_private_key_path
     field_type: String
     comments: JWT private key file path (when using `auth_jwt`).
+    required: false
+  - name: adbc_snowflake.jwt_private_key_pkcs8_value
+    field_type: String
+    required: false
+  - name: adbc_snowflake.jwt_private_key_pkcs8_password
+    field_type: String
     required: false
 AzblobProperties:
   fields:
