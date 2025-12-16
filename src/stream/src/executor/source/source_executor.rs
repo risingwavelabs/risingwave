@@ -701,6 +701,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                 }
                             }
                             Mutation::ResetSource { source_id } => {
+                                // Note: RESET SOURCE only clears the offset, does NOT pause the source.
+                                // When offset is None, after recovery/restart, Debezium will automatically
+                                // enter recovery mode and fetch the latest offset from upstream.
                                 if *source_id == self.stream_source_core.source_id {
                                     tracing::info!(
                                         actor_id = %self.actor_ctx.id,
@@ -811,14 +814,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                             "No splits found to reset - source may not be initialized yet"
                                         );
                                     }
-
-                                    // Note: RESET SOURCE only clears the offset, does NOT pause the source.
-                                    // When offset is None, after recovery/restart, Debezium will automatically
-                                    // enter recovery mode and fetch the latest offset from upstream
-                                    // (MySQL binlog / MongoDB oplog).
-                                    //
-                                    // If user needs to pause for resnapshot, use: ALTER SOURCE s SET rate_limit = 0;
-                                    // To resume after resnapshot: ALTER SOURCE s SET rate_limit TO default;
                                 } else {
                                     tracing::debug!(
                                         actor_id = %self.actor_ctx.id,
