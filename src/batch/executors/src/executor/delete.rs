@@ -60,6 +60,7 @@ impl DeleteExecutor {
         identity: String,
         returning: bool,
         session_id: u32,
+        upsert: bool,
     ) -> Self {
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -81,7 +82,7 @@ impl DeleteExecutor {
             returning,
             txn_id,
             session_id,
-            upsert: false,
+            upsert,
         }
     }
 }
@@ -212,6 +213,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             source.plan_node().get_identity().clone(),
             delete_node.returning,
             delete_node.session_id,
+            delete_node.upsert,
         )))
     }
 }
@@ -277,6 +279,7 @@ mod tests {
             "DeleteExecutor".to_owned(),
             false,
             0,
+            false,
         ));
 
         let handle = tokio::spawn(async move {

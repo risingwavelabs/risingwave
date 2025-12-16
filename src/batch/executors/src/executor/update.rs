@@ -16,12 +16,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{
-    Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk, StreamChunkBuilder,
+    Array, ArrayBuilder, DataChunk, PrimitiveArrayBuilder, StreamChunk, StreamChunkBuilder,
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
@@ -66,6 +65,7 @@ impl UpdateExecutor {
         identity: String,
         returning: bool,
         session_id: u32,
+        upsert: bool,
     ) -> Self {
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
@@ -90,7 +90,7 @@ impl UpdateExecutor {
             returning,
             txn_id,
             session_id,
-            upsert: false,
+            upsert,
         }
     }
 }
@@ -260,6 +260,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.plan_node().get_identity().clone(),
             update_node.returning,
             update_node.session_id,
+            update_node.upsert,
         )))
     }
 }
