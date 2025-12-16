@@ -34,6 +34,7 @@ use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
@@ -713,8 +714,9 @@ impl Mutation {
 
     #[cfg(test)]
     fn to_protobuf(&self) -> PbMutation {
-        use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
-        use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+        use risingwave_pb::source::{
+            ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
+        };
         use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
         use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
         use risingwave_pb::stream_plan::{
@@ -774,11 +776,14 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                actor_cdc_table_snapshot_splits:
-                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
-                        actor_cdc_table_snapshot_splits.clone(),
-                    )
-                    .into(),
+                actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
+                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
+                        (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
+                            splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
+                            generation: *generation,
+                        })
+                    }).collect()
+                }),
                 sink_add_columns: sink_add_columns
                     .iter()
                     .map(|(sink_id, add_columns)| {
@@ -824,10 +829,14 @@ impl Mutation {
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
                 actor_cdc_table_snapshot_splits:
-                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
-                        actor_cdc_table_snapshot_splits.clone(),
-                    )
-                    .into(),
+                Some(PbCdcTableSnapshotSplitsWithGeneration {
+                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
+                        (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
+                            splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
+                            generation: *generation,
+                        })
+                    }).collect()
+                }),
                 new_upstream_sinks: new_upstream_sinks
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
@@ -1686,6 +1695,7 @@ struct BuildInputContext {
     pub local_barrier_manager: LocalBarrierManager,
     pub metrics: Arc<StreamingMetrics>,
     pub fragment_id: FragmentId,
+    pub actor_config: Arc<StreamingConfig>,
 }
 
 type BoxedNewInputsFuture =
@@ -1704,6 +1714,7 @@ impl DispatchBarrierBuffer {
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         fragment_id: FragmentId,
+        actor_config: Arc<StreamingConfig>,
     ) -> Self {
         Self {
             buffer: VecDeque::new(),
@@ -1716,6 +1727,7 @@ impl DispatchBarrierBuffer {
                 local_barrier_manager,
                 metrics,
                 fragment_id,
+                actor_config,
             }),
         }
     }
@@ -1827,6 +1839,7 @@ impl DispatchBarrierBuffer {
                         ctx.fragment_id,
                         upstream_actor,
                         upstream_fragment_id,
+                        ctx.actor_config.clone(),
                     )
                     .await?;
 

@@ -32,12 +32,14 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
+use risingwave_pb::source::PbCdcTableSnapshotSplits;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
 use crate::MetaResult;
+use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::ControlStreamManager;
@@ -415,6 +417,7 @@ pub(super) struct InflightStreamingJobInfo {
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     pub subscribers: HashMap<SubscriberId, SubscriberType>,
     pub status: CreateStreamingJobStatus,
+    pub cdc_table_backfill_tracker: Option<CdcTableBackfillTracker>,
 }
 
 impl InflightStreamingJobInfo {
@@ -495,10 +498,58 @@ impl InflightDatabaseInfo {
             })
     }
 
+    pub fn gen_cdc_progress(&self) -> impl Iterator<Item = (JobId, CdcProgress)> + '_ {
+        self.jobs.iter().filter_map(|(job_id, job)| {
+            job.cdc_table_backfill_tracker
+                .as_ref()
+                .map(|tracker| (*job_id, tracker.gen_cdc_progress()))
+        })
+    }
+
+    pub(super) fn may_assign_fragment_cdc_backfill_splits(
+        &mut self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>> {
+        let job_id = self.fragment_location[&fragment_id];
+        let job = self.jobs.get_mut(&job_id).expect("should exist");
+        if let Some(tracker) = &mut job.cdc_table_backfill_tracker {
+            let cdc_scan_fragment_id = tracker.cdc_scan_fragment_id();
+            if cdc_scan_fragment_id != fragment_id {
+                return Ok(None);
+            }
+            let actors = job.fragment_infos[&cdc_scan_fragment_id]
+                .actors
+                .keys()
+                .copied()
+                .collect();
+            tracker.reassign_splits(actors).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub(super) fn assign_cdc_backfill_splits(
+        &mut self,
+        job_id: JobId,
+    ) -> MetaResult<Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>> {
+        let job = self.jobs.get_mut(&job_id).expect("should exist");
+        if let Some(tracker) = &mut job.cdc_table_backfill_tracker {
+            let cdc_scan_fragment_id = tracker.cdc_scan_fragment_id();
+            let actors = job.fragment_infos[&cdc_scan_fragment_id]
+                .actors
+                .keys()
+                .copied()
+                .collect();
+            tracker.reassign_splits(actors).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     pub(super) fn apply_collected_command(
         &mut self,
         command: Option<&Command>,
-        resps: impl Iterator<Item = &BarrierCompleteResponse>,
+        resps: &[BarrierCompleteResponse],
         version_stats: &HummockVersionStats,
     ) {
         if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
@@ -524,7 +575,7 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        for progress in resps.flat_map(|resp| &resp.create_mview_progress) {
+        for progress in resps.iter().flat_map(|resp| &resp.create_mview_progress) {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
                 warn!(
                     "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
@@ -538,6 +589,27 @@ impl InflightDatabaseInfo {
                 continue;
             };
             tracker.apply_progress(progress, version_stats);
+        }
+        for progress in resps
+            .iter()
+            .flat_map(|resp| &resp.cdc_table_backfill_progress)
+        {
+            let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
+                warn!(
+                    "update the cdc progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
+                );
+                continue;
+            };
+            let Some(tracker) = &mut self
+                .jobs
+                .get_mut(job_id)
+                .expect("should exist")
+                .cdc_table_backfill_tracker
+            else {
+                warn!("update the progress of an created streaming job: {progress:?}");
+                continue;
+            };
+            tracker.update_split_progress(progress);
         }
     }
 
@@ -575,7 +647,8 @@ impl InflightDatabaseInfo {
     pub(super) fn take_staging_commit_info(&mut self) -> StagingCommitInfo {
         let mut finished_jobs = vec![];
         let mut table_ids_to_truncate = vec![];
-        for job in self.jobs.values_mut() {
+        let mut finished_cdc_table_backfill = vec![];
+        for (job_id, job) in &mut self.jobs {
             if let CreateStreamingJobStatus::Creating(tracker) = &mut job.status {
                 let (is_finished, truncate_table_ids) = tracker.collect_staging_commit_info();
                 table_ids_to_truncate.extend(truncate_table_ids);
@@ -588,10 +661,16 @@ impl InflightDatabaseInfo {
                     finished_jobs.push(tracker.into_tracking_job());
                 }
             }
+            if let Some(tracker) = &mut job.cdc_table_backfill_tracker
+                && tracker.take_pre_completed()
+            {
+                finished_cdc_table_backfill.push(*job_id);
+            }
         }
         StagingCommitInfo {
             finished_jobs,
             table_ids_to_truncate,
+            finished_cdc_table_backfill,
         }
     }
 
@@ -698,6 +777,7 @@ impl InflightDatabaseInfo {
             fragment_infos,
             subscribers,
             status,
+            cdc_table_backfill_tracker,
         } = job;
         self.jobs
             .try_insert(
@@ -707,6 +787,7 @@ impl InflightDatabaseInfo {
                     subscribers,
                     fragment_infos: Default::default(), // fill in later in apply_add
                     status,
+                    cdc_table_backfill_tracker,
                 },
             )
             .expect("non-duplicate");
@@ -728,10 +809,10 @@ impl InflightDatabaseInfo {
     /// the info correspondingly.
     pub(crate) fn pre_apply(
         &mut self,
-        new_job_id: Option<JobId>,
+        new_job: Option<(JobId, Option<CdcTableBackfillTracker>)>,
         fragment_changes: HashMap<FragmentId, CommandFragmentChanges>,
     ) -> HashMap<FragmentId, PostApplyFragmentChanges> {
-        if let Some(job_id) = new_job_id {
+        if let Some((job_id, cdc_table_backfill_tracker)) = new_job {
             self.jobs
                 .try_insert(
                     job_id,
@@ -740,6 +821,7 @@ impl InflightDatabaseInfo {
                         fragment_infos: Default::default(),
                         subscribers: Default::default(), // no subscriber for newly create job
                         status: CreateStreamingJobStatus::Init,
+                        cdc_table_backfill_tracker,
                     },
                 )
                 .expect("non-duplicate");

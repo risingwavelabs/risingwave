@@ -295,6 +295,22 @@ create table t_partition4(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(
 statement error
 create table t_partition5(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='c2,c3') engine = iceberg;
 
+# test partition fields persistency issue
+statement ok
+CREATE TABLE t_partition_persistency (id BIGINT, v_int INT, v_long BIGINT, v_float REAL, v_double DOUBLE, v_varchar CHARACTER VARYING, v_bool BOOLEAN, v_date DATE, v_timestamp timestamptz, v_ts_ntz TIMESTAMP, v_decimal NUMERIC, PRIMARY KEY (v_int, v_long, v_date, v_timestamp, v_ts_ntz)) APPEND ONLY WITH (commit_checkpoint_interval = 1, partition_by = 'v_int,truncate(30,v_long),year(v_date)') ENGINE = ICEBERG;
+
+statement ok
+INSERT INTO t_partition_persistency VALUES (5, 999, 1.1, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11);
+
+statement ok
+FLUSH;
+
+
+query ????????? retry 3 backoff 1s
+SELECT * FROM t_partition_persistency
+----
+5 999 1 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.1100000000
+
 statement ok
 DROP TABLE t_partition1;
 
@@ -306,6 +322,9 @@ DROP TABLE t_partition3;
 
 statement ok
 DROP TABLE t_partition4;
+
+statement ok
+DROP TABLE t_partition_persistency;
 
 statement ok
 DROP CONNECTION public.my_hosted_catalog_conn;

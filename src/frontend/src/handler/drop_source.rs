@@ -17,7 +17,7 @@ use risingwave_common::catalog::ICEBERG_SOURCE_PREFIX;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
-use super::util::execute_with_long_running_notification;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
@@ -84,6 +84,7 @@ pub async fn handle_drop_source(
         catalog_writer.drop_source(source.id, cascade),
         &session,
         "DROP SOURCE",
+        LongRunningNotificationAction::SuggestRecover,
     )
     .await?;
 

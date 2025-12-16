@@ -2058,4 +2058,161 @@ mod tests {
             assert!(rows.is_empty());
         }
     }
+
+    #[tokio::test]
+    async fn test_flush_when_reschedule() {
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch0 = 232;
+        let epoch1 = 233;
+
+        let all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
+        let build_bitmap = |indexes: &[usize]| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+            for i in indexes {
+                builder.set(*i, true);
+            }
+            builder.finish()
+        };
+        let vnode = build_bitmap(&all_vnode);
+
+        let metadata = vec![1u8, 2u8];
+
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(sender);
+                    Ok((epoch0, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let expected_param = param.clone();
+                let metadata = metadata.clone();
+                let db = db.clone();
+                move |param, new_writer_rx| {
+                    let metadata = metadata.clone();
+                    let expected_param = expected_param.clone();
+                    let db = db.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param.clone(),
+                                new_writer_rx,
+                                MockTwoPhaseCoordinator::new_coordinator(
+                                    move |_epoch, metadata_list| {
+                                        let metadata =
+                                            metadata_list.into_iter().exactly_one().unwrap();
+                                        Ok(match metadata.metadata {
+                                            Some(Metadata::Serialized(SerializedMetadata {
+                                                metadata,
+                                            })) => metadata,
+                                            _ => unreachable!(),
+                                        })
+                                    },
+                                    move |_epoch, commit_metadata| {
+                                        assert_eq!(commit_metadata, metadata);
+                                        Ok(())
+                                    },
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let build_client = |vnode| async {
+            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            })
+            .await
+        };
+
+        let (mut client1, _) = build_client(vnode.clone()).await.unwrap();
+
+        let aligned_epoch = client1.align_initial_epoch(1).await.unwrap();
+        assert_eq!(aligned_epoch, 1);
+
+        client1
+            .commit(
+                epoch1,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: metadata.clone(),
+                    })),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        {
+            let rows = list_rows(&db).await;
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].1, epoch1 as i64);
+            assert_eq!(rows[0].2, "PENDING");
+        }
+
+        let mut build_client2_future = pin!(build_client(vnode.clone()));
+        assert!(
+            poll_fn(|cx| Poll::Ready(build_client2_future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+
+        client1.stop().await.unwrap();
+
+        assert!(
+            poll_fn(|cx| Poll::Ready(build_client2_future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+
+        {
+            let guard = sender.lock().await;
+            let sender = guard.as_ref().unwrap().clone();
+            sender.send(epoch1).unwrap();
+        }
+
+        let (_, init_epoch) = build_client2_future.await.unwrap();
+        assert_eq!(init_epoch, Some(epoch1));
+
+        {
+            let rows = list_rows(&db).await;
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].1, epoch1 as i64);
+            assert_eq!(rows[0].2, "COMMITTED");
+        }
+    }
 }

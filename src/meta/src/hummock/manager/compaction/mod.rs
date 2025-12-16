@@ -42,6 +42,7 @@ use rand::rng as thread_rng;
 use rand::seq::SliceRandom;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -563,7 +564,11 @@ impl HummockManager {
                     self.calculate_vnode_partition(
                         &mut compact_task,
                         group_config.compaction_config.as_ref(),
-                    );
+                        version
+                            .latest_version()
+                            .get_compaction_group_levels(compaction_group_id),
+                    )
+                    .await?;
 
                     let table_ids_to_be_compacted = compact_task.build_compact_table_ids();
 
@@ -1157,85 +1162,174 @@ impl HummockManager {
         }
     }
 
-    pub(crate) fn calculate_vnode_partition(
+    /// Apply vnode-aligned compaction for large single-table levels.
+    /// This enables one-vnode-per-SST alignment for precise query pruning.
+    async fn try_apply_vnode_aligned_partition(
+        &self,
+        compact_task: &mut CompactTask,
+        compaction_config: &CompactionConfig,
+        levels: &Levels,
+    ) -> Result<bool> {
+        // Check if vnode-aligned compaction is enabled for this level
+        // Only enable for single-table scenarios to avoid cross-table complexity
+        let Some(threshold) = compaction_config.vnode_aligned_level_size_threshold else {
+            return Ok(false);
+        };
+
+        if compact_task.target_level < compact_task.base_level
+            || compact_task.existing_table_ids.len() != 1
+        {
+            return Ok(false);
+        }
+
+        // Calculate total size of the entire target level
+        let target_level_size = levels
+            .get_level(compact_task.target_level as usize)
+            .total_file_size;
+
+        if target_level_size < threshold {
+            return Ok(false);
+        }
+
+        // Enable strict one-vnode-per-SST alignment for single table
+        let table_id = compact_task.existing_table_ids[0];
+
+        // Get the actual vnode count from table catalog
+        let table = self
+            .metadata_manager
+            .get_table_catalog_by_ids(&[table_id])
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to get table catalog for table_id {} in compaction_group {}",
+                    table_id, compact_task.compaction_group_id
+                )
+            })
+            .map_err(Error::Internal)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                Error::Internal(anyhow::anyhow!(
+                    "Table catalog not found for table_id {} in compaction_group {}",
+                    table_id,
+                    compact_task.compaction_group_id
+                ))
+            })?;
+
+        compact_task
+            .table_vnode_partition
+            .insert(table_id, table.vnode_count() as u32);
+
+        Ok(true)
+    }
+
+    /// Apply `split_weight_by_vnode` based partition strategy.
+    /// This handles dynamic partitioning based on table size and write throughput.
+    fn apply_split_weight_by_vnode_partition(
         &self,
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
     ) {
-        // do not split sst by vnode partition when target_level > base_level
-        // The purpose of data alignment is mainly to improve the parallelism of base level compaction and reduce write amplification.
-        // However, at high level, the size of the sst file is often larger and only contains the data of a single table_id, so there is no need to cut it.
-        if compact_task.target_level > compact_task.base_level {
-            return;
-        }
         if compaction_config.split_weight_by_vnode > 0 {
             for table_id in &compact_task.existing_table_ids {
                 compact_task
                     .table_vnode_partition
                     .insert(*table_id, compact_task.split_weight_by_vnode);
             }
-        } else {
-            let mut table_size_info: HashMap<TableId, u64> = HashMap::default();
-            let mut existing_table_ids: HashSet<TableId> = HashSet::default();
-            for input_ssts in &compact_task.input_ssts {
-                for sst in &input_ssts.table_infos {
-                    existing_table_ids.extend(sst.table_ids.iter());
-                    for table_id in &sst.table_ids {
-                        *table_size_info.entry(*table_id).or_default() +=
-                            sst.sst_size / (sst.table_ids.len() as u64);
-                    }
-                }
-            }
-            compact_task
-                .existing_table_ids
-                .retain(|table_id| existing_table_ids.contains(table_id));
 
-            let hybrid_vnode_count = self.env.opts.hybrid_partition_node_count;
-            let default_partition_count = self.env.opts.partition_vnode_count;
-            // We must ensure the partition threshold large enough to avoid too many small files.
-            let compact_task_table_size_partition_threshold_low = self
-                .env
-                .opts
-                .compact_task_table_size_partition_threshold_low;
-            let compact_task_table_size_partition_threshold_high = self
-                .env
-                .opts
-                .compact_task_table_size_partition_threshold_high;
-            // check latest write throughput
-            let table_write_throughput_statistic_manager =
-                self.table_write_throughput_statistic_manager.read();
-            let timestamp = chrono::Utc::now().timestamp();
-            for (table_id, compact_table_size) in table_size_info {
-                let write_throughput = table_write_throughput_statistic_manager
-                    .get_table_throughput_descending(table_id, timestamp)
-                    .peekable()
-                    .peek()
-                    .map(|item| item.throughput)
-                    .unwrap_or(0);
-                if compact_table_size > compact_task_table_size_partition_threshold_high
-                    && default_partition_count > 0
-                {
-                    compact_task
-                        .table_vnode_partition
-                        .insert(table_id, default_partition_count);
-                } else if (compact_table_size > compact_task_table_size_partition_threshold_low
-                    || (write_throughput > self.env.opts.table_high_write_throughput_threshold
-                        && compact_table_size > compaction_config.target_file_size_base))
-                    && hybrid_vnode_count > 0
-                {
-                    // partition for large write throughput table. But we also need to make sure that it can not be too small.
-                    compact_task
-                        .table_vnode_partition
-                        .insert(table_id, hybrid_vnode_count);
-                } else if compact_table_size > compaction_config.target_file_size_base {
-                    // partition for small table
-                    compact_task.table_vnode_partition.insert(table_id, 1);
+            return;
+        }
+
+        // Calculate per-table size from input SSTs
+        let mut table_size_info: HashMap<TableId, u64> = HashMap::default();
+        let mut existing_table_ids: HashSet<TableId> = HashSet::default();
+        for input_ssts in &compact_task.input_ssts {
+            for sst in &input_ssts.table_infos {
+                existing_table_ids.extend(sst.table_ids.iter());
+                for table_id in &sst.table_ids {
+                    *table_size_info.entry(*table_id).or_default() +=
+                        sst.sst_size / (sst.table_ids.len() as u64);
                 }
             }
-            compact_task
-                .table_vnode_partition
-                .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
         }
+        compact_task
+            .existing_table_ids
+            .retain(|table_id| existing_table_ids.contains(table_id));
+
+        let hybrid_vnode_count = self.env.opts.hybrid_partition_node_count;
+        let default_partition_count = self.env.opts.partition_vnode_count;
+        let compact_task_table_size_partition_threshold_low = self
+            .env
+            .opts
+            .compact_task_table_size_partition_threshold_low;
+        let compact_task_table_size_partition_threshold_high = self
+            .env
+            .opts
+            .compact_task_table_size_partition_threshold_high;
+
+        // Check latest write throughput
+        let table_write_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.read();
+        let timestamp = chrono::Utc::now().timestamp();
+
+        for (table_id, compact_table_size) in table_size_info {
+            let write_throughput = table_write_throughput_statistic_manager
+                .get_table_throughput_descending(table_id, timestamp)
+                .peekable()
+                .peek()
+                .map(|item| item.throughput)
+                .unwrap_or(0);
+
+            if compact_table_size > compact_task_table_size_partition_threshold_high
+                && default_partition_count > 0
+            {
+                compact_task
+                    .table_vnode_partition
+                    .insert(table_id, default_partition_count);
+            } else if (compact_table_size > compact_task_table_size_partition_threshold_low
+                || (write_throughput > self.env.opts.table_high_write_throughput_threshold
+                    && compact_table_size > compaction_config.target_file_size_base))
+                && hybrid_vnode_count > 0
+            {
+                compact_task
+                    .table_vnode_partition
+                    .insert(table_id, hybrid_vnode_count);
+            } else if compact_table_size > compaction_config.target_file_size_base {
+                compact_task.table_vnode_partition.insert(table_id, 1);
+            }
+        }
+
+        compact_task
+            .table_vnode_partition
+            .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+    }
+
+    pub(crate) async fn calculate_vnode_partition(
+        &self,
+        compact_task: &mut CompactTask,
+        compaction_config: &CompactionConfig,
+        levels: &Levels,
+    ) -> Result<()> {
+        // Try vnode-aligned partition first (for large single-table levels)
+        if self
+            .try_apply_vnode_aligned_partition(compact_task, compaction_config, levels)
+            .await?
+        {
+            return Ok(());
+        }
+
+        // Do not split sst by vnode partition when target_level > base_level
+        // The purpose of data alignment is mainly to improve the parallelism of base level compaction
+        // and reduce write amplification. However, at high level, the size of the sst file is often
+        // larger and only contains the data of a single table_id, so there is no need to cut it.
+        if compact_task.target_level > compact_task.base_level {
+            return Ok(());
+        }
+
+        // Apply split_weight_by_vnode based partition strategy
+        self.apply_split_weight_by_vnode_partition(compact_task, compaction_config);
+
+        Ok(())
     }
 
     pub fn compactor_manager_ref(&self) -> crate::hummock::CompactorManagerRef {

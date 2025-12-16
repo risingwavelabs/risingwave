@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod convert;
+mod execute;
+mod function;
 mod iceberg_executor;
 mod iceberg_table_provider;
 
+pub use convert::*;
+pub use execute::*;
+pub use function::convert_function_call;
 pub use iceberg_executor::IcebergScan;
 pub use iceberg_table_provider::IcebergTableProvider;
 use risingwave_common::error::BoxedError;

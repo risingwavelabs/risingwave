@@ -52,7 +52,7 @@ pub async fn handle_create_view(
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let super::query::BatchQueryPlanResult {
+        let super::query::RwBatchQueryPlanResult {
             schema,
             dependent_relations,
             ..

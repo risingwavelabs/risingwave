@@ -335,7 +335,7 @@ impl Catalog for StorageCatalog {
         let table = self.load_table(table).await?;
         table
             .file_io()
-            .remove_all(table.metadata().location())
+            .remove_dir_all(table.metadata().location())
             .await
     }
 
@@ -379,5 +379,16 @@ impl Catalog for StorageCatalog {
         .await?;
 
         self.load_table(commit.identifier()).await
+    }
+
+    async fn register_table(
+        &self,
+        _table_ident: &TableIdent,
+        _metadata_location: String,
+    ) -> iceberg::Result<Table> {
+        Err(Error::new(
+            ErrorKind::Unexpected,
+            "register_table is not supported in storage catalog",
+        ))
     }
 }

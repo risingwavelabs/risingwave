@@ -148,7 +148,10 @@ message GetStreamResponse {
   Permits permits = 2;
 }
 
-service ExchangeService {
+service BatchExchangeService {
   rpc GetData(GetDataRequest) returns (stream GetDataResponse);
+}
+
+service StreamExchangeService {
   rpc GetStream(stream GetStreamRequest) returns (stream GetStreamResponse);
 }
