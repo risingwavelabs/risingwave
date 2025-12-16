@@ -1558,7 +1558,9 @@ impl SinkWriter for IcebergSinkWriter {
                 let data_files = result
                     .into_iter()
                     .map(|f| {
-                        SerializedDataFile::try_from(f, partition_type, format_version)
+                        // Truncate large column statistics BEFORE serialization
+                        let truncated = truncate_datafile(f);
+                        SerializedDataFile::try_from(truncated, partition_type, format_version)
                             .map_err(|err| SinkError::Iceberg(anyhow!(err)))
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -1577,6 +1579,71 @@ impl SinkWriter for IcebergSinkWriter {
 const SCHEMA_ID: &str = "schema_id";
 const PARTITION_SPEC_ID: &str = "partition_spec_id";
 const DATA_FILES: &str = "data_files";
+
+/// Maximum size for column statistics (min/max values) in bytes.
+/// Column statistics larger than this will be truncated to avoid metadata bloat.
+/// This is especially important for large fields like JSONB, TEXT, BINARY, etc.
+///
+/// Fix for large column statistics in `DataFile` metadata that can cause OOM errors.
+/// We truncate at the `DataFile` level (before serialization) by directly modifying
+/// the public `lower_bounds` and `upper_bounds` fields.
+///
+/// This prevents metadata from ballooning to gigabytes when dealing with large
+/// JSONB, TEXT, or BINARY fields, while still preserving statistics for small fields
+/// that benefit from query optimization.
+const MAX_COLUMN_STAT_SIZE: usize = 10240; // 10KB
+
+/// Truncate large column statistics from `DataFile` BEFORE serialization.
+///
+/// This function directly modifies `DataFile`'s `lower_bounds` and `upper_bounds`
+/// to remove entries that exceed `MAX_COLUMN_STAT_SIZE`.
+///
+/// # Arguments
+/// * `data_file` - A `DataFile` to process
+///
+/// # Returns
+/// The modified `DataFile` with large statistics truncated
+fn truncate_datafile(mut data_file: DataFile) -> DataFile {
+    // Process lower_bounds - remove entries with large values
+    data_file.lower_bounds.retain(|field_id, datum| {
+        // Use to_bytes() to get the actual binary size without JSON serialization overhead
+        let size = match datum.to_bytes() {
+            Ok(bytes) => bytes.len(),
+            Err(_) => 0,
+        };
+
+        if size > MAX_COLUMN_STAT_SIZE {
+            tracing::debug!(
+                field_id = field_id,
+                size = size,
+                "Truncating large lower_bound statistic"
+            );
+            return false;
+        }
+        true
+    });
+
+    // Process upper_bounds - remove entries with large values
+    data_file.upper_bounds.retain(|field_id, datum| {
+        // Use to_bytes() to get the actual binary size without JSON serialization overhead
+        let size = match datum.to_bytes() {
+            Ok(bytes) => bytes.len(),
+            Err(_) => 0,
+        };
+
+        if size > MAX_COLUMN_STAT_SIZE {
+            tracing::debug!(
+                field_id = field_id,
+                size = size,
+                "Truncating large upper_bound statistic"
+            );
+            return false;
+        }
+        true
+    });
+
+    data_file
+}
 
 #[derive(Default, Clone)]
 struct IcebergCommitResult {
