@@ -484,49 +484,64 @@ impl PeriodicBarriers {
         }
     }
 
+    fn reset_database_timer(&mut self, database_id: DatabaseId) {
+        // Check if the database exists.
+        assert!(
+            self.databases.contains_key(&database_id),
+            "database {} not found in scheduled barriers",
+            database_id
+        );
+        assert!(
+            self.timer_streams.contains_key(&database_id),
+            "timer stream for database {} not found in scheduled barriers",
+            database_id
+        );
+        // New command will trigger the barriers, so reset the timer for the specific database.
+        for (db_id, timer_stream) in self.timer_streams.iter_mut() {
+            if *db_id == database_id {
+                timer_stream.as_mut().reset();
+            }
+        }
+    }
+
     #[await_tree::instrument]
     pub(super) async fn next_barrier(
         &mut self,
         context: &impl GlobalBarrierWorkerContext,
     ) -> NewBarrier {
-        if let Some(database_id) = self.force_checkpoint_databases.drain().next() {
-            return NewBarrier {
+        let force_checkpoint_database = self.force_checkpoint_databases.drain().next();
+        let new_barrier = if let Some(database_id) = force_checkpoint_database {
+            self.reset_database_timer(database_id);
+            NewBarrier {
                 database_id,
                 command: None,
                 span: tracing_span(),
                 checkpoint: true,
-            };
-        }
-        let new_barrier = select! {
-            biased;
-            scheduled = context.next_scheduled() => {
-                let database_id = scheduled.database_id;
-                // Check if the database exists.
-                assert!(self.databases.contains_key(&database_id), "database {} not found in periodic barriers", database_id);
-                assert!(self.timer_streams.contains_key(&database_id), "timer stream for database {} not found in periodic barriers", database_id);
-                // New command will trigger the barriers, so reset the timer for the specific database.
-                for (db_id, timer_stream) in self.timer_streams.iter_mut() {
-                    if *db_id == database_id {
-                        timer_stream.as_mut().reset();
+            }
+        } else {
+            select! {
+                biased;
+                scheduled = context.next_scheduled() => {
+                    let database_id = scheduled.database_id;
+                    self.reset_database_timer(database_id);
+                    let checkpoint = scheduled.command.need_checkpoint() || self.try_get_checkpoint(database_id);
+                    NewBarrier {
+                        database_id: scheduled.database_id,
+                        command: Some((scheduled.command, scheduled.notifiers)),
+                        span: scheduled.span,
+                        checkpoint,
                     }
-                }
-                let checkpoint = scheduled.command.need_checkpoint() || self.try_get_checkpoint(database_id);
-                NewBarrier {
-                    database_id: scheduled.database_id,
-                    command: Some((scheduled.command, scheduled.notifiers)),
-                    span: scheduled.span,
-                    checkpoint,
-                }
-            },
-            // If there is no database, we won't wait for `Interval`, but only wait for command.
-            // Normally it will not return None, because there is always at least one database.
-            (database_id, _instant) = pending_on_none(self.timer_streams.next()) => {
-                let checkpoint = self.try_get_checkpoint(database_id);
-                NewBarrier {
-                    database_id,
-                    command: None,
-                    span: tracing_span(),
-                    checkpoint,
+                },
+                // If there is no database, we won't wait for `Interval`, but only wait for command.
+                // Normally it will not return None, because there is always at least one database.
+                (database_id, _instant) = pending_on_none(self.timer_streams.next()) => {
+                    let checkpoint = self.try_get_checkpoint(database_id);
+                    NewBarrier {
+                        database_id,
+                        command: None,
+                        span: tracing_span(),
+                        checkpoint,
+                    }
                 }
             }
         };
