@@ -1003,9 +1003,14 @@ impl Command {
                         HashMap::new()
                     };
 
-                let actor_cdc_table_snapshot_splits = database_info
-                    .assign_cdc_backfill_splits(stream_job_fragments.stream_job_id)?
-                    .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
+                let actor_cdc_table_snapshot_splits =
+                    if !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_)) {
+                        database_info
+                            .assign_cdc_backfill_splits(stream_job_fragments.stream_job_id)?
+                            .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits })
+                    } else {
+                        None
+                    };
 
                 let add_mutation = AddMutation {
                     actor_dispatchers: edges

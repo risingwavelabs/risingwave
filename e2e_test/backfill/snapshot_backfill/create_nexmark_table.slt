@@ -49,6 +49,3 @@ CREATE table bid (
     nexmark.split.num = '8',
     nexmark.min.event.gap.in.ns = '100000'
 );
-
-# sleep for a while to let table accumulate enough data
-sleep 10s
