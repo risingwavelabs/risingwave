@@ -35,7 +35,7 @@ sink-doris = []
 sink-starrocks = []
 
 [dependencies]
-adbc_core = { version = "0.17", optional = true }
+adbc_core = { version = "0.21", optional = true }
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
