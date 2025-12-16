@@ -18,15 +18,15 @@ def _(outer_panels: Panels):
             [
                 panels.subheader("General"),
                 panels.timeseries_percentage(
-                    "CPU Usage Per Materialized View",
-                    "The figure shows the CPU usage of each materialized view",
+                    "CPU Usage Per Streaming Job",
+                    "The figure shows the CPU usage of each streaming job",
                     [
                         panels.target(
                             f"{_sum_fragment_metric_by_mv(f'sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)')}"
                             f"/ on(materialized_view_id)"
                             f"{_sum_fragment_metric_by_mv(f'sum({metric('stream_actor_count')}) by (fragment_id)')}"
                             f"/ 1000000000",
-                            "materialized_view {{materialized_view_id}}",
+                            "job {{materialized_view_id}}",
                         )
                     ],
                 ),
