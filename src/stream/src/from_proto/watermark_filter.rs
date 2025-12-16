@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::{ColumnId, TableDesc};
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::WatermarkFilterNode;
+use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
@@ -34,6 +35,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
+        let upsert = matches!(input.stream_kind(), PbStreamKind::Upsert);
         let watermark_descs = node.get_watermark_descs().clone();
         let [watermark_desc]: [_; 1] = watermark_descs.try_into().unwrap();
         let watermark_expr = build_non_strict_from_prost(
@@ -70,6 +72,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             input,
             watermark_expr,
             event_time_col_idx,
+            upsert,
             table,
             global_watermark_table,
             params.eval_error_report,
