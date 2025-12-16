@@ -2561,7 +2561,7 @@ impl IcebergSinkCommitter {
         // Step 1: Get current table metadata
         let metadata = self.table.metadata();
         let current_schema = metadata.current_schema().as_ref().clone();
-        let mut next_field_id = metadata.last_column_id + 1;
+        let mut next_field_id = metadata.last_column_id() + 1;
         tracing::debug!("Starting schema change, next_field_id: {}", next_field_id);
 
         // Step 2: Build new schema with added columns
