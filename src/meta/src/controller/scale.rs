@@ -29,9 +29,9 @@ use risingwave_meta_model::prelude::{
     Database, Fragment, FragmentRelation, FragmentSplits, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    CreateType, DatabaseId, DispatcherType, FragmentId, JobStatus, SourceId, StreamingParallelism,
-    WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink, source,
-    streaming_job, table,
+    DatabaseId, DispatcherType, FragmentId, JobStatus, SourceId, StreamingParallelism, WorkerId,
+    database, fragment, fragment_relation, fragment_splits, object, sink, source, streaming_job,
+    table,
 };
 use risingwave_meta_model_migration::Condition;
 use sea_orm::{
@@ -149,32 +149,12 @@ where
         })
         .collect();
 
-    let mut background_job_query = StreamingJob::find()
-        .select_only()
-        .column(streaming_job::Column::JobId)
-        .filter(streaming_job::Column::CreateType.eq(CreateType::Background))
-        .filter(streaming_job::Column::JobStatus.eq(JobStatus::Creating));
-
-    if let Some(database_id) = database_id {
-        background_job_query = background_job_query
-            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
-            .filter(object::Column::DatabaseId.eq(database_id));
-    }
-
-    let background_jobs: HashSet<JobId> = background_job_query
-        .into_tuple()
-        .all(txn)
-        .await?
-        .into_iter()
-        .collect();
-
     let RenderedGraph { fragments, .. } = render_jobs(
         txn,
         actor_id_counter,
         jobs,
         available_workers,
         adaptive_parallelism_strategy,
-        &background_jobs,
     )
     .await?;
 
@@ -218,7 +198,6 @@ pub async fn render_fragments<C>(
     ensembles: Vec<NoShuffleEnsemble>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    backfill_jobs: &HashSet<JobId>,
 ) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
@@ -286,7 +265,6 @@ where
         &jobs,
         &workers,
         adaptive_parallelism_strategy,
-        backfill_jobs,
     )
     .await?;
 
@@ -304,7 +282,6 @@ pub async fn render_jobs<C>(
     job_ids: HashSet<JobId>,
     workers: BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    backfill_jobs: &HashSet<JobId>,
 ) -> MetaResult<RenderedGraph>
 where
     C: ConnectionTrait,
@@ -370,7 +347,6 @@ where
         &jobs,
         &workers,
         adaptive_parallelism_strategy,
-        backfill_jobs,
     )
     .await?;
 
@@ -393,7 +369,6 @@ async fn render_no_shuffle_ensembles<C>(
     job_map: &HashMap<JobId, streaming_job::Model>,
     worker_map: &BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    backfill_jobs: &HashSet<JobId>,
 ) -> MetaResult<FragmentRenderMap>
 where
     C: ConnectionTrait,
@@ -440,7 +415,6 @@ where
         fragment_splits: &fragment_splits,
         streaming_job_databases: &streaming_job_databases,
         database_map: &database_map,
-        backfill_jobs,
     };
 
     render_actors(
@@ -461,7 +435,6 @@ struct RenderActorsContext<'a> {
     fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
     streaming_job_databases: &'a HashMap<JobId, DatabaseId>,
     database_map: &'a HashMap<DatabaseId, database::Model>,
-    backfill_jobs: &'a HashSet<JobId>,
 }
 
 fn render_actors(
@@ -478,7 +451,6 @@ fn render_actors(
         fragment_splits: fragment_splits_map,
         streaming_job_databases,
         database_map,
-        backfill_jobs,
     } = context;
 
     let mut all_fragments: FragmentRenderMap = HashMap::new();
@@ -547,7 +519,7 @@ fn render_actors(
 
         let total_parallelism = available_workers.values().map(|w| w.get()).sum::<usize>();
 
-        let effective_job_parallelism = if backfill_jobs.contains(&job_id) {
+        let effective_job_parallelism = if job.job_status == JobStatus::Creating {
             job.backfill_parallelism
                 .as_ref()
                 .unwrap_or(&job.parallelism)
@@ -1271,14 +1243,12 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
-        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
-            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
@@ -1379,14 +1349,12 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
-        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
-            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
@@ -1518,14 +1486,12 @@ mod tests {
             HashMap::from([(entry_fragment_id, vec![split_a.clone(), split_b.clone()])]);
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
-        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
-            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
