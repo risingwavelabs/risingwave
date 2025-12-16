@@ -16,7 +16,7 @@ use risingwave_common::catalog::{
     ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::iceberg::{IcebergDeleteParameters, IcebergSplitEnumerator};
+use risingwave_connector::source::iceberg::{IcebergTaskParameters, IcebergSplitEnumerator};
 use risingwave_connector::source::{ConnectorProperties, SourceEnumeratorContext};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
@@ -63,9 +63,9 @@ impl FallibleRule<Logical> for SourceToIcebergScanRule {
             {
                 let timezone = plan.ctx().get_session_timezone();
                 let time_travel_info = to_iceberg_time_travel_as_of(&source.core.as_of, &timezone)?;
-                let delete_parameters: IcebergDeleteParameters =
+                let delete_parameters: IcebergTaskParameters =
                     tokio::task::block_in_place(|| {
-                        FRONTEND_RUNTIME.block_on(s.get_delete_parameters(time_travel_info))
+                        FRONTEND_RUNTIME.block_on(s.get_iceberg_task_parameters(time_travel_info))
                     })?;
                 // data file scan
                 let mut data_iceberg_scan: PlanRef = LogicalIcebergScan::new(
