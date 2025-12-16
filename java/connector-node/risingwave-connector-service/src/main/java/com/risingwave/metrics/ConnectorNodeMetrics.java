@@ -83,8 +83,8 @@ public class ConnectorNodeMetrics {
 
     // Debezium CDC engine error metrics.
     //
-    // NOTE: We intentionally keep error_kind low-cardinality (e.g. "oom" / "other"), and avoid
-    // labeling by the full error message/stacktrace to prevent metric explosion.
+    // NOTE: error_kind is set to the exception class name (e.g., "IOException", "SQLException", etc.),
+    // which keeps cardinality finite and avoids using the full error message/stacktrace to prevent metric explosion.
     private static final Counter cdcEngineFailureTotal =
             Counter.build()
                     .name("connector_cdc_engine_failure_total")
