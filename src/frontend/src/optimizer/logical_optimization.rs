@@ -516,6 +516,22 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
     )
 });
 
+static LOGICAL_ICEBERG_PREDICATE_PUSHDOWN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Logical Iceberg Predicate Pushdown",
+        vec![LogicalIcebergPredicatePushDownRule::create()],
+        ApplyOrder::BottomUp,
+    )
+});
+
+static LOGICAL_ICEBGER_COUNT_STAR: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Logical Iceberg Count Star",
+        vec![IcebergCountStarRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "TopN to Vector Search",
@@ -863,6 +879,11 @@ impl LogicalOptimizer {
             last_total_rule_applied_before_predicate_pushdown) = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
+
+        // Iceberg-specific predicate pushdown (for zone-map optimization)
+        plan = plan.optimize_by_rules(&LOGICAL_ICEBERG_PREDICATE_PUSHDOWN)?;
+
+        plan = plan.optimize_by_rules(&LOGICAL_ICEBGER_COUNT_STAR)?;
 
         plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;

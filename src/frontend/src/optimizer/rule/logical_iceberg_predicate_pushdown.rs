@@ -26,22 +26,22 @@ use risingwave_common::types::ScalarImpl;
 use super::prelude::*;
 use crate::expr::{Expr, ExprImpl, ExprType, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{BatchFilter, BatchIcebergScan, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalFilter, LogicalIcebergScan, PlanTreeNodeUnary};
 use crate::utils::Condition;
 
 /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
 /// zone-map is used to evaluate predicates on iceberg tables.
 /// Without zone-map, iceberg-sdk will still apply the predicate on its own.
 /// See: <https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235>.
-pub struct BatchIcebergPredicatePushDownRule {}
+pub struct LogicalIcebergPredicatePushDownRule {}
 
-impl Rule<Batch> for BatchIcebergPredicatePushDownRule {
+impl Rule<Logical> for LogicalIcebergPredicatePushDownRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let filter: &BatchFilter = plan.as_batch_filter()?;
+        let filter: &LogicalFilter = plan.as_logical_filter()?;
         let input = filter.input();
-        let scan: &BatchIcebergScan = input.as_batch_iceberg_scan()?;
+        let scan: &LogicalIcebergScan = input.as_logical_iceberg_scan()?;
         // NOTE(kwannoel): We only fill iceberg predicate here.
-        assert_eq!(scan.predicate, IcebergPredicate::AlwaysTrue);
+        assert_eq!(scan.predicate(), IcebergPredicate::AlwaysTrue);
 
         let predicate = filter.predicate().clone();
         let (iceberg_predicate, rw_predicate) =
@@ -50,10 +50,8 @@ impl Rule<Batch> for BatchIcebergPredicatePushDownRule {
         if rw_predicate.always_true() {
             Some(scan.into())
         } else {
-            let filter = filter
-                .clone_with_input(scan.into())
-                .clone_with_predicate(rw_predicate);
-            Some(filter.into())
+            let filter = LogicalFilter::create(scan.into(), rw_predicate);
+            Some(filter)
         }
     }
 }
@@ -254,6 +252,7 @@ fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<Ice
         _ => None,
     }
 }
+
 fn rw_predicate_to_iceberg_predicate(
     predicate: Condition,
     fields: &[Field],
@@ -307,8 +306,8 @@ fn rw_predicate_to_iceberg_predicate(
     )
 }
 
-impl BatchIcebergPredicatePushDownRule {
+impl LogicalIcebergPredicatePushDownRule {
     pub fn create() -> BoxedRule {
-        Box::new(BatchIcebergPredicatePushDownRule {})
+        Box::new(LogicalIcebergPredicatePushDownRule {})
     }
 }

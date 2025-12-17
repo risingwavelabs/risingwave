@@ -29,16 +29,13 @@ impl Rule<Logical> for IcebergCountStarRule {
             return None;
         }
 
-        let input = agg.input();
+        let input = &agg.core().input;
         let iceberg_scan: &LogicalIcebergScan = input.as_logical_iceberg_scan()?;
         if iceberg_scan.iceberg_scan_type() != IcebergScanType::DataScan {
             return None;
         }
 
-        Some(
-            LogicalIcebergScan::new_count_star_with_logical_iceberg_scan(iceberg_scan)
-                .into(),
-        )
+        Some(LogicalIcebergScan::new_count_star_with_logical_iceberg_scan(iceberg_scan).into())
     }
 }
 

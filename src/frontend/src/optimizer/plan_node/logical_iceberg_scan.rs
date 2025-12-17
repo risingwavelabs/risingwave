@@ -14,6 +14,7 @@
 
 use std::rc::Rc;
 
+use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
@@ -36,12 +37,44 @@ use crate::optimizer::plan_node::{
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalIcebergScan` is only used by batch queries. At the beginning of the batch query optimization, `LogicalSource` with a iceberg property would be converted into a `LogicalIcebergScan`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
     pub iceberg_scan_type: IcebergScanType,
+    pub predicate: IcebergPredicate,
     pub snapshot_id: Option<i64>,
+}
+
+impl PartialEq for LogicalIcebergScan {
+    fn eq(&self, other: &Self) -> bool {
+        // We only compare when both predicates are AlwaysTrue for simplicity
+        if self.predicate == IcebergPredicate::AlwaysTrue
+            && other.predicate == IcebergPredicate::AlwaysTrue
+        {
+            self.base == other.base
+                && self.core == other.core
+                && self.iceberg_scan_type == other.iceberg_scan_type
+                && self.snapshot_id == other.snapshot_id
+        } else {
+            panic!("LogicalIcebergScan::eq: comparing non-AlwaysTrue predicates is not supported")
+        }
+    }
+}
+
+impl Eq for LogicalIcebergScan {}
+
+impl std::hash::Hash for LogicalIcebergScan {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        if self.predicate != IcebergPredicate::AlwaysTrue {
+            panic!("LogicalIcebergScan::hash: hashing non-AlwaysTrue predicates is not supported")
+        } else {
+            self.base.hash(state);
+            self.core.hash(state);
+            self.iceberg_scan_type.hash(state);
+            self.snapshot_id.hash(state);
+        }
+    }
 }
 
 impl LogicalIcebergScan {
@@ -61,12 +94,27 @@ impl LogicalIcebergScan {
             base,
             core,
             iceberg_scan_type,
+            predicate: IcebergPredicate::AlwaysTrue,
             snapshot_id,
         }
     }
 
     pub fn iceberg_scan_type(&self) -> IcebergScanType {
         self.iceberg_scan_type
+    }
+
+    pub fn predicate(&self) -> IcebergPredicate {
+        self.predicate.clone()
+    }
+
+    pub fn clone_with_predicate(&self, predicate: IcebergPredicate) -> Self {
+        Self {
+            base: self.base.clone(),
+            core: self.core.clone(),
+            iceberg_scan_type: self.iceberg_scan_type,
+            predicate,
+            snapshot_id: self.snapshot_id,
+        }
     }
 
     pub fn new_count_star_with_logical_iceberg_scan(
@@ -84,6 +132,7 @@ impl LogicalIcebergScan {
             base,
             core,
             iceberg_scan_type: IcebergScanType::CountStar,
+            predicate: IcebergPredicate::AlwaysTrue,
             snapshot_id: logical_iceberg_scan.snapshot_id,
         }
     }
@@ -114,6 +163,7 @@ impl LogicalIcebergScan {
             base,
             core,
             iceberg_scan_type: self.iceberg_scan_type,
+            predicate: self.predicate.clone(),
             snapshot_id: self.snapshot_id,
         }
     }
