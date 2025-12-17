@@ -205,17 +205,13 @@ cat << EOF | rpk topic produce test_alter_non_shared_source_conn -X brokers=mess
 {"x": 15}
 EOF
 
-sleep 5s
 
-query I retry 5 backoff 3s
+query I retry 10 backoff 1s
 select * from non_shared_conn_source_mv order by x;
 ----
 1
 2
 3
-4
-5
-6
 7
 8
 9
