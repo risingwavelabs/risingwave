@@ -58,17 +58,19 @@ echo -ne "${BLUE}"
 # Build git pathspec exclusions. `--` separates revs/options from pathspecs.
 # Default: search repo root, but skip `.cargo/` (it often contains generated/config files).
 git_grep_pathspec=(-- ':' ':!.cargo')
-for d in "${skip_dirs[@]}"; do
-    # Normalize leading "./" to keep the pathspec consistent.
-    d="${d#./}"
-    git_grep_pathspec+=(":!${d}")
-done
+if [ ${#skip_dirs[@]} -gt 0 ]; then
+    for d in "${skip_dirs[@]}"; do
+        # Normalize leading "./" to keep the pathspec consistent.
+        d="${d#./}"
+        git_grep_pathspec+=(":!${d}")
+    done
+fi
 
-git grep -nIP --untracked '[[:space:]]+$' "${git_grep_pathspec[@]}" | tee $temp_file || true
+git grep -nIP --untracked '[[:space:]]+$' "${git_grep_pathspec[@]}" | tee "$temp_file" || true
 echo -ne "${NONE}"
 
-bad_files=$(cat $temp_file | cut -f1 -d ':' | sort -u)
-rm $temp_file
+bad_files=$(cat "$temp_file" | cut -f1 -d ':' | sort -u)
+rm "$temp_file"
 
 # Portable in-place sed (GNU vs BSD/macOS).
 sed_inplace() {
@@ -83,11 +85,11 @@ sed_inplace() {
     fi
 }
 
-if [ ! -z "$bad_files" ]; then
+if [ -n "$bad_files" ]; then
     if [[ $fix == true ]]; then
-        for file in $bad_files; do
+        while IFS= read -r file; do
             sed_inplace 's/[[:space:]]*$//' "$file"
-        done
+        done <<< "$bad_files"
 
         echo
         echo -e "${GREEN}${BOLD}All trailing spaces listed above have been cleaned.${NONE}"
