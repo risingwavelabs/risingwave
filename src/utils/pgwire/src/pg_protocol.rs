@@ -304,12 +304,14 @@ where
             _ => return tracing::Span::none(),
         };
 
+        let sql = msg.get_sql().unwrap_or_default().unwrap_or_default();
+
         tracing::info_span!(
             target: PGWIRE_ROOT_SPAN_TARGET,
             "handle_query",
             mode,
             session_id,
-            sql = tracing::field::Empty, // record SQL later in each `process` call
+            sql,
         )
     }
 
