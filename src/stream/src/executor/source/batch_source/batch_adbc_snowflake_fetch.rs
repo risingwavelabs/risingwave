@@ -14,12 +14,13 @@
 
 use std::collections::VecDeque;
 
+use arrow::RecordBatch;
 use either::Either;
 use futures::stream;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
-use risingwave_common::array::arrow::arrow_array_56::RecordBatch;
+use risingwave_common::array::arrow::arrow_array_56 as arrow;
 use risingwave_common::id::TableId;
 use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;

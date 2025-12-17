@@ -15,7 +15,7 @@
 use adbc_core::Statement as _;
 use anyhow::Context;
 use risingwave_common::array::arrow::arrow_array_56::RecordBatchReader;
-use risingwave_common::array::arrow::arrow_schema_56;
+use risingwave_common::array::arrow::arrow_schema_56 as arrow_schema;
 
 use super::AdbcSnowflakeProperties;
 use crate::error::ConnectorResult;
@@ -31,7 +31,7 @@ impl AdbcSnowflakeProperties {
     /// consistency between schema inference (used by frontend) and data fetching (used by executor).
     ///
     /// The column order in the returned schema matches the column order in the Snowflake table.
-    pub fn get_arrow_schema(&self) -> ConnectorResult<arrow_schema_56::Schema> {
+    pub fn get_arrow_schema(&self) -> ConnectorResult<arrow_schema::Schema> {
         let database = self.create_database()?;
         let mut connection = self.create_connection(&database)?;
 
