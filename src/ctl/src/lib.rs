@@ -511,7 +511,11 @@ enum ThrottleCommands {
 
 #[derive(Clone, Debug, Args)]
 pub struct ThrottleCommandArgs {
+    /// The ID of the object to throttle
+    #[clap(long, required = true)]
     id: u32,
+    /// The rate limit to apply
+    #[clap(long)]
     rate: Option<u32>,
     /// The type of throttle to apply. Options: dml, backfill, source, sink
     #[clap(long, value_name = "TYPE", required = true)]
