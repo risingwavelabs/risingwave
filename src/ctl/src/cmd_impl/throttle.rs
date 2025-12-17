@@ -15,8 +15,8 @@
 use risingwave_pb::common::PbThrottleType;
 use risingwave_pb::meta::PbThrottleTarget;
 
-use crate::ThrottleCommandArgs;
 use crate::common::CtlContext;
+use crate::{ThrottleCommandArgs, ThrottleTypeArg};
 
 pub async fn apply_throttle(
     context: &CtlContext,
@@ -24,16 +24,13 @@ pub async fn apply_throttle(
     params: ThrottleCommandArgs,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    // Infer throttle type from target for backward compatibility.
-    let throttle_type = match kind {
-        PbThrottleTarget::Source => PbThrottleType::Source,
-        PbThrottleTarget::Mv => PbThrottleType::Backfill,
-        PbThrottleTarget::Sink => PbThrottleType::Sink,
-        PbThrottleTarget::Table | PbThrottleTarget::Fragment | PbThrottleTarget::Unspecified => {
-            // Default to Backfill for unspecified/unsupported combinations; user should use SQL for table throttling
-            PbThrottleType::Backfill
-        }
+    let throttle_type = match params.throttle_type {
+        ThrottleTypeArg::Dml => PbThrottleType::Dml,
+        ThrottleTypeArg::Backfill => PbThrottleType::Backfill,
+        ThrottleTypeArg::Source => PbThrottleType::Source,
+        ThrottleTypeArg::Sink => PbThrottleType::Sink,
     };
+
     meta_client
         .apply_throttle(kind, throttle_type, params.id, params.rate)
         .await?;
