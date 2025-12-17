@@ -26,9 +26,15 @@ jobs:
       - name: Pick latest release branch
         run: |
           release_branches=$(cat release_branches.txt)
-          latest_branch=$(echo "$release_branches" | sort -t. -k1,1 -k2,2 -Vr | head -n 1)
+          latest_branch=$(
+            echo "$release_branches" |
+            sed -E 's/^release-([0-9]+\.[0-9]+).*/\1 &/' |
+            sort -V -r |
+            head -n 1 |
+            awk '{print $2}'
+          )
           echo "Latest release branch: $latest_branch"
-          latest_version=$(echo "$latest_branch" | sed -E 's/release-([0-9]+\.[0-9]+)/\1/' | sed 's/^[ \t]*//')
+          latest_version=$(echo "$latest_branch" | sed -E 's/^release-([0-9]+\.[0-9]+).*/\1/')
           echo "Latest release version: $latest_version"
           echo "$latest_version" > latest_release_version.txt
 
