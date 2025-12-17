@@ -56,8 +56,8 @@ temp_file=$(mktemp)
 
 echo -ne "${BLUE}"
 # Build git pathspec exclusions. `--` separates revs/options from pathspecs.
-# Default: search repo root, but skip `.cargo/` (it often contains generated/config files).
-git_grep_pathspec=(-- ':' ':!.cargo')
+# Default: search repo root, but skip `.cargo/` and `src/tests/regress/`.
+git_grep_pathspec=(-- ':' ':!.cargo' ':!src/tests/regress')
 if [ ${#skip_dirs[@]} -gt 0 ]; then
     for d in "${skip_dirs[@]}"; do
         # Normalize leading "./" to keep the pathspec consistent.
