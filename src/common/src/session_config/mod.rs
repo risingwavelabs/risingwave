@@ -452,11 +452,12 @@ pub struct SessionConfig {
     enable_datafusion_engine: bool,
 
     /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
+    /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.
     ///
     /// When enabled:
     /// - `UPDATE` will only emit `Insert` records for new rows, instead of `Update` records.
     /// - `DELETE` will only include key columns and pad the rest with NULL, instead of emitting complete rows.
-    #[parameter(default = false, alias = "rw_upsert_dml")]
+    #[parameter(default = false)]
     upsert_dml: bool,
 }
 
